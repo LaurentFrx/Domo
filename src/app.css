@@ -1,0 +1,43 @@
+@import 'tailwindcss';
+
+@import './lib/theme/tokens.css';
+
+/* ════════════════════════════════════════════════════════════════════════ */
+/* Reset / base                                                              */
+/* ════════════════════════════════════════════════════════════════════════ */
+
+html, body {
+  background-color: var(--surface-base);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'SF Pro Display', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Empêcher le zoom au focus des inputs sur iOS */
+input, select, textarea {
+  font-size: 16px;
+}
+
+/* Scrollbar sombre */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+/* Safe area iOS (notch, home indicator) */
+.safe-top    { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }

@@ -1,0 +1,42 @@
+# Node / pnpm
+node_modules/
+.pnpm-store/
+
+# SvelteKit
+.svelte-kit/
+build/
+.vercel/
+
+# Vite
+.vite/
+dist/
+
+# Logs
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Environnement
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Tests
+coverage/
+playwright-report/
+test-results/
+
+# Docker
+.dockerignore
