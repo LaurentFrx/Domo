@@ -5,6 +5,15 @@
   import SolarMiniTile from '$components/tiles/SolarMiniTile.svelte';
   import BatteryMiniTile from '$components/tiles/BatteryMiniTile.svelte';
   import ProductionChart from '$components/charts/ProductionChart.svelte';
+  import ForecastTile from '$components/tiles/ForecastTile.svelte';
+  import { SolcastStore } from '$lib/forecast/solcast.svelte';
+
+  const solcast = new SolcastStore();
+
+  // Refresh au mount uniquement (le throttle 4h évite les hits multiples).
+  $effect(() => {
+    void solcast.refresh();
+  });
 </script>
 
 <svelte:head>
@@ -20,4 +29,5 @@
     <BatteryMiniTile />
   </div>
   <ProductionChart />
+  <ForecastTile {solcast} />
 </div>
