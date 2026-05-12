@@ -5,11 +5,13 @@
 const FR_LOCALE = 'fr-FR';
 
 export function formatDate(date: Date = new Date()): string {
-  return date.toLocaleDateString(FR_LOCALE, {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long'
-  }).toUpperCase();
+  return date
+    .toLocaleDateString(FR_LOCALE, {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long'
+    })
+    .toUpperCase();
 }
 
 export function formatCurrency(value: number): string {

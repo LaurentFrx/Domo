@@ -39,14 +39,14 @@ docker compose up -d --build
 Quand le push relay sera déployé, ajouter dans `docker-compose.yml` :
 
 ```yaml
-  ha-push-relay:
-    image: ghcr.io/laurentfrx/ha-push-relay:latest
-    container_name: ha-push-relay
-    restart: unless-stopped
-    networks:
-      - web
-    expose:
-      - "8080"
+ha-push-relay:
+  image: ghcr.io/laurentfrx/ha-push-relay:latest
+  container_name: ha-push-relay
+  restart: unless-stopped
+  networks:
+    - web
+  expose:
+    - '8080'
 ```
 
 Et dans `Caddyfile` :

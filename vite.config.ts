@@ -14,7 +14,8 @@ export default defineConfig({
       manifest: {
         name: 'HA Dashboard',
         short_name: 'HA',
-        description: 'Dashboard Home Assistant — PWA familiale pour piloter cumulus, solaire, batterie',
+        description:
+          'Dashboard Home Assistant — PWA familiale pour piloter cumulus, solaire, batterie',
         theme_color: '#07001F',
         background_color: '#07001F',
         display: 'standalone',

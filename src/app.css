@@ -6,7 +6,8 @@
 /* Reset / base                                                              */
 /* ════════════════════════════════════════════════════════════════════════ */
 
-html, body {
+html,
+body {
   background-color: var(--surface-base);
   color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'SF Pro Display', system-ui, sans-serif;
@@ -18,7 +19,9 @@ html, body {
 }
 
 /* Empêcher le zoom au focus des inputs sur iOS */
-input, select, textarea {
+input,
+select,
+textarea {
   font-size: 16px;
 }
 
@@ -39,5 +42,9 @@ input, select, textarea {
 }
 
 /* Safe area iOS (notch, home indicator) */
-.safe-top    { padding-top: env(safe-area-inset-top); }
-.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}

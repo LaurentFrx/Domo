@@ -32,10 +32,10 @@
    */
   const hourlyBars = $derived.by(() => {
     const horizonHours = 24;
-    const buckets: { sum: number; count: number }[] = Array.from(
-      { length: horizonHours },
-      () => ({ sum: 0, count: 0 })
-    );
+    const buckets: { sum: number; count: number }[] = Array.from({ length: horizonHours }, () => ({
+      sum: 0,
+      count: 0
+    }));
     const now = Date.now();
     for (const p of solcast.points) {
       const t = new Date(p.time).getTime();

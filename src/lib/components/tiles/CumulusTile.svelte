@@ -35,7 +35,12 @@
       </div>
       <div class="flex items-center gap-1 text-xs font-medium text-[var(--accent-500)]">
         <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-          <path d="M2 9 L9 2 M9 2 L9 7 M9 2 L4 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <path
+            d="M2 9 L9 2 M9 2 L9 7 M9 2 L4 2"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          />
         </svg>
         +{dashboard.cumulusTempTrend}°C / 1h
       </div>
