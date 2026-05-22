@@ -7,11 +7,17 @@ projets sur le même VPS.
 ## Prérequis VPS
 
 - Ubuntu 22.04+ ou Debian 12+
-- Node 20+ (`node --version`) — testé avec Node 22
-- pnpm (via corepack ou install direct)
 - Caddy en service systemd, écoute sur 80/443
-- `laurent` avec sudo NOPASSWD (au moins sur `systemctl restart domo`)
+- `laurent` peut sudo (mot de passe accepté pour le bootstrap initial)
 - DNS A/AAAA pour `domo.feroux.fr` pointant vers l'IP du VPS
+
+`bootstrap-vps.sh` se charge automatiquement de :
+
+- Installer Node LTS (via NodeSource) si absent ou trop ancien
+- Installer pnpm en global (via `npm install -g pnpm`)
+- Créer `/etc/sudoers.d/domo-deploy` pour autoriser laurent à exécuter
+  `systemctl restart domo` et `systemctl reload caddy` sans password
+  (utilisé ensuite par le workflow GitHub Actions)
 
 ## Première installation
 

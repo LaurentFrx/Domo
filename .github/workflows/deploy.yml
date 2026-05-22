@@ -5,9 +5,11 @@
 #                 Générer : ssh-keygen -t ed25519 -f ~/.ssh/domo_deploy -N ""
 #                 Ajouter la .pub dans /home/laurent/.ssh/authorized_keys
 #
-# Prérequis VPS : Node 20+, pnpm (corepack OK), sudo NOPASSWD pour laurent
-# (au moins sur `systemctl restart domo`), service systemd `domo` installé
-# via scripts/bootstrap-vps.sh.
+# Prérequis VPS (mis en place par scripts/bootstrap-vps.sh) :
+#  - Node 20+ et pnpm installés (NodeSource + npm -g)
+#  - Service systemd `domo` installé et activé
+#  - /etc/sudoers.d/domo-deploy donne à laurent NOPASSWD sur
+#    /bin/systemctl restart domo et /bin/systemctl reload caddy
 name: Deploy to Hetzner
 
 on:
