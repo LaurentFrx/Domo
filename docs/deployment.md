@@ -5,22 +5,24 @@
 - Ubuntu 22.04+ ou Debian 12+
 - Docker + Docker Compose v2 installés
 - Ports 80 et 443 ouverts dans le firewall
-- DNS A/AAAA pour `dashboard.feroux.fr` pointant vers l'IP du VPS
+- DNS A/AAAA pour `domo.feroux.fr` pointant vers l'IP du VPS
 
 ## Première installation
 
+Le script `scripts/bootstrap-vps.sh` s'occupe de tout :
+
 ```bash
-# Sur le VPS
-cd /opt
-git clone https://github.com/LaurentFrx/ha-pwa.git
-cd ha-pwa
+ssh laurent@<vps>
+curl -fsSL https://raw.githubusercontent.com/LaurentFrx/Domo/main/scripts/bootstrap-vps.sh | bash
+```
 
-# Build et lancement
+Ou manuellement :
+
+```bash
+cd /home/laurent
+git clone https://github.com/LaurentFrx/Domo.git domo
+cd domo
 docker compose up -d --build
-
-# Vérifier
-docker compose logs -f ha-pwa
-docker compose logs -f caddy
 ```
 
 Caddy détecte le domaine, demande un certificat Let's Encrypt
@@ -28,34 +30,35 @@ automatiquement. ~30 secondes pour HTTPS actif.
 
 ## Mises à jour
 
+Auto-deploy via GitHub Actions à chaque push sur `main`
+(voir `.github/workflows/deploy.yml`).
+
+Manuel si besoin :
+
 ```bash
-cd /opt/ha-pwa
+cd /home/laurent/domo
 git pull
-docker compose up -d --build
+docker compose up -d --build domo
 ```
 
-## Mutualisation avec HA-Push-Relay
+## Cohabitation avec d'autres projets
 
-Quand le push relay sera déployé, ajouter dans `docker-compose.yml` :
-
-```yaml
-ha-push-relay:
-  image: ghcr.io/laurentfrx/ha-push-relay:latest
-  container_name: ha-push-relay
-  restart: unless-stopped
-  networks:
-    - web
-  expose:
-    - '8080'
-```
-
-Et dans `Caddyfile` :
+Si un Caddy partagé tourne déjà sur le VPS (ex. projet `tazieff-eps`),
+ne PAS démarrer le service `caddy` de ce compose. Ajouter à la place
+le bloc `domo.feroux.fr` dans le Caddyfile partagé :
 
 ```caddy
-push.feroux.fr {
-    reverse_proxy ha-push-relay:8080
-    encode gzip
+domo.feroux.fr {
+    encode gzip zstd
+    reverse_proxy domo:3000
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 }
+```
+
+Puis :
+
+```bash
+docker compose up -d --build domo   # PWA seulement, sans caddy embarqué
 ```
 
 ## Logs
@@ -65,7 +68,7 @@ push.feroux.fr {
 docker compose logs -f
 
 # Logs Caddy (HTTPS, requêtes)
-docker exec ha-caddy cat /var/log/caddy/dashboard.log
+docker logs domo-caddy
 ```
 
 ## Sauvegarde
@@ -74,7 +77,7 @@ Le seul état persistant est dans le volume `caddy_data`
 (certificats Let's Encrypt). À sauvegarder régulièrement :
 
 ```bash
-docker run --rm -v ha-pwa_caddy_data:/data \
+docker run --rm -v domo_caddy_data:/data \
   -v $(pwd):/backup alpine \
   tar czf /backup/caddy-data-$(date +%Y%m%d).tar.gz /data
 ```

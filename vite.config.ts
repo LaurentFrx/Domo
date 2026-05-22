@@ -12,10 +12,9 @@ export default defineConfig({
       injectRegister: 'auto',
       strategies: 'generateSW',
       manifest: {
-        name: 'HA Dashboard',
-        short_name: 'HA',
-        description:
-          'Dashboard Home Assistant — PWA familiale pour piloter cumulus, solaire, batterie',
+        name: 'Domo',
+        short_name: 'Domo',
+        description: 'Tableau de bord énergie de la maison Feroux',
         theme_color: '#07001F',
         background_color: '#07001F',
         display: 'standalone',
@@ -46,17 +45,8 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['client/**/*.{js,css,ico,png,svg,woff,woff2}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/maison\.feroux\.fr\/api\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'ha-api-cache',
-              networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 50, maxAgeSeconds: 300 }
-            }
-          }
-        ]
+        // TODO: cache orchestrateur
+        runtimeCaching: []
       },
       devOptions: {
         enabled: false

@@ -17,7 +17,7 @@
 </script>
 
 <svelte:head>
-  <title>HA Dashboard</title>
+  <title>Domo</title>
 </svelte:head>
 
 <div class="flex flex-col gap-3 pb-6">

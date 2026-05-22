@@ -1,9 +1,9 @@
-# Docker Compose mutualisé : ha-pwa + ha-push-relay (à venir) derrière Caddy
+# Docker Compose : domo (PWA SvelteKit) derrière Caddy
 
 services:
-  ha-pwa:
+  domo:
     build: .
-    container_name: ha-pwa
+    container_name: domo
     restart: unless-stopped
     environment:
       - NODE_ENV=production
@@ -15,7 +15,7 @@ services:
 
   caddy:
     image: caddy:2-alpine
-    container_name: ha-caddy
+    container_name: domo-caddy
     restart: unless-stopped
     ports:
       - '80:80'
@@ -27,7 +27,7 @@ services:
     networks:
       - web
     depends_on:
-      - ha-pwa
+      - domo
 
 networks:
   web:

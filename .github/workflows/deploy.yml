@@ -1,0 +1,28 @@
+# Secrets requis dans Settings → Secrets → Actions :
+#   VPS_HOST    = 204.168.129.228
+#   VPS_USER    = laurent
+#   VPS_SSH_KEY = clé privée d'une deploy key dédiée
+#                 Générer : ssh-keygen -t ed25519 -f ~/.ssh/domo_deploy -N ""
+#                 Ajouter la .pub dans /home/laurent/.ssh/authorized_keys
+name: Deploy to Hetzner
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /home/laurent/domo
+            git pull origin main
+            docker compose up -d --build domo
+            docker image prune -f

@@ -1,9 +1,9 @@
 {
-  "name": "ha-pwa",
+  "name": "domo",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Dashboard Home Assistant — PWA familiale pour piloter cumulus, solaire, batterie",
+  "description": "Tableau de bord énergie de la maison Feroux",
   "author": "Laurent Feroux",
   "license": "MIT",
   "scripts": {
@@ -32,7 +32,6 @@
     "@vite-pwa/sveltekit": "^1.1.0"
   },
   "dependencies": {
-    "home-assistant-js-websocket": "^9.4.0",
     "layercake": "^8.4.0",
     "d3-scale": "^4.0.0",
     "d3-shape": "^3.2.0"
