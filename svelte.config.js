@@ -13,7 +13,6 @@ const config = {
     alias: {
       $components: 'src/lib/components',
       $theme: 'src/lib/theme',
-      $ha: 'src/lib/ha',
       $stores: 'src/lib/stores',
       $utils: 'src/lib/utils'
     }

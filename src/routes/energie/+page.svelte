@@ -3,7 +3,7 @@
 </script>
 
 <svelte:head>
-  <title>Énergie — HA Dashboard</title>
+  <title>Énergie — Domo</title>
 </svelte:head>
 
 <Header name="Énergie" />

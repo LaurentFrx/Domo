@@ -3,7 +3,7 @@
 </script>
 
 <svelte:head>
-  <title>Pièces — HA Dashboard</title>
+  <title>Pièces — Domo</title>
 </svelte:head>
 
 <Header name="Pièces" />

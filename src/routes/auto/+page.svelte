@@ -3,7 +3,7 @@
 </script>
 
 <svelte:head>
-  <title>Automations — HA Dashboard</title>
+  <title>Automations — Domo</title>
 </svelte:head>
 
 <Header name="Automations" />
