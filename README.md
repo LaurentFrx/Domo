@@ -5,7 +5,7 @@ PWA SvelteKit 2 déployée sur https://domo.feroux.fr
 
 ## Stack
 
-SvelteKit 2 · Svelte 5 Runes · TypeScript · Tailwind 4 · LayerCake · @vite-pwa/sveltekit · Docker · Caddy
+SvelteKit 2 · Svelte 5 Runes · TypeScript · Tailwind 4 · LayerCake · @vite-pwa/sveltekit · Node + systemd · Caddy
 
 ## Dev local
 

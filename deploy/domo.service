@@ -1,0 +1,26 @@
+[Unit]
+Description=Domo — PWA SvelteKit (énergie maison Feroux)
+After=network.target
+
+[Service]
+Type=simple
+User=laurent
+Group=laurent
+WorkingDirectory=/home/laurent/domo
+EnvironmentFile=-/home/laurent/domo/.env
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3000
+ExecStart=/usr/bin/node build
+Restart=on-failure
+RestartSec=5
+
+# Hardening minimal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/laurent/domo
+
+[Install]
+WantedBy=multi-user.target

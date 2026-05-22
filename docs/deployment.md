@@ -1,32 +1,70 @@
 # Déploiement Hetzner
 
+Déploiement bare-metal (pas de Docker) : SvelteKit adapter-node +
+systemd + Caddy systemd partagé. Fait pour cohabiter avec d'autres
+projets sur le même VPS.
+
 ## Prérequis VPS
 
 - Ubuntu 22.04+ ou Debian 12+
-- Docker + Docker Compose v2 installés
-- Ports 80 et 443 ouverts dans le firewall
+- Node 20+ (`node --version`) — testé avec Node 22
+- pnpm (via corepack ou install direct)
+- Caddy en service systemd, écoute sur 80/443
+- `laurent` avec sudo NOPASSWD (au moins sur `systemctl restart domo`)
 - DNS A/AAAA pour `domo.feroux.fr` pointant vers l'IP du VPS
 
 ## Première installation
 
-Le script `scripts/bootstrap-vps.sh` s'occupe de tout :
+Le script `scripts/bootstrap-vps.sh` est idempotent :
 
 ```bash
 ssh laurent@<vps>
-curl -fsSL https://raw.githubusercontent.com/LaurentFrx/Domo/main/scripts/bootstrap-vps.sh | bash
+bash <(curl -fsSL https://raw.githubusercontent.com/LaurentFrx/Domo/main/scripts/bootstrap-vps.sh)
 ```
 
-Ou manuellement :
+Il :
+
+1. Vérifie Node / pnpm / Caddy systemd
+2. Clone (ou pull) le repo dans `/home/laurent/domo`
+3. `pnpm install --frozen-lockfile && pnpm build`
+4. Installe `deploy/domo.service` dans `/etc/systemd/system/`
+5. `systemctl enable --now domo`
+6. Imprime le bloc Caddyfile à ajouter manuellement à `/etc/caddy/Caddyfile`
+7. Teste HTTPS
+
+## Caddyfile partagé
+
+À ajouter dans `/etc/caddy/Caddyfile` (à côté des autres sites) :
+
+```caddy
+domo.feroux.fr {
+    encode gzip zstd
+    reverse_proxy 127.0.0.1:3000
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+}
+```
+
+Puis :
 
 ```bash
-cd /home/laurent
-git clone https://github.com/LaurentFrx/Domo.git domo
-cd domo
-docker compose up -d --build
+sudo systemctl reload caddy
 ```
 
-Caddy détecte le domaine, demande un certificat Let's Encrypt
-automatiquement. ~30 secondes pour HTTPS actif.
+## Variables d'environnement
+
+`/home/laurent/domo/.env` (gitignored) :
+
+```env
+SOLCAST_API_KEY=...
+SOLCAST_RESOURCE_ID=...
+```
+
+Le service systemd charge ce fichier via `EnvironmentFile=`. Après
+modification :
+
+```bash
+sudo systemctl restart domo
+```
 
 ## Mises à jour
 
@@ -38,46 +76,26 @@ Manuel si besoin :
 ```bash
 cd /home/laurent/domo
 git pull
-docker compose up -d --build domo
-```
-
-## Cohabitation avec d'autres projets
-
-Si un Caddy partagé tourne déjà sur le VPS (ex. projet `tazieff-eps`),
-ne PAS démarrer le service `caddy` de ce compose. Ajouter à la place
-le bloc `domo.feroux.fr` dans le Caddyfile partagé :
-
-```caddy
-domo.feroux.fr {
-    encode gzip zstd
-    reverse_proxy domo:3000
-    header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-}
-```
-
-Puis :
-
-```bash
-docker compose up -d --build domo   # PWA seulement, sans caddy embarqué
+pnpm install --frozen-lockfile
+pnpm build
+sudo systemctl restart domo
 ```
 
 ## Logs
 
 ```bash
-# Logs containers
-docker compose logs -f
+# Service domo
+journalctl -u domo -f
+journalctl -u domo -n 50 --no-pager
 
-# Logs Caddy (HTTPS, requêtes)
-docker logs domo-caddy
+# Caddy
+journalctl -u caddy -f
 ```
 
-## Sauvegarde
-
-Le seul état persistant est dans le volume `caddy_data`
-(certificats Let's Encrypt). À sauvegarder régulièrement :
+## Diagnostic
 
 ```bash
-docker run --rm -v domo_caddy_data:/data \
-  -v $(pwd):/backup alpine \
-  tar czf /backup/caddy-data-$(date +%Y%m%d).tar.gz /data
+systemctl status domo
+curl -sI http://127.0.0.1:3000/
+curl -sI https://domo.feroux.fr
 ```

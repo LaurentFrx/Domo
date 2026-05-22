@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 #
-# bootstrap-vps.sh — Provision Domo sur le VPS Hetzner.
+# bootstrap-vps.sh — Provision Domo sur le VPS (déploiement Node + systemd).
 #
 # Idempotent : peut être relancé sans casser un déploiement existant.
-# Détecte un Caddy déjà installé (container ou systemd) pour cohabiter
-# avec d'autres projets (ex. tazieff-eps).
+# Pas de Docker : SvelteKit adapter-node + systemd + Caddy systemd partagé.
 #
 # Usage : bash scripts/bootstrap-vps.sh
 #         curl -fsSL https://raw.githubusercontent.com/LaurentFrx/Domo/main/scripts/bootstrap-vps.sh | bash
@@ -14,16 +13,40 @@ set -euo pipefail
 REPO_URL="https://github.com/LaurentFrx/Domo.git"
 TARGET_DIR="/home/laurent/domo"
 DOMAIN="domo.feroux.fr"
+SERVICE_NAME="domo"
+UNIT_SRC="$TARGET_DIR/deploy/domo.service"
+UNIT_DST="/etc/systemd/system/$SERVICE_NAME.service"
 
 log()  { printf '\033[1;34m[domo]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[domo]\033[0m %s\n' "$*" >&2; }
 fail() { printf '\033[1;31m[domo]\033[0m %s\n' "$*" >&2; exit 1; }
 
 # ── 1. Prérequis ─────────────────────────────────────────────────
-log 'Vérification Docker + docker compose v2…'
-command -v docker >/dev/null 2>&1 || fail 'Docker introuvable. Installer Docker avant de relancer ce script.'
-docker compose version >/dev/null 2>&1 || fail 'docker compose v2 introuvable. Installer le plugin compose avant de relancer.'
-log "  Docker $(docker --version | awk '{print $3}' | tr -d ,) — compose $(docker compose version --short)"
+log 'Vérification Node 20+ / pnpm / Caddy systemd…'
+
+command -v node >/dev/null 2>&1 || fail 'Node introuvable. Installer Node 20+ avant de relancer ce script.'
+NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
+if [ "$NODE_MAJOR" -lt 20 ]; then
+  fail "Node $NODE_MAJOR détecté — Node 20+ requis."
+fi
+log "  Node $(node --version)"
+
+if ! command -v pnpm >/dev/null 2>&1; then
+  if command -v corepack >/dev/null 2>&1; then
+    log '  pnpm absent — activation via corepack'
+    corepack enable >/dev/null 2>&1 || true
+    corepack prepare pnpm@latest --activate >/dev/null 2>&1 || fail 'corepack enable a échoué. Installer pnpm manuellement.'
+  else
+    fail 'pnpm introuvable et corepack absent. Installer pnpm manuellement.'
+  fi
+fi
+log "  pnpm $(pnpm --version)"
+
+if ! systemctl is-active --quiet caddy 2>/dev/null; then
+  warn 'Caddy systemd ne tourne pas. Le script continue mais HTTPS ne fonctionnera pas tant que Caddy ne sert pas domo.feroux.fr.'
+else
+  log '  Caddy systemd actif'
+fi
 
 # ── 2. Clone ou pull du repo ─────────────────────────────────────
 if [ -d "$TARGET_DIR/.git" ]; then
@@ -35,88 +58,87 @@ else
 fi
 cd "$TARGET_DIR"
 
-# ── 3. Détection du Caddy partagé ────────────────────────────────
-CADDY_MODE='none'
-if docker ps --format '{{.Names}}' | grep -qE '(^|[^-])caddy([^-]|$)|caddy$'; then
-  # Un container avec "caddy" dans le nom tourne (hors domo-caddy)
-  RUNNING_CADDY=$(docker ps --format '{{.Names}}' | grep -i caddy | grep -v '^domo-caddy$' | head -1 || true)
-  if [ -n "$RUNNING_CADDY" ]; then
-    CADDY_MODE='shared-container'
-    log "Caddy partagé détecté : container '$RUNNING_CADDY'"
-  fi
-fi
-if [ "$CADDY_MODE" = 'none' ] && systemctl is-active --quiet caddy 2>/dev/null; then
-  CADDY_MODE='systemd'
-  log 'Caddy partagé détecté : service systemd'
-fi
-if [ "$CADDY_MODE" = 'none' ]; then
-  log 'Aucun Caddy détecté — démarrage du stack complet (PWA + Caddy embarqué)'
+# ── 3. Install + build ───────────────────────────────────────────
+log 'pnpm install --frozen-lockfile'
+pnpm install --frozen-lockfile
+
+log 'pnpm build'
+pnpm build
+
+# ── 4. .env (placeholder + warn si vide) ─────────────────────────
+if [ ! -f "$TARGET_DIR/.env" ]; then
+  warn ''
+  warn '┌─ .env absent ──────────────────────────────────────────────────'
+  warn '│  Le service tournera mais l’endpoint /api/solcast/forecast'
+  warn "│  renverra 503 tant que ces variables ne sont pas définies :"
+  warn '│'
+  warn '│    SOLCAST_API_KEY=...'
+  warn '│    SOLCAST_RESOURCE_ID=...'
+  warn '│'
+  warn "│  Créer $TARGET_DIR/.env puis : sudo systemctl restart $SERVICE_NAME"
+  warn '└────────────────────────────────────────────────────────────────'
+  warn ''
 fi
 
-# ── 4. Démarrage ─────────────────────────────────────────────────
-case "$CADDY_MODE" in
-  shared-container)
-    warn ''
-    warn '┌─ ACTION MANUELLE REQUISE ──────────────────────────────────────'
-    warn "│  Un Caddy partagé tourne déjà ('$RUNNING_CADDY')."
-    warn '│  Ajouter ce bloc au Caddyfile partagé puis recharger Caddy :'
-    warn '│'
-    warn "│    $DOMAIN {"
-    warn '│        encode gzip zstd'
-    warn '│        reverse_proxy domo:3000'
-    warn '│        header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"'
-    warn '│    }'
-    warn '│'
-    warn "│  Le container 'domo' doit être sur le même réseau Docker que"
-    warn "│  '$RUNNING_CADDY'. Vérifier avec :"
-    warn "│    docker network inspect <reseau> | grep -E 'domo|$RUNNING_CADDY'"
-    warn '└────────────────────────────────────────────────────────────────'
-    warn ''
-    log 'Démarrage du container domo seul (sans caddy embarqué)…'
-    docker compose up -d --build domo
-    ;;
-  systemd)
-    warn ''
-    warn '┌─ ACTION MANUELLE REQUISE ──────────────────────────────────────'
-    warn '│  Caddy tourne en systemd. Ajouter ce bloc à /etc/caddy/Caddyfile'
-    warn '│  puis : sudo systemctl reload caddy'
-    warn '│'
-    warn "│    $DOMAIN {"
-    warn '│        encode gzip zstd'
-    warn '│        reverse_proxy 127.0.0.1:3000'
-    warn '│        header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"'
-    warn '│    }'
-    warn '│'
-    warn '│  NOTE : le container expose 3000 en interne uniquement. Pour'
-    warn '│  laisser Caddy systemd y accéder, ajouter au service domo dans'
-    warn '│  docker-compose.yml :'
-    warn '│    ports:'
-    warn "│      - '127.0.0.1:3000:3000'"
-    warn '└────────────────────────────────────────────────────────────────'
-    warn ''
-    log 'Démarrage du container domo seul (sans caddy embarqué)…'
-    docker compose up -d --build domo
-    ;;
-  none)
-    log 'Démarrage de docker compose up -d --build (PWA + Caddy)…'
-    docker compose up -d --build
-    ;;
-esac
+# ── 5. Installation du systemd unit ──────────────────────────────
+log "Installation systemd unit → $UNIT_DST (sudo requis)"
+sudo cp "$UNIT_SRC" "$UNIT_DST"
+sudo systemctl daemon-reload
+sudo systemctl enable "$SERVICE_NAME"
 
-# ── 5. Vérification finale ───────────────────────────────────────
-log ''
+if systemctl is-active --quiet "$SERVICE_NAME"; then
+  log "Restart $SERVICE_NAME"
+  sudo systemctl restart "$SERVICE_NAME"
+else
+  log "Start $SERVICE_NAME"
+  sudo systemctl start "$SERVICE_NAME"
+fi
+
+sleep 2
+if systemctl is-active --quiet "$SERVICE_NAME"; then
+  log "  ✓ $SERVICE_NAME actif"
+else
+  warn "  ✗ $SERVICE_NAME inactif"
+  warn '    Diagnostic : journalctl -u domo -n 30 --no-pager'
+fi
+
+# ── 6. Bloc Caddyfile à ajouter manuellement ─────────────────────
+CADDY_FILE='/etc/caddy/Caddyfile'
+if [ -f "$CADDY_FILE" ] && grep -q "^${DOMAIN}" "$CADDY_FILE"; then
+  log "Bloc $DOMAIN déjà présent dans $CADDY_FILE — rien à ajouter"
+else
+  warn ''
+  warn '┌─ ACTION MANUELLE REQUISE ──────────────────────────────────────'
+  warn "│  Ajouter ce bloc à $CADDY_FILE puis :"
+  warn '│    sudo systemctl reload caddy'
+  warn '│'
+  warn "│    $DOMAIN {"
+  warn '│        encode gzip zstd'
+  warn '│        reverse_proxy 127.0.0.1:3000'
+  warn '│        header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"'
+  warn '│    }'
+  warn '└────────────────────────────────────────────────────────────────'
+  warn ''
+fi
+
+# ── 7. Vérification finale ───────────────────────────────────────
+log 'Test HTTP local sur 127.0.0.1:3000 …'
+if curl -sI --max-time 5 http://127.0.0.1:3000/ >/dev/null 2>&1; then
+  log '  ✓ service répond en local'
+else
+  warn "  ✗ 127.0.0.1:3000 injoignable — voir journalctl -u $SERVICE_NAME -n 30"
+fi
+
 log "Test HTTPS sur https://$DOMAIN …"
-sleep 3
 if curl -sI --max-time 10 "https://$DOMAIN" >/dev/null 2>&1; then
   log "  ✓ https://$DOMAIN répond"
-  curl -sI "https://$DOMAIN" | head -5 | sed 's/^/    /'
+  curl -sI "https://$DOMAIN" | head -3 | sed 's/^/    /'
 else
-  warn "  ✗ https://$DOMAIN injoignable pour l'instant."
+  warn "  ✗ https://$DOMAIN injoignable pour l’instant."
   warn '    Causes possibles :'
   warn "    - DNS pas encore propagé ($DOMAIN → IP du VPS)"
-  warn "    - Let's Encrypt en cours de provisioning (attendre ~30s)"
-  warn "    - Bloc Caddy manuel pas encore ajouté (cf. instructions ci-dessus)"
-  warn "    Diagnostic : docker logs domo  &&  docker logs <caddy-container>"
+  warn "    - Bloc Caddy pas encore ajouté (cf. instructions ci-dessus)"
+  warn "    - Let's Encrypt en cours de provisioning (attendre ~30s après reload Caddy)"
 fi
 
 log ''
