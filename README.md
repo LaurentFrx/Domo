@@ -74,13 +74,13 @@ Caddy gère HTTPS automatiquement via Let's Encrypt.
 
 ## Phases
 
-| Phase | Contenu | Statut |
-|-------|---------|--------|
-| **1.1** | Scaffold + design system | ✅ Phase actuelle |
-| **1.2** | Composants dashboard mockés | ⏳ À venir |
-| **1.3** | PWA setup (manifest, SW, icônes) | ⏳ À venir |
-| **1.4** | Connexion HA réelle (WS + OAuth2) | ⏳ À venir |
-| **1.5** | Polish + déploiement Hetzner | ⏳ À venir |
+| Phase   | Contenu                           | Statut            |
+| ------- | --------------------------------- | ----------------- |
+| **1.1** | Scaffold + design system          | ✅ Phase actuelle |
+| **1.2** | Composants dashboard mockés       | ⏳ À venir        |
+| **1.3** | PWA setup (manifest, SW, icônes)  | ⏳ À venir        |
+| **1.4** | Connexion HA réelle (WS + OAuth2) | ⏳ À venir        |
+| **1.5** | Polish + déploiement Hetzner      | ⏳ À venir        |
 
 ## Documentation
 

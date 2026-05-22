@@ -20,7 +20,9 @@ class DashboardState {
   solarPower = $state(2.17); // kW
   solarSelfConsumption = $state(84); // %
   solarSurplus = $state(320); // W
-  solarProduction24h = $state([0.12, 0.18, 0.35, 0.55, 0.78, 0.92, 1.0, 0.88, 0.65, 0.42, 0.22, 0.08]);
+  solarProduction24h = $state([
+    0.12, 0.18, 0.35, 0.55, 0.78, 0.92, 1.0, 0.88, 0.65, 0.42, 0.22, 0.08
+  ]);
   solarTotal24h = $state(18.4); // kWh
 
   // ─── Batterie ───

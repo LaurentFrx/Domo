@@ -9,9 +9,13 @@
   }
 </script>
 
-<div class="flex flex-col gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-4">
+<div
+  class="flex flex-col gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-4"
+>
   <div class="flex items-center justify-between">
-    <span class="text-xs font-medium tracking-wider text-[var(--text-secondary)]">PRODUCTION 24H</span>
+    <span class="text-xs font-medium tracking-wider text-[var(--text-secondary)]"
+      >PRODUCTION 24H</span
+    >
     <span class="text-xs font-medium text-[var(--accent-500)]">+{dashboard.solarTotal24h} kWh</span>
   </div>
 

@@ -11,15 +11,15 @@ services:
     networks:
       - web
     expose:
-      - "3000"
+      - '3000'
 
   caddy:
     image: caddy:2-alpine
     container_name: ha-caddy
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - '80:80'
+      - '443:443'
     volumes:
       - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

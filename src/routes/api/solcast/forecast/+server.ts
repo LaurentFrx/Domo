@@ -7,7 +7,7 @@
  */
 
 import { error, json } from '@sveltejs/kit';
-import { SOLCAST_API_KEY, SOLCAST_RESOURCE_ID } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
 import type { ForecastPoint, ForecastResponse } from '$lib/forecast/types';
 
@@ -52,11 +52,14 @@ function mapForecast(raw: SolcastForecastRaw): ForecastPoint {
 }
 
 export const GET: RequestHandler = async () => {
-  if (!SOLCAST_API_KEY || !SOLCAST_RESOURCE_ID) {
-    throw error(500, 'Solcast non configuré (SOLCAST_API_KEY / SOLCAST_RESOURCE_ID manquants).');
+  const apiKey = env.SOLCAST_API_KEY;
+  const resourceId = env.SOLCAST_RESOURCE_ID;
+
+  if (!apiKey || !resourceId) {
+    throw error(503, 'Solcast non configuré côté serveur (voir .env)');
   }
 
-  const url = `${SOLCAST_BASE}/${SOLCAST_RESOURCE_ID}/forecasts?format=json&hours=${FORECAST_HOURS}`;
+  const url = `${SOLCAST_BASE}/${resourceId}/forecasts?format=json&hours=${FORECAST_HOURS}`;
 
   // Timeout via AbortController : fetch natif ne supporte pas `timeout`.
   const controller = new AbortController();
@@ -66,7 +69,7 @@ export const GET: RequestHandler = async () => {
   try {
     upstream = await fetch(url, {
       headers: {
-        Authorization: `Bearer ${SOLCAST_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         Accept: 'application/json'
       },
       signal: controller.signal

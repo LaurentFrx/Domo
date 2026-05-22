@@ -12,14 +12,14 @@ agence Norry. Style : dark mode premium + violet électrique + vert menthe.
 
 ## Couleurs principales
 
-| Token | Hex | Usage |
-|-------|-----|-------|
-| `--primary-500` | `#6E45FF` | Brand, CTAs, glows |
-| `--accent-500` | `#3DFD98` | Mode PV, highlights, charts |
-| `--surface-base` | `#07001F` | Canvas app |
-| `--surface-card` | `#302D3A` | Tiles, cards |
-| `--text-primary` | `#FFFFFF` | Texte principal |
-| `--text-secondary` | `#9895A1` | Labels, metadata |
+| Token              | Hex       | Usage                       |
+| ------------------ | --------- | --------------------------- |
+| `--primary-500`    | `#6E45FF` | Brand, CTAs, glows          |
+| `--accent-500`     | `#3DFD98` | Mode PV, highlights, charts |
+| `--surface-base`   | `#07001F` | Canvas app                  |
+| `--surface-card`   | `#302D3A` | Tiles, cards                |
+| `--text-primary`   | `#FFFFFF` | Texte principal             |
+| `--text-secondary` | `#9895A1` | Labels, metadata            |
 
 ## Modes cumulus (sémantique)
 

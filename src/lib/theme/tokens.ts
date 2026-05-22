@@ -73,9 +73,13 @@ export type CumulusMode = 'OFF' | 'PV' | 'HC' | 'FORCE';
 
 export function modeColor(mode: CumulusMode): string {
   switch (mode) {
-    case 'PV':    return colors.mode.pv;
-    case 'HC':    return colors.mode.hc;
-    case 'FORCE': return colors.mode.force;
-    default:      return colors.mode.off;
+    case 'PV':
+      return colors.mode.pv;
+    case 'HC':
+      return colors.mode.hc;
+    case 'FORCE':
+      return colors.mode.force;
+    default:
+      return colors.mode.off;
   }
 }
