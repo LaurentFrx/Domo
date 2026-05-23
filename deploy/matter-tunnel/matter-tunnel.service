@@ -1,0 +1,36 @@
+[Unit]
+Description=Tunnel SSH inverse RPi4 -> VPS pour python-matter-server
+# Expose le matter-server local (127.0.0.1:5580 sur le RPi4) sur le VPS
+# (127.0.0.1:5580 côté VPS), où Caddy le proxy en wss://domo.feroux.fr/matter/ws.
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+# Adapter VPS_HOST/VPS_USER au besoin.
+Environment=VPS_USER=laurent
+Environment=VPS_HOST=domo.feroux.fr
+Environment=SSH_KEY=/home/pi/.ssh/matter_tunnel_ed25519
+
+# -N : pas de commande, juste le tunnel
+# -T : pas de TTY
+# -R 5580:localhost:5580 : reverse forward, port distant -> port local
+# ServerAliveInterval/CountMax : ferme la connexion si le VPS ne répond plus
+#   → systemd Restart=always relancera dans la foulée
+# ExitOnForwardFailure=yes : échoue immédiatement si le port distant est occupé
+ExecStart=/usr/bin/ssh -N -T \
+    -i ${SSH_KEY} \
+    -o StrictHostKeyChecking=accept-new \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -o TCPKeepAlive=yes \
+    -R 127.0.0.1:5580:127.0.0.1:5580 \
+    ${VPS_USER}@${VPS_HOST}
+
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

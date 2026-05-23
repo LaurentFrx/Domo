@@ -58,9 +58,24 @@ export function readLiftPercent100ths(node: MatterNode): number | null {
   return typeof raw === 'number' ? raw : null;
 }
 
+/**
+ * Construit l'URL WebSocket par défaut :
+ * - En prod (page servie en HTTPS) : `wss://<host>/matter/ws` — passe par le
+ *   reverse-proxy Caddy + tunnel SSH inverse vers le RPi4. Évite le blocage
+ *   mixed content sous Safari iOS.
+ * - En dev (HTTP local) : fallback sur l'IP LAN directe du RPi4.
+ * - En SSR : URL placeholder, `connect()` est SSR-safe et ne fait rien.
+ */
+function defaultWsUrl(): string {
+  if (typeof window === 'undefined') return 'wss://invalid.local/matter/ws';
+  const { protocol, host } = window.location;
+  if (protocol === 'https:') return `wss://${host}/matter/ws`;
+  return 'ws://192.168.1.29:5580/ws';
+}
+
 class MatterStore {
   // ─── Config ───
-  wsUrl = $state('ws://192.168.1.29:5580/ws');
+  wsUrl = $state(defaultWsUrl());
 
   // ─── State ───
   connected = $state(false);

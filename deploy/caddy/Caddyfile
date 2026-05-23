@@ -1,9 +1,20 @@
 # Caddyfile — gère HTTPS auto via Let's Encrypt
 #
 # Domaine : domo.feroux.fr → PWA SvelteKit (domo container)
+# Sous-chemin /matter/* : proxy WSS vers le python-matter-server du RPi4
+#   exposé localement sur 127.0.0.1:5580 par un tunnel SSH inverse
+#   (cf. scripts/matter-tunnel.service côté RPi4).
 
 domo.feroux.fr {
     encode gzip zstd
-    reverse_proxy 127.0.0.1:3000
     header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+    # Proxy WebSocket vers python-matter-server tunnelé.
+    # `handle_path` strip le préfixe : client `/matter/ws` → backend `/ws`.
+    handle_path /matter/* {
+        reverse_proxy 127.0.0.1:5580
+    }
+
+    # PWA SvelteKit (tout le reste).
+    reverse_proxy 127.0.0.1:3000
 }
