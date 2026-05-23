@@ -6,6 +6,7 @@
   import BatteryMiniTile from '$components/tiles/BatteryMiniTile.svelte';
   import ProductionChart from '$components/charts/ProductionChart.svelte';
   import ForecastTile from '$components/tiles/ForecastTile.svelte';
+  import VoletsSummaryTile from '$components/tiles/VoletsSummaryTile.svelte';
   import { SolcastStore } from '$lib/forecast/solcast.svelte';
 
   const solcast = new SolcastStore();
@@ -29,5 +30,6 @@
     <BatteryMiniTile />
   </div>
   <ProductionChart />
+  <VoletsSummaryTile />
   <ForecastTile {solcast} />
 </div>
