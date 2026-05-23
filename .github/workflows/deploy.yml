@@ -30,9 +30,11 @@ jobs:
           script: |
             set -euo pipefail
             cd /home/laurent/domo
-            git pull origin main
+            git fetch --prune origin
+            git checkout -B main origin/main
             pnpm install --frozen-lockfile
             pnpm build
             sudo systemctl restart domo
             sleep 2
-            systemctl is-active --quiet domo && echo "[deploy] domo actif" || (journalctl -u domo -n 20 --no-pager; exit 1)
+            systemctl is-active --quiet domo || (journalctl -u domo -n 20 --no-pager; exit 1)
+            curl -fsS --max-time 10 http://127.0.0.1:3000/ -o /dev/null && echo "[deploy] domo actif et répond HTTP 200"
