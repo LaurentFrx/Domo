@@ -25,19 +25,22 @@ interface ServerMessage {
   [key: string]: unknown;
 }
 
+/**
+ * `node_added` / `node_updated` : `data` est un `MatterNodeData`, qui contient
+ * au minimum `node_id`, `available`, `attributes`.
+ */
 interface NodeUpdateEvent {
   node_id: number;
   available?: boolean;
   attributes?: AttributeMap;
 }
 
-interface AttributeUpdatedEvent {
-  node_id: number;
-  endpoint: number;
-  cluster_id: number;
-  attribute_id: number;
-  value: unknown;
-}
+/**
+ * `attribute_updated` : côté serveur, `data` est sérialisé depuis le tuple
+ * Python `(node_id, attribute_path, value)` — donc un tableau JSON à 3 éléments.
+ * `attribute_path` est au format `"endpoint/cluster/attribute"`.
+ */
+type AttributeUpdatedTuple = [node_id: number, attribute_path: string, value: unknown];
 
 const WINDOW_COVERING_CLUSTER = 258;
 const CURRENT_LIFT_ATTR = 14;
@@ -105,13 +108,16 @@ class MatterStore {
     this.reconnecting = false;
   }
 
-  /** Envoie une commande générique sur un endpoint/cluster donné. */
+  /**
+   * Envoie une commande sur un endpoint/cluster donné.
+   * `payload` est toujours présent, même vide — c'est requis par le serveur.
+   */
   sendCommand(
     nodeId: number,
     endpointId: number,
     clusterId: number,
     commandName: string,
-    args?: Record<string, unknown>
+    payload: Record<string, unknown> = {}
   ): void {
     this.#send({
       command: 'device_command',
@@ -120,7 +126,7 @@ class MatterStore {
         endpoint_id: endpointId,
         cluster_id: clusterId,
         command_name: commandName,
-        ...(args ? { payload: args } : {})
+        payload
       }
     });
   }
@@ -189,11 +195,15 @@ class MatterStore {
     ws.addEventListener('open', () => {
       this.connected = true;
       this.#retries = 0;
-      this.#send({ command: 'get_nodes' });
+      console.debug('[matter] connected', this.wsUrl);
+      // `start_listening` dump tous les nœuds dans `result` ET active le push
+      // des `attribute_updated` / `node_updated`. Sans ça, l'UI ne se rafraîchit
+      // jamais après la première lecture.
+      this.#send({ command: 'start_listening' });
     });
 
     ws.addEventListener('message', (ev: MessageEvent<string>) => {
-      this.#handleRaw(ev.data);
+      this.#handleRaw(typeof ev.data === 'string' ? ev.data : String(ev.data));
     });
 
     ws.addEventListener('close', () => {
@@ -259,8 +269,8 @@ class MatterStore {
 
   #handleEvent(event: string, msg: ServerMessage): void {
     if (event === 'node_added' || event === 'node_updated') {
-      const data = (msg.data ?? msg.result) as NodeUpdateEvent | undefined;
-      if (!data) return;
+      const data = msg.data as NodeUpdateEvent | undefined;
+      if (!data || typeof data.node_id !== 'number') return;
       this.#upsertNode({
         node_id: data.node_id,
         available: data.available ?? true,
@@ -269,10 +279,20 @@ class MatterStore {
       return;
     }
 
+    if (event === 'node_removed') {
+      const data = msg.data as { node_id?: number } | undefined;
+      if (!data || typeof data.node_id !== 'number') return;
+      this.nodes = this.nodes.filter((n) => n.node_id !== data.node_id);
+      return;
+    }
+
     if (event === 'attribute_updated') {
-      const data = (msg.data ?? msg.result) as AttributeUpdatedEvent | undefined;
-      if (!data) return;
-      this.#updateAttribute(data);
+      // `data` est un tuple [node_id, attribute_path, value].
+      const data = msg.data as AttributeUpdatedTuple | undefined;
+      if (!Array.isArray(data) || data.length < 3) return;
+      const [nodeId, attrPath, value] = data;
+      if (typeof nodeId !== 'number' || typeof attrPath !== 'string') return;
+      this.#patchAttribute(nodeId, attrPath, value);
       return;
     }
   }
@@ -291,6 +311,7 @@ class MatterStore {
       });
     }
     this.nodes = next;
+    console.debug('[matter] dump initial', next.length, 'nœud(s)');
   }
 
   #upsertNode(node: MatterNode): void {
@@ -309,20 +330,19 @@ class MatterStore {
     }
   }
 
-  #updateAttribute(ev: AttributeUpdatedEvent): void {
-    const key = attrKey(ev.endpoint, ev.cluster_id, ev.attribute_id);
-    const idx = this.nodes.findIndex((n) => n.node_id === ev.node_id);
+  #patchAttribute(nodeId: number, attrPath: string, value: unknown): void {
+    const idx = this.nodes.findIndex((n) => n.node_id === nodeId);
     if (idx === -1) {
       this.nodes = [
         ...this.nodes,
-        { node_id: ev.node_id, available: true, attributes: { [key]: ev.value } }
+        { node_id: nodeId, available: true, attributes: { [attrPath]: value } }
       ];
       return;
     }
     const copy = this.nodes.slice();
     copy[idx] = {
       ...copy[idx],
-      attributes: { ...copy[idx].attributes, [key]: ev.value }
+      attributes: { ...copy[idx].attributes, [attrPath]: value }
     };
     this.nodes = copy;
   }

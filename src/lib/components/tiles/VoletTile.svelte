@@ -9,7 +9,9 @@
   let { nodeId, name = `Volet ${nodeId}` }: Props = $props();
 
   const available = $derived(matter.isAvailable(nodeId));
-  const liftPercent = $derived(matter.positionFor(nodeId)); // 0..100 ou null
+  // On masque la dernière position connue sur un nœud hors ligne — sinon l'UI
+  // laisse penser qu'on connaît son état actuel alors qu'on a juste un cache.
+  const liftPercent = $derived(available ? matter.positionFor(nodeId) : null);
   const positionLabel = $derived(liftPercent === null ? '—' : `${liftPercent}%`);
 
   // Valeur du slider : on tolère `null` en affichant 0 mais on désactive le contrôle.
