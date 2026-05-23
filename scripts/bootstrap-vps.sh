@@ -117,35 +117,70 @@ fi
 
 # ── 8. Sudoers narrow pour le déploiement automatisé ─────────────
 log "Installation sudoers narrow → $SUDOERS_DST"
-SUDOERS_LINE='laurent ALL=(root) NOPASSWD: /bin/systemctl restart domo, /bin/systemctl reload caddy'
-echo "$SUDOERS_LINE" | sudo tee "$SUDOERS_DST" >/dev/null
-sudo chmod 0440 "$SUDOERS_DST"
-if sudo visudo -cf "$SUDOERS_DST" >/dev/null 2>&1; then
-  log "  ✓ règle sudoers valide"
+SUDOERS_TMP="$(mktemp)"
+cat >"$SUDOERS_TMP" <<'SUDOERS'
+laurent ALL=(root) NOPASSWD: /bin/systemctl restart domo, /bin/systemctl reload caddy, /usr/bin/caddy validate --config /etc/caddy/Caddyfile
+SUDOERS
+if sudo visudo -cf "$SUDOERS_TMP" >/dev/null 2>&1; then
+  sudo install -m 0440 -o root -g root "$SUDOERS_TMP" "$SUDOERS_DST"
+  rm -f "$SUDOERS_TMP"
+  log "  ✓ règle sudoers installée et validée"
 else
-  sudo rm -f "$SUDOERS_DST"
-  fail "Sudoers domo-deploy invalide (visudo a refusé). Fichier supprimé pour sécurité."
+  rm -f "$SUDOERS_TMP"
+  fail "Sudoers domo-deploy invalide (visudo a refusé). Aucune modification appliquée."
 fi
 
-# ── 9. Bloc Caddyfile à ajouter manuellement ─────────────────────
+# ── 9. Caddyfile : ajout idempotent du bloc reverse_proxy ────────
 CADDY_FILE='/etc/caddy/Caddyfile'
-if [ -f "$CADDY_FILE" ] && grep -q "^${DOMAIN}" "$CADDY_FILE"; then
-  log "Bloc $DOMAIN déjà présent dans $CADDY_FILE — rien à ajouter"
+if ! systemctl is-active --quiet caddy 2>/dev/null; then
+  warn "Caddy inactif — skip de la configuration Caddyfile pour $DOMAIN."
+elif [ ! -f "$CADDY_FILE" ]; then
+  warn "$CADDY_FILE absent — skip (Caddy installé mais sans Caddyfile par défaut ?)"
+elif grep -q "$DOMAIN" "$CADDY_FILE"; then
+  log "  ✓ bloc Caddy $DOMAIN déjà en place"
 else
-  cat <<EOF
+  log "Ajout du bloc reverse_proxy $DOMAIN → 127.0.0.1:3000 dans $CADDY_FILE"
+  CADDY_BACKUP="${CADDY_FILE}.bak.$(date +%Y%m%d-%H%M%S)"
+  sudo cp "$CADDY_FILE" "$CADDY_BACKUP"
+  log "  backup → $CADDY_BACKUP"
 
-================================================================================
-  ACTION MANUELLE REQUISE — ajouter ce bloc à $CADDY_FILE
-  Puis :  sudo systemctl reload caddy
---------------------------------------------------------------------------------
+  sudo tee -a "$CADDY_FILE" >/dev/null <<CADDY
+
 $DOMAIN {
     encode gzip zstd
     reverse_proxy 127.0.0.1:3000
     header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 }
-================================================================================
+CADDY
 
-EOF
+  if sudo caddy validate --config "$CADDY_FILE" >/tmp/caddy-validate.log 2>&1; then
+    log '  ✓ caddy validate OK'
+    sudo systemctl reload caddy
+    if systemctl is-active --quiet caddy; then
+      log '  ✓ caddy reload OK'
+      log "  attente cert Let's Encrypt (jusqu'à 60s)…"
+      CERT_OK=0
+      for _ in 1 2 3 4 5 6; do
+        sleep 10
+        if sudo journalctl -u caddy --since "5 minutes ago" --no-pager 2>/dev/null \
+             | grep -q "certificate obtained successfully.*$DOMAIN"; then
+          log "  ✓ cert Let's Encrypt obtenu pour $DOMAIN"
+          CERT_OK=1
+          break
+        fi
+      done
+      [ "$CERT_OK" -eq 1 ] || warn "  cert non confirmé dans le délai (vérif manuelle : journalctl -u caddy -n 80)"
+    else
+      warn "  caddy inactif après reload — rollback vers $CADDY_BACKUP"
+      sudo cp "$CADDY_BACKUP" "$CADDY_FILE"
+      sudo systemctl reload caddy || true
+    fi
+  else
+    warn '  ✗ caddy validate KO — rollback automatique'
+    sed -n '1,20p' /tmp/caddy-validate.log | sed 's/^/    /' >&2
+    sudo cp "$CADDY_BACKUP" "$CADDY_FILE"
+    fail "Caddyfile invalide après ajout du bloc $DOMAIN ; configuration restaurée."
+  fi
 fi
 
 # ── 10. Vérification finale ──────────────────────────────────────
