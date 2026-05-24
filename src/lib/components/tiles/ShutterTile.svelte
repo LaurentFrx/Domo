@@ -29,16 +29,10 @@
   }
 
   const positionLabel = $derived(
-    shutter.position === 0
-      ? 'Ouvert'
-      : shutter.position >= 100
-        ? 'Fermé'
-        : `${shutter.position}%`
+    shutter.position === 0 ? 'Ouvert' : shutter.position >= 100 ? 'Fermé' : `${shutter.position}%`
   );
 
-  const statusColor = $derived(
-    shutter.available ? 'var(--accent-500)' : 'var(--text-tertiary)'
-  );
+  const statusColor = $derived(shutter.available ? 'var(--accent-500)' : 'var(--text-tertiary)');
 </script>
 
 <div
@@ -55,10 +49,7 @@
       {#if shutter.moving}
         <span class="text-[10px] font-medium text-[var(--primary-400)]">En mouvement</span>
       {/if}
-      <span
-        class="h-2 w-2 rounded-full"
-        style="background-color: {statusColor};"
-      ></span>
+      <span class="h-2 w-2 rounded-full" style="background-color: {statusColor};"></span>
     </div>
   </div>
 
@@ -95,7 +86,15 @@
       disabled={!shutter.available}
       onclick={() => matter.open(shutter.nodeId)}
     >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      >
         <path d="M18 15l-6-6-6 6" />
       </svg>
       Ouvrir
@@ -106,7 +105,14 @@
       disabled={!shutter.available}
       onclick={() => matter.stop(shutter.nodeId)}
     >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.5"
+      >
         <rect x="6" y="6" width="12" height="12" rx="1" />
       </svg>
       Stop
@@ -117,7 +123,15 @@
       disabled={!shutter.available}
       onclick={() => matter.close(shutter.nodeId)}
     >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      >
         <path d="M6 9l6 6 6-6" />
       </svg>
       Fermer

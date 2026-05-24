@@ -140,11 +140,7 @@ export class MatterClient {
     }
   }
 
-  async sendCommand(
-    nodeId: number,
-    commandName: string,
-    payload?: Record<string, unknown>
-  ) {
+  async sendCommand(nodeId: number, commandName: string, payload?: Record<string, unknown>) {
     const args: Record<string, unknown> = {
       endpoint_id: 1,
       node_id: nodeId,

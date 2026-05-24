@@ -47,7 +47,9 @@
   <Header name="Pièces" />
 
   <!-- Status bar -->
-  <div class="flex items-center justify-between rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
+  <div
+    class="flex items-center justify-between rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3"
+  >
     <div class="flex items-center gap-2">
       <span
         class="h-2 w-2 rounded-full"
@@ -82,14 +84,16 @@
 
   <!-- Shutters grouped by room -->
   {#if matter.shutters.length === 0 && matter.connectionStatus === 'connected'}
-    <div class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 text-center">
+    <div
+      class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 text-center"
+    >
       <p class="text-sm text-[var(--text-secondary)]">Aucun volet détecté</p>
     </div>
   {:else if matter.connectionStatus === 'disconnected'}
-    <div class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 text-center">
-      <p class="text-sm text-[var(--text-secondary)]">
-        Connexion au serveur Matter perdue
-      </p>
+    <div
+      class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 text-center"
+    >
+      <p class="text-sm text-[var(--text-secondary)]">Connexion au serveur Matter perdue</p>
       <button
         type="button"
         class="mt-3 rounded-full bg-[var(--primary-500)] px-4 py-2 text-xs font-medium text-white"
