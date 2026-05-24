@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import Header from '$components/layout/Header.svelte';
   import ShutterTile from '$components/tiles/ShutterTile.svelte';
   import { matter } from '$stores/matter.svelte';
+  import { formatDate } from '$utils/format';
 
   onMount(() => {
     matter.connect();
@@ -11,6 +11,8 @@
   onDestroy(() => {
     matter.disconnect();
   });
+
+  const date = $derived(formatDate());
 
   const shuttersByRoom = $derived.by(() => {
     const grouped = new Map<string, typeof matter.shutters>();
@@ -21,66 +23,38 @@
     }
     return grouped;
   });
-
-  const statusLabel = $derived(
-    matter.connectionStatus === 'connected'
-      ? `${matter.onlineCount}/${matter.shutters.length} en ligne`
-      : matter.connectionStatus === 'connecting'
-        ? 'Connexion…'
-        : 'Déconnecté'
-  );
-
-  const statusColor = $derived(
-    matter.connectionStatus === 'connected'
-      ? 'var(--accent-500)'
-      : matter.connectionStatus === 'connecting'
-        ? 'var(--warning)'
-        : 'var(--error)'
-  );
 </script>
 
 <svelte:head>
-  <title>Pièces — Domo</title>
+  <title>Volets — Domo</title>
 </svelte:head>
 
 <div class="flex flex-col gap-4 pb-6">
-  <Header name="Pièces" />
-
-  <!-- Status bar -->
-  <div
-    class="flex items-center justify-between rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3"
-  >
-    <div class="flex items-center gap-2">
-      <span
-        class="h-2 w-2 rounded-full"
-        class:animate-pulse={matter.connectionStatus === 'connecting'}
-        style="background-color: {statusColor};"
-      ></span>
-      <span class="text-xs text-[var(--text-secondary)]">
-        Matter · {statusLabel}
-      </span>
+  <!-- Header inline : date + titre « Volets » + actions globales sur la même ligne -->
+  <header class="flex flex-col gap-1 pt-4 pb-2">
+    <span class="text-xs font-medium tracking-wider text-[var(--text-secondary)]">{date}</span>
+    <div class="flex items-center justify-between gap-3">
+      <h1 class="text-2xl font-medium text-white">Volets</h1>
+      {#if matter.connectionStatus === 'connected' && matter.onlineCount > 0}
+        <div class="flex gap-2">
+          <button
+            type="button"
+            class="rounded-full border border-[var(--border-subtle)] bg-white/5 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/10"
+            onclick={() => matter.openAll()}
+          >
+            Tout ouvrir
+          </button>
+          <button
+            type="button"
+            class="rounded-full border border-[var(--border-subtle)] bg-white/5 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/10"
+            onclick={() => matter.closeAll()}
+          >
+            Tout fermer
+          </button>
+        </div>
+      {/if}
     </div>
-
-    <!-- Global actions -->
-    {#if matter.connectionStatus === 'connected' && matter.onlineCount > 0}
-      <div class="flex gap-2">
-        <button
-          type="button"
-          class="rounded-full border border-[var(--border-subtle)] bg-white/5 px-3 py-1 text-[10px] font-medium text-white transition-colors hover:bg-white/10"
-          onclick={() => matter.openAll()}
-        >
-          Tout ouvrir
-        </button>
-        <button
-          type="button"
-          class="rounded-full border border-[var(--border-subtle)] bg-white/5 px-3 py-1 text-[10px] font-medium text-white transition-colors hover:bg-white/10"
-          onclick={() => matter.closeAll()}
-        >
-          Tout fermer
-        </button>
-      </div>
-    {/if}
-  </div>
+  </header>
 
   <!-- Shutters grouped by room -->
   {#if matter.shutters.length === 0 && matter.connectionStatus === 'connected'}
