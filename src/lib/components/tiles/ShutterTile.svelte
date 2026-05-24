@@ -83,6 +83,7 @@
       oninput={onSliderInput}
       onchange={onSliderChange}
       class="shutter-slider w-full"
+      style="--val: {sliderValue}"
     />
   </div>
 
