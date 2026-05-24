@@ -31,10 +31,9 @@
   let animTarget = 0;
   let lastFrameTime = 0;
   let rafId: number | null = null;
-  // Garde la dernière position serveur observée pour détecter les vrais
-  // changements (et recaler l'anim) sans boucler sur nos propres updates.
-  // null = pas encore initialisé (sera fait au premier tick du $effect).
-  let lastServerPos = $state<number | null>(null);
+  // Mémoire interne (non reactive) — sert juste à détecter les nouvelles
+  // valeurs serveur dans l'effect, pas à déclencher du rendu.
+  let lastServerPos: number | null = null;
 
   // ─── Glow boutons quand action en cours ───
   let activeAction = $state<'open' | 'close' | 'stop' | null>(null);
@@ -71,21 +70,42 @@
     }
     if (pos === lastServerPos) return;
     lastServerPos = pos;
-    if (animPos !== null) {
-      // Si le serveur dit qu'on est arrivé (proche de la cible) ou très loin
-      // de notre estimation, on s'aligne sur la vérité.
-      if (Math.abs(pos - animTarget) < 2) {
-        stopAnimation();
-      } else if (Math.abs(pos - animPos) > 5) {
-        animPos = pos;
-        lastFrameTime = performance.now();
+    if (animPos === null) return;
+    // Quasi-cible atteinte côté serveur → libère l'animation, on retombe
+    // sur shutter.position.
+    if (Math.abs(pos - animTarget) < 2) {
+      stopAnimation();
+      return;
+    }
+    // Écart important entre notre estimation locale et la réalité serveur
+    // → on s'aligne sur la vérité, l'anim continue depuis ce point.
+    if (Math.abs(pos - animPos) > 10) {
+      animPos = pos;
+      lastFrameTime = performance.now();
+      if (rafId === null && pos !== animTarget) {
+        rafId = requestAnimationFrame(animTick);
       }
     }
   });
 
-  function startAnimation(target: number) {
-    stopAnimation();
-    animPos = shutter.position;
+  /**
+   * Démarre / met à jour l'animation visuelle vers `target`.
+   * Le point de départ est la position visuelle COURANTE (drag en cours,
+   * anim en cours, ou état serveur) — ainsi pas de saut visuel quand on
+   * lâche le slider ou qu'on re-clique pendant un mouvement.
+   */
+  function setVisualTarget(target: number) {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    const from = dragging ? dragPos : (animPos ?? shutter.position);
+    if (Math.abs(from - target) < 0.5) {
+      // Déjà à la cible : pas d'anim, pas de pastille « en mouvement ».
+      animPos = null;
+      return;
+    }
+    animPos = from;
     animTarget = target;
     lastFrameTime = performance.now();
     rafId = requestAnimationFrame(animTick);
@@ -100,16 +120,28 @@
     const next = animPos + direction * SPEED_PERCENT_PER_SECOND * dt;
     const reached = (direction > 0 && next >= animTarget) || (direction < 0 && next <= animTarget);
     if (reached) {
+      // Cible visuelle atteinte. On garde animPos figé sur animTarget
+      // jusqu'à ce que le serveur confirme — c'est le $effect qui libérera
+      // animPos via stopAnimation(). Si le serveur ne confirme jamais
+      // (rare), un filet de sécurité libère après 20 s.
       animPos = animTarget;
-      // Garde la cible visible 1 s puis libère, le temps que le serveur
-      // confirme la position réelle.
-      setTimeout(() => {
-        if (animPos === animTarget) animPos = null;
-      }, 1000);
+      scheduleFailsafeRelease();
       return;
     }
     animPos = next;
     rafId = requestAnimationFrame(animTick);
+  }
+
+  let failsafeTimer: ReturnType<typeof setTimeout> | null = null;
+  function scheduleFailsafeRelease() {
+    if (failsafeTimer) clearTimeout(failsafeTimer);
+    failsafeTimer = setTimeout(() => {
+      failsafeTimer = null;
+      // Libère uniquement si l'anim est encore figée sur la cible.
+      if (rafId === null && animPos === animTarget) {
+        animPos = null;
+      }
+    }, 20000);
   }
 
   function stopAnimation() {
@@ -117,12 +149,17 @@
       cancelAnimationFrame(rafId);
       rafId = null;
     }
+    if (failsafeTimer) {
+      clearTimeout(failsafeTimer);
+      failsafeTimer = null;
+    }
     animPos = null;
   }
 
   onDestroy(() => {
     stopAnimation();
     if (activeTimer) clearTimeout(activeTimer);
+    if (failsafeTimer) clearTimeout(failsafeTimer);
   });
 
   // ─── Drag du slider ───
@@ -140,7 +177,17 @@
 
   function onPointerDown(e: PointerEvent) {
     if (!shutter.available) return;
-    stopAnimation();
+    // Interrompt l'anim en cours (sans casser la continuité visuelle :
+    // on bascule directement sur dragPos via `dragging = true`).
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    if (failsafeTimer) {
+      clearTimeout(failsafeTimer);
+      failsafeTimer = null;
+    }
+    animPos = null;
     dragging = true;
     dragPos = pointerToPosition(e.clientY);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -154,31 +201,41 @@
 
   function onPointerUp(e: PointerEvent) {
     if (!dragging) return;
-    dragging = false;
     const finalPos = pointerToPosition(e.clientY);
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     matter.goToPosition(shutter.nodeId, finalPos);
     setActive(finalPos < shutter.position ? 'open' : 'close');
-    startAnimation(finalPos);
+    // « Hold » visuel sur finalPos jusqu'à confirmation serveur — set AVANT
+    // dragging=false pour ne pas exposer brièvement shutter.position
+    // (l'ancienne valeur).
+    animPos = finalPos;
+    animTarget = finalPos;
+    scheduleFailsafeRelease();
+    dragging = false;
   }
 
   // ─── Handlers boutons ───
   function onOpenClick() {
     matter.open(shutter.nodeId);
     setActive('open');
-    startAnimation(0);
+    setVisualTarget(0);
   }
   function onCloseClick() {
     matter.close(shutter.nodeId);
     setActive('close');
-    startAnimation(100);
+    setVisualTarget(100);
   }
   function onStopClick() {
     matter.stop(shutter.nodeId);
     setActive('stop');
-    // Stop fige la position actuelle en cible — l'anim s'arrête doucement.
+    // Fige immédiatement le tablier sur la position visuelle courante.
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
     if (animPos !== null) {
       animTarget = animPos;
+      scheduleFailsafeRelease();
     }
   }
 </script>
