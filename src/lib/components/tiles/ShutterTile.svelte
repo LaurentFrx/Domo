@@ -8,12 +8,16 @@
 
   let { shutter }: Props = $props();
 
-  // ─── Convention ───
-  // Store Domo  : shutter.position = % de fermeture (0 = ouvert, 100 = fermé)
-  // Slider vertical : pouce en haut = ouvert, pouce en bas = fermé
-  // → bottomPercent (0..100) représente la position visuelle du pouce, où
-  //   0 = collé en bas (= fermé) et 100 = collé en haut (= ouvert)
-  // → bottomPercent = 100 - shutter.position
+  // ─── Convention Matter (à ne pas modifier) ───
+  // shutter.position = % de fermeture (0 = ouvert, 100 = fermé)
+  //
+  // ─── Rendu visuel cohérent avec un vrai volet vu de l'extérieur ───
+  // Ouvert (0)  → tablier remonté → fill height = 0 %  → thumb tout EN HAUT
+  // Fermé (100) → tablier déroulé → fill height = 100 % → thumb tout EN BAS
+  //
+  // Donc `slider-fill.height = position%` (le fill matérialise le tablier
+  // visible), et `slider-thumb.bottom = (100 - position)%` (le thumb suit le
+  // bas du tablier qui descend quand on ferme).
 
   let dragging = $state(false);
   // dragPos n'est utilisé que tant que `dragging === true` — il est écrasé par
@@ -23,14 +27,13 @@
 
   // Affichage : si on drag, on suit le doigt, sinon on suit la valeur réelle.
   const displayedPosition = $derived(dragging ? dragPos : shutter.position);
-  const bottomPercent = $derived(100 - displayedPosition);
 
   const positionLabel = $derived(
     displayedPosition <= 1 ? 'Ouvert' : displayedPosition >= 99 ? 'Fermé' : `${displayedPosition}%`
   );
 
-  // Emoji selon ouverture (0 = ouvert ☀️, 100 = fermé 🌙)
-  const thumbIcon = $derived(displayedPosition < 25 ? '☀️' : displayedPosition < 75 ? '🌤️' : '🌙');
+  // Icône thumb : franche aux extrêmes, neutre entre les deux.
+  const thumbIcon = $derived(displayedPosition <= 10 ? '☀️' : displayedPosition >= 90 ? '🌙' : '▬');
 
   function clampPosition(p: number): number {
     return Math.max(0, Math.min(100, p));
@@ -114,10 +117,13 @@
       aria-valuenow={shutter.position}
       aria-valuetext={positionLabel}
     >
-      <!-- Fill néon (remonte du bas = % d'ouverture) -->
-      <div class="slider-fill" style:height="{bottomPercent}%"></div>
-      <!-- Thumb avec emoji (positionné depuis le bas) -->
-      <div class="slider-thumb" style:bottom="calc({bottomPercent}% - 22px)">
+      <!-- Tablier visible : ancré en haut, descend du haut vers le bas avec
+           la fermeture. height = position% (0 = invisible, 100 = plein rail). -->
+      <div class="slider-fill" style:height="{displayedPosition}%"></div>
+      <!-- Thumb (= bas du tablier / poignée), monte quand on ouvre. Ancré
+           par le bas pour éviter d'aller calculer la hauteur du rail en JS.
+           18px = thumbHeight / 2 pour centrer le thumb sur la limite tablier. -->
+      <div class="slider-thumb" style:bottom="calc({100 - displayedPosition}% - 18px)">
         <span class="thumb-icon">{thumbIcon}</span>
       </div>
     </div>
@@ -242,16 +248,23 @@
     outline-offset: 2px;
   }
 
-  /* Track remplie qui « monte » avec l'ouverture */
+  /* Tablier du volet — descend du haut (ancré top) avec la fermeture.
+     Couleur gris ardoise + motif horizontal qui évoque les lamelles. */
   .slider-fill {
     position: absolute;
-    bottom: 0;
+    top: 0;
     left: 0;
     right: 0;
-    background: linear-gradient(to top, var(--accent-600), var(--accent-500));
-    box-shadow:
-      0 0 16px rgba(61, 253, 152, 0.55),
-      0 0 4px rgba(141, 253, 195, 0.4);
+    background:
+      repeating-linear-gradient(
+        to bottom,
+        rgba(0, 0, 0, 0.28) 0px,
+        rgba(0, 0, 0, 0.28) 1px,
+        transparent 1px,
+        transparent 5px
+      ),
+      linear-gradient(to bottom, #5a6478 0%, #3a4252 70%, #2a3140 100%);
+    box-shadow: inset 0 -2px 4px rgba(0, 0, 0, 0.4);
     transition: height 150ms var(--easing-default);
     pointer-events: none;
   }
@@ -260,7 +273,7 @@
     transition: none;
   }
 
-  /* Le pouce */
+  /* Le pouce — neutre par défaut, halo accent uniquement pendant le drag. */
   .slider-thumb {
     position: absolute;
     left: 50%;
@@ -271,20 +284,21 @@
     background: linear-gradient(135deg, #ffffff, #e8e6f0);
     box-shadow:
       0 4px 10px rgba(0, 0, 0, 0.55),
-      0 0 14px rgba(61, 253, 152, 0.35);
+      inset 0 -2px 4px rgba(0, 0, 0, 0.12);
     display: flex;
     align-items: center;
     justify-content: center;
     pointer-events: none;
     transition: bottom 150ms var(--easing-default);
     will-change: bottom;
+    z-index: 1;
   }
 
   .slider-track.dragging .slider-thumb {
     transition: none;
     box-shadow:
       0 6px 14px rgba(0, 0, 0, 0.7),
-      0 0 22px rgba(61, 253, 152, 0.6);
+      0 0 22px rgba(61, 253, 152, 0.55);
   }
 
   .thumb-icon {
