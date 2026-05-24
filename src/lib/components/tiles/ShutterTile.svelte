@@ -56,9 +56,12 @@
     displayedPosition <= 1 ? 'Ouvert' : displayedPosition >= 99 ? 'Fermé' : `${displayedPosition}%`
   );
 
-  const thumbIcon = $derived(displayedPosition <= 10 ? '☀️' : displayedPosition >= 90 ? '🌙' : '▬');
-
   const isMoving = $derived(animPos !== null || shutter.moving);
+
+  // Hauteur du thumb (doit matcher .slider-thumb width/height en CSS).
+  // Utilisée par le mapping pointer → position pour que le centre du thumb
+  // coïncide avec le doigt et reste entièrement dans la zone visible.
+  const THUMB_SIZE = 36;
 
   // Recalibre l'animation locale quand le serveur push une vraie nouvelle
   // valeur (différente de la dernière qu'on connaissait).
@@ -170,8 +173,13 @@
   function pointerToPosition(clientY: number): number {
     if (!trackEl) return shutter.position;
     const rect = trackEl.getBoundingClientRect();
-    const yFromTop = clientY - rect.top;
-    const closedPercent = (yFromTop / rect.height) * 100;
+    // Le centre du thumb peut se trouver dans [thumb/2, rail - thumb/2]
+    // → on mappe linéairement cette zone vers [0, 100] pour que le doigt
+    //    pointe pile sur le centre du thumb.
+    const half = THUMB_SIZE / 2;
+    const usable = rect.height - THUMB_SIZE;
+    const yCentered = clientY - rect.top - half;
+    const closedPercent = (yCentered / usable) * 100;
     return clampPosition(Math.round(closedPercent));
   }
 
@@ -279,9 +287,12 @@
       aria-valuetext={positionLabel}
     >
       <div class="slider-fill" style:height="{displayedPosition}%"></div>
-      <div class="slider-thumb" style:bottom="calc({100 - displayedPosition}% - 18px)">
-        <span class="thumb-icon">{thumbIcon}</span>
-      </div>
+      <!-- bottom = (rail_h - thumb_h) * (100 - position) / 100
+           → reste entièrement visible aux deux extrêmes du rail. -->
+      <div
+        class="slider-thumb"
+        style:bottom="calc((100% - {THUMB_SIZE}px) * {(100 - displayedPosition) / 100})"
+      ></div>
     </div>
 
     <div class="flex flex-1 items-center">
@@ -469,12 +480,6 @@
     box-shadow:
       0 6px 14px rgba(0, 0, 0, 0.7),
       0 0 22px rgba(61, 253, 152, 0.55);
-  }
-
-  .thumb-icon {
-    font-size: 1rem;
-    line-height: 1;
-    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.4));
   }
 
   /* ─── Pourcentage en gros, gradient signature Yeldra ─── */

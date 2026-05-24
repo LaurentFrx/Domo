@@ -37,18 +37,10 @@
       <h1 class="text-2xl font-medium text-white">Volets</h1>
       {#if matter.connectionStatus === 'connected' && matter.onlineCount > 0}
         <div class="flex gap-2">
-          <button
-            type="button"
-            class="rounded-full border border-[var(--border-subtle)] bg-white/5 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/10"
-            onclick={() => matter.openAll()}
-          >
+          <button type="button" class="pill-glass" onclick={() => matter.openAll()}>
             Tout ouvrir
           </button>
-          <button
-            type="button"
-            class="rounded-full border border-[var(--border-subtle)] bg-white/5 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/10"
-            onclick={() => matter.closeAll()}
-          >
+          <button type="button" class="pill-glass" onclick={() => matter.closeAll()}>
             Tout fermer
           </button>
         </div>
@@ -91,3 +83,43 @@
     {/each}
   {/if}
 </div>
+
+<style>
+  /* Pills glassmorphism : transparence + backdrop blur, cohérent avec
+     l'esthétique glass des ShutterTile. */
+  .pill-glass {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.375rem 0.875rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(14px) saturate(160%);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.25),
+      inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    transition:
+      background-color var(--motion-fast) var(--easing-default),
+      border-color var(--motion-fast) var(--easing-default),
+      box-shadow var(--motion-fast) var(--easing-default);
+    cursor: pointer;
+  }
+
+  .pill-glass:hover {
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.2);
+    box-shadow:
+      0 4px 16px rgba(0, 0, 0, 0.3),
+      0 0 18px rgba(61, 253, 152, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+
+  .pill-glass:active {
+    background: rgba(255, 255, 255, 0.2);
+  }
+</style>
