@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { matter } from '$stores/matter.svelte';
   import type { Shutter } from '$stores/matter.svelte';
 
@@ -14,27 +15,117 @@
   // ─── Rendu visuel cohérent avec un vrai volet vu de l'extérieur ───
   // Ouvert (0)  → tablier remonté → fill height = 0 %  → thumb tout EN HAUT
   // Fermé (100) → tablier déroulé → fill height = 100 % → thumb tout EN BAS
-  //
-  // Donc `slider-fill.height = position%` (le fill matérialise le tablier
-  // visible), et `slider-thumb.bottom = (100 - position)%` (le thumb suit le
-  // bas du tablier qui descend quand on ferme).
 
+  // ─── Drag du slider ───
   let dragging = $state(false);
-  // dragPos n'est utilisé que tant que `dragging === true` — il est écrasé par
-  // pointerToPosition() dès le onPointerDown, donc l'initialiser à 0 suffit.
   let dragPos = $state(0);
   let trackEl = $state<HTMLDivElement | null>(null);
 
-  // Affichage : si on drag, on suit le doigt, sinon on suit la valeur réelle.
-  const displayedPosition = $derived(dragging ? dragPos : shutter.position);
+  // ─── Animation locale anticipée ───
+  // Les SONOFF MINI-RBS ne pushent leur position qu'à la fin du mouvement.
+  // Pour donner un feedback fluide, on anime localement de la position
+  // actuelle vers la cible à ~10 secondes / 100% (vitesse typique d'un volet
+  // roulant standard). On recalibre dès qu'un vrai event arrive.
+  const SPEED_PERCENT_PER_SECOND = 10;
+  let animPos = $state<number | null>(null);
+  let animTarget = 0;
+  let lastFrameTime = 0;
+  let rafId: number | null = null;
+  // Garde la dernière position serveur observée pour détecter les vrais
+  // changements (et recaler l'anim) sans boucler sur nos propres updates.
+  // null = pas encore initialisé (sera fait au premier tick du $effect).
+  let lastServerPos = $state<number | null>(null);
+
+  // ─── Glow boutons quand action en cours ───
+  let activeAction = $state<'open' | 'close' | 'stop' | null>(null);
+  let activeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function setActive(action: 'open' | 'close' | 'stop') {
+    activeAction = action;
+    if (activeTimer) clearTimeout(activeTimer);
+    activeTimer = setTimeout(() => {
+      activeAction = null;
+    }, 1500);
+  }
+
+  // ─── Position affichée (drag > anim > état serveur) ───
+  const displayedPosition = $derived(
+    dragging ? dragPos : animPos !== null ? Math.round(animPos) : shutter.position
+  );
 
   const positionLabel = $derived(
     displayedPosition <= 1 ? 'Ouvert' : displayedPosition >= 99 ? 'Fermé' : `${displayedPosition}%`
   );
 
-  // Icône thumb : franche aux extrêmes, neutre entre les deux.
   const thumbIcon = $derived(displayedPosition <= 10 ? '☀️' : displayedPosition >= 90 ? '🌙' : '▬');
 
+  const isMoving = $derived(animPos !== null || shutter.moving);
+
+  // Recalibre l'animation locale quand le serveur push une vraie nouvelle
+  // valeur (différente de la dernière qu'on connaissait).
+  $effect(() => {
+    const pos = shutter.position;
+    if (lastServerPos === null) {
+      lastServerPos = pos;
+      return;
+    }
+    if (pos === lastServerPos) return;
+    lastServerPos = pos;
+    if (animPos !== null) {
+      // Si le serveur dit qu'on est arrivé (proche de la cible) ou très loin
+      // de notre estimation, on s'aligne sur la vérité.
+      if (Math.abs(pos - animTarget) < 2) {
+        stopAnimation();
+      } else if (Math.abs(pos - animPos) > 5) {
+        animPos = pos;
+        lastFrameTime = performance.now();
+      }
+    }
+  });
+
+  function startAnimation(target: number) {
+    stopAnimation();
+    animPos = shutter.position;
+    animTarget = target;
+    lastFrameTime = performance.now();
+    rafId = requestAnimationFrame(animTick);
+  }
+
+  function animTick(t: number) {
+    rafId = null;
+    if (animPos === null) return;
+    const dt = (t - lastFrameTime) / 1000;
+    lastFrameTime = t;
+    const direction = animTarget > animPos ? 1 : -1;
+    const next = animPos + direction * SPEED_PERCENT_PER_SECOND * dt;
+    const reached = (direction > 0 && next >= animTarget) || (direction < 0 && next <= animTarget);
+    if (reached) {
+      animPos = animTarget;
+      // Garde la cible visible 1 s puis libère, le temps que le serveur
+      // confirme la position réelle.
+      setTimeout(() => {
+        if (animPos === animTarget) animPos = null;
+      }, 1000);
+      return;
+    }
+    animPos = next;
+    rafId = requestAnimationFrame(animTick);
+  }
+
+  function stopAnimation() {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    animPos = null;
+  }
+
+  onDestroy(() => {
+    stopAnimation();
+    if (activeTimer) clearTimeout(activeTimer);
+  });
+
+  // ─── Drag du slider ───
   function clampPosition(p: number): number {
     return Math.max(0, Math.min(100, p));
   }
@@ -42,15 +133,14 @@
   function pointerToPosition(clientY: number): number {
     if (!trackEl) return shutter.position;
     const rect = trackEl.getBoundingClientRect();
-    // y relative en haut du track : 0 = top, height = bottom
     const yFromTop = clientY - rect.top;
-    // Convertit en % de fermeture (top = 0 = ouvert, bottom = 100 = fermé)
     const closedPercent = (yFromTop / rect.height) * 100;
     return clampPosition(Math.round(closedPercent));
   }
 
   function onPointerDown(e: PointerEvent) {
     if (!shutter.available) return;
+    stopAnimation();
     dragging = true;
     dragPos = pointerToPosition(e.clientY);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -67,8 +157,29 @@
     dragging = false;
     const finalPos = pointerToPosition(e.clientY);
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    // N'envoie la commande qu'à la fin du drag — économise les frames Matter.
     matter.goToPosition(shutter.nodeId, finalPos);
+    setActive(finalPos < shutter.position ? 'open' : 'close');
+    startAnimation(finalPos);
+  }
+
+  // ─── Handlers boutons ───
+  function onOpenClick() {
+    matter.open(shutter.nodeId);
+    setActive('open');
+    startAnimation(0);
+  }
+  function onCloseClick() {
+    matter.close(shutter.nodeId);
+    setActive('close');
+    startAnimation(100);
+  }
+  function onStopClick() {
+    matter.stop(shutter.nodeId);
+    setActive('stop');
+    // Stop fige la position actuelle en cible — l'anim s'arrête doucement.
+    if (animPos !== null) {
+      animTarget = animPos;
+    }
   }
 </script>
 
@@ -76,20 +187,14 @@
   class="tile-glass relative flex flex-col gap-3 overflow-hidden rounded-3xl p-4"
   class:opacity-50={!shutter.available}
 >
-  <!-- Glow décoratif vert menthe en haut à droite -->
   <div class="glow" aria-hidden="true"></div>
 
-  <!-- Header : nom + room + pastille statut -->
+  <!-- Header : nom + pastille statut (room retiré — déjà affiché en titre de section) -->
   <div class="relative flex items-start justify-between">
-    <div class="flex flex-col">
-      <span class="text-sm leading-tight font-medium text-white">{shutter.name}</span>
-      <span class="text-[10px] tracking-wider text-[var(--text-secondary)] uppercase">
-        {shutter.room}
-      </span>
-    </div>
+    <span class="text-sm leading-tight font-medium text-white">{shutter.name}</span>
     <div class="flex items-center gap-1.5">
-      {#if shutter.moving}
-        <span class="text-[9px] font-medium text-[var(--primary-400)]">●●●</span>
+      {#if isMoving}
+        <span class="moving-dots text-[9px] font-medium text-[var(--accent-500)]">●●●</span>
       {/if}
       <span
         class="h-2 w-2 rounded-full"
@@ -100,7 +205,6 @@
 
   <!-- Slider vertical + indicateur valeur -->
   <div class="relative flex items-center gap-4">
-    <!-- Track -->
     <div
       bind:this={trackEl}
       class="slider-track"
@@ -117,18 +221,12 @@
       aria-valuenow={shutter.position}
       aria-valuetext={positionLabel}
     >
-      <!-- Tablier visible : ancré en haut, descend du haut vers le bas avec
-           la fermeture. height = position% (0 = invisible, 100 = plein rail). -->
       <div class="slider-fill" style:height="{displayedPosition}%"></div>
-      <!-- Thumb (= bas du tablier / poignée), monte quand on ouvre. Ancré
-           par le bas pour éviter d'aller calculer la hauteur du rail en JS.
-           18px = thumbHeight / 2 pour centrer le thumb sur la limite tablier. -->
       <div class="slider-thumb" style:bottom="calc({100 - displayedPosition}% - 18px)">
         <span class="thumb-icon">{thumbIcon}</span>
       </div>
     </div>
 
-    <!-- Valeur + état (à droite du slider) -->
     <div class="flex flex-1 flex-col gap-1">
       <span class="percent-display text-3xl leading-none font-bold">
         {displayedPosition}<span class="text-lg">%</span>
@@ -137,13 +235,14 @@
     </div>
   </div>
 
-  <!-- Boutons d'action discrets -->
+  <!-- Boutons d'action -->
   <div class="relative grid grid-cols-3 gap-1.5">
     <button
       type="button"
       class="action-btn"
+      class:active={activeAction === 'open'}
       disabled={!shutter.available}
-      onclick={() => matter.open(shutter.nodeId)}
+      onclick={onOpenClick}
       aria-label="Ouvrir {shutter.name}"
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -159,8 +258,9 @@
     <button
       type="button"
       class="action-btn action-btn--stop"
+      class:active={activeAction === 'stop'}
       disabled={!shutter.available}
-      onclick={() => matter.stop(shutter.nodeId)}
+      onclick={onStopClick}
       aria-label="Arrêter {shutter.name}"
     >
       <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -170,8 +270,9 @@
     <button
       type="button"
       class="action-btn"
+      class:active={activeAction === 'close'}
       disabled={!shutter.available}
-      onclick={() => matter.close(shutter.nodeId)}
+      onclick={onCloseClick}
       aria-label="Fermer {shutter.name}"
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -209,7 +310,6 @@
       inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
 
-  /* Halo accent en arrière-plan */
   .glow {
     position: absolute;
     top: -40px;
@@ -220,6 +320,21 @@
     background: radial-gradient(circle, rgba(61, 253, 152, 0.18), transparent 70%);
     pointer-events: none;
     z-index: 0;
+  }
+
+  /* ─── Indicateur "en mouvement" ─── */
+  .moving-dots {
+    animation: pulse-dots 1.2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-dots {
+    0%,
+    100% {
+      opacity: 0.4;
+    }
+    50% {
+      opacity: 1;
+    }
   }
 
   /* ─── Slider vertical ─── */
@@ -233,7 +348,7 @@
     box-shadow: inset 0 4px 12px rgba(0, 0, 0, 0.5);
     cursor: grab;
     flex-shrink: 0;
-    touch-action: none; /* indispensable pour pointer events tactiles */
+    touch-action: none;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
     overflow: hidden;
@@ -248,8 +363,6 @@
     outline-offset: 2px;
   }
 
-  /* Tablier du volet — descend du haut (ancré top) avec la fermeture.
-     Gradient vert néon Yeldra avec glow, comme avant. */
   .slider-fill {
     position: absolute;
     top: 0;
@@ -259,7 +372,9 @@
     box-shadow:
       0 0 16px rgba(61, 253, 152, 0.55),
       0 0 4px rgba(141, 253, 195, 0.4);
-    transition: height 250ms var(--easing-default);
+    /* Petite transition pour absorber les micro-sauts entre frames RAF
+       et les recalibrations sur events serveur. */
+    transition: height 120ms linear;
     pointer-events: none;
   }
 
@@ -267,7 +382,6 @@
     transition: none;
   }
 
-  /* Le pouce — neutre par défaut, halo accent uniquement pendant le drag. */
   .slider-thumb {
     position: absolute;
     left: 50%;
@@ -283,7 +397,7 @@
     align-items: center;
     justify-content: center;
     pointer-events: none;
-    transition: bottom 250ms var(--easing-default);
+    transition: bottom 120ms linear;
     will-change: bottom;
     z-index: 1;
   }
@@ -313,6 +427,7 @@
 
   /* ─── Boutons d'action ─── */
   .action-btn {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -323,7 +438,9 @@
     border: 1px solid rgba(255, 255, 255, 0.04);
     transition:
       background-color var(--motion-fast) var(--easing-default),
-      border-color var(--motion-fast) var(--easing-default);
+      border-color var(--motion-fast) var(--easing-default),
+      color var(--motion-fast) var(--easing-default),
+      box-shadow var(--motion-fast) var(--easing-default);
   }
 
   .action-btn:hover:not(:disabled) {
@@ -342,5 +459,38 @@
 
   .action-btn--stop {
     color: var(--warning);
+  }
+
+  /* ─── État "actif" : glow vert menthe Yeldra pendant l'action ─── */
+  .action-btn.active {
+    background-color: var(--accent-500);
+    border-color: var(--accent-500);
+    color: var(--surface-base);
+    box-shadow:
+      0 0 16px rgba(61, 253, 152, 0.6),
+      0 0 32px rgba(61, 253, 152, 0.3),
+      inset 0 0 8px rgba(255, 255, 255, 0.2);
+    animation: pulse-active 1.2s ease-in-out infinite;
+  }
+
+  .action-btn--stop.active {
+    background-color: var(--warning);
+    border-color: var(--warning);
+    color: var(--surface-base);
+    box-shadow:
+      0 0 16px rgba(255, 184, 77, 0.6),
+      0 0 32px rgba(255, 184, 77, 0.3),
+      inset 0 0 8px rgba(255, 255, 255, 0.2);
+    animation: pulse-active 1.2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-active {
+    0%,
+    100% {
+      filter: brightness(1);
+    }
+    50% {
+      filter: brightness(1.15);
+    }
   }
 </style>
