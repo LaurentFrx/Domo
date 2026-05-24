@@ -249,23 +249,17 @@
   }
 
   /* Tablier du volet — descend du haut (ancré top) avec la fermeture.
-     Couleur gris ardoise + motif horizontal qui évoque les lamelles. */
+     Gradient vert néon Yeldra avec glow, comme avant. */
   .slider-fill {
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
-    background:
-      repeating-linear-gradient(
-        to bottom,
-        rgba(0, 0, 0, 0.28) 0px,
-        rgba(0, 0, 0, 0.28) 1px,
-        transparent 1px,
-        transparent 5px
-      ),
-      linear-gradient(to bottom, #5a6478 0%, #3a4252 70%, #2a3140 100%);
-    box-shadow: inset 0 -2px 4px rgba(0, 0, 0, 0.4);
-    transition: height 150ms var(--easing-default);
+    background: linear-gradient(to bottom, var(--accent-600), var(--accent-500));
+    box-shadow:
+      0 0 16px rgba(61, 253, 152, 0.55),
+      0 0 4px rgba(141, 253, 195, 0.4);
+    transition: height 250ms var(--easing-default);
     pointer-events: none;
   }
 
@@ -289,7 +283,7 @@
     align-items: center;
     justify-content: center;
     pointer-events: none;
-    transition: bottom 150ms var(--easing-default);
+    transition: bottom 250ms var(--easing-default);
     will-change: bottom;
     z-index: 1;
   }

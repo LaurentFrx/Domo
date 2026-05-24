@@ -64,7 +64,11 @@ export class MatterClient {
     this.ws.onopen = () => {
       this._setStatus('connected');
       this.reconnectDelay = 1000;
-      this.getNodes();
+      // `start_listening` retourne le dump initial dans `result` ET active le
+      // push des événements `attribute_updated` / `node_updated`. Sans ça, le
+      // serveur reste muet → l'UI ne se met à jour qu'après chaque commande
+      // locale (via les polls de `sendCommand`), pas en temps réel.
+      this.startListening();
     };
 
     this.ws.onmessage = (ev) => {
@@ -77,8 +81,17 @@ export class MatterClient {
           return;
         }
 
-        if (data.event === 'node_updated' || data.event === 'attribute_updated') {
-          this.getNodes();
+        if (
+          data.event === 'attribute_updated' ||
+          data.event === 'node_updated' ||
+          data.event === 'node_added' ||
+          data.event === 'node_removed'
+        ) {
+          // Debounce : pendant un mouvement le serveur push plusieurs events
+          // par seconde (CurrentPosition, TargetPosition, OperationalStatus).
+          // On groupe les refresh par tranches de 200 ms pour ne pas marteler
+          // le serveur avec des `get_nodes`.
+          this._scheduleRefresh();
         }
       } catch {
         /* ignore parse errors */
@@ -140,6 +153,34 @@ export class MatterClient {
     }
   }
 
+  /**
+   * Active le push d'événements `attribute_updated` / `node_updated` côté
+   * serveur. La réponse contient le dump initial des nœuds (équivalent à
+   * `get_nodes`), qu'on propage directement au store.
+   */
+  async startListening() {
+    try {
+      const resp = (await this._send({
+        message_id: String(++this.msgId),
+        command: 'start_listening'
+      })) as { result?: unknown[] };
+      if (resp?.result) {
+        this.onNodesUpdate(resp.result);
+      }
+    } catch {
+      /* reconnect will retry */
+    }
+  }
+
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private _scheduleRefresh() {
+    if (this.refreshTimer) return;
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      this.getNodes();
+    }, 200);
+  }
+
   async sendCommand(nodeId: number, commandName: string, payload?: Record<string, unknown>) {
     const args: Record<string, unknown> = {
       endpoint_id: 1,
@@ -155,8 +196,11 @@ export class MatterClient {
       args
     });
 
-    setTimeout(() => this.getNodes(), 500);
-    setTimeout(() => this.getNodes(), 2000);
+    // Filet de sécurité : si pour une raison X le serveur ne pousse pas
+    // l'event de mouvement (race, paquet perdu), on garantit un refresh
+    // visuel dans la seconde. Les events `attribute_updated` arrivent
+    // normalement avant, et le _scheduleRefresh debounce déduplique.
+    setTimeout(() => this._scheduleRefresh(), 800);
   }
 
   async open(nodeId: number) {
