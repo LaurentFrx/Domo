@@ -17,15 +17,15 @@ export interface Shutter {
   moving: boolean;
 }
 
+// Re-commissioning du 24/05/2026 — nouveau mapping des node_ids
+// (cf. matter-server fabric 1, après cleanup des zombies 2-7).
 const NODE_NAMES: Record<number, { name: string; room: string }> = {
-  2: { name: 'Volet 1', room: 'Salon' },
-  3: { name: 'Volet 2', room: 'Salon' },
-  4: { name: 'Volet 3', room: 'Chambre' },
-  5: { name: 'Volet 4', room: 'Chambre' },
-  6: { name: 'Volet 5', room: 'Bureau' },
-  7: { name: 'Volet 6', room: 'Bureau' },
-  12: { name: 'Volet 7', room: 'Cuisine' },
-  13: { name: 'Volet 8', room: 'Cuisine' }
+  12: { name: 'Balcon', room: 'Étage' },
+  13: { name: 'Salle à manger', room: 'Séjour' },
+  18: { name: 'Salon', room: 'Séjour' },
+  19: { name: 'Bureau', room: 'Étage' },
+  20: { name: 'Chambre parents', room: 'Étage' },
+  21: { name: 'Chambre amis', room: 'Étage' }
 };
 
 function parseShutter(node: Record<string, unknown>): Shutter | null {
