@@ -151,7 +151,7 @@ export class MatterClient {
       cluster_id: 258,
       command_name: commandName
     };
-    if (payload) args.payload = payload;
+    args.payload = payload || {};
 
     await this._send({
       message_id: String(++this.msgId),
