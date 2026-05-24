@@ -284,11 +284,16 @@
       </div>
     </div>
 
-    <div class="flex flex-1 flex-col gap-1">
-      <span class="percent-display text-3xl leading-none font-bold">
-        {displayedPosition}<span class="text-lg">%</span>
-      </span>
-      <span class="text-[11px] text-[var(--text-secondary)]">{positionLabel}</span>
+    <div class="flex flex-1 items-center">
+      {#if displayedPosition <= 1}
+        <span class="percent-display text-2xl leading-none font-bold">Ouvert</span>
+      {:else if displayedPosition >= 99}
+        <span class="percent-display text-2xl leading-none font-bold">Fermé</span>
+      {:else}
+        <span class="percent-display text-3xl leading-none font-bold">
+          {displayedPosition}<span class="text-lg">%</span>
+        </span>
+      {/if}
     </div>
   </div>
 
