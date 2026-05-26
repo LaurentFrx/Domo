@@ -181,14 +181,20 @@ export class MatterClient {
     }, 200);
   }
 
-  async sendCommand(nodeId: number, commandName: string, payload?: Record<string, unknown>) {
+  async sendCommand(
+    nodeId: number,
+    endpointId: number,
+    clusterId: number,
+    commandName: string,
+    payload?: Record<string, unknown>
+  ) {
     const args: Record<string, unknown> = {
-      endpoint_id: 1,
+      endpoint_id: endpointId,
       node_id: nodeId,
-      cluster_id: 258,
-      command_name: commandName
+      cluster_id: clusterId,
+      command_name: commandName,
+      payload: payload || {}
     };
-    args.payload = payload || {};
 
     await this._send({
       message_id: String(++this.msgId),
@@ -204,22 +210,30 @@ export class MatterClient {
   }
 
   async open(nodeId: number) {
-    await this.sendCommand(nodeId, 'UpOrOpen');
+    await this.sendCommand(nodeId, 1, 258, 'UpOrOpen');
   }
 
   async close(nodeId: number) {
-    await this.sendCommand(nodeId, 'DownOrClose');
+    await this.sendCommand(nodeId, 1, 258, 'DownOrClose');
   }
 
   async stop(nodeId: number) {
-    await this.sendCommand(nodeId, 'StopMotion');
+    await this.sendCommand(nodeId, 1, 258, 'StopMotion');
   }
 
   async goToPosition(nodeId: number, percent: number) {
     const value = Math.round(Math.max(0, Math.min(100, percent)) * 100);
-    await this.sendCommand(nodeId, 'GoToLiftPercentage', {
+    await this.sendCommand(nodeId, 1, 258, 'GoToLiftPercentage', {
       liftPercent100thsValue: value
     });
+  }
+
+  async turnOn(nodeId: number) {
+    await this.sendCommand(nodeId, 1, 6, 'On');
+  }
+
+  async turnOff(nodeId: number) {
+    await this.sendCommand(nodeId, 1, 6, 'Off');
   }
 }
 
