@@ -26,6 +26,12 @@ export interface Switch {
   isOn: boolean;
 }
 
+export interface DeviceGroup {
+  room: string;
+  shutters: Shutter[];
+  switches: Switch[];
+}
+
 // Re-commissioning du 24/05/2026 — nouveau mapping des node_ids
 // (cf. matter-server fabric 1, après cleanup des zombies 2-7).
 const NODE_NAMES: Record<number, { name: string; room: string }> = {
@@ -107,10 +113,27 @@ class MatterState {
   connectionStatus = $state<'connected' | 'connecting' | 'disconnected'>('disconnected');
   private client: MatterClient | null = null;
 
-  get rooms(): string[] {
-    const rooms = new Set(this.shutters.map((s) => s.room));
-    return [...rooms].sort();
-  }
+  rooms = $derived.by<DeviceGroup[]>(() => {
+    const grouped = new Map<string, DeviceGroup>();
+    const ensure = (room: string): DeviceGroup => {
+      let g = grouped.get(room);
+      if (!g) {
+        g = { room, shutters: [], switches: [] };
+        grouped.set(room, g);
+      }
+      return g;
+    };
+
+    for (const s of this.shutters) ensure(s.room).shutters.push(s);
+    for (const sw of this.switches) ensure(sw.room).switches.push(sw);
+
+    return [...grouped.values()].sort((a, b) => {
+      const ca = a.shutters.length + a.switches.length;
+      const cb = b.shutters.length + b.switches.length;
+      if (ca !== cb) return cb - ca;
+      return a.room.localeCompare(b.room, 'fr');
+    });
+  });
 
   get onlineCount(): number {
     return this.shutters.filter((s) => s.available).length;
@@ -192,6 +215,30 @@ class MatterState {
       await this.client?.turnOff(nodeId);
     } else {
       await this.client?.turnOn(nodeId);
+    }
+  }
+
+  async openRoom(room: string) {
+    for (const s of this.shutters.filter((s) => s.available && s.room === room)) {
+      await this.client?.open(s.nodeId);
+    }
+  }
+
+  async closeRoom(room: string) {
+    for (const s of this.shutters.filter((s) => s.available && s.room === room)) {
+      await this.client?.close(s.nodeId);
+    }
+  }
+
+  async switchesOnInRoom(room: string) {
+    for (const sw of this.switches.filter((s) => s.available && s.room === room)) {
+      await this.client?.turnOn(sw.nodeId);
+    }
+  }
+
+  async switchesOffInRoom(room: string) {
+    for (const sw of this.switches.filter((s) => s.available && s.room === room)) {
+      await this.client?.turnOff(sw.nodeId);
     }
   }
 }

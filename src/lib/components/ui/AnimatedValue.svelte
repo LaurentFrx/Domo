@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
+
   interface Props {
     value: number;
     decimals?: number;
@@ -17,7 +19,7 @@
     class: klass = ''
   }: Props = $props();
 
-  let displayed = $state(value);
+  let displayed = $state(untrack(() => value));
   let rafId = 0;
 
   $effect(() => {
