@@ -38,13 +38,12 @@ const NODE_NAMES: Record<number, { name: string; room: string }> = {
 };
 
 // Sonoff Matter Smart Switch — assignation par date de commissioning.
-// node 1 commissionné le 2026-05-15, node 22 le 2026-05-24. Inversion
-// facile ici si l'utilisateur identifie le contraire en physique.
-// node 23 pré-ajouté (Chargeur Lau) en attente de commissioning.
+// node 1 commissionné le 2026-05-15, node 22 le 2026-05-24, node 24 le
+// 2026-05-27 (commissioning via VPS, network_only mDNS).
 const SWITCH_NAMES: Record<number, { name: string; room: string }> = {
   1: { name: 'Bureau multimédia', room: 'Bureau' },
   22: { name: 'Sèche-serviette', room: 'Salle de bain' },
-  23: { name: 'Chargeur Lau', room: 'Séjour' }
+  24: { name: 'Chargeur Lau', room: 'Séjour' }
 };
 
 function parseShutter(node: Record<string, unknown>): Shutter | null {
