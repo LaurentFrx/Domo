@@ -1,5 +1,6 @@
 <script lang="ts">
   import { dashboard } from '$stores/dashboard.svelte';
+  import { anker } from '$stores/anker.svelte';
   import { formatDate } from '$utils/format';
   import AnimatedValue from '$components/ui/AnimatedValue.svelte';
 
@@ -18,18 +19,36 @@
   const TARIF_HC = 0.1812;
   const TARIF_HP = 0.2318;
 
-  // ─── Flux énergétiques (dérivés du dashboard mock) ──────────────────────
-  const pvKw = $derived(dashboard.solarPower);
-  const houseKw = $derived(Math.max(0.4, (pvKw * dashboard.solarSelfConsumption) / 100 + 0.6));
+  // ─── Flux énergétiques ─────────────────────────────────────────────────
+  // Source : anker en priorité (valeurs réelles), sinon dashboard mock.
+  const live = $derived(anker.connected);
+  const pvKw = $derived(live ? anker.solarPowerW / 1000 : dashboard.solarPower);
+  const gridKw = $derived(live ? anker.gridPowerW / 1000 : 0);
   const batteryKw = $derived(
-    dashboard.batteryStatus === 'charge' ? 0.6 : dashboard.batteryStatus === 'discharge' ? -0.4 : 0
+    live
+      ? anker.netBatteryPowerW / 1000
+      : dashboard.batteryStatus === 'charge'
+        ? 0.6
+        : dashboard.batteryStatus === 'discharge'
+          ? -0.4
+          : 0
   );
-  // réseau : positif = soutirage, négatif = injection
-  const gridKw = $derived(houseKw + Math.max(0, batteryKw) - pvKw);
+  // Conso maison reconstituée : production - injection + soutirage - charge bat
+  const houseKw = $derived(
+    live
+      ? Math.max(0, pvKw - Math.max(0, -gridKw) + Math.max(0, gridKw) - Math.max(0, batteryKw))
+      : Math.max(0.4, (pvKw * dashboard.solarSelfConsumption) / 100 + 0.6)
+  );
+  // En mock, recalcul du grid à partir de house/pv/battery.
+  const effectiveGridKw = $derived(live ? gridKw : houseKw + Math.max(0, batteryKw) - pvKw);
 
-  // ─── Résumé journée (mock) ──────────────────────────────────────────────
-  const prodTotal = $derived(dashboard.solarTotal24h); // kWh
-  const autoConso = $derived(dashboard.solarSelfConsumption); // %
+  // ─── Résumé journée ────────────────────────────────────────────────────
+  const prodTotal = $derived(live ? anker.dailyProductionWh / 1000 : dashboard.solarTotal24h);
+  const autoConso = $derived(
+    live && anker.selfConsumptionRate !== null
+      ? anker.selfConsumptionRate
+      : dashboard.solarSelfConsumption
+  );
   const economy = $derived(prodTotal * 0.18); // €
   const co2Saved = $derived(prodTotal * 0.06); // kg
 
@@ -85,7 +104,7 @@
   }
 
   const pvToHouseW = $derived(arrowW(Math.min(pvKw, houseKw)));
-  const gridArrowW = $derived(arrowW(gridKw));
+  const gridArrowW = $derived(arrowW(effectiveGridKw));
   const batteryArrowW = $derived(arrowW(batteryKw));
 </script>
 
@@ -105,7 +124,16 @@
         {isHC ? 'HC' : 'HP'} · {(isHC ? TARIF_HC : TARIF_HP).toFixed(4)} €/kWh
       </div>
     </div>
-    <h1 class="text-2xl font-medium text-white">Énergie</h1>
+    <div class="flex items-center gap-2">
+      <h1 class="text-2xl font-medium text-white">Énergie</h1>
+      <span
+        class="rounded-full px-1.5 py-0.5 text-[9px] font-semibold tracking-wider"
+        style:color={live ? 'var(--surface-base)' : 'var(--primary-400)'}
+        style:background-color={live ? 'var(--accent-500)' : 'rgba(110,69,255,0.15)'}
+      >
+        {live ? 'LIVE' : 'DÉMO'}
+      </span>
+    </div>
   </header>
 
   <div class="grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
@@ -199,7 +227,7 @@
             >Réseau</text
           >
           <text y="52" text-anchor="middle" fill="var(--warning)" font-size="11" font-weight="600">
-            {gridKw >= 0 ? '+' : ''}{gridKw.toFixed(2)} kW
+            {effectiveGridKw >= 0 ? '+' : ''}{effectiveGridKw.toFixed(2)} kW
           </text>
         </g>
 
@@ -271,7 +299,7 @@
         />
 
         <!-- Flux Maison ↔ Réseau -->
-        {#if gridKw > 0.05}
+        {#if effectiveGridKw > 0.05}
           <path
             d="M 216 50 Q 180 80 164 102"
             fill="none"
@@ -281,7 +309,7 @@
             marker-end="url(#arr-warn)"
             opacity="0.9"
           />
-        {:else if gridKw < -0.05}
+        {:else if effectiveGridKw < -0.05}
           <path
             d="M 164 102 Q 180 80 216 50"
             fill="none"
