@@ -20,7 +20,7 @@
   <title>Domo</title>
 </svelte:head>
 
-<div class="flex flex-col gap-3 pb-6">
+<div class="stagger-enter flex flex-col gap-3 pb-6">
   <Header name="Laurent" />
   <CumulusTile />
   <ModeSegmentedControl />

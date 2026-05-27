@@ -1,18 +1,22 @@
 <script lang="ts">
   import { dashboard } from '$stores/dashboard.svelte';
   import { formatPower, formatCurrency } from '$utils/format';
+  import { modeColor } from '$theme/tokens';
   import ModeBadge from '$components/ui/ModeBadge.svelte';
-  import Gauge from '$components/ui/Gauge.svelte';
+  import ArcGauge from '$components/ui/ArcGauge.svelte';
+  import AnimatedValue from '$components/ui/AnimatedValue.svelte';
   import StatColumn from '$components/ui/StatColumn.svelte';
+
+  const accent = $derived(modeColor(dashboard.cumulusMode));
 </script>
 
 <div
-  class="relative overflow-hidden rounded-3xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-5"
+  class="tile-press relative overflow-hidden rounded-3xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-5"
 >
-  <!-- Glow vert décoratif -->
+  <!-- Glow décoratif suivant le mode -->
   <div
-    class="pointer-events-none absolute h-36 w-36 rounded-full bg-[var(--accent-500)] opacity-10 blur-2xl"
-    style="top: -50px; right: -40px;"
+    class="glow-animated pointer-events-none absolute h-36 w-36 rounded-full blur-2xl"
+    style="top: -50px; right: -40px; background-color: {accent};"
   ></div>
 
   <div class="relative flex flex-col gap-4">
@@ -27,27 +31,37 @@
       <ModeBadge mode={dashboard.cumulusMode} />
     </div>
 
-    <!-- Température + tendance -->
-    <div class="flex items-baseline justify-between">
-      <div class="flex items-baseline gap-1.5">
-        <span class="text-6xl font-light text-white">{dashboard.cumulusTemp}</span>
-        <span class="text-2xl font-light text-[var(--text-secondary)]">°C</span>
-      </div>
-      <div class="flex items-center gap-1 text-xs font-medium text-[var(--accent-500)]">
-        <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-          <path
-            d="M2 9 L9 2 M9 2 L9 7 M9 2 L4 2"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
+    <!-- Température + ArcGauge -->
+    <div class="flex items-center justify-between gap-4">
+      <div class="flex flex-col">
+        <div class="flex items-baseline gap-1.5">
+          <AnimatedValue
+            value={dashboard.cumulusTemp}
+            decimals={1}
+            class="text-6xl font-light tabular-nums text-white"
           />
-        </svg>
-        +{dashboard.cumulusTempTrend}°C / 1h
+          <span class="text-2xl font-light text-[var(--text-secondary)]">°C</span>
+        </div>
+        <div class="mt-1 flex items-center gap-1 text-xs font-medium text-[var(--accent-500)]">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+            <path
+              d="M2 9 L9 2 M9 2 L9 7 M9 2 L4 2"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+            />
+          </svg>
+          <AnimatedValue
+            value={dashboard.cumulusTempTrend}
+            decimals={1}
+            prefix="+"
+            suffix="°C / 1h"
+          />
+        </div>
       </div>
-    </div>
 
-    <!-- Jauge -->
-    <Gauge value={dashboard.cumulusGaugePercent} />
+      <ArcGauge value={dashboard.cumulusGaugePercent} size={88} strokeWidth={5} color={accent} />
+    </div>
 
     <!-- Séparateur -->
     <div class="h-px w-full bg-white/[0.08]"></div>

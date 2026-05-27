@@ -1,0 +1,114 @@
+/* ════════════════════════════════════════════════════════════════════════ */
+/*                                                                          */
+/*   Domo — Animations globales                                             */
+/*   Keyframes & utilitaires pour micro-interactions et entrées animées     */
+/*                                                                          */
+/* ════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Glow pulse : halos décoratifs ────────────────────────────────── */
+@keyframes glow-pulse {
+  0%,
+  100% {
+    opacity: 0.1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.22;
+    transform: scale(1.05);
+  }
+}
+
+.glow-animated {
+  animation: glow-pulse 3s ease-in-out infinite;
+}
+
+/* ─── Charge pulse : batterie en charge ────────────────────────────── */
+@keyframes charge-pulse {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ─── Slide up + fade : entrée des tiles ───────────────────────────── */
+@keyframes slide-up-fade {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ─── Stagger : applique slide-up-fade en cascade sur les enfants ──── */
+.stagger-enter > * {
+  opacity: 0;
+  animation: slide-up-fade 0.4s ease-out forwards;
+}
+
+.stagger-enter > *:nth-child(1) {
+  animation-delay: 0s;
+}
+.stagger-enter > *:nth-child(2) {
+  animation-delay: 0.06s;
+}
+.stagger-enter > *:nth-child(3) {
+  animation-delay: 0.12s;
+}
+.stagger-enter > *:nth-child(4) {
+  animation-delay: 0.18s;
+}
+.stagger-enter > *:nth-child(5) {
+  animation-delay: 0.24s;
+}
+.stagger-enter > *:nth-child(6) {
+  animation-delay: 0.3s;
+}
+.stagger-enter > *:nth-child(7) {
+  animation-delay: 0.36s;
+}
+.stagger-enter > *:nth-child(8) {
+  animation-delay: 0.42s;
+}
+.stagger-enter > *:nth-child(9) {
+  animation-delay: 0.48s;
+}
+.stagger-enter > *:nth-child(10) {
+  animation-delay: 0.54s;
+}
+
+/* ─── Tile press : feedback tactile ────────────────────────────────── */
+.tile-press {
+  transition: transform 0.15s ease-out;
+}
+
+.tile-press:active {
+  transform: scale(0.97);
+}
+
+/* ─── Ping : pastille connexion en cours ───────────────────────────── */
+@keyframes dot-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  75%,
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+.dot-ping::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background-color: currentColor;
+  animation: dot-ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+}

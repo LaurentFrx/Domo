@@ -1,40 +1,30 @@
 <script lang="ts">
   import { dashboard } from '$stores/dashboard.svelte';
+  import AreaChart from '$components/charts/AreaChart.svelte';
+  import AnimatedValue from '$components/ui/AnimatedValue.svelte';
 
-  const bars = $derived(dashboard.solarProduction24h);
-  const maxBarHeight = 50;
-
-  function barOpacity(value: number): number {
-    return value < 0.3 ? 0.3 + value : 1.0;
-  }
+  const data = $derived(dashboard.solarProduction24h);
 </script>
 
 <div
-  class="flex flex-col gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-4"
+  class="tile-press flex flex-col gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-4"
 >
   <div class="flex items-center justify-between">
     <span class="text-xs font-medium tracking-wider text-[var(--text-secondary)]"
       >PRODUCTION 24H</span
     >
-    <span class="text-xs font-medium text-[var(--accent-500)]">+{dashboard.solarTotal24h} kWh</span>
+    <span class="text-xs font-medium text-[var(--accent-500)]">
+      +<AnimatedValue value={dashboard.solarTotal24h} decimals={1} /> kWh
+    </span>
   </div>
 
-  <div class="flex items-end gap-1" style="height: {maxBarHeight}px;">
-    {#each bars as v, i (i)}
-      <div
-        class="flex-1 rounded-full"
-        style="
-          background-color: var(--accent-500);
-          opacity: {barOpacity(v)};
-          height: {Math.max(4, v * maxBarHeight)}px;
-        "
-      ></div>
-    {/each}
-  </div>
+  <AreaChart {data} color="var(--accent-500)" height={80} />
 
   <div class="flex justify-between text-[9px] text-[var(--text-secondary)]">
     <span>06h</span>
+    <span>09h</span>
     <span>12h</span>
+    <span>15h</span>
     <span>18h</span>
   </div>
 </div>
