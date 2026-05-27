@@ -78,7 +78,7 @@
       <p class="text-sm text-[var(--text-secondary)]">Aucun appareil détecté</p>
     </div>
   {:else}
-    <div class="stagger-enter flex flex-col gap-3">
+    <div class="stagger-enter grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
       {#each matter.rooms as room (room.room)}
         <RoomSection {room} />
       {/each}

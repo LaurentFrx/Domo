@@ -29,7 +29,9 @@
   }
 </script>
 
-<nav class="safe-bottom border-t border-white/[0.08] bg-[var(--surface-base)] px-4 pt-3 pb-4">
+<nav
+  class="safe-bottom tabbar-glass fixed right-0 bottom-0 left-0 z-50 border-t border-white/[0.08] px-3 pt-2 pb-3 md:hidden"
+>
   <div class="flex items-center justify-around">
     {#each tabs as tab (tab.href)}
       {@const active = isActive(tab.href)}
@@ -57,3 +59,11 @@
     {/each}
   </div>
 </nav>
+
+<style>
+  .tabbar-glass {
+    background-color: color-mix(in oklab, var(--surface-base) 90%, transparent);
+    backdrop-filter: blur(12px) saturate(160%);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+  }
+</style>

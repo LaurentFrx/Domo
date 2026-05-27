@@ -20,10 +20,10 @@
 </script>
 
 <div
-  class="tile-press flex flex-col gap-1.5 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-4"
+  class="tile-press flex flex-col gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 md:rounded-2xl md:p-3"
 >
   <div class="flex items-center justify-between">
-    <span class="text-xs font-medium tracking-wider text-[var(--text-secondary)]">SOLAIRE</span>
+    <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]">SOLAIRE</span>
     <svg width="40" height="12" viewBox="0 0 40 12" class="opacity-60">
       <path
         d={spark}
@@ -39,9 +39,9 @@
     <AnimatedValue
       value={dashboard.solarPower}
       decimals={2}
-      class="text-2xl font-medium text-[var(--accent-500)] tabular-nums"
+      class="text-xl font-medium text-[var(--accent-500)] tabular-nums md:text-2xl"
     />
-    <span class="text-xs text-[var(--text-secondary)]">kW</span>
+    <span class="text-[10px] text-[var(--text-secondary)] md:text-xs">kW</span>
   </div>
   <span class="text-[10px] text-[var(--text-secondary)]">
     Auto-conso <AnimatedValue value={dashboard.solarSelfConsumption} suffix="%" />

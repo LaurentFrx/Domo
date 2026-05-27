@@ -249,7 +249,7 @@
 </script>
 
 <div
-  class="tile-glass relative flex flex-col gap-3 overflow-hidden rounded-3xl p-4"
+  class="tile-glass relative flex flex-col gap-2 overflow-hidden rounded-xl p-3 md:gap-3 md:rounded-2xl md:p-4"
   class:opacity-50={!shutter.available}
 >
   <div class="glow" aria-hidden="true"></div>

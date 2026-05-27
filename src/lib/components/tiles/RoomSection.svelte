@@ -19,7 +19,7 @@
 </script>
 
 <section
-  class="flex flex-col gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-4"
+  class="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 md:gap-3 md:rounded-2xl md:p-3"
 >
   <header class="flex flex-wrap items-center justify-between gap-2">
     <div class="flex items-baseline gap-2">

@@ -20,14 +20,26 @@
   <title>Domo</title>
 </svelte:head>
 
-<div class="stagger-enter flex flex-col gap-3 pb-6">
+<div class="stagger-enter flex flex-col gap-2 md:gap-3">
   <Header name="Laurent" />
-  <CumulusTile />
-  <ModeSegmentedControl />
-  <div class="grid grid-cols-2 gap-2">
-    <SolarMiniTile />
-    <BatteryMiniTile />
+
+  <!-- Grille principale : 1 col mobile, 2 cols paysage (≥ 768px) -->
+  <div class="grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
+    <!-- Colonne 1 : Cumulus + mode -->
+    <div class="flex flex-col gap-2 md:gap-3">
+      <CumulusTile />
+      <ModeSegmentedControl />
+    </div>
+
+    <!-- Colonne 2 : Solar/Battery + production -->
+    <div class="flex flex-col gap-2 md:gap-3">
+      <div class="grid grid-cols-2 gap-2">
+        <SolarMiniTile />
+        <BatteryMiniTile />
+      </div>
+      <ProductionChart />
+    </div>
   </div>
-  <ProductionChart />
+
   <ForecastTile {solcast} />
 </div>
