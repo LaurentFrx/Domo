@@ -123,7 +123,7 @@
 
   {#if matterDisconnected}
     <div
-      class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 text-center"
+      class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 text-center shadow-[var(--shadow-card)]"
     >
       <p class="text-sm text-[var(--text-secondary)]">Connexion au serveur Matter perdue</p>
       <button
@@ -136,13 +136,13 @@
     </div>
   {:else if matter.connectionStatus === 'connecting' && mergedRooms.length === 0}
     <div
-      class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 text-center"
+      class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 text-center shadow-[var(--shadow-card)]"
     >
       <p class="text-sm text-[var(--text-secondary)]">Connexion en cours…</p>
     </div>
   {:else if isEmpty}
     <div
-      class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 text-center"
+      class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 text-center shadow-[var(--shadow-card)]"
     >
       <p class="text-sm text-[var(--text-secondary)]">Aucun appareil détecté</p>
     </div>

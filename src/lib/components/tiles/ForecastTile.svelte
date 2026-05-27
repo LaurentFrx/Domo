@@ -68,7 +68,7 @@
 </script>
 
 <div
-  class="relative overflow-hidden rounded-3xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-5"
+  class="relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-card)] md:rounded-2xl md:p-4"
 >
   <!-- Glow vert décoratif, identique à CumulusTile -->
   <div

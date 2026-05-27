@@ -32,7 +32,7 @@
 </script>
 
 <div
-  class="tile-press flex flex-col gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 md:rounded-2xl md:p-3"
+  class="tile-press flex flex-col gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 shadow-[var(--shadow-card)] md:rounded-2xl md:p-3"
   class:opacity-50={!device.available}
 >
   <div class="flex items-start justify-between gap-2">

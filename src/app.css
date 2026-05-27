@@ -1,5 +1,8 @@
 @import 'tailwindcss';
 
+/* Geist Variable (Vercel font) — font lisible pour dashboards chiffrés */
+@import '@fontsource-variable/geist';
+
 @import './lib/theme/tokens.css';
 @import './lib/theme/animations.css';
 
@@ -11,7 +14,14 @@ html,
 body {
   background-color: var(--surface-base);
   color: var(--text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'SF Pro Display', system-ui, sans-serif;
+  font-family:
+    'Geist Variable',
+    -apple-system,
+    BlinkMacSystemFont,
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+  font-feature-settings: 'cv11', 'ss01';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overscroll-behavior: none;

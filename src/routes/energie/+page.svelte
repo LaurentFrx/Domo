@@ -139,7 +139,7 @@
   <div class="grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
     <!-- Flux temps réel -->
     <section
-      class="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 md:rounded-2xl md:p-4"
+      class="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-card)] md:rounded-2xl md:p-4"
     >
       <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]">
         FLUX EN TEMPS RÉEL
@@ -353,7 +353,7 @@
     <!-- Résumé journée : 4 mini-cards -->
     <section class="grid grid-cols-2 gap-2">
       <div
-        class="tile-press flex flex-col gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 md:rounded-2xl md:p-3"
+        class="tile-press flex flex-col gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 shadow-[var(--shadow-card)] md:rounded-2xl md:p-3"
       >
         <div class="flex items-center justify-between">
           <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]"
@@ -388,7 +388,7 @@
       </div>
 
       <div
-        class="tile-press flex flex-col gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 md:rounded-2xl md:p-3"
+        class="tile-press flex flex-col gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 shadow-[var(--shadow-card)] md:rounded-2xl md:p-3"
       >
         <div class="flex items-center justify-between">
           <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]"
@@ -421,7 +421,7 @@
       </div>
 
       <div
-        class="tile-press flex flex-col gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 md:rounded-2xl md:p-3"
+        class="tile-press flex flex-col gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 shadow-[var(--shadow-card)] md:rounded-2xl md:p-3"
       >
         <div class="flex items-center justify-between">
           <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]"
@@ -453,7 +453,7 @@
       </div>
 
       <div
-        class="tile-press flex flex-col gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 md:rounded-2xl md:p-3"
+        class="tile-press flex flex-col gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 shadow-[var(--shadow-card)] md:rounded-2xl md:p-3"
       >
         <div class="flex items-center justify-between">
           <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]"
@@ -489,7 +489,7 @@
 
   <!-- Courbe production / consommation 24h -->
   <section
-    class="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 md:rounded-2xl md:p-4"
+    class="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-card)] md:rounded-2xl md:p-4"
   >
     <div class="flex items-center justify-between">
       <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]">

@@ -19,7 +19,7 @@
 </script>
 
 <div
-  class="tile-press relative flex flex-col gap-2 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 md:rounded-2xl md:p-3"
+  class="tile-press relative flex flex-col gap-2 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 shadow-[var(--shadow-card)] md:rounded-2xl md:p-3"
   class:opacity-50={!device.available}
 >
   <div class="flex items-start justify-between gap-2">

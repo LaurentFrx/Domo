@@ -88,7 +88,7 @@
   <div class="grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
     <!-- Cumulus : statut + prochain event + mode control -->
     <section
-      class="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 md:rounded-2xl md:p-4"
+      class="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-card)] md:rounded-2xl md:p-4"
     >
       <div class="flex items-baseline justify-between">
         <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]">
@@ -116,7 +116,7 @@
 
     <!-- Historique récent -->
     <section
-      class="flex flex-col gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 md:rounded-2xl md:p-4"
+      class="flex flex-col gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-card)] md:rounded-2xl md:p-4"
     >
       <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]">
         HISTORIQUE — 5 DERNIERS ÉVÉNEMENTS
@@ -149,7 +149,7 @@
     <div class="grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
       {#each scenarios as s (s.id)}
         <div
-          class="tile-press flex items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 md:rounded-2xl md:p-4"
+          class="tile-press flex items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-card)] md:rounded-2xl md:p-4"
         >
           <div class="flex flex-1 flex-col gap-0.5">
             <div class="flex items-center gap-2">

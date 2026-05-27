@@ -76,7 +76,7 @@
       stroke-linecap="round"
       stroke-dasharray={arcLength}
       stroke-dashoffset={dashOffset}
-      style="transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1);"
+      style="transition: stroke-dashoffset var(--duration-long) var(--easing-quart);"
     />
 
     <!-- Dot glow (halo) -->
@@ -87,7 +87,7 @@
       fill={color}
       opacity="0.55"
       filter="url(#{filterId})"
-      style="transition: cx 0.6s cubic-bezier(0.4, 0, 0.2, 1), cy 0.6s cubic-bezier(0.4, 0, 0.2, 1);"
+      style="transition: cx var(--duration-long) var(--easing-quart), cy var(--duration-long) var(--easing-quart);"
     />
 
     <!-- Dot bright -->
@@ -96,7 +96,7 @@
       cy={dot.y}
       r={strokeWidth * 0.5}
       fill={color}
-      style="transition: cx 0.6s cubic-bezier(0.4, 0, 0.2, 1), cy 0.6s cubic-bezier(0.4, 0, 0.2, 1);"
+      style="transition: cx var(--duration-long) var(--easing-quart), cy var(--duration-long) var(--easing-quart);"
     />
   </svg>
 

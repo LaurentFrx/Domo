@@ -12,7 +12,7 @@
 <svelte:window bind:innerWidth />
 
 <div
-  class="tile-press flex flex-col gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 md:gap-2 md:rounded-2xl md:p-3"
+  class="tile-press flex flex-col gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 shadow-[var(--shadow-card)] md:gap-2 md:rounded-2xl md:p-3"
 >
   <div class="flex items-center justify-between">
     <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]"

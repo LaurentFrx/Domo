@@ -16,7 +16,7 @@
 <svelte:window bind:innerWidth />
 
 <div
-  class="tile-press relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 md:rounded-2xl md:p-4"
+  class="tile-press relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-card)] md:rounded-2xl md:p-4"
 >
   <!-- Glow décoratif suivant le mode -->
   <div

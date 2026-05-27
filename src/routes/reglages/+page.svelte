@@ -46,7 +46,7 @@
         >SYSTÈME</span
       >
       <div
-        class="flex flex-col divide-y divide-white/[0.06] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] md:rounded-2xl"
+        class="flex flex-col divide-y divide-white/[0.06] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)] md:rounded-2xl"
       >
         <div class="flex items-center justify-between px-3 py-2.5 md:px-4 md:py-3">
           <span class="text-sm text-white">Matter</span>
@@ -81,7 +81,7 @@
         >CUMULUS</span
       >
       <div
-        class="flex flex-col gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 md:rounded-2xl md:p-4"
+        class="flex flex-col gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-card)] md:rounded-2xl md:p-4"
       >
         <!-- Seuil PV -->
         <div class="flex flex-col gap-1.5">
@@ -153,7 +153,7 @@
         >AFFICHAGE</span
       >
       <div
-        class="flex flex-col divide-y divide-white/[0.06] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] md:rounded-2xl"
+        class="flex flex-col divide-y divide-white/[0.06] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)] md:rounded-2xl"
       >
         <!-- Unités -->
         <div class="flex items-center justify-between px-3 py-2.5 md:px-4 md:py-3">
@@ -208,7 +208,7 @@
       <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]">COMPTE</span
       >
       <div
-        class="flex flex-col divide-y divide-white/[0.06] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] md:rounded-2xl"
+        class="flex flex-col divide-y divide-white/[0.06] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)] md:rounded-2xl"
       >
         <a
           href="https://github.com/LaurentFrx/Domo"

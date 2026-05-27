@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════════════════════════════ */
 /*                                                                          */
 /*   Domo — Animations globales                                             */
-/*   Keyframes & utilitaires pour micro-interactions et entrées animées     */
+/*   Easings & durées Yeldra (cf. tokens.css)                               */
 /*                                                                          */
 /* ════════════════════════════════════════════════════════════════════════ */
 
@@ -19,7 +19,7 @@
 }
 
 .glow-animated {
-  animation: glow-pulse 3s ease-in-out infinite;
+  animation: glow-pulse 3s var(--easing-default) infinite;
 }
 
 /* ─── Charge pulse : batterie en charge ────────────────────────────── */
@@ -48,7 +48,7 @@
 /* ─── Stagger : applique slide-up-fade en cascade sur les enfants ──── */
 .stagger-enter > * {
   opacity: 0;
-  animation: slide-up-fade 0.4s ease-out forwards;
+  animation: slide-up-fade var(--duration-long) var(--easing-quart) forwards;
 }
 
 .stagger-enter > *:nth-child(1) {
@@ -82,9 +82,9 @@
   animation-delay: 0.54s;
 }
 
-/* ─── Tile press : feedback tactile ────────────────────────────────── */
+/* ─── Tile press : feedback tactile (easing-quart pour feeling premium) ─ */
 .tile-press {
-  transition: transform 0.15s ease-out;
+  transition: transform var(--duration-short) var(--easing-quart);
 }
 
 .tile-press:active {
@@ -110,5 +110,5 @@
   inset: 0;
   border-radius: 9999px;
   background-color: currentColor;
-  animation: dot-ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+  animation: dot-ping 1.4s var(--easing-default) infinite;
 }
