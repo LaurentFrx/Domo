@@ -38,7 +38,7 @@
           <AnimatedValue
             value={dashboard.cumulusTemp}
             decimals={1}
-            class="text-6xl font-light tabular-nums text-white"
+            class="text-6xl font-light text-white tabular-nums"
           />
           <span class="text-2xl font-light text-[var(--text-secondary)]">°C</span>
         </div>

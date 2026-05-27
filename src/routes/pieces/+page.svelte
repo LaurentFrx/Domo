@@ -86,9 +86,7 @@
 
   {#if matter.switches.length > 0}
     <div class="flex flex-col gap-2">
-      <h2 class="text-xs font-medium tracking-wider text-[var(--text-secondary)]">
-        INTERRUPTEURS
-      </h2>
+      <h2 class="text-xs font-medium tracking-wider text-[var(--text-secondary)]">INTERRUPTEURS</h2>
       <div class="grid grid-cols-2 gap-2">
         {#each matter.switches as sw (sw.nodeId)}
           <SwitchTile {sw} />

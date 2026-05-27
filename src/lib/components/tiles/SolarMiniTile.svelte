@@ -39,7 +39,7 @@
     <AnimatedValue
       value={dashboard.solarPower}
       decimals={2}
-      class="text-2xl font-medium tabular-nums text-[var(--accent-500)]"
+      class="text-2xl font-medium text-[var(--accent-500)] tabular-nums"
     />
     <span class="text-xs text-[var(--text-secondary)]">kW</span>
   </div>

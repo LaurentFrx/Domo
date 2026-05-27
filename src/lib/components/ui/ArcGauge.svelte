@@ -47,7 +47,10 @@
   const filterId = `gauge-glow-${Math.random().toString(36).slice(2, 9)}`;
 </script>
 
-<div class="relative inline-flex items-center justify-center" style="width: {size}px; height: {size}px;">
+<div
+  class="relative inline-flex items-center justify-center"
+  style="width: {size}px; height: {size}px;"
+>
   <svg width={size} height={size} viewBox="0 0 {size} {size}" class="overflow-visible">
     <defs>
       <filter id={filterId} x="-50%" y="-50%" width="200%" height="200%">
@@ -99,7 +102,7 @@
 
   {#if showValue}
     <div class="absolute inset-0 flex items-center justify-center">
-      <span class="text-2xl font-light tabular-nums text-white">
+      <span class="text-2xl font-light text-white tabular-nums">
         {Math.round(clamped)}<span class="text-sm text-[var(--text-secondary)]">{valueSuffix}</span>
       </span>
     </div>

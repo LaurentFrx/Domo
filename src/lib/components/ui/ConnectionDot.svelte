@@ -28,7 +28,9 @@
   );
 </script>
 
-<div class="inline-flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-[var(--text-secondary)]">
+<div
+  class="inline-flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-[var(--text-secondary)]"
+>
   <span
     class="relative inline-block h-2 w-2 rounded-full"
     class:dot-ping={status === 'connecting'}

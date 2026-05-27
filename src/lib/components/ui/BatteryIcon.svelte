@@ -10,11 +10,7 @@
   const clamped = $derived(Math.max(0, Math.min(100, level)));
 
   const color = $derived(
-    clamped > 60
-      ? 'var(--accent-500)'
-      : clamped > 25
-        ? 'var(--warning)'
-        : 'var(--error)'
+    clamped > 60 ? 'var(--accent-500)' : clamped > 25 ? 'var(--warning)' : 'var(--error)'
   );
 
   const w = 18;

@@ -31,7 +31,7 @@
     <AnimatedValue
       value={dashboard.batteryLevel}
       decimals={0}
-      class="text-2xl font-medium tabular-nums text-white"
+      class="text-2xl font-medium text-white tabular-nums"
     />
     <span class="text-xs text-[var(--text-secondary)]">%</span>
   </div>
