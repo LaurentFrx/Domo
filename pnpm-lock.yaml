@@ -8,9 +8,9 @@ importers:
 
   .:
     dependencies:
-      '@fontsource-variable/geist':
-        specifier: ^5.2.9
-        version: 5.2.9
+      '@fontsource-variable/inter':
+        specifier: ^5.2.8
+        version: 5.2.8
       d3-scale:
         specifier: ^4.0.0
         version: 4.0.2
@@ -732,8 +732,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@fontsource-variable/geist@5.2.9':
-    resolution: {integrity: sha512-TP+QSBG3wxKGPE33CbMy/L0Nu3qvJ6Fy81Yc4LnQ95xH+i+cfEp8fyU8/kfV14YwszxIFPhnoMTbjL71waVpyQ==}
+  '@fontsource-variable/inter@5.2.8':
+    resolution: {integrity: sha512-kOfP2D+ykbcX/P3IFnokOhVRNoTozo5/JxhAIVYLpea/UBmCQ/YWPBfWIDuBImXX/15KH+eKh4xpEUyS2sQQGQ==}
 
   '@isaacs/cliui@9.0.0':
     resolution: {integrity: sha512-AokJm4tuBHillT+FpMtxQ60n8ObyXBatq7jD2/JA9dxbDDokKQm8KMht5ibGzLVU9IJDIKK4TPKgMHEYMn3lMg==}
@@ -3266,7 +3266,7 @@ snapshots:
   '@esbuild/win32-x64@0.25.12':
     optional: true
 
-  '@fontsource-variable/geist@5.2.9': {}
+  '@fontsource-variable/inter@5.2.8': {}
 
   '@isaacs/cliui@9.0.0': {}
 

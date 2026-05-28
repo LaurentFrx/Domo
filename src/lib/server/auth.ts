@@ -9,6 +9,7 @@
  */
 
 import { env } from '$env/dynamic/private';
+import type { Cookies } from '@sveltejs/kit';
 import crypto from 'node:crypto';
 
 const COOKIE_NAME = 'domo_session';
@@ -66,15 +67,13 @@ export function checkMagicToken(token: string): boolean {
   }
 }
 
-export function isAuthenticated(cookies: { get: (name: string) => string | undefined }): boolean {
+export function isAuthenticated(cookies: Cookies): boolean {
   const token = cookies.get(COOKIE_NAME);
   if (!token) return false;
   return verifySessionToken(token);
 }
 
-export function setSessionCookie(cookies: {
-  set: (name: string, value: string, opts: Record<string, unknown>) => void;
-}): void {
+export function setSessionCookie(cookies: Cookies): void {
   cookies.set(COOKIE_NAME, createSessionToken(), {
     path: '/',
     httpOnly: true,
@@ -84,8 +83,6 @@ export function setSessionCookie(cookies: {
   });
 }
 
-export function clearSessionCookie(cookies: {
-  delete: (name: string, opts: Record<string, unknown>) => void;
-}): void {
+export function clearSessionCookie(cookies: Cookies): void {
   cookies.delete(COOKIE_NAME, { path: '/' });
 }

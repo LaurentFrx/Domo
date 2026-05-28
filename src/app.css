@@ -1,27 +1,213 @@
 @import 'tailwindcss';
 
-/* Geist Variable (Vercel font) — font lisible pour dashboards chiffrés */
-@import '@fontsource-variable/geist';
+/* Inter Variable — font unique du design system */
+@import '@fontsource-variable/inter';
 
-@import './lib/theme/tokens.css';
 @import './lib/theme/animations.css';
 
 /* ════════════════════════════════════════════════════════════════════════ */
-/* Reset / base                                                              */
+/*   Tokens — Design system Domo (Yeldra v2, OKLCH)                         */
+/* ════════════════════════════════════════════════════════════════════════ */
+
+@theme {
+  /* ─── Brand violet ─── */
+  --color-primary: oklch(0.541 0.281 293);
+  --color-primary-fg: oklch(0.985 0.01 280);
+  --color-primary-hover: oklch(0.48 0.26 293);
+  --color-primary-muted: oklch(0.541 0.281 293 / 0.12);
+
+  /* ─── Surfaces light ─── */
+  --color-bg: oklch(0.985 0.002 280);
+  --color-fg: oklch(0.145 0 0);
+  --color-card: oklch(1 0 0);
+  --color-card-hover: oklch(0.98 0.003 280);
+  --color-muted: oklch(0.965 0.004 280);
+  --color-muted-fg: oklch(0.45 0.02 280);
+  --color-border: oklch(0.915 0.006 280);
+  --color-border-strong: oklch(0.85 0.01 280);
+
+  /* ─── Énergie sémantique ─── */
+  --color-solar: oklch(0.795 0.184 86);
+  --color-solar-fg: oklch(0.35 0.12 86);
+  --color-solar-muted: oklch(0.795 0.184 86 / 0.10);
+
+  --color-consumption: oklch(0.546 0.215 262);
+  --color-consumption-fg: oklch(0.985 0.01 262);
+  --color-consumption-muted: oklch(0.546 0.215 262 / 0.10);
+
+  --color-battery: oklch(0.627 0.194 149);
+  --color-battery-fg: oklch(0.985 0.01 149);
+  --color-battery-muted: oklch(0.627 0.194 149 / 0.10);
+
+  --color-grid-energy: oklch(0.708 0.012 280);
+  --color-grid-energy-muted: oklch(0.708 0.012 280 / 0.10);
+
+  --color-hc: oklch(0.541 0.281 293);
+  --color-hc-muted: oklch(0.541 0.281 293 / 0.10);
+
+  --color-hp: oklch(0.6 0.118 25);
+  --color-hp-muted: oklch(0.6 0.118 25 / 0.10);
+
+  --color-alert: oklch(0.577 0.245 27.3);
+  --color-alert-fg: oklch(0.985 0.01 27);
+  --color-alert-muted: oklch(0.577 0.245 27.3 / 0.10);
+
+  --color-success: oklch(0.627 0.194 149);
+  --color-warning: oklch(0.795 0.184 86);
+
+  /* ─── Sidebar (immutable dark) ─── */
+  --color-sidebar: oklch(0.175 0.018 280);
+  --color-sidebar-fg: oklch(0.935 0.005 280);
+  --color-sidebar-muted: oklch(0.55 0.015 280);
+  --color-sidebar-accent: oklch(0.24 0.02 280);
+  --color-sidebar-active: oklch(0.541 0.281 293 / 0.15);
+  --color-sidebar-active-border: oklch(0.541 0.281 293);
+  --color-sidebar-hover: oklch(0.22 0.018 280);
+
+  /* ─── Top bar ─── */
+  --color-topbar: oklch(1 0 0);
+  --color-topbar-border: oklch(0.915 0.006 280);
+
+  /* ─── Shadows ─── */
+  --shadow-xs: 0 1px 2px oklch(0.145 0 0 / 0.03);
+  --shadow-sm:
+    0 1px 3px oklch(0.145 0 0 / 0.05), 0 1px 2px oklch(0.145 0 0 / 0.03);
+  --shadow-md:
+    0 4px 6px oklch(0.145 0 0 / 0.05), 0 2px 4px oklch(0.145 0 0 / 0.03);
+  --shadow-lg:
+    0 10px 15px oklch(0.145 0 0 / 0.06), 0 4px 6px oklch(0.145 0 0 / 0.03);
+
+  /* ─── Radius ─── */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 0.875rem;
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.5rem;
+  --radius-pill: 9999px;
+
+  /* ─── Motion ─── */
+  --duration-fast: 100ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  /* ─── Breakpoints ─── */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+}
+
+/* ════════════════════════════════════════════════════════════════════════ */
+/*   Dark mode (opt-in via data-theme="dark" sur <html>)                    */
+/*   La sidebar ne change PAS — uniquement contenu                          */
+/* ════════════════════════════════════════════════════════════════════════ */
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+[data-theme='dark'] {
+  --color-bg: oklch(0.145 0.015 280);
+  --color-fg: oklch(0.935 0.005 280);
+  --color-card: oklch(0.195 0.018 280);
+  --color-card-hover: oklch(0.22 0.02 280);
+  --color-muted: oklch(0.235 0.02 280);
+  --color-muted-fg: oklch(0.65 0.015 280);
+  --color-border: oklch(0.28 0.02 280);
+  --color-border-strong: oklch(0.35 0.025 280);
+
+  --color-topbar: oklch(0.175 0.016 280);
+  --color-topbar-border: oklch(0.28 0.02 280);
+
+  --color-solar: oklch(0.828 0.16 84.4);
+  --color-solar-muted: oklch(0.828 0.16 84.4 / 0.12);
+  --color-consumption: oklch(0.65 0.16 262);
+  --color-consumption-muted: oklch(0.65 0.16 262 / 0.12);
+  --color-battery: oklch(0.70 0.15 149);
+  --color-battery-muted: oklch(0.70 0.15 149 / 0.12);
+  --color-grid-energy: oklch(0.55 0.01 280);
+  --color-alert: oklch(0.704 0.17 22.2);
+  --color-alert-muted: oklch(0.704 0.17 22.2 / 0.12);
+
+  --shadow-sm: 0 1px 3px oklch(0 0 0 / 0.3), 0 1px 2px oklch(0 0 0 / 0.2);
+  --shadow-md: 0 4px 6px oklch(0 0 0 / 0.35), 0 2px 4px oklch(0 0 0 / 0.2);
+}
+
+/* ════════════════════════════════════════════════════════════════════════ */
+/*   Alias legacy — pour ne pas casser les composants pas encore migrés     */
+/*   À supprimer progressivement au fil des refontes de composants          */
+/* ════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --surface-base: var(--color-bg);
+  --surface-elevated: var(--color-card);
+  --surface-deep: var(--color-card-hover);
+  --surface-card: var(--color-card);
+  --surface-card-hover: var(--color-card-hover);
+  --surface-darkest: var(--color-sidebar);
+
+  --text-primary: var(--color-fg);
+  --text-secondary: var(--color-muted-fg);
+  --text-tertiary: var(--color-muted-fg);
+  --text-muted: var(--color-muted-fg);
+  --text-disabled: var(--color-muted);
+
+  --border-subtle: var(--color-border);
+  --border-default: var(--color-border);
+  --border-strong: var(--color-border-strong);
+
+  --brand-400: var(--color-primary);
+  --primary-500: var(--color-primary);
+  --primary-600: var(--color-primary-hover);
+  --accent-500: var(--color-battery);
+  --accent-600: var(--color-battery);
+
+  --error: var(--color-alert);
+  --warning: var(--color-warning);
+
+  --mode-off: var(--color-grid-energy);
+  --mode-pv: var(--color-solar);
+  --mode-hc: var(--color-hc);
+  --mode-force: var(--color-alert);
+
+  --easing-default: var(--ease-default);
+  --easing-quart: var(--ease-out);
+  --easing-spring: var(--ease-spring);
+  --duration-short: var(--duration-fast);
+  --duration-default: var(--duration-normal);
+  --duration-long: 500ms;
+
+  --motion-fast: var(--duration-fast);
+  --motion-base: var(--duration-normal);
+  --motion-slow: var(--duration-slow);
+
+  --shadow-elevated: var(--shadow-lg);
+  --shadow-card: var(--shadow-md);
+  --shadow-subtle: var(--shadow-sm);
+
+  --glow-primary: 0 0 40px oklch(0.541 0.281 293 / 0.4);
+  --glow-accent: 0 0 40px oklch(0.627 0.194 149 / 0.3);
+  --glow-soft: 0 0 60px oklch(0.541 0.281 293 / 0.15);
+
+  --radius-xs: 2px;
+  --radius-xl2: var(--radius-3xl);
+}
+
+/* ════════════════════════════════════════════════════════════════════════ */
+/*   Reset & base                                                            */
 /* ════════════════════════════════════════════════════════════════════════ */
 
 html,
 body {
-  background-color: var(--surface-base);
-  color: var(--text-primary);
+  background-color: var(--color-bg);
+  color: var(--color-fg);
   font-family:
-    'Geist Variable',
-    -apple-system,
-    BlinkMacSystemFont,
-    ui-sans-serif,
-    system-ui,
-    sans-serif;
-  font-feature-settings: 'cv11', 'ss01';
+    'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, ui-sans-serif,
+    system-ui, sans-serif;
+  font-feature-settings: 'ss01', 'ss02', 'cv11';
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overscroll-behavior: none;
@@ -29,14 +215,14 @@ body {
   min-height: 100dvh;
 }
 
-/* Empêcher le zoom au focus des inputs sur iOS */
+/* iOS : empêcher le zoom au focus input */
 input,
 select,
 textarea {
   font-size: 16px;
 }
 
-/* Scrollbar sombre */
+/* Scrollbar discret */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -45,14 +231,14 @@ textarea {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-default);
+  background: var(--color-border-strong);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--border-strong);
+  background: var(--color-muted-fg);
 }
 
-/* Safe area iOS (notch, home indicator) */
+/* Safe area iOS */
 .safe-top {
   padding-top: env(safe-area-inset-top);
 }
