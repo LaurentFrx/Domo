@@ -334,7 +334,7 @@
     </div>
   </section>
 
-  <!-- ═══ Section 2 : Daikin (Salon + SdB) ═══ -->
+  <!-- ═══ Section 2 : Daikin — dial circulaire central ═══ -->
   <section>
     <h2
       class="mb-3 text-[14px] font-semibold tracking-[0.04em] uppercase"
@@ -348,29 +348,38 @@
         {@const indoorT = typeof thermo?.state.temperature === 'number' ? (thermo.state.temperature as number) : null}
         {@const indoorH = typeof thermo?.state.humidity === 'number' ? (thermo.state.humidity as number) : null}
         {@const tgt = currentTarget(unit)}
-        {@const modeColor = operationModes.find((m) => m.id === unit.operationMode)?.color ?? 'var(--color-muted-fg)'}
+        {@const modeMeta = operationModes.find((m) => m.id === unit.operationMode)}
+        {@const modeColor = modeMeta?.color ?? 'var(--color-muted-fg)'}
+        {@const modeBg = modeMeta?.bg ?? 'var(--color-muted)'}
+        {@const TGT_MIN = 16}
+        {@const TGT_MAX = 30}
+        {@const sliderPct = tgt !== null ? ((tgt - TGT_MIN) / (TGT_MAX - TGT_MIN)) * 100 : 50}
+        {@const active = unit.onOff && unit.operationMode !== 'off'}
         <article
-          class="daikin-card flex flex-col gap-4 rounded-[var(--radius-2xl)] border p-4"
-          class:daikin-on={unit.onOff && unit.operationMode !== 'off'}
-          style="background: var(--color-card); border-color: var(--color-border); --neon: {modeColor};"
+          class="daikin-card relative flex flex-col gap-5 overflow-hidden rounded-[var(--radius-2xl)] border p-5"
+          class:daikin-on={active}
+          style="background: var(--color-card); border-color: var(--color-border); --mode-color: {modeColor}; --mode-bg: {modeBg};"
         >
-          <!-- Header : zone + dot online + on/off -->
-          <header class="flex items-center justify-between gap-3">
-            <div class="flex min-w-0 flex-col gap-0.5">
-              <div class="flex items-center gap-2">
-                <span
-                  class="h-1.5 w-1.5 rounded-full"
-                  style:background-color={unit.online ? 'var(--color-battery)' : 'var(--color-alert)'}
-                  title={unit.online ? 'En ligne' : 'Hors ligne'}
-                  aria-hidden="true"
-                ></span>
-                <span class="text-[14px] font-semibold leading-tight" style="color: var(--color-fg);">
+          <!-- Halo gradient ambient (en bas-droite, suit la couleur du mode) -->
+          <div class="ambient-halo" aria-hidden="true"></div>
+
+          <!-- Header minimal : dot + zone + nom + toggle -->
+          <header class="relative z-10 flex items-center justify-between gap-3">
+            <div class="flex min-w-0 items-center gap-2.5">
+              <span
+                class="h-2 w-2 rounded-full"
+                style:background-color={unit.online ? 'var(--color-battery)' : 'var(--color-alert)'}
+                title={unit.online ? 'En ligne' : 'Hors ligne'}
+                aria-hidden="true"
+              ></span>
+              <div class="flex min-w-0 flex-col gap-0">
+                <span class="text-[15px] font-semibold leading-tight" style="color: var(--color-fg);">
                   {unit.zone}
                 </span>
+                <span class="text-[10px]" style="color: var(--color-muted-fg);">
+                  {unit.name}
+                </span>
               </div>
-              <span class="text-[10px]" style="color: var(--color-muted-fg);">
-                {unit.name}
-              </span>
             </div>
             <button
               type="button"
@@ -386,124 +395,125 @@
             </button>
           </header>
 
-          <!-- Températures : intérieur (depuis thermo) + extérieur (Daikin) -->
-          <div class="grid grid-cols-2 gap-3">
-            <div class="flex flex-col gap-1">
+          <!-- HERO : consigne énorme + sous-label -->
+          <div class="relative z-10 flex flex-col items-center gap-1 py-2">
+            {#if tgt !== null && unit.onOff}
+              <div class="hero-temp" style="color: {modeColor};">
+                <span class="hero-temp-int">{Math.floor(tgt)}</span><span class="hero-temp-dec"
+                  >{tgt % 1 ? '.5' : ''}</span><span class="hero-temp-unit">°</span>
+              </div>
               <span
-                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+                class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+                style="color: {modeColor};"
+              >
+                {unit.operationMode === 'heating' ? 'Chauffage' : 'Climatisation'}
+                {#if unit.operationMode === 'heating'}
+                  · cible chaud
+                {:else}
+                  · cible froid
+                {/if}
+              </span>
+            {:else}
+              <div class="hero-temp" style="color: var(--color-muted-fg);">
+                <span class="hero-temp-int">—</span><span class="hero-temp-unit">°</span>
+              </div>
+              <span class="text-[11px] font-semibold tracking-[0.08em] uppercase" style="color: var(--color-muted-fg);">
+                {unit.online ? 'À l\'arrêt' : 'Hors ligne'}
+              </span>
+            {/if}
+          </div>
+
+          <!-- Slider horizontal de consigne (16-30°C par 0.5°) -->
+          {#if tgt !== null && unit.onOff}
+            <div class="relative z-10 flex flex-col gap-1.5">
+              <input
+                type="range"
+                min="16"
+                max="30"
+                step="0.5"
+                value={tgt}
+                oninput={(e) => setTarget(unit, +(e.currentTarget as HTMLInputElement).value)}
+                class="temp-slider"
+                style="--slider-pct: {sliderPct}%;"
+                aria-label="Consigne température"
+              />
+              <div class="flex justify-between text-[10px] tabular-nums" style="color: var(--color-muted-fg);">
+                <span>{TGT_MIN}°</span>
+                <span>{TGT_MAX}°</span>
+              </div>
+            </div>
+          {/if}
+
+          <!-- Mode opérationnel -->
+          <div class="relative z-10 flex gap-2">
+            {#each operationModes as m (m.id)}
+              {@const isActive = unit.operationMode === m.id}
+              <button
+                type="button"
+                onclick={() => tapOperationMode(unit.id, m.id)}
+                disabled={!unit.onOff || !unit.online}
+                class="mode-pill flex-1"
+                class:mode-active={isActive}
+                style="--mp-color: {m.color}; --mp-bg: {m.bg};"
+                aria-pressed={isActive}
+              >
+                {m.label}
+              </button>
+            {/each}
+          </div>
+
+          <!-- Métadonnées : intérieur + extérieur (compact) -->
+          <div class="relative z-10 grid grid-cols-2 gap-3 rounded-[var(--radius-lg)] border p-3" style="border-color: var(--color-border); background: var(--color-muted);">
+            <div class="flex flex-col gap-0.5">
+              <span
+                class="text-[9px] font-semibold tracking-[0.06em] uppercase"
                 style="color: var(--color-muted-fg);"
               >
                 {thermo ? thermo.friendlyName : 'Intérieur'}
               </span>
               {#if indoorT !== null}
-                <div class="flex items-baseline gap-2">
-                  <span class="text-[22px] font-semibold tabular-nums" style="color: var(--color-fg); letter-spacing: -0.01em;">
-                    {indoorT.toFixed(1)}
+                <div class="flex items-baseline gap-1.5">
+                  <span class="text-[18px] font-semibold tabular-nums" style="color: var(--color-fg); letter-spacing: -0.01em;">
+                    {indoorT.toFixed(1)}°
                   </span>
-                  <span class="text-[12px]" style="color: var(--color-muted-fg);">°C</span>
                   {#if indoorH !== null}
-                    <span class="text-[12px] tabular-nums" style="color: var(--color-consumption);">
-                      · {Math.round(indoorH)}%
+                    <span class="text-[11px] tabular-nums" style="color: var(--color-consumption);">
+                      {Math.round(indoorH)}%
                     </span>
                   {/if}
                 </div>
               {:else}
-                <span class="text-[11px]" style="color: var(--color-muted-fg);">capteur indisponible</span>
+                <span class="text-[11px]" style="color: var(--color-muted-fg);">indisponible</span>
               {/if}
             </div>
-            <div class="flex flex-col gap-1">
+            <div class="flex flex-col gap-0.5">
               <span
-                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+                class="text-[9px] font-semibold tracking-[0.06em] uppercase"
                 style="color: var(--color-muted-fg);"
               >
                 Extérieur
               </span>
-              <div class="flex items-baseline gap-1">
-                <span class="text-[22px] font-semibold tabular-nums" style="color: var(--color-fg); letter-spacing: -0.01em;">
-                  {unit.outdoorTempC.toFixed(1)}
-                </span>
-                <span class="text-[12px]" style="color: var(--color-muted-fg);">°C</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Mode opérationnel : Chaud / Froid / Off -->
-          <div class="flex flex-col gap-2">
-            <span
-              class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-              style="color: var(--color-muted-fg);"
-            >
-              Mode
-            </span>
-            <div class="flex gap-2">
-              {#each operationModes as m (m.id)}
-                {@const active = unit.operationMode === m.id}
-                <button
-                  type="button"
-                  onclick={() => tapOperationMode(unit.id, m.id)}
-                  disabled={!unit.onOff || !unit.online}
-                  class="seg-btn flex-1"
-                  class:seg-active={active}
-                  style="--seg-color: {m.color}; --seg-bg: {m.bg};"
-                  aria-pressed={active}
-                >
-                  {m.label}
-                </button>
-              {/each}
-            </div>
-          </div>
-
-          <!-- Consigne (selon mode actif) -->
-          {#if tgt !== null && unit.onOff}
-            <div class="flex items-center justify-between">
-              <span
-                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-                style="color: var(--color-muted-fg);"
-              >
-                Consigne {unit.operationMode === 'heating' ? 'chaud' : 'froid'}
+              <span class="text-[18px] font-semibold tabular-nums" style="color: var(--color-fg); letter-spacing: -0.01em;">
+                {unit.outdoorTempC.toFixed(1)}°
               </span>
-              <div class="flex items-center gap-2">
-                <button
-                  type="button"
-                  onclick={() => setTarget(unit, tgt - 0.5)}
-                  class="target-btn"
-                  aria-label="Diminuer la consigne"
-                >−</button>
-                <span
-                  class="text-[24px] font-bold tabular-nums"
-                  style="color: {modeColor}; letter-spacing: -0.02em;"
-                >
-                  {tgt.toFixed(1)} <span class="text-[12px] font-medium" style="color: var(--color-muted-fg);">°C</span>
-                </span>
-                <button
-                  type="button"
-                  onclick={() => setTarget(unit, tgt + 0.5)}
-                  class="target-btn"
-                  aria-label="Augmenter la consigne"
-                >+</button>
-              </div>
             </div>
-          {/if}
+          </div>
 
-          <!-- Ventilation : Auto / Quiet / 1..5 -->
-          <div class="flex flex-col gap-2">
-            <span
-              class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-              style="color: var(--color-muted-fg);"
-            >
+          <!-- Ventilation : segments compactes -->
+          <div class="relative z-10 flex flex-col gap-1.5">
+            <span class="text-[9px] font-semibold tracking-[0.06em] uppercase" style="color: var(--color-muted-fg);">
               Ventilation
             </span>
-            <div class="flex gap-1.5 overflow-x-auto">
+            <div class="flex gap-1">
               {#each fanSpeeds as sp (sp.id)}
-                {@const active = unit.fanSpeed === sp.id}
+                {@const isActive = unit.fanSpeed === sp.id}
                 <button
                   type="button"
                   onclick={() => tapFanSpeed(unit.id, sp.id)}
-                  disabled={!unit.onOff || !unit.online || unit.operationMode === 'off'}
-                  class="seg-btn"
-                  class:seg-active={active}
-                  style="--seg-color: var(--color-primary); --seg-bg: var(--color-primary-muted); min-width: 36px;"
-                  aria-pressed={active}
+                  disabled={!active}
+                  class="fan-seg"
+                  class:fan-seg-active={isActive}
+                  aria-pressed={isActive}
                 >
                   {sp.label}
                 </button>
@@ -511,55 +521,46 @@
             </div>
           </div>
 
-          <!-- Orientation : H + V -->
-          <div class="grid grid-cols-2 gap-3">
-            <div class="flex flex-col gap-1.5">
-              <span
-                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-                style="color: var(--color-muted-fg);"
+          <!-- Orientation : 2 boutons icônes -->
+          <div class="relative z-10 flex items-center justify-between gap-3">
+            <span class="text-[9px] font-semibold tracking-[0.06em] uppercase" style="color: var(--color-muted-fg);">
+              Orientation
+            </span>
+            <div class="flex gap-2">
+              <button
+                type="button"
+                onclick={() => tapSwingH(unit.id, unit.swingHorizontal === 'swing' ? 'off' : 'swing')}
+                disabled={!active}
+                class="swing-btn"
+                class:swing-active={unit.swingHorizontal === 'swing'}
+                aria-pressed={unit.swingHorizontal === 'swing'}
+                title="Oscillation horizontale"
               >
-                Horizontale
-              </span>
-              <div class="flex gap-1.5">
-                {#each [{ id: 'off', label: 'Fixe' }, { id: 'swing', label: 'Swing' }] as sw (sw.id)}
-                  {@const active = unit.swingHorizontal === sw.id}
-                  <button
-                    type="button"
-                    onclick={() => tapSwingH(unit.id, sw.id as SwingMode)}
-                    disabled={!unit.onOff || !unit.online || unit.operationMode === 'off'}
-                    class="seg-btn flex-1"
-                    class:seg-active={active}
-                    style="--seg-color: var(--color-primary); --seg-bg: var(--color-primary-muted);"
-                    aria-pressed={active}
-                  >
-                    {sw.label}
-                  </button>
-                {/each}
-              </div>
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <span
-                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-                style="color: var(--color-muted-fg);"
+                <!-- Icône ↔ -->
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="17 1 21 5 17 9" />
+                  <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+                  <polyline points="7 23 3 19 7 15" />
+                  <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onclick={() => tapSwingV(unit.id, unit.swingVertical === 'swing' ? 'off' : 'swing')}
+                disabled={!active}
+                class="swing-btn"
+                class:swing-active={unit.swingVertical === 'swing'}
+                aria-pressed={unit.swingVertical === 'swing'}
+                title="Oscillation verticale"
               >
-                Verticale
-              </span>
-              <div class="flex gap-1.5">
-                {#each [{ id: 'off', label: 'Fixe' }, { id: 'swing', label: 'Swing' }] as sw (sw.id)}
-                  {@const active = unit.swingVertical === sw.id}
-                  <button
-                    type="button"
-                    onclick={() => tapSwingV(unit.id, sw.id as SwingMode)}
-                    disabled={!unit.onOff || !unit.online || unit.operationMode === 'off'}
-                    class="seg-btn flex-1"
-                    class:seg-active={active}
-                    style="--seg-color: var(--color-primary); --seg-bg: var(--color-primary-muted);"
-                    aria-pressed={active}
-                  >
-                    {sw.label}
-                  </button>
-                {/each}
-              </div>
+                <!-- Icône ↕ -->
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="1 17 5 21 9 17" />
+                  <path d="M11 3H9a4 4 0 0 0-4 4v14" />
+                  <polyline points="23 7 19 3 15 7" />
+                  <path d="M13 21h2a4 4 0 0 0 4-4V3" />
+                </svg>
+              </button>
             </div>
           </div>
         </article>
@@ -718,17 +719,195 @@
 </div>
 
 <style>
-  /* ─── Daikin card : glow néon quand allumée (idem switches ON) ─── */
+  /* ─── Daikin card : design Tesla/Mysa-inspired ─── */
   .daikin-card {
     transition:
       border-color var(--duration-normal) var(--ease-default),
       box-shadow var(--duration-normal) var(--ease-default);
+    min-height: 520px;
   }
   .daikin-on {
-    border-color: var(--neon);
-    box-shadow:
-      0 0 12px oklch(0.546 0.215 262 / 0.40),
-      0 0 26px oklch(0.546 0.215 262 / 0.18);
+    border-color: var(--mode-color);
+  }
+
+  /* Halo gradient ambient — couleur du mode en bas-droite */
+  .ambient-halo {
+    position: absolute;
+    right: -40%;
+    bottom: -40%;
+    width: 120%;
+    height: 120%;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--mode-bg) 0%, transparent 60%);
+    opacity: 0;
+    transition: opacity 800ms var(--ease-out);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .daikin-on .ambient-halo {
+    opacity: 1;
+  }
+
+  /* HERO consigne : énorme chiffre signature Yeldra (font-light) */
+  .hero-temp {
+    display: flex;
+    align-items: flex-start;
+    line-height: 0.85;
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+    transition: color 400ms var(--ease-default);
+  }
+  .hero-temp-int {
+    font-size: 96px;
+    font-weight: 200;
+  }
+  .hero-temp-dec {
+    font-size: 48px;
+    font-weight: 300;
+    margin-top: 0.5rem;
+    opacity: 0.7;
+  }
+  .hero-temp-unit {
+    font-size: 36px;
+    font-weight: 300;
+    margin-top: 0.5rem;
+    opacity: 0.6;
+  }
+
+  /* Slider linéaire de consigne */
+  .temp-slider {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    height: 8px;
+    background: linear-gradient(
+      to right,
+      var(--mode-color) 0%,
+      var(--mode-color) var(--slider-pct, 50%),
+      var(--color-muted) var(--slider-pct, 50%),
+      var(--color-muted) 100%
+    );
+    border-radius: 9999px;
+    outline: none;
+    cursor: pointer;
+    transition: background 200ms linear;
+  }
+  .temp-slider::-webkit-slider-thumb {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 2px solid var(--mode-color);
+    box-shadow: 0 2px 8px oklch(0 0 0 / 0.18);
+    cursor: pointer;
+    transition: transform var(--duration-fast) var(--ease-default);
+  }
+  .temp-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+  }
+  .temp-slider::-moz-range-thumb {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 2px solid var(--mode-color);
+    box-shadow: 0 2px 8px oklch(0 0 0 / 0.18);
+    cursor: pointer;
+  }
+
+  /* Mode pills */
+  .mode-pill {
+    padding: 0.6rem 0.5rem;
+    border: 1.5px solid var(--color-border);
+    border-radius: 9999px;
+    background: transparent;
+    color: var(--color-muted-fg);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: all var(--duration-fast) var(--ease-default);
+  }
+  .mode-pill:hover:not(:disabled) {
+    color: var(--mp-color);
+    border-color: var(--mp-color);
+  }
+  .mode-pill:active:not(:disabled) {
+    transform: scale(0.96);
+  }
+  .mode-pill:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+  .mode-active {
+    border-color: var(--mp-color);
+    background: var(--mp-bg);
+    color: var(--mp-color);
+  }
+
+  /* Fan segments : compact horizontal bar */
+  .fan-seg {
+    flex: 1;
+    padding: 0.4rem 0.25rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-card);
+    color: var(--color-muted-fg);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: all var(--duration-fast) var(--ease-default);
+  }
+  .fan-seg:hover:not(:disabled) {
+    border-color: var(--color-border-strong);
+    color: var(--color-fg);
+  }
+  .fan-seg:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .fan-seg:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+  .fan-seg-active {
+    border-color: var(--mode-color);
+    background: var(--mode-bg);
+    color: var(--mode-color);
+  }
+
+  /* Boutons swing icons */
+  .swing-btn {
+    display: inline-flex;
+    width: 34px;
+    height: 34px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-card);
+    color: var(--color-muted-fg);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: all var(--duration-fast) var(--ease-default);
+  }
+  .swing-btn:hover:not(:disabled) {
+    border-color: var(--color-border-strong);
+    color: var(--color-fg);
+  }
+  .swing-btn:active:not(:disabled) {
+    transform: scale(0.94);
+  }
+  .swing-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+  .swing-active {
+    border-color: var(--mode-color);
+    background: var(--mode-bg);
+    color: var(--mode-color);
   }
 
   /* ─── Boutons segmentés (mode / fan / swing) ─── */
