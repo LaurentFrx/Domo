@@ -22,9 +22,6 @@
   });
 
   // ─── Synchro Anker → dashboard quand l'API est dispo ───────────────────
-  // Tant que `anker.connected === false`, le demo-ticker continue d'écrire.
-  // Dès qu'Anker répond, on bascule connectionStatus='connected' et on
-  // écrase les valeurs solaire/batterie du dashboard avec les vraies.
   $effect(() => {
     if (anker.connected) {
       dashboard.connectionStatus = 'connected';
@@ -32,29 +29,28 @@
       const soc = anker.averageSoc;
       if (soc !== null) dashboard.batteryLevel = soc;
       dashboard.batteryStatus = anker.batteryStatus;
-      // Surplus = production - consommation maison (estimée). Si grid est
-      // négatif on injecte → c'est le surplus net.
       dashboard.solarSurplus = Math.max(0, -anker.gridPowerW);
-      // Production cumulée jour (Wh → kWh).
       dashboard.solarTotal24h = anker.dailyProductionWh / 1000;
       if (anker.selfConsumptionRate !== null) {
         dashboard.solarSelfConsumption = Math.round(anker.selfConsumptionRate);
       }
       if (anker.lastUpdate) dashboard.lastUpdate = anker.lastUpdate;
     } else if (dashboard.connectionStatus === 'connected') {
-      // On perd Anker → on rebascule en mode mock pour ne pas figer l'UI.
       dashboard.connectionStatus = 'mock';
     }
   });
 </script>
 
-<div class="min-h-screen">
+<div class="min-h-screen" style="background: var(--color-bg); color: var(--color-fg);">
   <Sidebar />
 
-  <main class="safe-top min-h-screen pb-24 md:pb-6 md:pl-20">
-    <div class="mx-auto w-full max-w-screen-xl px-3 md:px-6">
+  <main
+    class="safe-top min-h-screen sm:pl-[72px] lg:pl-[280px]"
+    style="padding-bottom: calc(60px + env(safe-area-inset-bottom));"
+  >
+    <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
       {#key page.url.pathname}
-        <div class="animate-[slide-up-fade_0.25s_ease-out]">
+        <div class="animate-[slide-up-fade_0.25s_var(--ease-out)]">
           {@render children()}
         </div>
       {/key}
@@ -63,3 +59,12 @@
 
   <TabBar />
 </div>
+
+<style>
+  /* Compense le padding-bottom sur les écrans sm+ (tab bar masquée) */
+  @media (min-width: 640px) {
+    main {
+      padding-bottom: 0 !important;
+    }
+  }
+</style>

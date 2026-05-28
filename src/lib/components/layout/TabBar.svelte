@@ -4,22 +4,26 @@
   interface Tab {
     href: string;
     label: string;
-    icon: string; // path SVG simplifié
+    icon: string;
   }
 
   const tabs: Tab[] = [
     { href: '/', label: 'Accueil', icon: 'M3 11 L12 3 L21 11 V20 H3 Z' },
     { href: '/energie', label: 'Énergie', icon: 'M13 2 L4 14 H11 L9 22 L20 8 H13 Z' },
     {
+      href: '/climat',
+      label: 'Climat',
+      icon: 'M12 2 C12 2 8 6 8 12 C8 16 10 19 12 19 C14 19 16 16 16 12 C16 8 14 6 14 6 C14 8 13 10 12 10 C11 10 12 6 12 2 Z'
+    },
+    {
       href: '/pieces',
       label: 'Pièces',
       icon: 'M3 3 H10 V10 H3 Z M14 3 H21 V10 H14 Z M3 14 H10 V21 H3 Z M14 14 H21 V21 H14 Z'
     },
-    { href: '/auto', label: 'Auto.', icon: 'M12 2 L13 8 L19 9 L13 11 L12 17 L11 11 L5 9 L11 8 Z' },
     {
       href: '/reglages',
       label: 'Réglages',
-      icon: 'M12 2 V4 M12 20 V22 M2 12 H4 M20 12 H22 M5 5 L7 7 M17 17 L19 19 M5 19 L7 17 M17 7 L19 5 M12 8 A4 4 0 1 1 12 16 A4 4 0 1 1 12 8 Z'
+      icon: 'M12 8 A4 4 0 1 1 12 16 A4 4 0 1 1 12 8 Z M12 2 V5 M12 19 V22 M2 12 H5 M19 12 H22 M4.5 4.5 L6.5 6.5 M17.5 17.5 L19.5 19.5 M4.5 19.5 L6.5 17.5 M17.5 6.5 L19.5 4.5'
     }
   ];
 
@@ -30,40 +34,64 @@
 </script>
 
 <nav
-  class="safe-bottom tabbar-glass fixed right-0 bottom-0 left-0 z-50 border-t border-white/[0.08] px-3 pt-2 pb-3 md:hidden"
+  class="fixed right-0 bottom-0 left-0 z-50 border-t sm:hidden"
+  style="
+    background: var(--color-bg);
+    border-color: var(--color-border);
+    padding-bottom: env(safe-area-inset-bottom);
+    height: calc(60px + env(safe-area-inset-bottom));
+  "
+  aria-label="Navigation principale"
 >
-  <div class="flex items-center justify-around">
+  <div class="flex h-[60px] items-center justify-around px-2">
     {#each tabs as tab (tab.href)}
       {@const active = isActive(tab.href)}
       <a
         href={tab.href}
-        class="flex flex-1 flex-col items-center gap-0.5 transition-colors"
-        style="color: {active ? 'var(--accent-500)' : 'var(--text-secondary)'};"
+        class="tabbar-item flex h-full flex-1 flex-col items-center justify-center gap-1 rounded-lg"
+        class:tabbar-item-active={active}
+        aria-current={active ? 'page' : undefined}
       >
         <svg
-          width="20"
-          height="20"
+          width="22"
+          height="22"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          stroke-width="2"
+          stroke-width="1.75"
           stroke-linecap="round"
           stroke-linejoin="round"
+          aria-hidden="true"
         >
           <path d={tab.icon} />
         </svg>
-        <span class="text-[10px]" class:font-semibold={active}>
+        <span
+          class="text-[10px] leading-none"
+          class:font-semibold={active}
+          class:font-medium={!active}
+        >
           {tab.label}
         </span>
+        {#if active}
+          <span
+            class="absolute -bottom-0.5 h-[3px] w-1 rounded-full"
+            style="background: var(--color-primary);"
+            aria-hidden="true"
+          ></span>
+        {/if}
       </a>
     {/each}
   </div>
 </nav>
 
 <style>
-  .tabbar-glass {
-    background-color: color-mix(in oklab, var(--surface-base) 90%, transparent);
-    backdrop-filter: blur(12px) saturate(160%);
-    -webkit-backdrop-filter: blur(12px) saturate(160%);
+  .tabbar-item {
+    position: relative;
+    color: var(--color-muted-fg);
+    min-height: 44px;
+    transition: color var(--duration-fast) var(--ease-default);
+  }
+  .tabbar-item-active {
+    color: var(--color-primary);
   }
 </style>
