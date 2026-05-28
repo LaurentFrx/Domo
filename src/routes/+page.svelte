@@ -17,17 +17,22 @@
   const netSurplus = $derived(dashboard.solarSurplus);
   const isExporting = $derived(shelly.gridPowerW < 0);
 
-  // ─── Strate 2 : Flow Diagram ────────────────────────────────────────
-  const homePowerKw = $derived(
-    Math.max(0, dashboard.solarPower + shelly.gridPowerW / 1000 - 0)
+  // ─── Strate 2 : Flow Diagram (tout en watts) ─────────────────────────
+  const pvPowerW = $derived(Math.round(dashboard.solarPower * 1000));
+  const homePowerW = $derived(
+    Math.max(0, Math.round(dashboard.solarPower * 1000 + shelly.gridPowerW))
   );
-  const batteryNetKw = $derived(dashboard.batteryStatus === 'charge' ? 0.4 : -0.6);
+  const batteryNetW = $derived(dashboard.batteryStatus === 'charge' ? 400 : -600);
 
   // ─── Strate 3 : KPI Cards ───────────────────────────────────────────
   const pvSparkline = $derived(pvSeries24h(dashboard.solarPower * 1.2));
   const consoSparkline = $derived(consoSeries24h());
   const cumulusSparkline = $derived([55, 56, 57, 58, 60, 62, 63, 64, 64, 65, 65, 64]);
   const batterySparkline = $derived([55, 58, 62, 68, 75, 82, 87, 89, 90, 88, 85, 80]);
+
+  function fmtW(w: number): string {
+    return Math.round(Math.abs(w)).toLocaleString('fr-FR').replace(/\s/g, ' ');
+  }
 
   // ─── Strate 4 : Footer ──────────────────────────────────────────────
   const hour = $derived(hourOfDay());
@@ -79,14 +84,15 @@
     </span>
   </header>
 
-  <!-- ═══ Strate 2 : Flow Diagram (240px) ═══ -->
+  <!-- ═══ Strate 2 : Flow Diagram (280px, tout en watts) ═══ -->
   <FlowDiagram
-    pvPowerKw={dashboard.solarPower}
-    {homePowerKw}
-    {batteryNetKw}
+    {pvPowerW}
+    {homePowerW}
+    {batteryNetW}
     batterySoc={dashboard.batteryLevel}
-    gridPowerKw={shelly.gridPowerW / 1000}
+    gridPowerW={shelly.gridPowerW}
     cumulusTempC={cumulus.temperatureC}
+    cumulusPowerW={shelly.cumulusPowerW}
     cumulusOn={shelly.cumulusRelayOn}
   />
 
@@ -117,8 +123,8 @@
     <!-- Production PV -->
     <KpiCard
       label="Production"
-      value={dashboard.solarPower.toFixed(2)}
-      unit="kW"
+      value={fmtW(pvPowerW)}
+      unit="W"
       trend={`${dashboard.solarTotal24h.toFixed(1)} kWh aujourd'hui`}
       domain="solar"
       sparklineData={pvSparkline}
