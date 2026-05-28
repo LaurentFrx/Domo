@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import RoomSection from '$components/tiles/RoomSection.svelte';
   import ShutterTile from '$components/tiles/ShutterTile.svelte';
   import SwitchTile from '$components/tiles/SwitchTile.svelte';
   import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
@@ -166,10 +165,10 @@
       <p class="text-sm" style="color: var(--color-muted-fg);">Aucun appareil détecté</p>
     </div>
   {:else}
-    <!-- ═══ Strip "Tous les volets" — sm+ uniquement (iPad+) ═══ -->
+    <!-- ═══ Strip 'Tous les volets' — visible partout (3 cols mobile, N sur lg+) ═══ -->
     {#if matter.shutters.length > 0}
       <section
-        class="hidden flex-col gap-3 rounded-[var(--radius-2xl)] border p-4 sm:flex"
+        class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-4"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
         <div class="flex items-center justify-between gap-3">
@@ -211,21 +210,9 @@
       </section>
     {/if}
 
-    <!-- ═══ Mobile : grouping par pièce (volets inclus) ═══ -->
-    <div class="grid grid-cols-1 gap-3 sm:hidden">
-      {#each mergedRooms as r (r.room)}
-        <RoomSection
-          room={r.room}
-          shutters={r.shutters}
-          switches={r.switches}
-          zigbeeDevices={r.zigbeeDevices}
-        />
-      {/each}
-    </div>
-
-    <!-- ═══ sm+ (iPad/PC) : grille FLAT — tous les non-volets sans wrapper de pièce ═══ -->
+    <!-- ═══ Grille FLAT switches/zigbee — visible partout ═══ -->
     {#if hasFlatDevices}
-      <div class="hidden grid-cols-2 gap-3 sm:grid lg:grid-cols-3 xl:grid-cols-4">
+      <div class="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
         {#each matter.switches as sw (sw.nodeId)}
           <SwitchTile {sw} />
         {/each}
@@ -282,11 +269,17 @@
     transform: scale(0.97);
   }
 
-  /* Strip "Volets" : auto-fit en sm-lg (peut wrap), force N cols sur lg+ (iPad landscape garanti une ligne) */
+  /* Strip 'Volets' : 3 cols sur mobile (= 3 + 3 sur 2 lignes pour 6 volets),
+     auto-fit en sm-lg (peut wrap), force N cols sur lg+ (1 seule ligne sur iPad+). */
   .shutters-strip {
     display: grid;
     gap: 0.5rem;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  @media (min-width: 640px) {
+    .shutters-strip {
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    }
   }
   @media (min-width: 1024px) {
     .shutters-strip {
