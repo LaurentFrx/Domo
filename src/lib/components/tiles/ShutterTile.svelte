@@ -370,23 +370,42 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    width: 32px;
-    height: 32px;
+    width: 56px;
+    height: 56px;
     border-radius: 50%;
     background: #ffffff;
     box-shadow:
-      0 1px 3px oklch(0 0 0 / 0.2),
-      0 1px 1px oklch(0 0 0 / 0.1);
+      0 2px 8px oklch(0 0 0 / 0.18),
+      0 1px 2px oklch(0 0 0 / 0.10);
     pointer-events: none;
     transition: bottom 120ms linear;
     will-change: bottom;
     z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    color: oklch(0.30 0.01 280);
+  }
+  .thumb-pct {
+    font-size: 13px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .thumb-pct-unit {
+    font-size: 9px;
+    font-weight: 600;
+    margin-left: 1px;
+    opacity: 0.6;
   }
   .slider-track.dragging .slider-thumb {
     transition: none;
     box-shadow:
-      0 2px 6px oklch(0 0 0 / 0.25),
-      0 0 0 3px var(--color-primary-muted);
+      0 4px 12px oklch(0 0 0 / 0.25),
+      0 0 0 4px var(--color-primary-muted);
   }
 
   /* ─── Actions carrées 70×70 — triangles colorés (vert open / violet close) ─── */
