@@ -44,7 +44,7 @@
   <title>Domo</title>
 </svelte:head>
 
-<div class="flex flex-col gap-4 py-4">
+<div class="stagger-enter flex flex-col gap-4 py-4">
   <!-- ═══ Strate 1 : Hero KPI (~80px) ═══ -->
   <header class="flex items-center justify-between gap-4">
     <div class="flex flex-col gap-0.5">
