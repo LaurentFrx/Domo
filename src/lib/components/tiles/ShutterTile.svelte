@@ -238,8 +238,8 @@
     </span>
   </div>
 
-  <!-- Corps : slider vertical 120px à gauche + 3 actions carrées 36×36 -->
-  <div class="flex items-stretch gap-2" style="height: 120px;">
+  <!-- Corps : slider vertical 240px à gauche + 3 actions carrées 36×36 équi-réparties -->
+  <div class="flex items-stretch gap-2" style="height: 240px;">
     <div
       bind:this={trackEl}
       class="slider-track"
