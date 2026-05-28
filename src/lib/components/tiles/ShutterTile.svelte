@@ -235,8 +235,8 @@
     {/if}
   </span>
 
-  <!-- Corps : slider à gauche + colonne actions à droite. Dimensions via CSS vars responsive. -->
-  <div class="shutter-body flex items-stretch gap-3">
+  <!-- Corps centré : slider fin (24px) + gap + colonne actions carrées (60px). Body 210px = 3×60 + 2×15 gap. -->
+  <div class="shutter-body flex items-stretch justify-center gap-3">
     <div
       bind:this={trackEl}
       class="slider-track"
@@ -256,7 +256,7 @@
       <div class="slider-fill" style:height="{displayedPosition}%"></div>
       <div
         class="slider-thumb"
-        style:bottom="calc((100% - var(--ssize)) * {(100 - displayedPosition) / 100})"
+        style:bottom="calc((100% - 24px) * {(100 - displayedPosition) / 100})"
       >
         {#if displayedPosition > 1 && displayedPosition < 99}
           <span class="thumb-pct">{displayedPosition}</span>
@@ -306,40 +306,16 @@
 </div>
 
 <style>
-  /* ─── Dimensions par paliers : --ssize (slider/thumb) et --bsize (boutons) ─── */
+  /* ─── Dimensions fixes simples : slider 24, bouton 60, body 210 ─── */
   .shutter-tile {
-    --ssize: 28px; /* slider track width = thumb size */
-    --bsize: 56px; /* button size (carré) */
-    --bgap: 4px; /* gap entre boutons */
-    --body-h: calc(var(--bsize) * 3 + var(--bgap) * 2);
-    --pct-font: 11px;
-    --name-font: 12px;
     transition: border-color var(--duration-normal) var(--ease-default);
-  }
-  @media (min-width: 640px) {
-    .shutter-tile {
-      --ssize: 32px;
-      --bsize: 64px;
-      --bgap: 5px;
-      --pct-font: 12px;
-      --name-font: 13px;
-    }
-  }
-  @media (min-width: 1024px) {
-    .shutter-tile {
-      --ssize: 36px;
-      --bsize: 72px;
-      --bgap: 6px;
-      --pct-font: 13px;
-      --name-font: 14px;
-    }
   }
   .shutter-tile:hover {
     border-color: var(--color-border-strong);
   }
 
   .shutter-name {
-    font-size: var(--name-font);
+    font-size: 12px;
   }
 
   .moving-dots {
@@ -353,13 +329,13 @@
   }
 
   .shutter-body {
-    height: var(--body-h);
+    height: 210px; /* = 3 × 60 + 2 × 15 gap, distribué via justify-between */
   }
 
-  /* ─── Slider vertical : largeur = --ssize ─── */
+  /* ─── Slider vertical fin 24px ─── */
   .slider-track {
     position: relative;
-    width: var(--ssize);
+    width: 24px;
     height: 100%;
     border-radius: 9999px;
     background: var(--color-muted);
@@ -394,8 +370,8 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    width: var(--ssize);
-    height: var(--ssize);
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
     background: #ffffff;
     box-shadow:
@@ -411,7 +387,7 @@
     color: oklch(0.30 0.01 280);
   }
   .thumb-pct {
-    font-size: var(--pct-font);
+    font-size: 10px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.02em;
@@ -424,16 +400,16 @@
       0 0 0 3px var(--color-primary-muted);
   }
 
-  /* ─── Boutons carrés --bsize × --bsize ─── */
+  /* ─── Boutons carrés 60×60 ─── */
   .actions-col {
-    width: var(--bsize);
+    width: 60px;
   }
   .action-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: var(--bsize);
-    height: var(--bsize);
+    width: 60px;
+    height: 60px;
     border-radius: var(--radius-lg);
     background: var(--color-muted);
     border: 1px solid var(--color-border);
