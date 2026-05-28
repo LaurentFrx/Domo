@@ -414,11 +414,11 @@
                 {/if}
               </span>
             {:else}
-              <div class="hero-temp" style="color: var(--color-muted-fg);">
-                <span class="hero-temp-int">—</span><span class="hero-temp-unit">°</span>
+              <div class="hero-off" style="color: var(--color-muted-fg);">
+                {unit.online ? 'À l\'arrêt' : 'Hors ligne'}
               </div>
               <span class="text-[11px] font-semibold tracking-[0.08em] uppercase" style="color: var(--color-muted-fg);">
-                {unit.online ? 'À l\'arrêt' : 'Hors ligne'}
+                Consigne {tgt ?? unit.targetHeating}° chaud · {unit.targetCooling}° froid
               </span>
             {/if}
           </div>
@@ -469,7 +469,7 @@
                 class="text-[9px] font-semibold tracking-[0.06em] uppercase"
                 style="color: var(--color-muted-fg);"
               >
-                {thermo ? thermo.friendlyName : 'Intérieur'}
+                Intérieur
               </span>
               {#if indoorT !== null}
                 <div class="flex items-baseline gap-1.5">
@@ -483,7 +483,11 @@
                   {/if}
                 </div>
               {:else}
-                <span class="text-[11px]" style="color: var(--color-muted-fg);">indisponible</span>
+                <div class="flex items-baseline gap-1.5">
+                  <span class="text-[18px] font-semibold tabular-nums" style="color: var(--color-muted-fg); letter-spacing: -0.01em;">
+                    —°
+                  </span>
+                </div>
               {/if}
             </div>
             <div class="flex flex-col gap-0.5">
@@ -772,6 +776,18 @@
     font-weight: 300;
     margin-top: 0.5rem;
     opacity: 0.6;
+  }
+
+  /* Variante OFF : texte propre, hauteur équivalente au hero-temp,
+     pour ne pas faire « sauter » la carte entre on/off */
+  .hero-off {
+    font-size: 30px;
+    font-weight: 300;
+    letter-spacing: -0.01em;
+    line-height: 1;
+    padding: 1.4rem 0;
+    text-align: center;
+    transition: color 400ms var(--ease-default);
   }
 
   /* Slider linéaire de consigne */
