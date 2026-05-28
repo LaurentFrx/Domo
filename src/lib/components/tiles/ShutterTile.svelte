@@ -258,10 +258,6 @@
       bind:this={trackEl}
       class="slider-track"
       class:dragging
-      onpointerdown={onPointerDown}
-      onpointermove={onPointerMove}
-      onpointerup={onPointerUp}
-      onpointercancel={onPointerUp}
       role="slider"
       tabindex={shutter.available ? 0 : -1}
       aria-label="Position {shutter.name}"
@@ -271,9 +267,15 @@
       aria-valuetext={positionLabel}
     >
       <div class="slider-fill" style:height="{displayedPosition}%"></div>
+      <!-- Le thumb (rond blanc) seul est draggable. Le reste du track laisse
+           passer les gestes de scroll de l'iPhone (touch-action: pan-y). -->
       <div
         class="slider-thumb"
         style:bottom="calc((100% - 24px) * {(100 - displayedPosition) / 100})"
+        onpointerdown={onPointerDown}
+        onpointermove={onPointerMove}
+        onpointerup={onPointerUp}
+        onpointercancel={onPointerUp}
       >
         {#if displayedPosition > 1 && displayedPosition < 99}
           <span class="thumb-pct">{displayedPosition}</span>
@@ -351,7 +353,7 @@
     height: 210px; /* = 3 × 60 + 2 × 15 gap, distribué via justify-between */
   }
 
-  /* ─── Slider vertical fin 24px ─── */
+  /* ─── Slider vertical fin 24px — track laisse passer le scroll vertical ─── */
   .slider-track {
     position: relative;
     width: 24px;
@@ -359,15 +361,12 @@
     border-radius: 9999px;
     background: var(--color-muted);
     border: 1px solid var(--color-border);
-    cursor: grab;
     flex-shrink: 0;
-    touch-action: none;
+    /* pan-y : iOS Safari scrolle la page si le geste est vertical sur le track */
+    touch-action: pan-y;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
-    overflow: hidden;
-  }
-  .slider-track.dragging {
-    cursor: grabbing;
+    overflow: visible; /* permet à la hit-area étendue du thumb de déborder */
   }
   .slider-track:focus-visible {
     outline: 2px solid var(--color-primary);
@@ -396,7 +395,10 @@
     box-shadow:
       0 2px 6px oklch(0 0 0 / 0.18),
       0 1px 2px oklch(0 0 0 / 0.10);
-    pointer-events: none;
+    pointer-events: auto;
+    cursor: grab;
+    /* drag : empêche le browser de consumer le geste vertical */
+    touch-action: none;
     transition: bottom 120ms linear;
     will-change: bottom;
     z-index: 1;
@@ -404,6 +406,16 @@
     align-items: center;
     justify-content: center;
     color: oklch(0.30 0.01 280);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .slider-track.dragging .slider-thumb {
+    cursor: grabbing;
+  }
+  /* Hit-area étendue invisible 44×44 (HIG iOS) autour du thumb */
+  .slider-thumb::before {
+    content: '';
+    position: absolute;
+    inset: -10px;
   }
   .thumb-pct {
     font-size: 10px;
