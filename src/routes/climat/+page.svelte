@@ -2,7 +2,12 @@
   import type { CumulusMode } from '$theme/tokens';
   import { cumulus } from '$stores/cumulus.svelte';
   import { daikin } from '$stores/daikin.svelte';
-  import type { DaikinMode, DaikinUnit } from '$stores/daikin.svelte';
+  import type {
+    DaikinOperationMode,
+    DaikinUnit,
+    FanSpeed,
+    SwingMode
+  } from '$stores/daikin.svelte';
   import { weather } from '$stores/weather.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
   import { daysUntil } from '$utils/mock-curves';
@@ -44,30 +49,69 @@
   const legionnellaDays = $derived(daysUntil(cumulus.nextLegionnellaCycle));
 
   // ─── Daikin ────────────────────────────────────────────────────────
-  const daikinModes: { id: DaikinMode; label: string }[] = [
+  const operationModes: { id: DaikinOperationMode; label: string; color: string }[] = [
+    { id: 'heating', label: 'Chaud', color: 'var(--color-hp)' },
+    { id: 'cooling', label: 'Froid', color: 'var(--color-consumption)' },
+    { id: 'off', label: 'Off', color: 'var(--color-muted-fg)' }
+  ];
+  const fanSpeeds: { id: FanSpeed; label: string }[] = [
     { id: 'auto', label: 'Auto' },
-    { id: 'heat', label: 'Chaud' },
-    { id: 'cool', label: 'Froid' },
-    { id: 'fan', label: 'Ventil' },
-    { id: 'off', label: 'Off' }
+    { id: 'quiet', label: 'Quiet' },
+    { id: 'level1', label: '1' },
+    { id: 'level2', label: '2' },
+    { id: 'level3', label: '3' },
+    { id: 'level4', label: '4' },
+    { id: 'level5', label: '5' }
   ];
 
-  function decrTarget(u: DaikinUnit) {
-    haptic('light');
-    daikin.setTarget(u.id, u.target - 0.5);
+  function currentTarget(u: DaikinUnit): number | null {
+    if (u.operationMode === 'heating') return u.targetHeating;
+    if (u.operationMode === 'cooling') return u.targetCooling;
+    return null;
   }
-  function incrTarget(u: DaikinUnit) {
+  function setTarget(u: DaikinUnit, v: number) {
     haptic('light');
-    daikin.setTarget(u.id, u.target + 0.5);
+    if (u.operationMode === 'heating') daikin.setTargetHeating(u.id, v);
+    else if (u.operationMode === 'cooling') daikin.setTargetCooling(u.id, v);
+  }
+  function tapOperationMode(unitId: string, mode: DaikinOperationMode) {
+    haptic('medium');
+    daikin.setOperationMode(unitId, mode);
+  }
+  function tapOnOff(u: DaikinUnit) {
+    haptic('medium');
+    daikin.setOnOff(u.id, !u.onOff);
+  }
+  function tapFanSpeed(unitId: string, sp: FanSpeed) {
+    haptic('light');
+    daikin.setFanSpeed(unitId, sp);
+  }
+  function tapSwingH(unitId: string, sw: SwingMode) {
+    haptic('light');
+    daikin.setSwingHorizontal(unitId, sw);
+  }
+  function tapSwingV(unitId: string, sw: SwingMode) {
+    haptic('light');
+    daikin.setSwingVertical(unitId, sw);
   }
 
   function tapCumulusMode(mode: typeof cumulus.currentMode) {
     haptic('medium');
     cumulus.setMode(mode);
   }
-  function tapDaikinMode(unitId: string, mode: DaikinMode) {
-    haptic('light');
-    daikin.setMode(unitId, mode);
+
+  // ─── Référence Thermo Salon (Zigbee) pour temp + humidité intérieures ─
+  const thermoSalon = $derived(
+    zigbee.devices.find((d) => d.friendlyName.toLowerCase() === 'thermo salon') ?? null
+  );
+  function thermoForZone(zone: string) {
+    if (zone === 'Séjour') return thermoSalon;
+    if (zone === 'Salle de bain') {
+      return (
+        zigbee.devices.find((d) => d.friendlyName.toLowerCase() === 'thermo sdb') ?? null
+      );
+    }
+    return null;
   }
 
   // ─── Confort ───────────────────────────────────────────────────────
@@ -280,7 +324,7 @@
     </div>
   </section>
 
-  <!-- ═══ Section 2 : Daikin ═══ -->
+  <!-- ═══ Section 2 : Daikin (Salon + SdB) ═══ -->
   <section>
     <h2
       class="mb-3 text-[14px] font-semibold tracking-[0.04em] uppercase"
@@ -290,105 +334,225 @@
     </h2>
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       {#each daikin.units as unit (unit.id)}
+        {@const thermo = thermoForZone(unit.zone)}
+        {@const indoorT = typeof thermo?.state.temperature === 'number' ? (thermo.state.temperature as number) : null}
+        {@const indoorH = typeof thermo?.state.humidity === 'number' ? (thermo.state.humidity as number) : null}
+        {@const tgt = currentTarget(unit)}
+        {@const modeColor = operationModes.find((m) => m.id === unit.operationMode)?.color ?? 'var(--color-muted-fg)'}
         <article
-          class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-4"
-          style="background: var(--color-card); border-color: var(--color-border);"
+          class="daikin-card flex flex-col gap-4 rounded-[var(--radius-2xl)] border p-4"
+          class:daikin-on={unit.onOff && unit.operationMode !== 'off'}
+          style="background: var(--color-card); border-color: var(--color-border); --neon: {modeColor};"
         >
-          <div class="flex items-center justify-between">
-            <div>
-              <span class="text-[14px] font-semibold">{unit.zone}</span>
-              <div class="text-[11px]" style="color: var(--color-muted-fg);">
-                {unit.name}
+          <!-- Header : zone + dot online + on/off -->
+          <header class="flex items-center justify-between gap-3">
+            <div class="flex min-w-0 flex-col gap-0.5">
+              <div class="flex items-center gap-2">
+                <span
+                  class="h-1.5 w-1.5 rounded-full"
+                  style:background-color={unit.online ? 'var(--color-battery)' : 'var(--color-alert)'}
+                  title={unit.online ? 'En ligne' : 'Hors ligne'}
+                  aria-hidden="true"
+                ></span>
+                <span class="text-[14px] font-semibold leading-tight" style="color: var(--color-fg);">
+                  {unit.zone}
+                </span>
               </div>
+              <span class="text-[10px]" style="color: var(--color-muted-fg);">
+                {unit.name}
+              </span>
             </div>
-            <span
-              class="rounded-full px-2 py-0.5 text-[10px] font-semibold"
-              style="
-                background: {unit.online ? 'var(--color-battery-muted)' : 'var(--color-alert-muted)'};
-                color: {unit.online ? 'var(--color-battery)' : 'var(--color-alert)'};
-              "
+            <button
+              type="button"
+              class="toggle-track shrink-0"
+              class:toggle-on={unit.onOff}
+              role="switch"
+              aria-checked={unit.onOff}
+              aria-label="Allumer / éteindre {unit.zone}"
+              onclick={() => tapOnOff(unit)}
+              disabled={!unit.online}
             >
-              {unit.online ? 'En ligne' : 'Hors ligne'}
-            </span>
-          </div>
+              <span class="toggle-knob"></span>
+            </button>
+          </header>
 
-          <!-- Temp ambient -->
-          <div class="flex items-baseline gap-3">
-            <div>
+          <!-- Températures : intérieur (depuis thermo) + extérieur (Daikin) -->
+          <div class="grid grid-cols-2 gap-3">
+            <div class="flex flex-col gap-1">
               <span
                 class="text-[10px] font-semibold tracking-[0.04em] uppercase"
                 style="color: var(--color-muted-fg);"
               >
-                Ambiante
+                {thermo ? thermo.friendlyName : 'Intérieur'}
               </span>
-              <div class="flex items-baseline gap-0.5">
-                <span class="text-[28px] font-semibold" style="color: var(--color-fg); letter-spacing: -0.01em;">
-                  {unit.ambient.toFixed(1)}
+              {#if indoorT !== null}
+                <div class="flex items-baseline gap-2">
+                  <span class="text-[22px] font-semibold tabular-nums" style="color: var(--color-fg); letter-spacing: -0.01em;">
+                    {indoorT.toFixed(1)}
+                  </span>
+                  <span class="text-[12px]" style="color: var(--color-muted-fg);">°C</span>
+                  {#if indoorH !== null}
+                    <span class="text-[12px] tabular-nums" style="color: var(--color-consumption);">
+                      · {Math.round(indoorH)}%
+                    </span>
+                  {/if}
+                </div>
+              {:else}
+                <span class="text-[11px]" style="color: var(--color-muted-fg);">capteur indisponible</span>
+              {/if}
+            </div>
+            <div class="flex flex-col gap-1">
+              <span
+                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+                style="color: var(--color-muted-fg);"
+              >
+                Extérieur
+              </span>
+              <div class="flex items-baseline gap-1">
+                <span class="text-[22px] font-semibold tabular-nums" style="color: var(--color-fg); letter-spacing: -0.01em;">
+                  {unit.outdoorTempC.toFixed(1)}
                 </span>
-                <span class="text-[14px]" style="color: var(--color-muted-fg);">°C</span>
+                <span class="text-[12px]" style="color: var(--color-muted-fg);">°C</span>
               </div>
             </div>
           </div>
 
-          <!-- Consigne ± -->
-          <div class="flex items-center justify-between">
+          <!-- Mode opérationnel : Chaud / Froid / Off -->
+          <div class="flex flex-col gap-2">
             <span
               class="text-[10px] font-semibold tracking-[0.04em] uppercase"
               style="color: var(--color-muted-fg);"
             >
-              Consigne
+              Mode
             </span>
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                onclick={() => decrTarget(unit)}
-                class="flex h-8 w-8 items-center justify-center rounded-full border text-[16px] font-semibold transition-colors"
-                style="border-color: var(--color-border); color: var(--color-muted-fg);"
-                aria-label="Diminuer la consigne"
-              >−</button>
-              <span
-                class="text-[20px] font-semibold tabular-nums"
-                style="color: var(--color-primary);"
-              >
-                {unit.target.toFixed(1)} °C
-              </span>
-              <button
-                type="button"
-                onclick={() => incrTarget(unit)}
-                class="flex h-8 w-8 items-center justify-center rounded-full border text-[16px] font-semibold transition-colors"
-                style="border-color: var(--color-border); color: var(--color-muted-fg);"
-                aria-label="Augmenter la consigne"
-              >+</button>
+            <div class="flex gap-2">
+              {#each operationModes as m (m.id)}
+                {@const active = unit.operationMode === m.id}
+                <button
+                  type="button"
+                  onclick={() => tapOperationMode(unit.id, m.id)}
+                  disabled={!unit.onOff || !unit.online}
+                  class="seg-btn flex-1"
+                  class:seg-active={active}
+                  style="
+                    --seg-color: {m.color};
+                  "
+                  aria-pressed={active}
+                >
+                  {m.label}
+                </button>
+              {/each}
             </div>
           </div>
 
-          <!-- Mode segmented -->
-          <div class="flex gap-1.5 overflow-x-auto">
-            {#each daikinModes as m (m.id)}
-              {@const active = unit.mode === m.id}
-              <button
-                type="button"
-                onclick={() => tapDaikinMode(unit.id, m.id)}
-                class="flex-1 rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors"
-                style="
-                  min-width: 56px;
-                  border-color: {active ? 'var(--color-primary)' : 'var(--color-border)'};
-                  background: {active ? 'var(--color-primary-muted)' : 'transparent'};
-                  color: {active ? 'var(--color-primary)' : 'var(--color-muted-fg)'};
-                "
-                aria-pressed={active}
+          <!-- Consigne (selon mode actif) -->
+          {#if tgt !== null && unit.onOff}
+            <div class="flex items-center justify-between">
+              <span
+                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+                style="color: var(--color-muted-fg);"
               >
-                {m.label}
-              </button>
-            {/each}
+                Consigne {unit.operationMode === 'heating' ? 'chaud' : 'froid'}
+              </span>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  onclick={() => setTarget(unit, tgt - 0.5)}
+                  class="target-btn"
+                  aria-label="Diminuer la consigne"
+                >−</button>
+                <span
+                  class="text-[24px] font-bold tabular-nums"
+                  style="color: {modeColor}; letter-spacing: -0.02em;"
+                >
+                  {tgt.toFixed(1)} <span class="text-[12px] font-medium" style="color: var(--color-muted-fg);">°C</span>
+                </span>
+                <button
+                  type="button"
+                  onclick={() => setTarget(unit, tgt + 0.5)}
+                  class="target-btn"
+                  aria-label="Augmenter la consigne"
+                >+</button>
+              </div>
+            </div>
+          {/if}
+
+          <!-- Ventilation : Auto / Quiet / 1..5 -->
+          <div class="flex flex-col gap-2">
+            <span
+              class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+              style="color: var(--color-muted-fg);"
+            >
+              Ventilation
+            </span>
+            <div class="flex gap-1.5 overflow-x-auto">
+              {#each fanSpeeds as sp (sp.id)}
+                {@const active = unit.fanSpeed === sp.id}
+                <button
+                  type="button"
+                  onclick={() => tapFanSpeed(unit.id, sp.id)}
+                  disabled={!unit.onOff || !unit.online || unit.operationMode === 'off'}
+                  class="seg-btn"
+                  class:seg-active={active}
+                  style="--seg-color: var(--color-primary); min-width: 36px;"
+                  aria-pressed={active}
+                >
+                  {sp.label}
+                </button>
+              {/each}
+            </div>
           </div>
 
-          <!-- Footer stats -->
-          <div class="flex items-center justify-between text-[11px]" style="color: var(--color-muted-fg);">
-            <span>Ventilation : {unit.fanSpeed}</span>
-            <span class="tabular-nums">
-              {unit.mode === 'off' ? '— W' : `${unit.powerW} W`}
-            </span>
+          <!-- Orientation : H + V -->
+          <div class="grid grid-cols-2 gap-3">
+            <div class="flex flex-col gap-1.5">
+              <span
+                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+                style="color: var(--color-muted-fg);"
+              >
+                Horizontale
+              </span>
+              <div class="flex gap-1.5">
+                {#each [{ id: 'off', label: 'Fixe' }, { id: 'swing', label: 'Swing' }] as sw (sw.id)}
+                  {@const active = unit.swingHorizontal === sw.id}
+                  <button
+                    type="button"
+                    onclick={() => tapSwingH(unit.id, sw.id as SwingMode)}
+                    disabled={!unit.onOff || !unit.online || unit.operationMode === 'off'}
+                    class="seg-btn flex-1"
+                    class:seg-active={active}
+                    style="--seg-color: var(--color-primary);"
+                    aria-pressed={active}
+                  >
+                    {sw.label}
+                  </button>
+                {/each}
+              </div>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <span
+                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+                style="color: var(--color-muted-fg);"
+              >
+                Verticale
+              </span>
+              <div class="flex gap-1.5">
+                {#each [{ id: 'off', label: 'Fixe' }, { id: 'swing', label: 'Swing' }] as sw (sw.id)}
+                  {@const active = unit.swingVertical === sw.id}
+                  <button
+                    type="button"
+                    onclick={() => tapSwingV(unit.id, sw.id as SwingMode)}
+                    disabled={!unit.onOff || !unit.online || unit.operationMode === 'off'}
+                    class="seg-btn flex-1"
+                    class:seg-active={active}
+                    style="--seg-color: var(--color-primary);"
+                    aria-pressed={active}
+                  >
+                    {sw.label}
+                  </button>
+                {/each}
+              </div>
+            </div>
           </div>
         </article>
       {/each}
@@ -544,3 +708,114 @@
     </article>
   </section>
 </div>
+
+<style>
+  /* ─── Daikin card : glow néon quand allumée (idem switches ON) ─── */
+  .daikin-card {
+    transition:
+      border-color var(--duration-normal) var(--ease-default),
+      box-shadow var(--duration-normal) var(--ease-default);
+  }
+  .daikin-on {
+    border-color: var(--neon);
+    box-shadow:
+      0 0 12px oklch(0.546 0.215 262 / 0.40),
+      0 0 26px oklch(0.546 0.215 262 / 0.18);
+  }
+
+  /* ─── Boutons segmentés (mode / fan / swing) ─── */
+  .seg-btn {
+    padding: 0.45rem 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--color-muted-fg);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: all var(--duration-fast) var(--ease-default);
+    white-space: nowrap;
+  }
+  .seg-btn:hover:not(:disabled) {
+    border-color: var(--color-border-strong);
+    color: var(--color-fg);
+  }
+  .seg-btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .seg-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+  .seg-active {
+    border-color: var(--seg-color, var(--color-primary));
+    background: color-mix(in oklch, var(--seg-color, var(--color-primary)) 14%, transparent);
+    color: var(--seg-color, var(--color-primary));
+  }
+
+  /* ─── Boutons +/- de la consigne ─── */
+  .target-btn {
+    display: inline-flex;
+    width: 32px;
+    height: 32px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-border);
+    border-radius: 9999px;
+    background: var(--color-card);
+    color: var(--color-muted-fg);
+    font-size: 18px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-default);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .target-btn:hover {
+    border-color: var(--color-border-strong);
+    color: var(--color-fg);
+  }
+  .target-btn:active {
+    transform: scale(0.94);
+  }
+
+  /* ─── Toggle (cohérent SwitchTile) ─── */
+  .toggle-track {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    border-radius: 9999px;
+    background: var(--color-muted);
+    border: 1px solid var(--color-border);
+    cursor: pointer;
+    padding: 0;
+    transition:
+      background-color var(--duration-normal) var(--ease-default),
+      border-color var(--duration-normal) var(--ease-default);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .toggle-on {
+    background: var(--color-consumption);
+    border-color: var(--color-consumption);
+  }
+  .toggle-knob {
+    position: absolute;
+    top: 50%;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 1px 3px oklch(0 0 0 / 0.2);
+    transform: translateY(-50%);
+    transition: left var(--duration-normal) var(--ease-spring);
+  }
+  .toggle-on .toggle-knob {
+    left: calc(100% - 21px);
+  }
+  .toggle-track:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+</style>

@@ -1,29 +1,54 @@
 /**
- * Daikin store — climatisation Onecta cloud (2 unités : Salon + SdB).
+ * Daikin store — climatisation Onecta cloud.
  *
  * Modes :
  *   - 'mock'    : valeurs réalistes
- *   - 'proxy'   : via HA (futur)
- *   - 'direct'  : python-daikin-onecta direct (futur)
+ *   - 'proxy'   : via HA (futur, sera supprimé)
+ *   - 'direct'  : python-daikin-onecta sur RPi4 (cible — OAuth Daikin
+ *                 + polling périodique, exposé via Caddy comme anker-bridge)
+ *
+ * Périmètre Domo (décisions Laurent 2026-05-28) :
+ *   on garde : operationMode (heating/cooling/off), onOff, outdoor
+ *              temperature, consigne par mode, fan speed (auto/quiet/
+ *              level1..5), swing horizontal/vertical, statut connexion.
+ *   ailleurs : conso → /energie ; ambiante + humidité → thermo Zigbee
+ *              de la pièce (pas l'unité Daikin).
  */
 
-export type DaikinMode = 'auto' | 'heat' | 'cool' | 'fan' | 'off';
-export type FanSpeed = 'auto' | 'low' | 'mid' | 'high';
+export type DaikinOperationMode = 'heating' | 'cooling' | 'off';
+export type FanSpeed = 'auto' | 'quiet' | 'level1' | 'level2' | 'level3' | 'level4' | 'level5';
+export type SwingMode = 'off' | 'swing';
 
 export type DaikinUnit = {
   id: string;
   name: string;
   zone: string;
-  /** Température ambiante mesurée (°C) */
-  ambient: number;
-  /** Consigne (°C) */
-  target: number;
-  mode: DaikinMode;
-  fanSpeed: FanSpeed;
-  /** Puissance instantanée estimée (W) */
-  powerW: number;
+  /** Connexion à l'unité (cloud Onecta accessible). */
   online: boolean;
+  /** Alimentation. Indépendant du operationMode. */
+  onOff: boolean;
+  /** Mode opérationnel. */
+  operationMode: DaikinOperationMode;
+  /** Température extérieure mesurée par l'unité ext (°C). */
+  outdoorTempC: number;
+  /** Consigne en mode chaud (°C). */
+  targetHeating: number;
+  /** Consigne en mode froid (°C). */
+  targetCooling: number;
+  /** Vitesse ventilation. */
+  fanSpeed: FanSpeed;
+  /** Oscillation horizontale. */
+  swingHorizontal: SwingMode;
+  /** Oscillation verticale. */
+  swingVertical: SwingMode;
 };
+
+const TARGET_MIN = 16;
+const TARGET_MAX = 30;
+
+function clampTarget(v: number): number {
+  return Math.max(TARGET_MIN, Math.min(TARGET_MAX, Math.round(v * 2) / 2));
+}
 
 class DaikinState {
   mode = $state<'mock' | 'proxy' | 'direct'>('mock');
@@ -35,47 +60,59 @@ class DaikinState {
       id: 'salon',
       name: 'Daikin Salon',
       zone: 'Séjour',
-      ambient: 21.5,
-      target: 22,
-      mode: 'heat',
+      online: true,
+      onOff: true,
+      operationMode: 'heating',
+      outdoorTempC: 14.5,
+      targetHeating: 22,
+      targetCooling: 24,
       fanSpeed: 'auto',
-      powerW: 850,
-      online: true
+      swingHorizontal: 'off',
+      swingVertical: 'off'
     },
     {
       id: 'sdb',
       name: 'Daikin SdB',
       zone: 'Salle de bain',
-      ambient: 19.8,
-      target: 21,
-      mode: 'heat',
-      fanSpeed: 'low',
-      powerW: 450,
-      online: true
+      online: true,
+      onOff: false,
+      operationMode: 'heating',
+      outdoorTempC: 14.5,
+      targetHeating: 21,
+      targetCooling: 25,
+      fanSpeed: 'auto',
+      swingHorizontal: 'off',
+      swingVertical: 'off'
     }
   ]);
 
-  /** Puissance totale Daikin (somme des unités ON). */
-  totalPowerW = $derived(
-    this.units.reduce((s, u) => s + (u.mode === 'off' ? 0 : u.powerW), 0)
-  );
-
-  setTarget(unitId: string, target: number) {
-    const u = this.units.find((x) => x.id === unitId);
-    if (u) u.target = Math.max(16, Math.min(30, target));
+  private mutate(unitId: string, patch: Partial<DaikinUnit>) {
+    const idx = this.units.findIndex((u) => u.id === unitId);
+    if (idx < 0) return;
+    this.units[idx] = { ...this.units[idx], ...patch };
+    this.lastUpdate = new Date();
   }
 
-  setMode(unitId: string, mode: DaikinMode) {
-    const u = this.units.find((x) => x.id === unitId);
-    if (u) {
-      u.mode = mode;
-      u.powerW = mode === 'off' ? 0 : u.zone === 'Séjour' ? 850 : 450;
-    }
+  setOnOff(unitId: string, onOff: boolean) {
+    this.mutate(unitId, { onOff });
   }
-
+  setOperationMode(unitId: string, operationMode: DaikinOperationMode) {
+    this.mutate(unitId, { operationMode });
+  }
+  setTargetHeating(unitId: string, v: number) {
+    this.mutate(unitId, { targetHeating: clampTarget(v) });
+  }
+  setTargetCooling(unitId: string, v: number) {
+    this.mutate(unitId, { targetCooling: clampTarget(v) });
+  }
   setFanSpeed(unitId: string, fanSpeed: FanSpeed) {
-    const u = this.units.find((x) => x.id === unitId);
-    if (u) u.fanSpeed = fanSpeed;
+    this.mutate(unitId, { fanSpeed });
+  }
+  setSwingHorizontal(unitId: string, swingHorizontal: SwingMode) {
+    this.mutate(unitId, { swingHorizontal });
+  }
+  setSwingVertical(unitId: string, swingVertical: SwingMode) {
+    this.mutate(unitId, { swingVertical });
   }
 }
 
