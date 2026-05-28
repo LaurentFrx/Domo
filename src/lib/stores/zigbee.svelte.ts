@@ -73,8 +73,37 @@ type BridgeDevice = {
   definition?: { description?: string } | null;
 };
 
+// ─── Cache localStorage : restaure les derniers états connus avant
+// que MQTT n'ait fini de reconnecter (évite le « toggle qui flashe OFF »
+// pendant 1-2s au reload). Le cache est écrasé dès qu'un payload MQTT
+// retained arrive.
+const CACHE_KEY = 'domo.zigbee.cache.v1';
+const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h
+
+function loadCachedDevices(): ZigbeeDevice[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { ts: number; devices: ZigbeeDevice[] };
+    if (Date.now() - parsed.ts > CACHE_MAX_AGE_MS) return [];
+    return parsed.devices ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCachedDevices(devices: ZigbeeDevice[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), devices }));
+  } catch {
+    // localStorage indisponible (mode privé, quota…) : on accepte la perte.
+  }
+}
+
 class ZigbeeState {
-  devices = $state<ZigbeeDevice[]>([]);
+  devices = $state<ZigbeeDevice[]>(loadCachedDevices());
   connectionStatus = $state<'connected' | 'connecting' | 'disconnected' | 'unconfigured'>(
     'disconnected'
   );
@@ -187,6 +216,7 @@ class ZigbeeState {
     }
     next.sort((a, b) => a.friendlyName.localeCompare(b.friendlyName, 'fr'));
     this.devices = next;
+    saveCachedDevices(next);
   }
 
   private handleDeviceState(friendlyName: string, rawPayload: string) {
@@ -203,6 +233,7 @@ class ZigbeeState {
       state: { ...this.devices[idx].state, ...parsed },
       available: parsed.available !== false
     };
+    saveCachedDevices(this.devices);
   }
 
   // ─── Commandes ───
