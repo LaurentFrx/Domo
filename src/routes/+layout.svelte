@@ -6,8 +6,16 @@
   import { startDemoTicker, stopDemoTicker } from '$stores/demo-ticker.svelte';
   import { anker } from '$stores/anker.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
+  import { preferences } from '$stores/preferences.svelte';
 
   let { children } = $props();
+
+  // ─── Hydrater les préférences (theme, animations…) global, dès le mount ─
+  // Sans ça, un reload sur n'importe quelle page autre que /reglages
+  // perd le theme dark.
+  $effect(() => {
+    preferences.hydrate();
+  });
 
   // ─── Démo ticker (mock) — actif tant qu'on n'a pas de vraie source ─────
   $effect(() => {
