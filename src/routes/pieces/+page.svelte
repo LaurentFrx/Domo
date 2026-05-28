@@ -2,6 +2,10 @@
   import { onMount, onDestroy } from 'svelte';
   import RoomSection from '$components/tiles/RoomSection.svelte';
   import ShutterTile from '$components/tiles/ShutterTile.svelte';
+  import SwitchTile from '$components/tiles/SwitchTile.svelte';
+  import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
+  import ZigbeeSensorTile from '$components/tiles/ZigbeeSensorTile.svelte';
+  import ZigbeeGenericTile from '$components/tiles/ZigbeeGenericTile.svelte';
   import { matter } from '$stores/matter.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
   import { haptic } from '$utils/haptic';
@@ -60,6 +64,16 @@
     if (status === 'unconfigured') return 'var(--color-muted-fg)';
     return 'var(--color-warning)';
   }
+
+  // ─── sm+ : flat. Tous les non-volets à plat, sans wrapper de pièce. ───
+  const flatZigbeeSensors = $derived(zigbee.devices.filter((d) => d.category === 'sensor'));
+  const flatZigbeePlugs = $derived(zigbee.devices.filter((d) => d.category === 'plug'));
+  const flatZigbeeOthers = $derived(
+    zigbee.devices.filter((d) => !['sensor', 'plug'].includes(d.category))
+  );
+  const hasFlatDevices = $derived(
+    matter.switches.length + zigbee.devices.length > 0
+  );
 </script>
 
 <svelte:head>
@@ -200,8 +214,8 @@
       </section>
     {/if}
 
-    <!-- ═══ Grille pièces — volets cachés en sm+ (déjà dans la strip). 2 cols max pour éviter les sections fantômes à 1 device. ═══ -->
-    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <!-- ═══ Mobile : grouping par pièce (volets inclus) ═══ -->
+    <div class="grid grid-cols-1 gap-3 sm:hidden">
       {#each mergedRooms as r (r.room)}
         <RoomSection
           room={r.room}
@@ -211,6 +225,24 @@
         />
       {/each}
     </div>
+
+    <!-- ═══ sm+ (iPad/PC) : grille FLAT — tous les non-volets sans wrapper de pièce ═══ -->
+    {#if hasFlatDevices}
+      <div class="hidden grid-cols-2 gap-3 sm:grid lg:grid-cols-3 xl:grid-cols-4">
+        {#each matter.switches as sw (sw.nodeId)}
+          <SwitchTile {sw} />
+        {/each}
+        {#each flatZigbeePlugs as device (device.ieee)}
+          <ZigbeePlugTile {device} />
+        {/each}
+        {#each flatZigbeeOthers as device (device.ieee)}
+          <ZigbeeGenericTile {device} />
+        {/each}
+        {#each flatZigbeeSensors as device (device.ieee)}
+          <ZigbeeSensorTile {device} />
+        {/each}
+      </div>
+    {/if}
   {/if}
 </div>
 
