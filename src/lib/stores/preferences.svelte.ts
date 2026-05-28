@@ -9,19 +9,24 @@ import { startDemoTicker, stopDemoTicker } from './demo-ticker.svelte';
 const STORAGE_KEY = 'domo.preferences.v1';
 
 type PowerUnit = 'kW' | 'W';
+type Theme = 'light' | 'dark';
 
 type Persisted = {
   pvThreshold: number;
   hcMinTemp: number;
   powerUnit: PowerUnit;
   animationsEnabled: boolean;
+  theme: Theme;
+  autoTheme: boolean;
 };
 
 const DEFAULTS: Persisted = {
   pvThreshold: 1500,
   hcMinTemp: 45,
   powerUnit: 'kW',
-  animationsEnabled: true
+  animationsEnabled: true,
+  theme: 'light',
+  autoTheme: false
 };
 
 function load(): Persisted {
@@ -41,6 +46,8 @@ class PreferencesState {
   hcMinTemp = $state(DEFAULTS.hcMinTemp);
   powerUnit = $state<PowerUnit>(DEFAULTS.powerUnit);
   animationsEnabled = $state(DEFAULTS.animationsEnabled);
+  theme = $state<Theme>(DEFAULTS.theme);
+  autoTheme = $state(DEFAULTS.autoTheme);
 
   hydrate() {
     if (typeof window === 'undefined') return;
@@ -49,6 +56,9 @@ class PreferencesState {
     this.hcMinTemp = p.hcMinTemp;
     this.powerUnit = p.powerUnit;
     this.animationsEnabled = p.animationsEnabled;
+    this.theme = p.theme;
+    this.autoTheme = p.autoTheme;
+    this.applyTheme();
   }
 
   persist() {
@@ -57,13 +67,30 @@ class PreferencesState {
       pvThreshold: this.pvThreshold,
       hcMinTemp: this.hcMinTemp,
       powerUnit: this.powerUnit,
-      animationsEnabled: this.animationsEnabled
+      animationsEnabled: this.animationsEnabled,
+      theme: this.theme,
+      autoTheme: this.autoTheme
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(snap));
     } catch {
       // localStorage indisponible (mode privé) : on accepte la perte.
     }
+  }
+
+  private applyTheme() {
+    if (typeof document === 'undefined') return;
+    const effective = this.autoTheme ? this.timeBasedTheme() : this.theme;
+    if (effective === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  }
+
+  private timeBasedTheme(): Theme {
+    const h = new Date().getHours();
+    return h >= 7 && h < 19 ? 'light' : 'dark';
   }
 
   setPvThreshold(v: number) {
@@ -86,6 +113,17 @@ class PreferencesState {
     } else {
       stopDemoTicker();
     }
+  }
+  setTheme(theme: Theme) {
+    this.theme = theme;
+    this.autoTheme = false;
+    this.persist();
+    this.applyTheme();
+  }
+  setAutoTheme(enabled: boolean) {
+    this.autoTheme = enabled;
+    this.persist();
+    this.applyTheme();
   }
 }
 

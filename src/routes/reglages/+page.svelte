@@ -1,26 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { enhance } from '$app/forms';
   import { matter } from '$stores/matter.svelte';
+  import { anker } from '$stores/anker.svelte';
+  import { shelly } from '$stores/shelly.svelte';
+  import { daikin } from '$stores/daikin.svelte';
+  import { solcast } from '$stores/solcast.svelte';
+  import { weather } from '$stores/weather.svelte';
+  import { zigbee } from '$stores/zigbee.svelte';
+  import { cumulus } from '$stores/cumulus.svelte';
   import { preferences } from '$stores/preferences.svelte';
 
-  const APP_VERSION = '0.1.0';
-
-  const matterStatusLabel = $derived(
-    matter.connectionStatus === 'connected'
-      ? 'Connecté'
-      : matter.connectionStatus === 'connecting'
-        ? 'Connexion…'
-        : 'Déconnecté'
-  );
-  const matterStatusColor = $derived(
-    matter.connectionStatus === 'connected'
-      ? 'var(--accent-500)'
-      : matter.connectionStatus === 'connecting'
-        ? 'var(--warning)'
-        : 'var(--error)'
-  );
-  const matterDeviceCount = $derived(matter.shutters.length + matter.switches.length);
+  const APP_VERSION = '0.2.0';
 
   onMount(() => {
     preferences.hydrate();
@@ -28,323 +18,495 @@
       matter.connect();
     }
   });
+
+  // ─── Section 1 : Connexions ────────────────────────────────────────
+  type ConnEntry = {
+    name: string;
+    connected: boolean;
+    mode: 'mock' | 'proxy' | 'direct' | 'connected' | 'connecting' | 'disconnected' | 'unconfigured';
+    lastUpdate: Date | null;
+    devices?: number;
+  };
+
+  const connections = $derived<ConnEntry[]>([
+    {
+      name: 'Anker Solix',
+      connected: anker.connected,
+      mode: anker.status === 'connected' ? 'direct' : 'mock',
+      lastUpdate: anker.lastUpdate,
+      devices: anker.batteries.length
+    },
+    {
+      name: 'Shelly EM / 1 Pro',
+      connected: shelly.connected,
+      mode: shelly.mode,
+      lastUpdate: shelly.lastUpdate
+    },
+    {
+      name: 'Matter',
+      connected: matter.connectionStatus === 'connected',
+      mode: matter.connectionStatus,
+      lastUpdate: null,
+      devices: matter.shutters.length + matter.switches.length
+    },
+    {
+      name: 'Daikin Onecta',
+      connected: daikin.connected,
+      mode: daikin.mode,
+      lastUpdate: daikin.lastUpdate,
+      devices: daikin.units.length
+    },
+    {
+      name: 'Solcast',
+      connected: solcast.connected,
+      mode: solcast.mode,
+      lastUpdate: solcast.lastUpdate
+    },
+    {
+      name: 'Open-Meteo',
+      connected: weather.connected,
+      mode: weather.mode,
+      lastUpdate: weather.lastUpdate
+    },
+    {
+      name: 'Zigbee2MQTT',
+      connected: zigbee.connectionStatus === 'connected',
+      mode: zigbee.connectionStatus,
+      lastUpdate: null,
+      devices: zigbee.devices.length
+    }
+  ]);
+
+  function fmtLastUpdate(d: Date | null): string {
+    if (!d) return '—';
+    const sec = Math.round((Date.now() - d.getTime()) / 1000);
+    if (sec < 60) return `il y a ${sec} s`;
+    const min = Math.round(sec / 60);
+    if (min < 60) return `il y a ${min} min`;
+    return `il y a ${Math.round(min / 60)} h`;
+  }
+
+  // ─── Section 4 : Tarifs ───────────────────────────────────────────
+  let priceHc = $state(0.1812);
+  let priceHp = $state(0.2318);
+  let priceExport = $state(0.04);
+  let subscription = $state(13.5);
 </script>
 
 <svelte:head>
   <title>Réglages — Domo</title>
 </svelte:head>
 
-<div class="stagger-enter flex flex-col gap-3 md:gap-4">
-  <header class="flex flex-col gap-1 pt-4 pb-2">
-    <h1 class="text-2xl font-medium text-white">Réglages</h1>
-  </header>
+<div class="flex flex-col gap-6 py-4">
+  <h1 class="text-2xl font-semibold tracking-tight">Réglages</h1>
 
-  <div class="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
-    <!-- ─── Système ─────────────────────────────────────────────── -->
-    <section class="flex flex-col gap-2">
-      <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]"
-        >SYSTÈME</span
-      >
-      <div
-        class="flex flex-col divide-y divide-white/[0.06] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)] md:rounded-2xl"
-      >
-        <div class="flex items-center justify-between px-3 py-2.5 md:px-4 md:py-3">
-          <span class="text-sm text-white">Matter</span>
-          <span class="flex items-center gap-1.5 text-xs" style:color={matterStatusColor}>
-            <span class="h-1.5 w-1.5 rounded-full" style:background-color={matterStatusColor}
-            ></span>
-            {matterStatusLabel}
-            {#if matter.connectionStatus === 'connected'}
-              <span class="text-[10px] text-[var(--text-tertiary)]"
-                >· {matterDeviceCount} appareil{matterDeviceCount > 1 ? 's' : ''}</span
-              >
-            {/if}
-          </span>
-        </div>
-        <div class="flex items-center justify-between px-3 py-2.5 md:px-4 md:py-3">
-          <span class="text-sm text-white">Version</span>
-          <span class="text-xs text-[var(--text-secondary)] tabular-nums">{APP_VERSION}</span>
-        </div>
-        <div class="flex items-center justify-between px-3 py-2.5 md:px-4 md:py-3">
-          <span class="text-sm text-white">VPS</span>
-          <span class="flex items-center gap-1.5 text-xs text-[var(--accent-500)]">
-            <span class="h-1.5 w-1.5 rounded-full bg-[var(--accent-500)]"></span>
-            En ligne
-          </span>
-        </div>
-      </div>
-    </section>
-
-    <!-- ─── Cumulus ─────────────────────────────────────────────── -->
-    <section class="flex flex-col gap-2">
-      <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]"
-        >CUMULUS</span
-      >
-      <div
-        class="flex flex-col gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-card)] md:rounded-2xl md:p-4"
-      >
-        <!-- Seuil PV -->
-        <div class="flex flex-col gap-1.5">
-          <div class="flex items-baseline justify-between">
-            <label for="pv-threshold" class="text-sm text-white">Seuil surplus PV</label>
-            <span class="text-xs text-[var(--accent-500)] tabular-nums">
-              {preferences.pvThreshold} W
-            </span>
-          </div>
-          <input
-            id="pv-threshold"
-            class="yeldra-range"
-            type="range"
-            min="500"
-            max="3000"
-            step="100"
-            value={preferences.pvThreshold}
-            oninput={(e) =>
-              preferences.setPvThreshold(+(e.currentTarget as HTMLInputElement).value)}
-          />
-          <div class="flex justify-between text-[9px] text-[var(--text-tertiary)]">
-            <span>500 W</span>
-            <span>3000 W</span>
-          </div>
-        </div>
-
-        <div class="h-px w-full bg-white/[0.06]"></div>
-
-        <!-- T° min HC -->
-        <div class="flex flex-col gap-1.5">
-          <div class="flex items-baseline justify-between">
-            <label for="hc-min-temp" class="text-sm text-white">Température mini HC</label>
-            <span class="text-xs text-[var(--primary-400)] tabular-nums">
-              {preferences.hcMinTemp} °C
-            </span>
-          </div>
-          <input
-            id="hc-min-temp"
-            class="yeldra-range"
-            type="range"
-            min="35"
-            max="55"
-            step="1"
-            value={preferences.hcMinTemp}
-            oninput={(e) => preferences.setHcMinTemp(+(e.currentTarget as HTMLInputElement).value)}
-          />
-          <div class="flex justify-between text-[9px] text-[var(--text-tertiary)]">
-            <span>35 °C</span>
-            <span>55 °C</span>
-          </div>
-        </div>
-
-        <div class="h-px w-full bg-white/[0.06]"></div>
-
-        <!-- Anti-légio : info statique -->
-        <div class="flex items-center justify-between">
-          <div class="flex flex-col">
-            <span class="text-sm text-white">Anti-légionellose</span>
-            <span class="text-[10px] text-[var(--text-tertiary)]">Cycle non modifiable</span>
-          </div>
-          <span class="text-xs text-[var(--warning)]">60 °C / 7 jours</span>
-        </div>
-      </div>
-    </section>
-
-    <!-- ─── Affichage ───────────────────────────────────────────── -->
-    <section class="flex flex-col gap-2">
-      <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]"
-        >AFFICHAGE</span
-      >
-      <div
-        class="flex flex-col divide-y divide-white/[0.06] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)] md:rounded-2xl"
-      >
-        <!-- Unités -->
-        <div class="flex items-center justify-between px-3 py-2.5 md:px-4 md:py-3">
-          <span class="text-sm text-white">Unité de puissance</span>
-          <div
-            class="inline-flex overflow-hidden rounded-full border border-[var(--border-subtle)] text-[10px] font-medium"
-          >
-            <button
-              type="button"
-              class="unit-btn"
-              class:unit-active={preferences.powerUnit === 'kW'}
-              onclick={() => preferences.setPowerUnit('kW')}
-            >
-              kW
-            </button>
-            <button
-              type="button"
-              class="unit-btn"
-              class:unit-active={preferences.powerUnit === 'W'}
-              onclick={() => preferences.setPowerUnit('W')}
-            >
-              W
-            </button>
-          </div>
-        </div>
-
-        <!-- Animations -->
-        <div class="flex items-center justify-between px-3 py-2.5 md:px-4 md:py-3">
-          <div class="flex flex-col">
-            <span class="text-sm text-white">Animations</span>
-            <span class="text-[10px] text-[var(--text-tertiary)]"
-              >Démo ticker actif sur les valeurs</span
-            >
-          </div>
-          <button
-            type="button"
-            class="settings-toggle"
-            class:on={preferences.animationsEnabled}
-            role="switch"
-            aria-checked={preferences.animationsEnabled}
-            aria-label="Basculer les animations"
-            onclick={() => preferences.setAnimationsEnabled(!preferences.animationsEnabled)}
-          >
-            <span class="settings-knob"></span>
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <!-- ─── Compte ──────────────────────────────────────────────── -->
-    <section class="flex flex-col gap-2">
-      <span class="text-[10px] font-medium tracking-wider text-[var(--text-secondary)]">COMPTE</span
-      >
-      <div
-        class="flex flex-col divide-y divide-white/[0.06] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)] md:rounded-2xl"
-      >
-        <a
-          href="https://github.com/LaurentFrx/Domo"
-          target="_blank"
-          rel="noopener"
-          class="flex items-center justify-between px-3 py-2.5 transition-colors hover:bg-[var(--surface-card-hover)] md:px-4 md:py-3"
+  <!-- ═══ Section 1 : Connexions ═══ -->
+  <section class="flex flex-col gap-3">
+    <h2
+      class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+      style="color: var(--color-muted-fg);"
+    >
+      Connexions
+    </h2>
+    <div
+      class="overflow-hidden rounded-[var(--radius-xl)] border"
+      style="background: var(--color-card); border-color: var(--color-border);"
+    >
+      {#each connections as conn, i (conn.name)}
+        <div
+          class="flex items-center gap-3 px-4 py-3"
+          style="border-top: {i === 0 ? '0' : '1px solid var(--color-border)'};"
         >
-          <div class="flex flex-col">
-            <span class="text-sm text-white">À propos</span>
-            <span class="text-[10px] text-[var(--text-tertiary)]">
-              Domo {APP_VERSION} · Laurent Feroux
+          <span
+            class="h-2 w-2 shrink-0 rounded-full"
+            style:background={conn.connected ? 'var(--color-battery)' : 'var(--color-muted-fg)'}
+          ></span>
+          <div class="flex flex-1 flex-col gap-0.5 min-w-0">
+            <span class="text-[13px] font-semibold truncate" style="color: var(--color-fg);">
+              {conn.name}
+            </span>
+            <span class="text-[11px]" style="color: var(--color-muted-fg);">
+              {conn.mode}{conn.devices !== undefined ? ` · ${conn.devices} devices` : ''}
             </span>
           </div>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            class="text-[var(--text-secondary)]"
-          >
-            <path d="M7 17 L17 7 M9 7 H17 V15" />
-          </svg>
-        </a>
+          <span class="shrink-0 text-[11px] tabular-nums" style="color: var(--color-muted-fg);">
+            {fmtLastUpdate(conn.lastUpdate)}
+          </span>
+        </div>
+      {/each}
+    </div>
+  </section>
 
-        <div class="flex items-center justify-between px-3 py-2.5 md:px-4 md:py-3">
-          <div class="flex flex-col">
-            <span class="text-sm text-white">Session</span>
-            <span class="text-[10px] text-[var(--text-tertiary)]"
-              >Fermer la session sur cet appareil</span
-            >
-          </div>
-          <form method="POST" action="/api/auth/logout" use:enhance>
+  <!-- ═══ Section 2 : Préférences ═══ -->
+  <section class="flex flex-col gap-3">
+    <h2
+      class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+      style="color: var(--color-muted-fg);"
+    >
+      Préférences
+    </h2>
+    <div
+      class="flex flex-col divide-y rounded-[var(--radius-xl)] border"
+      style="background: var(--color-card); border-color: var(--color-border); --tw-divide-opacity: 1;"
+    >
+      <!-- Theme toggle -->
+      <div class="flex items-center justify-between gap-3 px-4 py-3" style="border-bottom: 1px solid var(--color-border);">
+        <div class="flex flex-col gap-0.5">
+          <span class="text-[13px] font-semibold">Apparence</span>
+          <span class="text-[11px]" style="color: var(--color-muted-fg);">
+            Light = clair, Dark = sombre
+          </span>
+        </div>
+        <div class="flex gap-1.5">
+          {#each ['light', 'dark'] as t (t)}
+            {@const active = preferences.theme === t && !preferences.autoTheme}
             <button
-              type="submit"
-              class="rounded-full border border-[var(--error)] px-3 py-1.5 text-[11px] font-medium text-[var(--error)] transition-colors hover:bg-[var(--error)] hover:text-white"
+              type="button"
+              onclick={() => preferences.setTheme(t as 'light' | 'dark')}
+              class="rounded-full border px-3 py-1 text-[12px] font-medium capitalize transition-colors"
+              style="
+                border-color: {active ? 'var(--color-primary)' : 'var(--color-border)'};
+                background: {active ? 'var(--color-primary-muted)' : 'transparent'};
+                color: {active ? 'var(--color-primary)' : 'var(--color-muted-fg)'};
+              "
             >
-              Déconnexion
+              {t}
             </button>
-          </form>
+          {/each}
         </div>
       </div>
-    </section>
-  </div>
+
+      <!-- Auto theme -->
+      <div class="flex items-center justify-between gap-3 px-4 py-3" style="border-bottom: 1px solid var(--color-border);">
+        <div class="flex flex-col gap-0.5">
+          <span class="text-[13px] font-semibold">Apparence auto</span>
+          <span class="text-[11px]" style="color: var(--color-muted-fg);">
+            Light 7h–19h, Dark 19h–7h
+          </span>
+        </div>
+        <label class="toggle-pill">
+          <input
+            type="checkbox"
+            checked={preferences.autoTheme}
+            onchange={(e) => preferences.setAutoTheme((e.target as HTMLInputElement).checked)}
+          />
+          <span class="toggle-pill-knob"></span>
+        </label>
+      </div>
+
+      <!-- Power unit -->
+      <div class="flex items-center justify-between gap-3 px-4 py-3" style="border-bottom: 1px solid var(--color-border);">
+        <div class="flex flex-col gap-0.5">
+          <span class="text-[13px] font-semibold">Unité de puissance</span>
+          <span class="text-[11px]" style="color: var(--color-muted-fg);">
+            Affichage par défaut
+          </span>
+        </div>
+        <div class="flex gap-1.5">
+          {#each ['W', 'kW'] as u (u)}
+            {@const active = preferences.powerUnit === u}
+            <button
+              type="button"
+              onclick={() => preferences.setPowerUnit(u as 'W' | 'kW')}
+              class="rounded-full border px-3 py-1 text-[12px] font-medium transition-colors"
+              style="
+                border-color: {active ? 'var(--color-primary)' : 'var(--color-border)'};
+                background: {active ? 'var(--color-primary-muted)' : 'transparent'};
+                color: {active ? 'var(--color-primary)' : 'var(--color-muted-fg)'};
+              "
+            >
+              {u}
+            </button>
+          {/each}
+        </div>
+      </div>
+
+      <!-- Animations -->
+      <div class="flex items-center justify-between gap-3 px-4 py-3">
+        <div class="flex flex-col gap-0.5">
+          <span class="text-[13px] font-semibold">Animations</span>
+          <span class="text-[11px]" style="color: var(--color-muted-fg);">
+            Désactiver pour économiser la batterie
+          </span>
+        </div>
+        <label class="toggle-pill">
+          <input
+            type="checkbox"
+            checked={preferences.animationsEnabled}
+            onchange={(e) => preferences.setAnimationsEnabled((e.target as HTMLInputElement).checked)}
+          />
+          <span class="toggle-pill-knob"></span>
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Section 3 : Configuration cumulus ═══ -->
+  <section class="flex flex-col gap-3">
+    <h2
+      class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+      style="color: var(--color-muted-fg);"
+    >
+      Cumulus
+    </h2>
+    <div
+      class="grid grid-cols-2 gap-3 sm:grid-cols-3"
+    >
+      <div
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          Seuil surplus ON
+        </span>
+        <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
+          {cumulus.surplusOnThreshold} W
+        </span>
+      </div>
+      <div
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          Seuil surplus OFF
+        </span>
+        <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
+          {cumulus.surplusOffThreshold} W
+        </span>
+      </div>
+      <div
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          Durée ON min.
+        </span>
+        <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
+          {Math.round(cumulus.minOnDurationSec / 60)} min
+        </span>
+      </div>
+      <div
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          Anti-cycling
+        </span>
+        <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
+          {Math.round(cumulus.antiCyclingSec / 60)} min
+        </span>
+      </div>
+      <div
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          Cible
+        </span>
+        <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
+          {cumulus.targetTempC}°C
+        </span>
+      </div>
+      <div
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          Max sécurité
+        </span>
+        <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-alert);">
+          {cumulus.maxTempC}°C
+        </span>
+      </div>
+      <div
+        class="col-span-2 flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3 sm:col-span-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          Plage HC
+        </span>
+        <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-hc);">
+          {cumulus.hcStartHour}h – {cumulus.hcEndHour}h
+        </span>
+        <span class="text-[11px]" style="color: var(--color-muted-fg);">
+          Anti-légionellose ANSES ≥60°C tous les 7 jours · jamais désactivable
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Section 4 : Tarifs ═══ -->
+  <section class="flex flex-col gap-3">
+    <h2
+      class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+      style="color: var(--color-muted-fg);"
+    >
+      Tarifs EDF
+    </h2>
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          HC (€/kWh)
+        </span>
+        <input
+          type="number"
+          step="0.0001"
+          bind:value={priceHc}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-hc);"
+        />
+      </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          HP (€/kWh)
+        </span>
+        <input
+          type="number"
+          step="0.0001"
+          bind:value={priceHp}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-hp);"
+        />
+      </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          Revente OA
+        </span>
+        <input
+          type="number"
+          step="0.0001"
+          bind:value={priceExport}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-solar);"
+        />
+      </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          Abonnement
+        </span>
+        <input
+          type="number"
+          step="0.01"
+          bind:value={subscription}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-fg);"
+        />
+      </label>
+    </div>
+  </section>
+
+  <!-- ═══ Section 5 : Infos système ═══ -->
+  <section class="flex flex-col gap-3">
+    <h2
+      class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+      style="color: var(--color-muted-fg);"
+    >
+      Système
+    </h2>
+    <div
+      class="grid grid-cols-2 gap-3 sm:grid-cols-4 rounded-[var(--radius-xl)] border p-4"
+      style="background: var(--color-card); border-color: var(--color-border);"
+    >
+      <div class="flex flex-col gap-1">
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          Version
+        </span>
+        <span class="text-[16px] font-semibold tabular-nums" style="color: var(--color-fg);">
+          {APP_VERSION}
+        </span>
+      </div>
+      <div class="flex flex-col gap-1">
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          Hôte
+        </span>
+        <span class="text-[16px] font-semibold" style="color: var(--color-fg);">
+          tazieff-dev
+        </span>
+      </div>
+      <div class="flex flex-col gap-1">
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          Domaine
+        </span>
+        <span class="text-[16px] font-semibold" style="color: var(--color-fg);">
+          domo.feroux.fr
+        </span>
+      </div>
+      <div class="flex flex-col gap-1">
+        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+          Code éditeur
+        </span>
+        <a
+          href="https://code.feroux.fr"
+          target="_blank"
+          rel="noreferrer"
+          class="text-[16px] font-semibold"
+          style="color: var(--color-primary);"
+        >
+          code-server ↗
+        </a>
+      </div>
+    </div>
+  </section>
 </div>
 
 <style>
-  /* ─── Range slider Yeldra ─── */
-  .yeldra-range {
-    width: 100%;
-    height: 4px;
-    appearance: none;
-    background: var(--border-default);
-    border-radius: 9999px;
-    outline: none;
-    cursor: pointer;
-  }
-  .yeldra-range::-webkit-slider-thumb {
-    appearance: none;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #fff, #e8e6f0);
-    box-shadow:
-      0 2px 6px rgba(0, 0, 0, 0.5),
-      0 0 12px rgba(61, 253, 152, 0.4);
-    cursor: pointer;
-    transition: transform var(--motion-fast) var(--easing-default);
-  }
-  .yeldra-range::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #fff, #e8e6f0);
-    box-shadow:
-      0 2px 6px rgba(0, 0, 0, 0.5),
-      0 0 12px rgba(61, 253, 152, 0.4);
-    cursor: pointer;
-    border: none;
-  }
-  .yeldra-range:active::-webkit-slider-thumb {
-    transform: scale(1.1);
-  }
-
-  /* ─── Unit segmented ─── */
-  .unit-btn {
-    padding: 0.25rem 0.625rem;
-    color: var(--text-secondary);
-    background-color: transparent;
-    cursor: pointer;
-    transition:
-      background-color var(--motion-fast),
-      color var(--motion-fast);
-  }
-  .unit-active {
-    background-color: var(--accent-500);
-    color: var(--surface-base);
-  }
-
-  /* ─── Settings toggle (knob 28, track 52×28) ─── */
-  .settings-toggle {
+  .toggle-pill {
     position: relative;
-    width: 52px;
-    height: 28px;
-    border-radius: 9999px;
-    background: rgba(0, 0, 0, 0.4);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.4);
+    display: inline-block;
+    width: 44px;
+    height: 24px;
     cursor: pointer;
-    padding: 0;
-    transition: background-color var(--motion-base) var(--easing-default);
     -webkit-tap-highlight-color: transparent;
   }
-  .settings-toggle.on {
-    background: linear-gradient(135deg, var(--accent-600), var(--accent-500));
-    border-color: rgba(141, 253, 195, 0.4);
-    box-shadow:
-      inset 0 2px 4px rgba(0, 0, 0, 0.2),
-      0 0 12px rgba(61, 253, 152, 0.4);
-  }
-  .settings-knob {
+  .toggle-pill input {
     position: absolute;
-    top: 50%;
-    left: 3px;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #fff, #e8e6f0);
-    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5);
-    transform: translateY(-50%);
-    transition: left var(--motion-base) var(--easing-default);
+    inset: 0;
+    opacity: 0;
+    margin: 0;
+    cursor: pointer;
+    z-index: 1;
   }
-  .settings-toggle.on .settings-knob {
-    left: calc(100% - 25px);
+  .toggle-pill-knob {
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background: var(--color-muted);
+    border: 1px solid var(--color-border);
+    transition: background-color var(--duration-fast) var(--ease-default);
+  }
+  .toggle-pill-knob::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px oklch(0 0 0 / 0.15);
+    transition: transform var(--duration-normal) var(--ease-spring);
+  }
+  .toggle-pill input:checked + .toggle-pill-knob {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+  }
+  .toggle-pill input:checked + .toggle-pill-knob::after {
+    transform: translateX(20px);
+  }
+  .toggle-pill input:focus-visible + .toggle-pill-knob {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
   }
 </style>
