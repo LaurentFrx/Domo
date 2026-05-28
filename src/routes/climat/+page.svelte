@@ -5,6 +5,7 @@
   import type { DaikinMode, DaikinUnit } from '$stores/daikin.svelte';
   import { weather } from '$stores/weather.svelte';
   import { daysUntil } from '$utils/mock-curves';
+  import { haptic } from '$utils/haptic';
   import Sparkline from '$components/ui/Sparkline.svelte';
 
   // ─── Cumulus ───────────────────────────────────────────────────────
@@ -39,10 +40,21 @@
   ];
 
   function decrTarget(u: DaikinUnit) {
+    haptic('light');
     daikin.setTarget(u.id, u.target - 0.5);
   }
   function incrTarget(u: DaikinUnit) {
+    haptic('light');
     daikin.setTarget(u.id, u.target + 0.5);
+  }
+
+  function tapCumulusMode(mode: typeof cumulus.currentMode) {
+    haptic('medium');
+    cumulus.setMode(mode);
+  }
+  function tapDaikinMode(unitId: string, mode: DaikinMode) {
+    haptic('light');
+    daikin.setMode(unitId, mode);
   }
 
   // ─── Confort ───────────────────────────────────────────────────────
@@ -124,7 +136,7 @@
           {@const active = cumulus.currentMode === m.id}
           <button
             type="button"
-            onclick={() => cumulus.setMode(m.id)}
+            onclick={() => tapCumulusMode(m.id)}
             class="flex-1 rounded-full border py-2 text-[11px] font-semibold tracking-[0.04em] transition-colors"
             style="
               border-color: {active ? `var(--color-${m.domain})` : 'var(--color-border)'};
@@ -343,7 +355,7 @@
               {@const active = unit.mode === m.id}
               <button
                 type="button"
-                onclick={() => daikin.setMode(unit.id, m.id)}
+                onclick={() => tapDaikinMode(unit.id, m.id)}
                 class="flex-1 rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors"
                 style="
                   min-width: 56px;

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ZigbeeDevice } from '$stores/zigbee.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
+  import { haptic } from '$utils/haptic';
 
   interface Props {
     device: ZigbeeDevice;
@@ -68,7 +69,10 @@
       role="switch"
       aria-checked={isOn}
       aria-label="Basculer {device.friendlyName}"
-      onclick={() => zigbee.toggle(device.friendlyName)}
+      onclick={() => {
+        haptic('light');
+        zigbee.toggle(device.friendlyName);
+      }}
       disabled={!device.available}
     >
       <span class="plug-knob"></span>

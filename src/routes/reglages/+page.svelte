@@ -10,6 +10,7 @@
   import { cumulus } from '$stores/cumulus.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { settings } from '$stores/settings.svelte';
+  import { haptic } from '$utils/haptic';
 
   const APP_VERSION = '0.2.0';
 
@@ -160,7 +161,7 @@
             {@const active = preferences.theme === t && !preferences.autoTheme}
             <button
               type="button"
-              onclick={() => preferences.setTheme(t as 'light' | 'dark')}
+              onclick={() => { haptic('light'); preferences.setTheme(t as 'light' | 'dark'); }}
               class="rounded-full border px-3 py-1 text-[12px] font-medium capitalize transition-colors"
               style="
                 border-color: {active ? 'var(--color-primary)' : 'var(--color-border)'};
@@ -186,7 +187,7 @@
           <input
             type="checkbox"
             checked={preferences.autoTheme}
-            onchange={(e) => preferences.setAutoTheme((e.target as HTMLInputElement).checked)}
+            onchange={(e) => { haptic('light'); preferences.setAutoTheme((e.target as HTMLInputElement).checked); }}
           />
           <span class="toggle-pill-knob"></span>
         </label>
@@ -205,7 +206,7 @@
             {@const active = preferences.powerUnit === u}
             <button
               type="button"
-              onclick={() => preferences.setPowerUnit(u as 'W' | 'kW')}
+              onclick={() => { haptic('light'); preferences.setPowerUnit(u as 'W' | 'kW'); }}
               class="rounded-full border px-3 py-1 text-[12px] font-medium transition-colors"
               style="
                 border-color: {active ? 'var(--color-primary)' : 'var(--color-border)'};
@@ -231,7 +232,7 @@
           <input
             type="checkbox"
             checked={preferences.animationsEnabled}
-            onchange={(e) => preferences.setAnimationsEnabled((e.target as HTMLInputElement).checked)}
+            onchange={(e) => { haptic('light'); preferences.setAnimationsEnabled((e.target as HTMLInputElement).checked); }}
           />
           <span class="toggle-pill-knob"></span>
         </label>
@@ -353,7 +354,7 @@
           type="number"
           step="0.0001"
           bind:value={settings.priceHc}
-          onchange={() => settings.save()}
+          onchange={() => { haptic('success'); settings.save(); }}
           class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
           style="color: var(--color-hc);"
         />
@@ -369,7 +370,7 @@
           type="number"
           step="0.0001"
           bind:value={settings.priceHp}
-          onchange={() => settings.save()}
+          onchange={() => { haptic('success'); settings.save(); }}
           class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
           style="color: var(--color-hp);"
         />
@@ -385,7 +386,7 @@
           type="number"
           step="0.0001"
           bind:value={settings.priceExport}
-          onchange={() => settings.save()}
+          onchange={() => { haptic('success'); settings.save(); }}
           class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
           style="color: var(--color-solar);"
         />
@@ -401,7 +402,7 @@
           type="number"
           step="0.01"
           bind:value={settings.subscription}
-          onchange={() => settings.save()}
+          onchange={() => { haptic('success'); settings.save(); }}
           class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
           style="color: var(--color-fg);"
         />

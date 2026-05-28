@@ -2,6 +2,7 @@
   import { onDestroy } from 'svelte';
   import { matter } from '$stores/matter.svelte';
   import type { Shutter } from '$stores/matter.svelte';
+  import { haptic } from '$utils/haptic';
 
   interface Props {
     shutter: Shutter;
@@ -174,6 +175,7 @@
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     matter.goToPosition(shutter.nodeId, finalPos);
     setActive(finalPos < shutter.position ? 'open' : 'close');
+    haptic('light');
     animPos = finalPos;
     animTarget = finalPos;
     scheduleFailsafeRelease();
@@ -183,16 +185,19 @@
   function onOpenClick() {
     matter.open(shutter.nodeId);
     setActive('open');
+    haptic('medium');
     setVisualTarget(0);
   }
   function onCloseClick() {
     matter.close(shutter.nodeId);
     setActive('close');
+    haptic('medium');
     setVisualTarget(100);
   }
   function onStopClick() {
     matter.stop(shutter.nodeId);
     setActive('stop');
+    haptic('heavy');
     if (rafId !== null) {
       cancelAnimationFrame(rafId);
       rafId = null;

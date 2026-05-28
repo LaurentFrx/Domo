@@ -8,6 +8,7 @@
   import ZigbeeSensorTile from '$components/tiles/ZigbeeSensorTile.svelte';
   import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
   import ZigbeeGenericTile from '$components/tiles/ZigbeeGenericTile.svelte';
+  import { haptic } from '$utils/haptic';
 
   interface Props {
     room: string;
@@ -40,6 +41,25 @@
     for (const d of zigbeeOnable) zigbee.setState(d.friendlyName, 'OFF');
   }
 
+  function openRoomTap() {
+    haptic('medium');
+    matter.openRoom(room);
+  }
+  function closeRoomTap() {
+    haptic('medium');
+    matter.closeRoom(room);
+  }
+  function allOnTap() {
+    haptic('medium');
+    if (hasSwitches) matter.switchesOnInRoom(room);
+    if (zigbeeOnable.length > 0) zigbeeAllOn();
+  }
+  function allOffTap() {
+    haptic('medium');
+    if (hasSwitches) matter.switchesOffInRoom(room);
+    if (zigbeeOnable.length > 0) zigbeeAllOff();
+  }
+
   const hasAnyToggleable = $derived(hasSwitches || zigbeeOnable.length > 0);
 </script>
 
@@ -65,7 +85,7 @@
         <button
           type="button"
           class="room-pill"
-          onclick={() => matter.openRoom(room)}
+          onclick={openRoomTap}
           aria-label="Ouvrir tous les volets de {room}"
         >
           Tout ouvrir
@@ -73,7 +93,7 @@
         <button
           type="button"
           class="room-pill"
-          onclick={() => matter.closeRoom(room)}
+          onclick={closeRoomTap}
           aria-label="Fermer tous les volets de {room}"
         >
           Tout fermer
@@ -83,10 +103,7 @@
         <button
           type="button"
           class="room-pill"
-          onclick={() => {
-            if (hasSwitches) matter.switchesOnInRoom(room);
-            if (zigbeeOnable.length > 0) zigbeeAllOn();
-          }}
+          onclick={allOnTap}
           aria-label="Allumer tous les interrupteurs de {room}"
         >
           Tout ON
@@ -94,10 +111,7 @@
         <button
           type="button"
           class="room-pill"
-          onclick={() => {
-            if (hasSwitches) matter.switchesOffInRoom(room);
-            if (zigbeeOnable.length > 0) zigbeeAllOff();
-          }}
+          onclick={allOffTap}
           aria-label="Éteindre tous les interrupteurs de {room}"
         >
           Tout OFF

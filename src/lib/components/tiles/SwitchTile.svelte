@@ -2,6 +2,7 @@
   import { onDestroy } from 'svelte';
   import { matter } from '$stores/matter.svelte';
   import type { Switch } from '$stores/matter.svelte';
+  import { haptic } from '$utils/haptic';
 
   interface Props {
     sw: Switch;
@@ -34,6 +35,7 @@
     if (!sw.available) return;
     const next = !displayedOn;
     optimisticOn = next;
+    haptic('light');
     if (optimisticTimer) clearTimeout(optimisticTimer);
     optimisticTimer = setTimeout(() => {
       optimisticOn = null;

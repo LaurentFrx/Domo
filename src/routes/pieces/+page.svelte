@@ -3,6 +3,7 @@
   import RoomSection from '$components/tiles/RoomSection.svelte';
   import { matter } from '$stores/matter.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
+  import { haptic } from '$utils/haptic';
 
   onMount(() => {
     matter.connect();
@@ -72,7 +73,7 @@
         <button
           type="button"
           class="pill-open"
-          onclick={() => matter.openAll()}
+          onclick={() => { haptic('heavy'); matter.openAll(); }}
           aria-label="Ouvrir tous les volets"
         >
           <span aria-hidden="true">▲</span> Tout ouvrir
@@ -80,7 +81,7 @@
         <button
           type="button"
           class="pill-close"
-          onclick={() => matter.closeAll()}
+          onclick={() => { haptic('heavy'); matter.closeAll(); }}
           aria-label="Fermer tous les volets"
         >
           <span aria-hidden="true">▼</span> Tout fermer

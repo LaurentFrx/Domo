@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ZigbeeDevice } from '$stores/zigbee.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
+  import { haptic } from '$utils/haptic';
 
   interface Props {
     device: ZigbeeDevice;
@@ -19,11 +20,13 @@
 
   function onPulse() {
     if (!device.available) return;
+    haptic('medium');
     zigbee.pulse(device.friendlyName);
   }
 
   function onToggle() {
     if (!device.available) return;
+    haptic('light');
     zigbee.toggle(device.friendlyName);
   }
 </script>
