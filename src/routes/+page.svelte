@@ -24,15 +24,16 @@
   );
   const batteryNetW = $derived(dashboard.batteryStatus === 'charge' ? 400 : -600);
 
-  // ─── Strate 3 : KPI Cards ───────────────────────────────────────────
+  // ─── Strate 3 : KPI Cards — totaux jour (info absente du diagramme) ──
   const pvSparkline = $derived(pvSeries24h(dashboard.solarPower * 1.2));
   const consoSparkline = $derived(consoSeries24h());
-  const cumulusSparkline = $derived([55, 56, 57, 58, 60, 62, 63, 64, 64, 65, 65, 64]);
-  const batterySparkline = $derived([55, 58, 62, 68, 75, 82, 87, 89, 90, 88, 85, 80]);
 
-  function fmtW(w: number): string {
-    return Math.round(Math.abs(w)).toLocaleString('fr-FR').replace(/\s/g, ' ');
-  }
+  // Conso jour estimée = production - export + import (équilibre)
+  const consoTodayKwh = $derived(
+    dashboard.solarTotal24h - shelly.gridExportTodayKwh + shelly.gridImportTodayKwh
+  );
+  const savedTodayEuro = $derived(dashboard.solarTotal24h * 0.18);
+  const savedMonthEuro = $derived(savedTodayEuro * 30);
 
   // ─── Strate 4 : Footer ──────────────────────────────────────────────
   const hour = $derived(hourOfDay());
@@ -96,47 +97,34 @@
     cumulusOn={shelly.cumulusRelayOn}
   />
 
-  <!-- ═══ Strate 3 : KPI Cards ═══ -->
-  <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <!-- Cumulus -->
-    <KpiCard
-      label="Cumulus"
-      value={cumulus.temperatureC.toFixed(0)}
-      unit="°C"
-      trend={`${cumulus.trendCh >= 0 ? '↑' : '↓'} ${Math.abs(cumulus.trendCh).toFixed(1)} °C/h`}
-      badge={cumulus.currentMode}
-      domain="hc"
-      badgeDomain={cumulus.currentMode === 'PV' ? 'solar' : cumulus.currentMode === 'HC' ? 'hc' : cumulus.currentMode === 'FORCE' ? 'alert' : 'grid'}
-      sparklineData={cumulusSparkline}
-    />
-
-    <!-- Batterie -->
-    <KpiCard
-      label="Batterie"
-      value={dashboard.batteryLevel.toFixed(0)}
-      unit="%"
-      trend={dashboard.batteryStatus === 'charge' ? '↑ Charge' : dashboard.batteryStatus === 'discharge' ? '↓ Décharge' : 'Repos'}
-      domain="battery"
-      sparklineData={batterySparkline}
-    />
-
-    <!-- Production PV -->
+  <!-- ═══ Strate 3 : KPI Cards — totaux jour ═══ -->
+  <div class="grid grid-cols-3 gap-3">
+    <!-- Production cumulée jour -->
     <KpiCard
       label="Production"
-      value={fmtW(pvPowerW)}
-      unit="W"
-      trend={`${dashboard.solarTotal24h.toFixed(1)} kWh aujourd'hui`}
+      value={dashboard.solarTotal24h.toFixed(1)}
+      unit="kWh"
+      trend="aujourd'hui"
       domain="solar"
       sparklineData={pvSparkline}
     />
 
-    <!-- Économies -->
+    <!-- Consommation cumulée jour -->
+    <KpiCard
+      label="Consommation"
+      value={Math.max(0, consoTodayKwh).toFixed(1)}
+      unit="kWh"
+      trend="aujourd'hui"
+      domain="consumption"
+      sparklineData={consoSparkline}
+    />
+
+    <!-- Économies jour + mois -->
     <KpiCard
       label="Économies"
-      value={fmtEuro(dashboard.solarTotal24h * 0.18)}
-      trend={`${fmtEuro(dashboard.solarTotal24h * 0.18 * 30)} ce mois`}
+      value={fmtEuro(savedTodayEuro)}
+      trend={`${fmtEuro(savedMonthEuro)} ce mois`}
       domain="hc"
-      sparklineData={consoSparkline}
     />
   </div>
 
