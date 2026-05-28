@@ -73,6 +73,26 @@
   const hasFlatDevices = $derived(
     matter.switches.length + zigbee.devices.length > 0
   );
+
+  // ─── Tri custom des volets (ordre choisi par Laurent) ───
+  const SHUTTER_ORDER = [
+    'salon',
+    'salle à manger',
+    'balcon',
+    'bureau',
+    'chambre parents',
+    'chambre amis'
+  ];
+  function shutterOrderIdx(name: string): number {
+    const lower = name.toLowerCase();
+    const idx = SHUTTER_ORDER.findIndex((s) => lower.includes(s));
+    return idx === -1 ? 999 : idx;
+  }
+  const sortedShutters = $derived(
+    [...matter.shutters].sort(
+      (a, b) => shutterOrderIdx(a.name) - shutterOrderIdx(b.name)
+    )
+  );
 </script>
 
 <svelte:head>
@@ -181,18 +201,18 @@
         </div>
         <div
           class="shutters-strip"
-          style="--shutter-count: {matter.shutters.length};"
+          style="--shutter-count: {sortedShutters.length};"
         >
-          {#each matter.shutters as shutter (shutter.nodeId)}
+          {#each sortedShutters as shutter (shutter.nodeId)}
             <ShutterTile {shutter} />
           {/each}
         </div>
       </section>
     {/if}
 
-    <!-- ═══ Grille FLAT switches/zigbee — visible partout ═══ -->
+    <!-- ═══ Grille FLAT switches/zigbee — 1 par ligne sur iPhone, plus dense ailleurs ═══ -->
     {#if hasFlatDevices}
-      <div class="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {#each matter.switches as sw (sw.nodeId)}
           <SwitchTile {sw} />
         {/each}
