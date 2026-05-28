@@ -69,6 +69,23 @@ class CumulusState {
     this.currentMode = h >= 11 && h < 16 ? 'PV' : h >= 22 || h < 6 ? 'HC' : 'OFF';
   }
 
+  /**
+   * Tick périodique du mock — appelé par demo-ticker toutes les 3s.
+   * Petit jitter ±0.15°C autour de la courbe théorique pour montrer
+   * la mesure capteur "qui frémit". Le mode auto reste figé (pas de
+   * basculement aléatoire).
+   */
+  tickMock() {
+    if (this.mode !== 'mock') return;
+    const h = hourOfDay();
+    const base = cumulusTemp(h);
+    const jitter = (Math.random() - 0.5) * 0.3; // ±0.15°C
+    this.temperatureC = +(base + jitter).toFixed(1);
+    const next = cumulusTemp(h + 0.1);
+    this.trendCh = +((next - base) * 10).toFixed(1);
+    this.lastUpdate = new Date();
+  }
+
   /** Pourcentage progression vs cible (0-100). */
   progressPercent = $derived(
     Math.min(100, Math.round((this.temperatureC / this.targetTempC) * 100))

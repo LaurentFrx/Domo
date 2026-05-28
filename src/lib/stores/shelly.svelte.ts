@@ -46,6 +46,28 @@ class ShellyState {
     this.cumulusLastToggleSec = 1200;
   }
 
+  /**
+   * Tick périodique du mock — appelé par demo-ticker toutes les 3s.
+   * Recalcule depuis l'heure courante + ajoute un jitter modéré pour
+   * que les valeurs bougent visuellement (sinon variation imperceptible
+   * sur 3s = 3/3600 h).
+   */
+  tickMock() {
+    if (this.mode !== 'mock') return;
+    const h = hourOfDay();
+    const pv = solarPV(h);
+    const conso = homeConsumption(h);
+    const jitterKw = (Math.random() - 0.5) * 0.18; // ±90W
+    const net = conso - pv + jitterKw;
+    this.gridPowerW = Math.round(net * 1000);
+
+    if (this.cumulusRelayOn) {
+      this.cumulusPowerW = 1800 + Math.round((Math.random() - 0.5) * 80); // ±40W
+    }
+    this.cumulusLastToggleSec += 3;
+    this.lastUpdate = new Date();
+  }
+
   /** Toggle cumulus — en mode mock c'est instantané. */
   async toggleCumulus() {
     if (this.mode !== 'mock') {
