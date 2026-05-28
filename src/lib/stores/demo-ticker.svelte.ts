@@ -4,6 +4,8 @@
  */
 
 import { dashboard } from './dashboard.svelte';
+import { shelly } from './shelly.svelte';
+import { cumulus } from './cumulus.svelte';
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -72,6 +74,10 @@ function tick(): void {
   }
 
   dashboard.lastUpdate = new Date();
+
+  // ─── Stores secondaires qui alimentent le FlowDiagram ───
+  shelly.tickMock();
+  cumulus.tickMock();
 }
 
 export function startDemoTicker(): void {
