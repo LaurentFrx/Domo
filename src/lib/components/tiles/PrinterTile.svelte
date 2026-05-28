@@ -63,6 +63,7 @@
 <article
   class="printer-tile flex flex-col gap-3 rounded-[var(--radius-xl)] border p-4"
   class:opacity-50={!plug.available}
+  class:printer-on={isOn}
   style="background: var(--color-card); border-color: var(--color-border);"
 >
   <!-- Header : icône + nom + état/conso + toggle -->
@@ -118,21 +119,16 @@
     </button>
   </header>
 
-  <!-- Bandeau pills CMYK : visible dès qu'on a des niveaux, même imprimante éteinte -->
+  <!-- Bandeau pills CMYK : 4 pills sur une seule ligne, barre de fill proportionnelle -->
   {#if printer.inks.length > 0}
-    <div class="ink-pills flex flex-wrap gap-2">
+    <div class="ink-pills">
       {#each printer.inks as ink (ink.color)}
         <div
           class="ink-pill"
-          style="
-            --ink-base: {INK_BASE[ink.color]};
-            --ink-glow: {INK_GLOW[ink.color]};
-            color: {INK_TEXT_DARK[ink.color] ? 'oklch(0.20 0 0)' : 'white'};
-          "
+          style="--ink-base: {INK_BASE[ink.color]}; --ink-glow: {INK_GLOW[ink.color]}; --ink-percent: {Math.max(0, Math.min(100, ink.percent))}%;"
           title="{ink.label} · {ink.percent}%"
         >
-          <span class="ink-pill-label">{ink.label}</span>
-          <span class="ink-pill-pct" style:color={ratioColor(ink.percent) || undefined}>
+          <span class="ink-pill-pct" class:ink-low={ink.percent < 10}>
             {ink.percent}<span class="ink-pill-unit">%</span>
           </span>
         </div>
@@ -159,63 +155,94 @@
 
 <style>
   .printer-tile {
-    transition: border-color var(--duration-normal) var(--ease-default);
+    transition:
+      border-color var(--duration-normal) var(--ease-default),
+      box-shadow var(--duration-normal) var(--ease-default);
   }
   .printer-tile:hover {
     border-color: var(--color-border-strong);
   }
+  /* ─── Glow néon quand l'imprimante est allumée (idem switches ON) ─── */
+  .printer-on {
+    --neon: var(--color-consumption);
+    border-color: var(--neon);
+    box-shadow:
+      0 0 14px color-mix(in oklch, var(--neon) 50%, transparent),
+      0 0 32px color-mix(in oklch, var(--neon) 22%, transparent);
+  }
+  .printer-on .printer-icon {
+    box-shadow:
+      0 0 10px color-mix(in oklch, var(--neon) 55%, transparent),
+      0 0 20px color-mix(in oklch, var(--neon) 30%, transparent);
+  }
+  .printer-icon {
+    transition:
+      background-color var(--duration-normal) var(--ease-default),
+      color var(--duration-normal) var(--ease-default),
+      box-shadow var(--duration-normal) var(--ease-default);
+  }
 
+  /* ─── 4 pills CMYK sur UNE SEULE ligne ─── */
   .ink-pills {
-    /* Distribue les 4 pills équitablement avec une largeur minimum, wrap si besoin */
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem;
   }
 
   .ink-pill {
-    flex: 1 1 calc(50% - 0.25rem);
-    min-width: 92px;
-    display: inline-flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
+    position: relative;
+    height: 30px;
     border-radius: 9999px;
-    /* Pill colorée façon "blob" : gradient interne + glow externe + bord soft */
-    background: radial-gradient(
-        ellipse at 30% 30%,
-        color-mix(in oklch, white 25%, var(--ink-base)) 0%,
-        var(--ink-base) 70%
-      ),
-      var(--ink-base);
+    overflow: hidden;
+    /* Fond translucide à 18% de la couleur + bord et glow extérieur */
+    background: color-mix(in oklch, var(--ink-base) 18%, transparent);
+    border: 1px solid color-mix(in oklch, var(--ink-base) 70%, transparent);
     box-shadow:
-      inset 0 1px 0 color-mix(in oklch, white 30%, transparent),
-      inset 0 -1px 1px color-mix(in oklch, black 15%, transparent),
-      0 0 14px var(--ink-glow),
-      0 0 28px color-mix(in oklch, var(--ink-glow) 50%, transparent);
+      inset 0 1px 0 color-mix(in oklch, white 15%, transparent),
+      0 0 10px var(--ink-glow);
+    display: flex;
+    align-items: center;
+    justify-content: center;
     transition: transform var(--duration-fast) var(--ease-default);
   }
-
-  .ink-pill:hover {
-    transform: translateY(-1px) scale(1.02);
+  /* Barre de fill proportionnelle au niveau d'encre (depuis la gauche) */
+  .ink-pill::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--ink-percent, 0%);
+    background: linear-gradient(
+      to right,
+      color-mix(in oklch, var(--ink-base) 90%, white) 0%,
+      var(--ink-base) 100%
+    );
+    z-index: 0;
+    transition: width 600ms var(--ease-out);
   }
-
-  .ink-pill-label {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    opacity: 0.85;
+  .ink-pill:hover {
+    transform: translateY(-1px) scale(1.03);
   }
 
   .ink-pill-pct {
-    font-size: 16px;
+    position: relative;
+    z-index: 1;
+    font-size: 13px;
     font-weight: 700;
+    color: white;
+    text-shadow:
+      0 1px 2px oklch(0 0 0 / 0.6),
+      0 0 4px oklch(0 0 0 / 0.4);
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.02em;
     line-height: 1;
   }
+  .ink-pill-pct.ink-low {
+    color: oklch(0.92 0.08 30); /* clair-rouge pour alerter */
+  }
   .ink-pill-unit {
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 600;
-    opacity: 0.7;
+    opacity: 0.85;
     margin-left: 1px;
   }
 
