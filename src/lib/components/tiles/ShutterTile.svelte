@@ -45,8 +45,11 @@
 
   const isMoving = $derived(animPos !== null || shutter.moving);
 
-  // Slider 32×230 fin — laisse toute la place aux boutons 70×70 dans la card
-  const THUMB_SIZE = 32;
+  // Dimensions proportionnelles via container queries (cqw). Pour les calculs
+  // de drag : on lit la taille runtime du track (qui = la taille du thumb).
+  function thumbSizePx(): number {
+    return trackEl?.clientWidth ?? 32;
+  }
 
   $effect(() => {
     const pos = shutter.position;
@@ -140,8 +143,9 @@
   function pointerToPosition(clientY: number): number {
     if (!trackEl) return shutter.position;
     const rect = trackEl.getBoundingClientRect();
-    const half = THUMB_SIZE / 2;
-    const usable = rect.height - THUMB_SIZE;
+    const thumb = thumbSizePx();
+    const half = thumb / 2;
+    const usable = rect.height - thumb;
     const yCentered = clientY - rect.top - half;
     const closedPercent = (yCentered / usable) * 100;
     return clampPosition(Math.round(closedPercent));
@@ -218,21 +222,21 @@
 </script>
 
 <div
-  class="shutter-tile flex flex-col gap-2 rounded-[var(--radius-xl)] border p-3"
+  class="shutter-tile rounded-[var(--radius-xl)] border"
   class:opacity-50={!shutter.available}
   style="background: var(--color-card); border-color: var(--color-border);"
   aria-label="{shutter.name} — {positionLabel}"
 >
   <!-- Nom de la pièce (uniquement, sans répétition du statut — il est dans le thumb) -->
-  <span class="text-[12px] font-semibold leading-tight truncate text-center" style="color: var(--color-fg);">
+  <span class="shutter-name" style="color: var(--color-fg);">
     {shutter.name}
     {#if isMoving}
-      <span class="moving-dots ml-1" style="color: var(--color-primary);">●●●</span>
+      <span class="moving-dots" style="color: var(--color-primary);">●●●</span>
     {/if}
   </span>
 
-  <!-- Corps : slider vertical 230px à gauche + 3 actions carrées 70×70 équi-réparties -->
-  <div class="flex items-stretch gap-3" style="height: 230px;">
+  <!-- Corps : slider à gauche + 3 actions carrées à droite — tout en cqw -->
+  <div class="shutter-body">
     <div
       bind:this={trackEl}
       class="slider-track"
@@ -252,7 +256,7 @@
       <div class="slider-fill" style:height="{displayedPosition}%"></div>
       <div
         class="slider-thumb"
-        style:bottom="calc((100% - {THUMB_SIZE}px) * {(100 - displayedPosition) / 100})"
+        style:bottom="calc((100% - 19cqw) * {(100 - displayedPosition) / 100})"
       >
         {#if displayedPosition > 1 && displayedPosition < 99}
           <span class="thumb-pct">{displayedPosition}</span>
@@ -260,7 +264,7 @@
       </div>
     </div>
 
-    <div class="flex flex-col justify-between" style="width: 70px;">
+    <div class="actions-col">
       <button
         type="button"
         class="action-btn action-btn--open"
@@ -269,7 +273,7 @@
         onclick={onOpenClick}
         aria-label="Ouvrir {shutter.name}"
       >
-        <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M12 5 L20 18 L4 18 Z" fill="currentColor" />
         </svg>
       </button>
@@ -281,7 +285,7 @@
         onclick={onStopClick}
         aria-label="Arrêter {shutter.name}"
       >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <rect x="6" y="6" width="12" height="12" rx="2" />
         </svg>
       </button>
@@ -293,7 +297,7 @@
         onclick={onCloseClick}
         aria-label="Fermer {shutter.name}"
       >
-        <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M12 19 L4 6 L20 6 Z" fill="currentColor" />
         </svg>
       </button>
@@ -302,29 +306,54 @@
 </div>
 
 <style>
+  /* ─── Container query : tout est proportionnel à la largeur de la tile ─── */
   .shutter-tile {
+    container-type: inline-size;
+    display: flex;
+    flex-direction: column;
+    gap: 5cqw;
+    padding: 7cqw;
     transition: border-color var(--duration-normal) var(--ease-default);
   }
   .shutter-tile:hover {
     border-color: var(--color-border-strong);
   }
 
+  .shutter-name {
+    font-size: 7cqw;
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .moving-dots {
     animation: pulse-dots 1.2s ease-in-out infinite;
-    font-size: 8px;
-    letter-spacing: -2px;
+    font-size: 5cqw;
+    letter-spacing: -0.05em;
+    margin-left: 0.3em;
   }
   @keyframes pulse-dots {
     0%, 100% { opacity: 0.4; }
     50% { opacity: 1; }
   }
 
-  /* ─── Slider vertical fin (32px), thumb 32px ─── */
+  /* Corps : slider + colonne actions. Hauteur = 3 boutons carrés + 2 gaps */
+  .shutter-body {
+    display: flex;
+    align-items: stretch;
+    gap: 7cqw;
+    height: 135cqw; /* 3 × 41cqw + 2 × 6cqw gap distribué par justify-between */
+  }
+
+  /* ─── Slider vertical proportionnel (19cqw wide) ─── */
   .slider-track {
     position: relative;
-    width: 32px;
+    width: 19cqw;
     height: 100%;
-    border-radius: 16px;
+    border-radius: 50cqw; /* rounded full */
     background: var(--color-muted);
     border: 1px solid var(--color-border);
     cursor: grab;
@@ -357,8 +386,8 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    width: 32px;
-    height: 32px;
+    width: 19cqw;
+    height: 19cqw;
     border-radius: 50%;
     background: #ffffff;
     box-shadow:
@@ -374,7 +403,7 @@
     color: oklch(0.30 0.01 280);
   }
   .thumb-pct {
-    font-size: 12px;
+    font-size: 7cqw;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.02em;
@@ -384,20 +413,34 @@
     transition: none;
     box-shadow:
       0 3px 10px oklch(0 0 0 / 0.25),
-      0 0 0 3px var(--color-primary-muted);
+      0 0 0 2cqw var(--color-primary-muted);
   }
 
-  /* ─── Actions carrées 70×70 — triangles colorés (vert open / violet close) ─── */
+  /* ─── Colonne actions : 3 boutons carrés équi-répartis ─── */
+  .actions-col {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    width: 41cqw;
+  }
   .action-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 70px;
-    height: 70px;
+    width: 41cqw;
+    height: 41cqw;
     border-radius: var(--radius-lg);
     background: var(--color-muted);
     border: 1px solid var(--color-border);
     transition: all var(--duration-fast) var(--ease-default);
+  }
+  .action-btn svg {
+    width: 60%;
+    height: 60%;
+  }
+  .action-btn--stop svg {
+    width: 50%;
+    height: 50%;
   }
   .action-btn--open {
     color: var(--color-battery);
@@ -423,13 +466,13 @@
     background: var(--color-battery);
     border-color: var(--color-battery);
     color: var(--color-primary-fg);
-    box-shadow: 0 0 0 3px var(--color-battery-muted);
+    box-shadow: 0 0 0 2cqw var(--color-battery-muted);
   }
   .action-active.action-btn--close {
     background: var(--color-primary);
     border-color: var(--color-primary);
     color: var(--color-primary-fg);
-    box-shadow: 0 0 0 3px var(--color-primary-muted);
+    box-shadow: 0 0 0 2cqw var(--color-primary-muted);
   }
   .action-active.action-btn--stop {
     background: var(--color-warning);
