@@ -5,6 +5,8 @@
   import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
   import ZigbeeSensorTile from '$components/tiles/ZigbeeSensorTile.svelte';
   import ZigbeeGenericTile from '$components/tiles/ZigbeeGenericTile.svelte';
+  import PrinterTile from '$components/tiles/PrinterTile.svelte';
+  import { printer } from '$stores/printer.svelte';
   import { matter } from '$stores/matter.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
   import { haptic } from '$utils/haptic';
@@ -12,11 +14,13 @@
   onMount(() => {
     matter.connect();
     zigbee.connect();
+    printer.connect();
   });
 
   onDestroy(() => {
     matter.disconnect();
     zigbee.disconnect();
+    printer.disconnect();
   });
 
   // ─── Fusion Matter + Zigbee par pièce ──────────────────────────────────
@@ -88,7 +92,17 @@
     )
   );
   const flatZigbeePlugs = $derived(
-    zigbee.devices.filter((d) => d.category === 'plug' && !isHidden(d.friendlyName))
+    zigbee.devices.filter(
+      (d) =>
+        d.category === 'plug' &&
+        !isHidden(d.friendlyName) &&
+        d.friendlyName.toLowerCase() !== 'imprimante epson'
+    )
+  );
+  // La prise Imprimante Epson est extraite à part pour la PrinterTile
+  // (toggle prise + niveaux d'encre scrappés).
+  const printerPlug = $derived(
+    zigbee.devices.find((d) => d.friendlyName.toLowerCase() === 'imprimante epson') ?? null
   );
   const flatZigbeeOthers = $derived(
     zigbee.devices.filter(
@@ -236,11 +250,14 @@
     {/if}
 
     <!-- ═══ Grille FLAT switches/zigbee — 1 par ligne sur iPhone, plus dense ailleurs ═══ -->
-    {#if hasFlatDevices}
+    {#if hasFlatDevices || printerPlug}
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {#each matter.switches as sw (sw.nodeId)}
           <SwitchTile {sw} />
         {/each}
+        {#if printerPlug}
+          <PrinterTile plug={printerPlug} />
+        {/if}
         {#each flatZigbeePlugs as device (device.ieee)}
           <ZigbeePlugTile {device} />
         {/each}
