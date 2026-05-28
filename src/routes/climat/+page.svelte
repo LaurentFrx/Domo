@@ -49,10 +49,20 @@
   const legionnellaDays = $derived(daysUntil(cumulus.nextLegionnellaCycle));
 
   // ─── Daikin ────────────────────────────────────────────────────────
-  const operationModes: { id: DaikinOperationMode; label: string; color: string }[] = [
-    { id: 'heating', label: 'Chaud', color: 'var(--color-hp)' },
-    { id: 'cooling', label: 'Froid', color: 'var(--color-consumption)' },
-    { id: 'off', label: 'Off', color: 'var(--color-muted-fg)' }
+  const operationModes: {
+    id: DaikinOperationMode;
+    label: string;
+    color: string;
+    bg: string;
+  }[] = [
+    { id: 'heating', label: 'Chaud', color: 'var(--color-hp)', bg: 'var(--color-hp-muted)' },
+    {
+      id: 'cooling',
+      label: 'Froid',
+      color: 'var(--color-consumption)',
+      bg: 'var(--color-consumption-muted)'
+    },
+    { id: 'off', label: 'Off', color: 'var(--color-muted-fg)', bg: 'var(--color-muted)' }
   ];
   const fanSpeeds: { id: FanSpeed; label: string }[] = [
     { id: 'auto', label: 'Auto' },
@@ -434,9 +444,7 @@
                   disabled={!unit.onOff || !unit.online}
                   class="seg-btn flex-1"
                   class:seg-active={active}
-                  style="
-                    --seg-color: {m.color};
-                  "
+                  style="--seg-color: {m.color}; --seg-bg: {m.bg};"
                   aria-pressed={active}
                 >
                   {m.label}
@@ -494,7 +502,7 @@
                   disabled={!unit.onOff || !unit.online || unit.operationMode === 'off'}
                   class="seg-btn"
                   class:seg-active={active}
-                  style="--seg-color: var(--color-primary); min-width: 36px;"
+                  style="--seg-color: var(--color-primary); --seg-bg: var(--color-primary-muted); min-width: 36px;"
                   aria-pressed={active}
                 >
                   {sp.label}
@@ -521,7 +529,7 @@
                     disabled={!unit.onOff || !unit.online || unit.operationMode === 'off'}
                     class="seg-btn flex-1"
                     class:seg-active={active}
-                    style="--seg-color: var(--color-primary);"
+                    style="--seg-color: var(--color-primary); --seg-bg: var(--color-primary-muted);"
                     aria-pressed={active}
                   >
                     {sw.label}
@@ -545,7 +553,7 @@
                     disabled={!unit.onOff || !unit.online || unit.operationMode === 'off'}
                     class="seg-btn flex-1"
                     class:seg-active={active}
-                    style="--seg-color: var(--color-primary);"
+                    style="--seg-color: var(--color-primary); --seg-bg: var(--color-primary-muted);"
                     aria-pressed={active}
                   >
                     {sw.label}
@@ -748,9 +756,12 @@
     cursor: not-allowed;
     opacity: 0.4;
   }
+  /* seg-active : couleur via --seg-bg (préfixe alpha sur la couleur du mode).
+     Évite color-mix(... transparent) qui bug sur Safari iOS dans certains
+     contextes. Le HTML pose --seg-bg avec une oklch + /α directe. */
   .seg-active {
     border-color: var(--seg-color, var(--color-primary));
-    background: color-mix(in oklch, var(--seg-color, var(--color-primary)) 14%, transparent);
+    background: var(--seg-bg, var(--color-primary-muted));
     color: var(--seg-color, var(--color-primary));
   }
 
