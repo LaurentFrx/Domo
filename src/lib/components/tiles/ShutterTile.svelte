@@ -45,8 +45,8 @@
 
   const isMoving = $derived(animPos !== null || shutter.moving);
 
-  // Slider 40×230 — thumb 40px pour rentrer dans la card avec les boutons 70px
-  const THUMB_SIZE = 40;
+  // Slider 32×230 fin — laisse toute la place aux boutons 70×70 dans la card
+  const THUMB_SIZE = 32;
 
   $effect(() => {
     const pos = shutter.position;
@@ -319,12 +319,12 @@
     50% { opacity: 1; }
   }
 
-  /* ─── Slider vertical (taille tactile iPad) ─── */
+  /* ─── Slider vertical fin (32px), thumb 32px ─── */
   .slider-track {
     position: relative;
-    width: 40px;
+    width: 32px;
     height: 100%;
-    border-radius: 20px;
+    border-radius: 16px;
     background: var(--color-muted);
     border: 1px solid var(--color-border);
     cursor: grab;
@@ -357,8 +357,8 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    width: 40px;
-    height: 40px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     background: #ffffff;
     box-shadow:
@@ -374,7 +374,7 @@
     color: oklch(0.30 0.01 280);
   }
   .thumb-pct {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.02em;
