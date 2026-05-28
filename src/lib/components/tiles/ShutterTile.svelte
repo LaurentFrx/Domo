@@ -45,8 +45,8 @@
 
   const isMoving = $derived(animPos !== null || shutter.moving);
 
-  // Slider 36×120 sur iPad — thumb 32px (touch target ≥ 44pt avec hit-area)
-  const THUMB_SIZE = 32;
+  // Slider 56×230 — thumb 56px assez grand pour contenir icône + % à l'intérieur
+  const THUMB_SIZE = 56;
 
   $effect(() => {
     const pos = shutter.position;
@@ -221,25 +221,18 @@
   class="shutter-tile flex flex-col gap-2 rounded-[var(--radius-xl)] border p-3"
   class:opacity-50={!shutter.available}
   style="background: var(--color-card); border-color: var(--color-border);"
+  aria-label="{shutter.name} — {positionLabel}"
 >
-  <!-- Header : nom + statut + dot moving -->
-  <div class="flex items-center justify-between gap-2">
-    <span class="text-[12px] font-semibold leading-tight truncate" style="color: var(--color-fg);">
-      {shutter.name}
-    </span>
-    <span
-      class="shrink-0 text-[11px] font-semibold tabular-nums"
-      style="color: {stateColor};"
-    >
-      {#if isMoving}
-        <span class="moving-dots mr-1" style="color: var(--color-primary);">●●●</span>
-      {/if}
-      {positionLabel}
-    </span>
-  </div>
+  <!-- Nom de la pièce (uniquement, sans répétition du statut — il est dans le thumb) -->
+  <span class="text-[12px] font-semibold leading-tight truncate text-center" style="color: var(--color-fg);">
+    {shutter.name}
+    {#if isMoving}
+      <span class="moving-dots ml-1" style="color: var(--color-primary);">●●●</span>
+    {/if}
+  </span>
 
-  <!-- Corps : slider vertical 240px à gauche + 3 actions carrées 36×36 équi-réparties -->
-  <div class="flex items-stretch gap-2" style="height: 240px;">
+  <!-- Corps : slider vertical 230px à gauche + 3 actions carrées 70×70 équi-réparties -->
+  <div class="flex items-stretch gap-3" style="height: 230px;">
     <div
       bind:this={trackEl}
       class="slider-track"
@@ -260,10 +253,27 @@
       <div
         class="slider-thumb"
         style:bottom="calc((100% - {THUMB_SIZE}px) * {(100 - displayedPosition) / 100})"
-      ></div>
+      >
+        {#if displayedPosition < 50}
+          <!-- Volet plutôt ouvert : icône stores relevés -->
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <line x1="3" y1="8" x2="21" y2="8" />
+          </svg>
+        {:else}
+          <!-- Volet plutôt fermé : icône stores baissés -->
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <line x1="3" y1="8" x2="21" y2="8" />
+            <line x1="3" y1="13" x2="21" y2="13" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        {/if}
+        <span class="thumb-pct">{displayedPosition}<span class="thumb-pct-unit">%</span></span>
+      </div>
     </div>
 
-    <div class="flex flex-col justify-between" style="width: 36px;">
+    <div class="flex flex-col justify-between" style="width: 70px;">
       <button
         type="button"
         class="action-btn action-btn--open"
@@ -272,8 +282,7 @@
         onclick={onOpenClick}
         aria-label="Ouvrir {shutter.name}"
       >
-        <!-- Triangle plein vers le haut -->
-        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M12 5 L20 18 L4 18 Z" fill="currentColor" />
         </svg>
       </button>
@@ -285,8 +294,8 @@
         onclick={onStopClick}
         aria-label="Arrêter {shutter.name}"
       >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <rect x="6" y="6" width="12" height="12" rx="1.5" />
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <rect x="6" y="6" width="12" height="12" rx="2" />
         </svg>
       </button>
       <button
@@ -297,8 +306,7 @@
         onclick={onCloseClick}
         aria-label="Fermer {shutter.name}"
       >
-        <!-- Triangle plein vers le bas -->
-        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M12 19 L4 6 L20 6 Z" fill="currentColor" />
         </svg>
       </button>
@@ -327,9 +335,9 @@
   /* ─── Slider vertical (taille tactile iPad) ─── */
   .slider-track {
     position: relative;
-    width: 36px;
+    width: 56px;
     height: 100%;
-    border-radius: 18px;
+    border-radius: 28px;
     background: var(--color-muted);
     border: 1px solid var(--color-border);
     cursor: grab;
@@ -381,14 +389,14 @@
       0 0 0 3px var(--color-primary-muted);
   }
 
-  /* ─── Actions carrées 36×36 — triangles colorés (vert open / violet close) ─── */
+  /* ─── Actions carrées 70×70 — triangles colorés (vert open / violet close) ─── */
   .action-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-md);
+    width: 70px;
+    height: 70px;
+    border-radius: var(--radius-lg);
     background: var(--color-muted);
     border: 1px solid var(--color-border);
     transition: all var(--duration-fast) var(--ease-default);
