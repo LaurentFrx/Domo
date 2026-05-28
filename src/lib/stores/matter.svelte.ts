@@ -47,8 +47,8 @@ const NODE_NAMES: Record<number, { name: string; room: string }> = {
 // node 1 commissionné le 2026-05-15, node 22 le 2026-05-24, node 24 le
 // 2026-05-27 (commissioning via VPS, network_only mDNS).
 const SWITCH_NAMES: Record<number, { name: string; room: string }> = {
-  1: { name: 'Bureau multimédia', room: 'Bureau' },
-  22: { name: 'Sèche-serviette', room: 'Salle de bain' },
+  1: { name: 'Sèche-serviette', room: 'Salle de bain' },
+  22: { name: 'Bureau multimédia', room: 'Bureau' },
   24: { name: 'Chargeur Lau', room: 'Séjour' }
 };
 
