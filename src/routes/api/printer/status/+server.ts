@@ -1,26 +1,26 @@
 /**
- * Proxy serveur vers l'imprimante Epson Workforce (LAN).
- *
- * Pourquoi un proxy : le navigateur ne peut pas tapper sur l'IP LAN
- * (CORS + mixed content HTTPS→HTTP). On scrape côté Node, on parse
- * et on expose un JSON normalisé.
+ * Proxy serveur vers l'imprimante Epson Workforce (LAN via Tailscale).
  *
  * Configuration .env :
- *   PRINTER_HOST=192.168.X.X     ← IP locale de l'imprimante
+ *   PRINTER_HOST=192.168.1.40    ← IP locale de l'imprimante
  *   PRINTER_TIMEOUT_MS=5000      ← timeout HTTP (optionnel)
  *
- * Heuristique de parsing : la page PRTINFO.HTML d'Epson Workforce
- * contient 4 images <IMG ... height="X" alt=""> où X est la hauteur
- * en pixels de la barre d'encre (0 = vide, ~50 = plein). On extrait
- * dans l'ordre BK, C, M, Y et on normalise en pourcentage.
+ * Format Epson moderne (ET-… / WF-…) :
+ *   - HTTP redirige vers HTTPS avec certificat self-signed
+ *   - Page PRTINFO.HTML contient 4 <img height='X' style=''> qui
+ *     représentent les barres d'encre dans l'ordre standard CMYK :
+ *     Black (BK), Cyan (C), Magenta (M), Yellow (Y).
+ *   - X est la hauteur en pixels (0–50). 50 = plein, 0 = vide.
  */
 
 import { error, json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import https from 'node:https';
+import http from 'node:http';
 import type { RequestHandler } from './$types';
 
 const DEFAULT_TIMEOUT_MS = 5000;
-const FULL_HEIGHT_PX = 50; // hauteur d'une barre pleine sur la page Epson
+const FULL_HEIGHT_PX = 50;
 
 export interface InkTank {
   color: 'BK' | 'C' | 'M' | 'Y';
@@ -34,23 +34,65 @@ export interface PrinterStatus {
   inks: InkTank[];
 }
 
-async function fetchEpsonHtml(host: string, timeoutMs: number): Promise<string> {
-  const url = `http://${host}/PRESENTATION/HTML/TOP/PRTINFO.HTML`;
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: { 'User-Agent': 'Domo/1.0' }
+/**
+ * GET HTTP/HTTPS avec suivi des redirects et acceptation des certs
+ * self-signed. node:https natif → pas de dépendance externe.
+ */
+function getUrl(url: string, timeoutMs: number, maxRedirects = 5): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const lib = u.protocol === 'https:' ? https : http;
+    const req = lib.request(
+      {
+        hostname: u.hostname,
+        port: u.port || (u.protocol === 'https:' ? 443 : 80),
+        path: u.pathname + u.search,
+        method: 'GET',
+        timeout: timeoutMs,
+        rejectUnauthorized: false, // certificat self-signed de l'Epson
+        headers: { 'User-Agent': 'Domo/1.0' }
+      },
+      (res) => {
+        const code = res.statusCode ?? 0;
+        // Suivi des redirects 301/302/303/307/308
+        if ([301, 302, 303, 307, 308].includes(code) && res.headers.location) {
+          if (maxRedirects <= 0) {
+            reject(new Error('Trop de redirects'));
+            return;
+          }
+          const next = new URL(res.headers.location, url).toString();
+          res.resume();
+          getUrl(next, timeoutMs, maxRedirects - 1).then(resolve, reject);
+          return;
+        }
+        if (code !== 200) {
+          reject(new Error(`HTTP ${code} sur ${url}`));
+          res.resume();
+          return;
+        }
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+      }
+    );
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error(`Timeout ${timeoutMs}ms`)));
+    req.end();
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} sur ${url}`);
-  return res.text();
+}
+
+async function fetchEpsonHtml(host: string, timeoutMs: number): Promise<string> {
+  return getUrl(`http://${host}/PRESENTATION/HTML/TOP/PRTINFO.HTML`, timeoutMs);
 }
 
 /**
- * Cherche les 4 <img height="N" ...> qui représentent les niveaux d'encre.
- * Plusieurs variantes Epson : on prend les 4 premiers <img> avec un height
- * compris dans [0, FULL_HEIGHT_PX].
+ * Capture les 4 barres d'encre. Le critère : <img ... height='X' ... style='...'>
+ * où style est vide ou ne contient pas explicitement de hauteur (filtre les
+ * éléments décoratifs comme le logo EPSON qui n'ont pas style=).
  */
 function parseInkHeights(html: string): number[] {
-  const re = /<img[^>]*height\s*=\s*["']?(\d+)["']?[^>]*>/gi;
+  // Matche tout <img> qui a height='X' ET style='' ou style=""
+  const re = /<img[^>]*\bheight\s*=\s*['"]?(\d+)['"]?[^>]*\bstyle\s*=\s*['"][\s]*['"][^>]*>/gi;
   const heights: number[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
@@ -77,7 +119,10 @@ const COLOR_LABELS: Record<InkTank['color'], string> = {
 export const GET: RequestHandler = async () => {
   const host = env.PRINTER_HOST;
   if (!host) {
-    throw error(503, "PRINTER_HOST non défini dans .env — l'endpoint /api/printer/status reste désactivé jusqu'à configuration.");
+    throw error(
+      503,
+      "PRINTER_HOST non défini dans .env — l'endpoint reste désactivé."
+    );
   }
   const timeoutMs = Number(env.PRINTER_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
 
