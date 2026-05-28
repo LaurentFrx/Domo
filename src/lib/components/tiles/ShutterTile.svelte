@@ -244,8 +244,9 @@
   style="background: var(--color-card); border-color: var(--color-border);"
   aria-label="{shutter.name} — {positionLabel}"
 >
-  <!-- Nom de la pièce (statut implicite via la position du thumb) -->
-  <span class="shutter-name truncate text-center font-semibold leading-tight" style="color: var(--color-fg);">
+  <!-- Nom de la pièce (statut implicite via la position du thumb).
+       Le wrap est autorisé pour les noms longs sur iPhone (Salle à manger…). -->
+  <span class="shutter-name text-center font-semibold leading-tight" style="color: var(--color-fg);">
     {shutter.name}
     {#if isMoving}
       <span class="moving-dots ml-1" style="color: var(--color-primary);">●●●</span>
@@ -271,7 +272,7 @@
            passer les gestes de scroll de l'iPhone (touch-action: pan-y). -->
       <div
         class="slider-thumb"
-        style:bottom="calc((100% - 24px) * {(100 - displayedPosition) / 100})"
+        style:bottom="calc((100% - var(--ssize)) * {(100 - displayedPosition) / 100})"
         onpointerdown={onPointerDown}
         onpointermove={onPointerMove}
         onpointerup={onPointerUp}
@@ -327,9 +328,19 @@
 </div>
 
 <style>
-  /* ─── Dimensions fixes simples : slider 24, bouton 60, body 210 ─── */
+  /* ─── Dimensions par CSS vars — palier mobile compact pour tenir à 3 cols ─── */
   .shutter-tile {
+    --ssize: 24px; /* slider track + thumb */
+    --bsize: 60px; /* bouton carré */
+    --body-h: 210px; /* 3 × 60 + 2 × 15 gap */
     transition: border-color var(--duration-normal) var(--ease-default);
+  }
+  @media (max-width: 639px) {
+    .shutter-tile {
+      --ssize: 20px;
+      --bsize: 44px;
+      --body-h: 150px; /* 3 × 44 + 2 × 9 gap */
+    }
   }
   .shutter-tile:hover {
     border-color: var(--color-border-strong);
@@ -337,6 +348,16 @@
 
   .shutter-name {
     font-size: 12px;
+    /* Permet le wrap sur 2 lignes pour les noms longs (Salle à manger,
+       Chambre parents, Chambre amis) sur iPhone. */
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    hyphens: auto;
+  }
+  @media (max-width: 639px) {
+    .shutter-name {
+      font-size: 10.5px;
+    }
   }
 
   .moving-dots {
@@ -350,13 +371,13 @@
   }
 
   .shutter-body {
-    height: 210px; /* = 3 × 60 + 2 × 15 gap, distribué via justify-between */
+    height: var(--body-h);
   }
 
-  /* ─── Slider vertical fin 24px — track laisse passer le scroll vertical ─── */
+  /* ─── Slider vertical — width = --ssize. Track laisse passer le scroll. ─── */
   .slider-track {
     position: relative;
-    width: 24px;
+    width: var(--ssize);
     height: 100%;
     border-radius: 9999px;
     background: var(--color-muted);
@@ -391,8 +412,8 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    width: 24px;
-    height: 24px;
+    width: var(--ssize);
+    height: var(--ssize);
     border-radius: 50%;
     background: #ffffff;
     box-shadow:
@@ -434,16 +455,16 @@
       0 0 0 3px var(--color-primary-muted);
   }
 
-  /* ─── Boutons carrés 60×60 ─── */
+  /* ─── Boutons carrés — width = height = --bsize ─── */
   .actions-col {
-    width: 60px;
+    width: var(--bsize);
   }
   .action-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 60px;
-    height: 60px;
+    width: var(--bsize);
+    height: var(--bsize);
     border-radius: var(--radius-lg);
     background: var(--color-muted);
     border: 1px solid var(--color-border);
