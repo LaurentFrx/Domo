@@ -65,7 +65,13 @@
   }
 
   // ─── sm+ : flat. Tous les non-volets à plat, sans wrapper de pièce. ───
-  const flatZigbeeSensors = $derived(zigbee.devices.filter((d) => d.category === 'sensor'));
+  // Les thermomètres (Thermo SdB / Salon / Garage / cumulus / ext / velos)
+  // sont déplacés sur la page /climat.
+  const flatZigbeeSensors = $derived(
+    zigbee.devices.filter(
+      (d) => d.category === 'sensor' && !d.friendlyName.toLowerCase().includes('thermo')
+    )
+  );
   const flatZigbeePlugs = $derived(zigbee.devices.filter((d) => d.category === 'plug'));
   const flatZigbeeOthers = $derived(
     zigbee.devices.filter((d) => !['sensor', 'plug'].includes(d.category))

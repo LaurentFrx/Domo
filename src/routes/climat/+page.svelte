@@ -4,9 +4,22 @@
   import { daikin } from '$stores/daikin.svelte';
   import type { DaikinMode, DaikinUnit } from '$stores/daikin.svelte';
   import { weather } from '$stores/weather.svelte';
+  import { zigbee } from '$stores/zigbee.svelte';
   import { daysUntil } from '$utils/mock-curves';
   import { haptic } from '$utils/haptic';
+  import { onMount, onDestroy } from 'svelte';
   import Sparkline from '$components/ui/Sparkline.svelte';
+  import ZigbeeSensorTile from '$components/tiles/ZigbeeSensorTile.svelte';
+
+  onMount(() => zigbee.connect());
+  onDestroy(() => zigbee.disconnect());
+
+  // Thermomètres Zigbee (SNZB-02 etc.) — détectés par 'thermo' dans le nom.
+  const thermoSensors = $derived(
+    zigbee.devices.filter(
+      (d) => d.category === 'sensor' && d.friendlyName.toLowerCase().includes('thermo')
+    )
+  );
 
   // ─── Cumulus ───────────────────────────────────────────────────────
   const modes: { id: CumulusMode; label: string; domain: string }[] = [
@@ -381,6 +394,23 @@
       {/each}
     </div>
   </section>
+
+  <!-- ═══ Thermomètres Zigbee (déplacés depuis /pieces) ═══ -->
+  {#if thermoSensors.length > 0}
+    <section class="flex flex-col gap-3">
+      <h2
+        class="text-[14px] font-semibold tracking-[0.04em] uppercase"
+        style="color: var(--color-muted-fg);"
+      >
+        Thermomètres · {thermoSensors.length}
+      </h2>
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {#each thermoSensors as device (device.ieee)}
+          <ZigbeeSensorTile {device} />
+        {/each}
+      </div>
+    </section>
+  {/if}
 
   <!-- ═══ Section 3 : Météo ═══ -->
   <section
