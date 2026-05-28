@@ -222,21 +222,21 @@
 </script>
 
 <div
-  class="shutter-tile rounded-[var(--radius-xl)] border"
+  class="shutter-tile flex flex-col gap-2 rounded-[var(--radius-xl)] border p-3"
   class:opacity-50={!shutter.available}
   style="background: var(--color-card); border-color: var(--color-border);"
   aria-label="{shutter.name} — {positionLabel}"
 >
-  <!-- Nom de la pièce (uniquement, sans répétition du statut — il est dans le thumb) -->
-  <span class="shutter-name" style="color: var(--color-fg);">
+  <!-- Nom de la pièce (statut implicite via la position du thumb) -->
+  <span class="shutter-name truncate text-center font-semibold leading-tight" style="color: var(--color-fg);">
     {shutter.name}
     {#if isMoving}
-      <span class="moving-dots" style="color: var(--color-primary);">●●●</span>
+      <span class="moving-dots ml-1" style="color: var(--color-primary);">●●●</span>
     {/if}
   </span>
 
-  <!-- Corps : slider à gauche + 3 actions carrées à droite — tout en cqw -->
-  <div class="shutter-body">
+  <!-- Corps : slider à gauche + colonne actions à droite. Dimensions via CSS vars responsive. -->
+  <div class="shutter-body flex items-stretch gap-3">
     <div
       bind:this={trackEl}
       class="slider-track"
@@ -256,7 +256,7 @@
       <div class="slider-fill" style:height="{displayedPosition}%"></div>
       <div
         class="slider-thumb"
-        style:bottom="calc((100% - 19cqw) * {(100 - displayedPosition) / 100})"
+        style:bottom="calc((100% - var(--ssize)) * {(100 - displayedPosition) / 100})"
       >
         {#if displayedPosition > 1 && displayedPosition < 99}
           <span class="thumb-pct">{displayedPosition}</span>
@@ -264,7 +264,7 @@
       </div>
     </div>
 
-    <div class="actions-col">
+    <div class="actions-col flex flex-col justify-between">
       <button
         type="button"
         class="action-btn action-btn--open"
@@ -306,54 +306,62 @@
 </div>
 
 <style>
-  /* ─── Container query : tout est proportionnel à la largeur de la tile ─── */
+  /* ─── Dimensions par paliers : --ssize (slider/thumb) et --bsize (boutons) ─── */
   .shutter-tile {
-    container-type: inline-size;
-    display: flex;
-    flex-direction: column;
-    gap: 5cqw;
-    padding: 7cqw;
+    --ssize: 28px; /* slider track width = thumb size */
+    --bsize: 56px; /* button size (carré) */
+    --bgap: 4px; /* gap entre boutons */
+    --body-h: calc(var(--bsize) * 3 + var(--bgap) * 2);
+    --pct-font: 11px;
+    --name-font: 12px;
     transition: border-color var(--duration-normal) var(--ease-default);
+  }
+  @media (min-width: 640px) {
+    .shutter-tile {
+      --ssize: 32px;
+      --bsize: 64px;
+      --bgap: 5px;
+      --pct-font: 12px;
+      --name-font: 13px;
+    }
+  }
+  @media (min-width: 1024px) {
+    .shutter-tile {
+      --ssize: 36px;
+      --bsize: 72px;
+      --bgap: 6px;
+      --pct-font: 13px;
+      --name-font: 14px;
+    }
   }
   .shutter-tile:hover {
     border-color: var(--color-border-strong);
   }
 
   .shutter-name {
-    font-size: 7cqw;
-    font-weight: 600;
-    line-height: 1.2;
-    text-align: center;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: var(--name-font);
   }
 
   .moving-dots {
     animation: pulse-dots 1.2s ease-in-out infinite;
-    font-size: 5cqw;
-    letter-spacing: -0.05em;
-    margin-left: 0.3em;
+    font-size: 8px;
+    letter-spacing: -2px;
   }
   @keyframes pulse-dots {
     0%, 100% { opacity: 0.4; }
     50% { opacity: 1; }
   }
 
-  /* Corps : slider + colonne actions. Hauteur = 3 boutons carrés + 2 gaps */
   .shutter-body {
-    display: flex;
-    align-items: stretch;
-    gap: 7cqw;
-    height: 135cqw; /* 3 × 41cqw + 2 × 6cqw gap distribué par justify-between */
+    height: var(--body-h);
   }
 
-  /* ─── Slider vertical proportionnel (19cqw wide) ─── */
+  /* ─── Slider vertical : largeur = --ssize ─── */
   .slider-track {
     position: relative;
-    width: 19cqw;
+    width: var(--ssize);
     height: 100%;
-    border-radius: 50cqw; /* rounded full */
+    border-radius: 9999px;
     background: var(--color-muted);
     border: 1px solid var(--color-border);
     cursor: grab;
@@ -386,8 +394,8 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    width: 19cqw;
-    height: 19cqw;
+    width: var(--ssize);
+    height: var(--ssize);
     border-radius: 50%;
     background: #ffffff;
     box-shadow:
@@ -403,7 +411,7 @@
     color: oklch(0.30 0.01 280);
   }
   .thumb-pct {
-    font-size: 7cqw;
+    font-size: var(--pct-font);
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.02em;
@@ -413,34 +421,31 @@
     transition: none;
     box-shadow:
       0 3px 10px oklch(0 0 0 / 0.25),
-      0 0 0 2cqw var(--color-primary-muted);
+      0 0 0 3px var(--color-primary-muted);
   }
 
-  /* ─── Colonne actions : 3 boutons carrés équi-répartis ─── */
+  /* ─── Boutons carrés --bsize × --bsize ─── */
   .actions-col {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    width: 41cqw;
+    width: var(--bsize);
   }
   .action-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 41cqw;
-    height: 41cqw;
+    width: var(--bsize);
+    height: var(--bsize);
     border-radius: var(--radius-lg);
     background: var(--color-muted);
     border: 1px solid var(--color-border);
     transition: all var(--duration-fast) var(--ease-default);
   }
   .action-btn svg {
-    width: 60%;
-    height: 60%;
+    width: 38%;
+    height: 38%;
   }
   .action-btn--stop svg {
-    width: 50%;
-    height: 50%;
+    width: 30%;
+    height: 30%;
   }
   .action-btn--open {
     color: var(--color-battery);
@@ -466,13 +471,13 @@
     background: var(--color-battery);
     border-color: var(--color-battery);
     color: var(--color-primary-fg);
-    box-shadow: 0 0 0 2cqw var(--color-battery-muted);
+    box-shadow: 0 0 0 3px var(--color-battery-muted);
   }
   .action-active.action-btn--close {
     background: var(--color-primary);
     border-color: var(--color-primary);
     color: var(--color-primary-fg);
-    box-shadow: 0 0 0 2cqw var(--color-primary-muted);
+    box-shadow: 0 0 0 3px var(--color-primary-muted);
   }
   .action-active.action-btn--stop {
     background: var(--color-warning);
