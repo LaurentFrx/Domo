@@ -1,7 +1,21 @@
 <script lang="ts">
   import { solcast } from '$stores/solcast.svelte';
+  import { zigbee } from '$stores/zigbee.svelte';
   import { consoSeries24h, pvSeries24h, hourOfDay } from '$utils/mock-curves';
+  import { onMount, onDestroy } from 'svelte';
   import KpiCard from '$components/cards/KpiCard.svelte';
+  import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
+
+  onMount(() => zigbee.connect());
+  onDestroy(() => zigbee.disconnect());
+
+  // Prises Zigbee suivies pour la conso électroménager (Frigo, Lave-linge).
+  const TRACKED_APPLIANCES = new Set(['frigo', 'lave-linge']);
+  const appliancePlugs = $derived(
+    zigbee.devices.filter(
+      (d) => d.category === 'plug' && TRACKED_APPLIANCES.has(d.friendlyName.toLowerCase())
+    )
+  );
 
   // ─── Section 1 : Stacked Area Chart 24h ─────────────────────────────
   const pvSeries = pvSeries24h(2.5);
@@ -220,7 +234,24 @@
     </div>
   </section>
 
-  <!-- ═══ Section 2 : Prévisions Solcast ═══ -->
+  <!-- ═══ Section 2 : Conso électroménager (Frigo, Lave-linge…) ═══ -->
+  {#if appliancePlugs.length > 0}
+    <section class="flex flex-col gap-3">
+      <h2
+        class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+        style="color: var(--color-muted-fg);"
+      >
+        Conso électroménager · {appliancePlugs.length}
+      </h2>
+      <div class="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
+        {#each appliancePlugs as device (device.ieee)}
+          <ZigbeePlugTile {device} />
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  <!-- ═══ Section 3 : Prévisions Solcast ═══ -->
   <section
     class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-4"
     style="background: var(--color-card); border-color: var(--color-border);"

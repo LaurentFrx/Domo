@@ -66,12 +66,14 @@
 
   // ─── Filtres d'affichage Zigbee sur cette page ─────────────────────────
   // Les thermomètres (Thermo SdB / Salon / Garage / cumulus / ext / velos)
-  // sont déplacés sur /climat.
-  // Cette liste est ignorée (devices retirés ou remplacés par Matter).
+  // sont déplacés sur /climat. Frigo + Lave-linge déplacés sur /energie
+  // (suivi conso électroménager). Cette liste est carrément retirée.
   const HIDDEN_ZIGBEE = new Set([
     'chargeur isa', // plus en fonctionnement
     'chargeur laurent', // remplacé par Matter
-    'ordi moniteur' // remplacé par Matter
+    'ordi moniteur', // remplacé par Matter
+    'frigo', // affiché sur /energie
+    'lave-linge' // affiché sur /energie
   ]);
   function isHidden(name: string): boolean {
     return HIDDEN_ZIGBEE.has(name.toLowerCase());
