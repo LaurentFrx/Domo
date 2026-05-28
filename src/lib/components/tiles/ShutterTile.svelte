@@ -12,12 +12,10 @@
   // ─── Convention Matter (à ne pas modifier) ───
   // shutter.position = % de fermeture (0 = ouvert, 100 = fermé)
 
-  // ─── Drag du slider ───
   let dragging = $state(false);
   let dragPos = $state(0);
   let trackEl = $state<HTMLDivElement | null>(null);
 
-  // ─── Animation locale anticipée ───
   const SPEED_PERCENT_PER_SECOND = 10;
   let animPos = $state<number | null>(null);
   let animTarget = 0;
@@ -25,7 +23,6 @@
   let rafId: number | null = null;
   let lastServerPos: number | null = null;
 
-  // ─── Glow boutons quand action en cours ───
   let activeAction = $state<'open' | 'close' | 'stop' | null>(null);
   let activeTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -47,7 +44,8 @@
 
   const isMoving = $derived(animPos !== null || shutter.moving);
 
-  const THUMB_SIZE = 36;
+  // Slider compact 24×64 — thumb 20px pour rester touchable
+  const THUMB_SIZE = 20;
 
   $effect(() => {
     const pos = shutter.position;
@@ -204,33 +202,39 @@
       scheduleFailsafeRelease();
     }
   }
+
+  const stateColor = $derived(
+    displayedPosition <= 1
+      ? 'var(--color-battery)'
+      : displayedPosition >= 99
+        ? 'var(--color-primary)'
+        : 'var(--color-primary)'
+  );
 </script>
 
 <div
-  class="shutter-tile relative flex flex-col gap-3 rounded-[var(--radius-xl)] border p-4"
+  class="shutter-tile flex flex-col gap-2 rounded-[var(--radius-xl)] border p-3"
   class:opacity-50={!shutter.available}
   style="background: var(--color-card); border-color: var(--color-border);"
 >
-  <!-- Header -->
-  <div class="flex items-start justify-between">
-    <span class="text-[13px] font-semibold leading-tight" style="color: var(--color-fg);">
+  <!-- Header : nom + statut + dot moving -->
+  <div class="flex items-center justify-between gap-2">
+    <span class="text-[12px] font-semibold leading-tight truncate" style="color: var(--color-fg);">
       {shutter.name}
     </span>
-    <div class="flex items-center gap-1.5">
+    <span
+      class="shrink-0 text-[11px] font-semibold tabular-nums"
+      style="color: {stateColor};"
+    >
       {#if isMoving}
-        <span class="moving-dots text-[9px] font-semibold" style="color: var(--color-primary);">
-          ●●●
-        </span>
+        <span class="moving-dots mr-1" style="color: var(--color-primary);">●●●</span>
       {/if}
-      <span
-        class="h-1.5 w-1.5 rounded-full"
-        style:background-color={shutter.available ? 'var(--color-battery)' : 'var(--color-muted-fg)'}
-      ></span>
-    </div>
+      {positionLabel}
+    </span>
   </div>
 
-  <!-- Slider vertical + valeur -->
-  <div class="flex items-center gap-4">
+  <!-- Corps : slider vertical compact à gauche + 3 actions verticales à droite -->
+  <div class="flex items-center gap-2">
     <div
       bind:this={trackEl}
       class="slider-track"
@@ -254,66 +258,46 @@
       ></div>
     </div>
 
-    <div class="flex flex-1 items-baseline justify-center">
-      {#if displayedPosition <= 1}
-        <span class="text-[20px] font-bold leading-none" style="color: var(--color-battery); letter-spacing: -0.01em;">
-          Ouvert
-        </span>
-      {:else if displayedPosition >= 99}
-        <span class="text-[20px] font-bold leading-none" style="color: var(--color-primary); letter-spacing: -0.01em;">
-          Fermé
-        </span>
-      {:else}
-        <span
-          class="text-[28px] font-bold leading-none tabular-nums"
-          style="color: var(--color-primary); letter-spacing: -0.02em;"
-        >
-          {displayedPosition}<span class="text-[14px]" style="color: var(--color-muted-fg);">%</span>
-        </span>
-      {/if}
+    <div class="flex flex-1 flex-col gap-1">
+      <button
+        type="button"
+        class="action-btn"
+        class:action-active={activeAction === 'open'}
+        class:action-open={activeAction === 'open'}
+        disabled={!shutter.available}
+        onclick={onOpenClick}
+        aria-label="Ouvrir {shutter.name}"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M18 15l-6-6-6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        class="action-btn action-btn--stop"
+        class:action-active={activeAction === 'stop'}
+        disabled={!shutter.available}
+        onclick={onStopClick}
+        aria-label="Arrêter {shutter.name}"
+      >
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <rect x="6" y="6" width="12" height="12" rx="1.5" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        class="action-btn"
+        class:action-active={activeAction === 'close'}
+        class:action-close={activeAction === 'close'}
+        disabled={!shutter.available}
+        onclick={onCloseClick}
+        aria-label="Fermer {shutter.name}"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
     </div>
-  </div>
-
-  <!-- Boutons d'action -->
-  <div class="grid grid-cols-3 gap-1.5">
-    <button
-      type="button"
-      class="action-btn"
-      class:action-active={activeAction === 'open'}
-      class:action-open={activeAction === 'open'}
-      disabled={!shutter.available}
-      onclick={onOpenClick}
-      aria-label="Ouvrir {shutter.name}"
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M18 15l-6-6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
-    </button>
-    <button
-      type="button"
-      class="action-btn action-btn--stop"
-      class:action-active={activeAction === 'stop'}
-      disabled={!shutter.available}
-      onclick={onStopClick}
-      aria-label="Arrêter {shutter.name}"
-    >
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-        <rect x="6" y="6" width="12" height="12" rx="1.5" />
-      </svg>
-    </button>
-    <button
-      type="button"
-      class="action-btn"
-      class:action-active={activeAction === 'close'}
-      class:action-close={activeAction === 'close'}
-      disabled={!shutter.available}
-      onclick={onCloseClick}
-      aria-label="Fermer {shutter.name}"
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
-    </button>
   </div>
 </div>
 
@@ -327,18 +311,20 @@
 
   .moving-dots {
     animation: pulse-dots 1.2s ease-in-out infinite;
+    font-size: 8px;
+    letter-spacing: -2px;
   }
   @keyframes pulse-dots {
     0%, 100% { opacity: 0.4; }
     50% { opacity: 1; }
   }
 
-  /* ─── Slider vertical ─── */
+  /* ─── Slider vertical compact ─── */
   .slider-track {
     position: relative;
-    width: 44px;
-    height: 140px;
-    border-radius: 24px;
+    width: 24px;
+    height: 72px;
+    border-radius: 14px;
     background: var(--color-muted);
     border: 1px solid var(--color-border);
     cursor: grab;
@@ -371,13 +357,13 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    width: 36px;
-    height: 36px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
     background: #ffffff;
     box-shadow:
-      0 2px 6px oklch(0 0 0 / 0.15),
-      0 1px 2px oklch(0 0 0 / 0.1);
+      0 1px 3px oklch(0 0 0 / 0.2),
+      0 1px 1px oklch(0 0 0 / 0.1);
     pointer-events: none;
     transition: bottom 120ms linear;
     will-change: bottom;
@@ -386,16 +372,16 @@
   .slider-track.dragging .slider-thumb {
     transition: none;
     box-shadow:
-      0 4px 12px oklch(0 0 0 / 0.25),
-      0 0 0 4px var(--color-primary-muted);
+      0 2px 6px oklch(0 0 0 / 0.25),
+      0 0 0 3px var(--color-primary-muted);
   }
 
-  /* ─── Boutons d'action ─── */
+  /* ─── Actions compactes ─── */
   .action-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0.5rem 0;
+    height: 22px;
     border-radius: var(--radius-md);
     background: var(--color-muted);
     color: var(--color-muted-fg);
@@ -408,7 +394,7 @@
     border-color: var(--color-border-strong);
   }
   .action-btn:active:not(:disabled) {
-    transform: scale(0.97);
+    transform: scale(0.95);
   }
   .action-btn:disabled {
     cursor: not-allowed;

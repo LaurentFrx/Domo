@@ -9,7 +9,6 @@
 
   let { sw }: Props = $props();
 
-  // ─── Optimistic toggle ───
   let optimisticOn = $state<boolean | null>(null);
   let optimisticTimer: ReturnType<typeof setTimeout> | null = null;
   let lastServerOn: boolean | null = null;
@@ -55,98 +54,84 @@
   });
 </script>
 
-<div
-  class="switch-tile relative flex flex-col gap-3 rounded-[var(--radius-xl)] border p-4"
+<button
+  type="button"
+  class="switch-tile flex w-full items-center justify-between gap-3 rounded-[var(--radius-xl)] border p-3 text-left"
   class:opacity-50={!sw.available}
   style="background: var(--color-card); border-color: var(--color-border);"
+  role="switch"
+  aria-checked={displayedOn}
+  aria-label="Basculer {sw.name}"
+  onclick={onToggle}
+  onkeydown={onKeydown}
+  disabled={!sw.available}
 >
-  <!-- Header -->
-  <div class="flex items-start justify-between">
-    <span class="text-[13px] font-semibold leading-tight" style="color: var(--color-fg);">
+  <div class="flex min-w-0 flex-col gap-0.5">
+    <span class="text-[12px] font-semibold leading-tight truncate" style="color: var(--color-fg);">
       {sw.name}
     </span>
-    <div class="flex items-center gap-1.5">
-      <span
-        class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-        style:color={displayedOn ? 'var(--color-primary)' : 'var(--color-muted-fg)'}
-      >
-        {displayedOn ? 'On' : 'Off'}
-      </span>
-      <span
-        class="h-1.5 w-1.5 rounded-full"
-        style:background-color={sw.available ? 'var(--color-battery)' : 'var(--color-muted-fg)'}
-      ></span>
-    </div>
+    <span
+      class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+      style:color={displayedOn ? 'var(--color-primary)' : 'var(--color-muted-fg)'}
+    >
+      {displayedOn ? 'On' : 'Off'}
+    </span>
   </div>
 
-  <!-- Toggle pill -->
-  <div class="flex items-center justify-center py-2">
-    <button
-      type="button"
-      class="toggle-track"
-      class:toggle-on={displayedOn}
-      disabled={!sw.available}
-      role="switch"
-      aria-checked={displayedOn}
-      aria-label="Basculer {sw.name}"
-      onclick={onToggle}
-      onkeydown={onKeydown}
-    >
-      <span class="toggle-knob"></span>
-    </button>
-  </div>
-</div>
+  <span class="toggle-track shrink-0" class:toggle-on={displayedOn}>
+    <span class="toggle-knob"></span>
+  </span>
+</button>
 
 <style>
   .switch-tile {
     transition: border-color var(--duration-normal) var(--ease-default);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
-  .switch-tile:hover {
+  .switch-tile:hover:not(:disabled) {
     border-color: var(--color-border-strong);
+  }
+  .switch-tile:active:not(:disabled) {
+    transform: scale(0.99);
+  }
+  .switch-tile:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+  .switch-tile:disabled {
+    cursor: not-allowed;
   }
 
   .toggle-track {
     position: relative;
-    width: 76px;
-    height: 38px;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
     border-radius: 9999px;
     background: var(--color-muted);
     border: 1px solid var(--color-border);
-    cursor: pointer;
-    padding: 0;
-    -webkit-tap-highlight-color: transparent;
     transition:
       background-color var(--duration-normal) var(--ease-default),
       border-color var(--duration-normal) var(--ease-default);
   }
-  .toggle-track:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 3px;
-  }
-  .toggle-track:disabled {
-    cursor: not-allowed;
-  }
-  .toggle-track.toggle-on {
+  .toggle-on {
     background: var(--color-primary);
     border-color: var(--color-primary);
   }
-
   .toggle-knob {
     position: absolute;
     top: 50%;
-    left: 3px;
-    width: 30px;
-    height: 30px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
     background: #ffffff;
-    box-shadow:
-      0 2px 6px oklch(0 0 0 / 0.15),
-      0 1px 2px oklch(0 0 0 / 0.1);
+    box-shadow: 0 1px 3px oklch(0 0 0 / 0.2);
     transform: translateY(-50%);
     transition: left var(--duration-normal) var(--ease-spring);
-    pointer-events: none;
   }
   .toggle-on .toggle-knob {
-    left: calc(100% - 33px);
+    left: calc(100% - 21px);
   }
 </style>
