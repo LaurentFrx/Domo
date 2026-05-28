@@ -22,30 +22,42 @@
     zigbee.toggle(plug.friendlyName);
   }
 
-  // ─── Couleurs CMYK base + gradient ───
-  const INK_BASE: Record<InkColor, string> = {
-    BK: 'oklch(0.30 0.005 280)',
-    C: 'oklch(0.70 0.20 220)',
-    M: 'oklch(0.62 0.27 350)',
-    Y: 'oklch(0.86 0.18 95)'
+  // ─── Couleurs CMYK : pour chaque cartouche, on précalcule :
+  // - base : couleur pleine (la barre de fill)
+  // - track : couleur très diluée (le fond de la pill)
+  // - glow : couleur diffuse pour le box-shadow extérieur
+  // - light : variante un poil éclaircie pour le dégradé du fill
+  // Pas de color-mix() dans les calculs (mal supporté sur Safari iOS
+  // dans certains contextes — notamment à l'intérieur des gradients).
+  const INK: Record<
+    InkColor,
+    { base: string; track: string; glow: string; light: string }
+  > = {
+    BK: {
+      base: 'oklch(0.32 0.005 280)',
+      track: 'oklch(0.32 0.005 280 / 0.20)',
+      glow: 'oklch(0.45 0.01 280 / 0.45)',
+      light: 'oklch(0.45 0.005 280)'
+    },
+    C: {
+      base: 'oklch(0.70 0.20 220)',
+      track: 'oklch(0.70 0.20 220 / 0.20)',
+      glow: 'oklch(0.70 0.20 220 / 0.55)',
+      light: 'oklch(0.82 0.18 220)'
+    },
+    M: {
+      base: 'oklch(0.62 0.27 350)',
+      track: 'oklch(0.62 0.27 350 / 0.20)',
+      glow: 'oklch(0.62 0.27 350 / 0.55)',
+      light: 'oklch(0.78 0.22 350)'
+    },
+    Y: {
+      base: 'oklch(0.86 0.18 95)',
+      track: 'oklch(0.86 0.18 95 / 0.22)',
+      glow: 'oklch(0.86 0.18 95 / 0.55)',
+      light: 'oklch(0.95 0.16 95)'
+    }
   };
-  const INK_GLOW: Record<InkColor, string> = {
-    BK: 'oklch(0.45 0.01 280 / 0.45)',
-    C: 'oklch(0.70 0.20 220 / 0.55)',
-    M: 'oklch(0.62 0.27 350 / 0.55)',
-    Y: 'oklch(0.86 0.18 95 / 0.55)'
-  };
-  const INK_TEXT_DARK: Record<InkColor, boolean> = {
-    BK: false,
-    C: false,
-    M: false,
-    Y: true // jaune trop clair pour texte blanc → texte sombre
-  };
-
-  function ratioColor(percent: number): string {
-    // Détresse visuelle si < 10 %
-    return percent < 10 ? 'var(--color-alert)' : '';
-  }
 
   const lastUpdateLabel = $derived.by(() => {
     const d = printer.lastUpdate;
@@ -123,11 +135,13 @@
   {#if printer.inks.length > 0}
     <div class="ink-pills">
       {#each printer.inks as ink (ink.color)}
+        {@const c = INK[ink.color]}
         <div
           class="ink-pill"
-          style="--ink-base: {INK_BASE[ink.color]}; --ink-glow: {INK_GLOW[ink.color]}; --ink-percent: {Math.max(0, Math.min(100, ink.percent))}%;"
+          style="--ink-base: {c.base}; --ink-light: {c.light}; --ink-track: {c.track}; --ink-glow: {c.glow}; --ink-percent: {Math.max(0, Math.min(100, ink.percent))}%;"
           title="{ink.label} · {ink.percent}%"
         >
+          <span class="ink-pill-fill" aria-hidden="true"></span>
           <span class="ink-pill-pct" class:ink-low={ink.percent < 10}>
             {ink.percent}<span class="ink-pill-unit">%</span>
           </span>
@@ -163,17 +177,18 @@
     border-color: var(--color-border-strong);
   }
   /* ─── Glow néon quand l'imprimante est allumée (idem switches ON) ─── */
+  /* Utilise oklch(... / alpha) directement plutôt que color-mix() pour
+     compatibilité Safari iOS. */
   .printer-on {
-    --neon: var(--color-consumption);
-    border-color: var(--neon);
+    border-color: var(--color-consumption);
     box-shadow:
-      0 0 14px color-mix(in oklch, var(--neon) 50%, transparent),
-      0 0 32px color-mix(in oklch, var(--neon) 22%, transparent);
+      0 0 14px oklch(0.546 0.215 262 / 0.50),
+      0 0 32px oklch(0.546 0.215 262 / 0.22);
   }
   .printer-on .printer-icon {
     box-shadow:
-      0 0 10px color-mix(in oklch, var(--neon) 55%, transparent),
-      0 0 20px color-mix(in oklch, var(--neon) 30%, transparent);
+      0 0 10px oklch(0.546 0.215 262 / 0.55),
+      0 0 20px oklch(0.546 0.215 262 / 0.30);
   }
   .printer-icon {
     transition:
@@ -194,31 +209,32 @@
     height: 30px;
     border-radius: 9999px;
     overflow: hidden;
-    /* Fond translucide à 18% de la couleur + bord et glow extérieur */
-    background: color-mix(in oklch, var(--ink-base) 18%, transparent);
-    border: 1px solid color-mix(in oklch, var(--ink-base) 70%, transparent);
-    box-shadow:
-      inset 0 1px 0 color-mix(in oklch, white 15%, transparent),
-      0 0 10px var(--ink-glow);
+    background: var(--ink-track);
+    border: 1px solid var(--ink-base);
+    /* glow extérieur — pas de color-mix, pas de transparent : Safari-safe */
+    box-shadow: 0 0 10px var(--ink-glow);
     display: flex;
     align-items: center;
     justify-content: center;
     transition: transform var(--duration-fast) var(--ease-default);
+    isolation: isolate; /* nouveau stacking context — fiabilise Safari */
   }
-  /* Barre de fill proportionnelle au niveau d'encre (depuis la gauche) */
-  .ink-pill::before {
-    content: '';
+
+  /* Fill : élément réel (pas ::before) — Safari iOS gère plus fiablement */
+  .ink-pill-fill {
     position: absolute;
-    inset: 0 auto 0 0;
+    top: 0;
+    left: 0;
+    bottom: 0;
     width: var(--ink-percent, 0%);
-    background: linear-gradient(
-      to right,
-      color-mix(in oklch, var(--ink-base) 90%, white) 0%,
-      var(--ink-base) 100%
-    );
+    background-color: var(--ink-base);
+    background-image: linear-gradient(to right, var(--ink-light), var(--ink-base));
+    border-radius: inherit;
     z-index: 0;
     transition: width 600ms var(--ease-out);
+    pointer-events: none;
   }
+
   .ink-pill:hover {
     transform: translateY(-1px) scale(1.03);
   }
@@ -228,7 +244,7 @@
     z-index: 1;
     font-size: 13px;
     font-weight: 700;
-    color: white;
+    color: #ffffff;
     text-shadow:
       0 1px 2px oklch(0 0 0 / 0.6),
       0 0 4px oklch(0 0 0 / 0.4);
@@ -237,7 +253,7 @@
     line-height: 1;
   }
   .ink-pill-pct.ink-low {
-    color: oklch(0.92 0.08 30); /* clair-rouge pour alerter */
+    color: oklch(0.92 0.08 30);
   }
   .ink-pill-unit {
     font-size: 9px;
