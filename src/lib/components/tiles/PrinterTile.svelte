@@ -82,15 +82,22 @@
 
   <!-- Niveaux d'encre -->
   {#if printer.empty && printer.status !== 'connected'}
-    <div class="text-[11px]" style="color: var(--color-muted-fg);">
+    <button
+      type="button"
+      class="ink-error-btn text-left text-[11px]"
+      style="color: var(--color-muted-fg);"
+      onclick={() => printer.refresh()}
+      title="Réessayer maintenant"
+    >
       {#if printer.status === 'unconfigured'}
-        Niveaux d'encre indisponibles — `PRINTER_HOST` non configuré dans `.env`.
-      {:else if printer.status === 'error'}
-        Imprimante injoignable — {printer.lastError ?? 'erreur réseau'}
-      {:else}
+        Niveaux d'encre indisponibles — `PRINTER_HOST` non configuré.
+      {:else if printer.status === 'polling'}
         Lecture des niveaux d'encre…
+      {:else}
+        Imprimante injoignable — {printer.lastError ?? 'erreur réseau'}.
+        <span style="color: var(--color-primary);">Tap pour réessayer</span>
       {/if}
-    </div>
+    </button>
   {:else}
     <div class="flex flex-col gap-2">
       <span
@@ -134,6 +141,14 @@
   }
   .printer-tile:hover {
     border-color: var(--color-border-strong);
+  }
+
+  .ink-error-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .ink-swatch {

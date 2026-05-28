@@ -1,13 +1,20 @@
 /**
- * Printer store — niveaux d'encre de l'Imprimante Epson Workforce,
- * scrapés serveur-side via /api/printer/status.
+ * Printer store — niveaux d'encre de l'Imprimante Epson, scrapés
+ * serveur-side via /api/printer/status.
  *
- * Polling 10 min : les niveaux d'encre évoluent lentement, pas besoin
- * de marteler l'imprimante.
+ * Polling adaptatif :
+ *   - Succès      → 5 min  (l'encre évolue lentement)
+ *   - Erreur      → 30 s   (back-off court, imprimante peut redémarrer)
+ *   - Non configuré → pas de re-poll automatique (re-tente au refresh manuel)
+ *
+ * Et re-poll si :
+ *   - L'onglet redevient visible (visibilitychange)
+ *   - Refresh manuel via printer.refresh()
  */
 
-const POLL_INTERVAL_MS = 10 * 60 * 1000;
-const INITIAL_DELAY_MS = 2000;
+const SUCCESS_INTERVAL_MS = 5 * 60 * 1000;
+const ERROR_INTERVAL_MS = 30 * 1000;
+const INITIAL_DELAY_MS = 500;
 
 export type InkColor = 'BK' | 'C' | 'M' | 'Y';
 export interface InkTank {
@@ -23,37 +30,57 @@ class PrinterState {
   lastError = $state<string | null>(null);
   status = $state<'idle' | 'polling' | 'connected' | 'unconfigured' | 'error'>('idle');
 
-  /** true tant qu'on n'a aucune donnée affichable. */
   empty = $derived(this.inks.length === 0);
 
-  private intervalId: ReturnType<typeof setInterval> | null = null;
-  private initialTimer: ReturnType<typeof setTimeout> | null = null;
+  private timerId: ReturnType<typeof setTimeout> | null = null;
+  private visibilityHandler: (() => void) | null = null;
 
   connect() {
     if (typeof window === 'undefined') return;
-    if (this.intervalId !== null) return;
-    // léger délai pour ne pas spammer au mount
-    this.initialTimer = setTimeout(() => {
-      this.poll();
-      this.intervalId = setInterval(() => this.poll(), POLL_INTERVAL_MS);
-    }, INITIAL_DELAY_MS);
+    if (this.timerId !== null) return;
+    // 1er poll rapide
+    this.timerId = setTimeout(() => this.pollAndSchedule(), INITIAL_DELAY_MS);
+    // Re-poll quand l'onglet redevient actif
+    this.visibilityHandler = () => {
+      if (document.visibilityState === 'visible') {
+        this.refresh();
+      }
+    };
+    document.addEventListener('visibilitychange', this.visibilityHandler);
   }
 
   disconnect() {
-    if (this.initialTimer !== null) {
-      clearTimeout(this.initialTimer);
-      this.initialTimer = null;
+    if (this.timerId !== null) {
+      clearTimeout(this.timerId);
+      this.timerId = null;
     }
-    if (this.intervalId !== null) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
+    if (this.visibilityHandler && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
     }
+  }
+
+  /** Force un poll immédiat (bouton refresh manuel, onglet réactivé, etc.). */
+  async refresh() {
+    if (this.timerId !== null) {
+      clearTimeout(this.timerId);
+      this.timerId = null;
+    }
+    await this.pollAndSchedule();
+  }
+
+  private async pollAndSchedule() {
+    await this.poll();
+    // Re-planifie le prochain poll selon le statut.
+    if (this.status === 'unconfigured') return; // inutile de reboucler
+    const delay = this.status === 'connected' ? SUCCESS_INTERVAL_MS : ERROR_INTERVAL_MS;
+    this.timerId = setTimeout(() => this.pollAndSchedule(), delay);
   }
 
   private async poll() {
     this.status = 'polling';
     try {
-      const res = await fetch('/api/printer/status');
+      const res = await fetch('/api/printer/status', { cache: 'no-store' });
       if (res.status === 503) {
         this.status = 'unconfigured';
         this.online = false;
@@ -69,7 +96,7 @@ class PrinterState {
       this.online = data.online;
       this.inks = data.inks ?? [];
       this.lastError = data.error ?? null;
-      this.status = data.error ? 'error' : 'connected';
+      this.status = data.error || !data.online ? 'error' : 'connected';
       this.lastUpdate = new Date();
     } catch (e) {
       this.online = false;
