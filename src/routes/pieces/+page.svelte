@@ -3,7 +3,6 @@
   import RoomSection from '$components/tiles/RoomSection.svelte';
   import { matter } from '$stores/matter.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
-  import { formatDate } from '$utils/format';
 
   onMount(() => {
     matter.connect();
@@ -14,8 +13,6 @@
     matter.disconnect();
     zigbee.disconnect();
   });
-
-  const date = $derived(formatDate());
 
   // ─── Fusion Matter + Zigbee par pièce ──────────────────────────────────
   const mergedRooms = $derived.by(() => {
@@ -55,67 +52,68 @@
       matterConnected &&
       ['connected', 'unconfigured'].includes(zigbee.connectionStatus)
   );
+
+  function zigbeeColor(status: string): string {
+    if (status === 'connected') return 'var(--color-battery)';
+    if (status === 'unconfigured') return 'var(--color-muted-fg)';
+    return 'var(--color-warning)';
+  }
 </script>
 
 <svelte:head>
   <title>Pièces — Domo</title>
 </svelte:head>
 
-<div class="flex flex-col gap-4 pb-6">
-  <header class="flex flex-col gap-1 pt-4 pb-2">
-    <span class="text-xs font-medium tracking-wider text-[var(--text-secondary)]">{date}</span>
-    <div class="flex items-center justify-between gap-3">
-      <h1 class="text-2xl font-medium text-white">Pièces</h1>
-      {#if matterConnected && hasShutters && matter.onlineCount > 0}
-        <div class="flex gap-2">
-          <button
-            type="button"
-            class="pill-accent"
-            onclick={() => matter.openAll()}
-            aria-label="Ouvrir tous les volets"
-          >
-            <span aria-hidden="true">▲</span> Tous les volets
-          </button>
-          <button
-            type="button"
-            class="pill-primary"
-            onclick={() => matter.closeAll()}
-            aria-label="Fermer tous les volets"
-          >
-            <span aria-hidden="true">▼</span> Tous les volets
-          </button>
-        </div>
-      {/if}
-    </div>
+<div class="flex flex-col gap-4 py-4">
+  <header class="flex items-center justify-between gap-3">
+    <h1 class="text-2xl font-semibold tracking-tight">Pièces</h1>
+    {#if matterConnected && hasShutters && matter.onlineCount > 0}
+      <div class="flex gap-2">
+        <button
+          type="button"
+          class="pill-open"
+          onclick={() => matter.openAll()}
+          aria-label="Ouvrir tous les volets"
+        >
+          <span aria-hidden="true">▲</span> Tout ouvrir
+        </button>
+        <button
+          type="button"
+          class="pill-close"
+          onclick={() => matter.closeAll()}
+          aria-label="Fermer tous les volets"
+        >
+          <span aria-hidden="true">▼</span> Tout fermer
+        </button>
+      </div>
+    {/if}
   </header>
 
   <!-- Sources status -->
   <div class="flex flex-wrap gap-2 text-[10px]">
     <span
-      class="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-subtle)] px-2 py-0.5"
-      style:color={matterConnected ? 'var(--accent-500)' : 'var(--text-tertiary)'}
+      class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5"
+      style="
+        border-color: var(--color-border);
+        color: {matterConnected ? 'var(--color-battery)' : 'var(--color-muted-fg)'};
+      "
     >
       <span
         class="h-1.5 w-1.5 rounded-full"
-        style:background-color={matterConnected ? 'var(--accent-500)' : 'var(--text-tertiary)'}
+        style:background-color={matterConnected ? 'var(--color-battery)' : 'var(--color-muted-fg)'}
       ></span>
       Matter
     </span>
     <span
-      class="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-subtle)] px-2 py-0.5"
-      style:color={zigbee.connectionStatus === 'connected'
-        ? 'var(--accent-500)'
-        : zigbee.connectionStatus === 'unconfigured'
-          ? 'var(--text-tertiary)'
-          : 'var(--warning)'}
+      class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5"
+      style="
+        border-color: var(--color-border);
+        color: {zigbeeColor(zigbee.connectionStatus)};
+      "
     >
       <span
         class="h-1.5 w-1.5 rounded-full"
-        style:background-color={zigbee.connectionStatus === 'connected'
-          ? 'var(--accent-500)'
-          : zigbee.connectionStatus === 'unconfigured'
-            ? 'var(--text-tertiary)'
-            : 'var(--warning)'}
+        style:background-color={zigbeeColor(zigbee.connectionStatus)}
       ></span>
       Zigbee · {zigbee.devices.length}
     </span>
@@ -123,12 +121,16 @@
 
   {#if matterDisconnected}
     <div
-      class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 text-center shadow-[var(--shadow-card)]"
+      class="rounded-[var(--radius-2xl)] border p-6 text-center"
+      style="background: var(--color-card); border-color: var(--color-border);"
     >
-      <p class="text-sm text-[var(--text-secondary)]">Connexion au serveur Matter perdue</p>
+      <p class="text-sm" style="color: var(--color-muted-fg);">
+        Connexion au serveur Matter perdue
+      </p>
       <button
         type="button"
-        class="mt-3 rounded-full bg-[var(--primary-500)] px-4 py-2 text-xs font-medium text-white"
+        class="mt-3 rounded-full px-4 py-2 text-xs font-semibold"
+        style="background: var(--color-primary); color: var(--color-primary-fg);"
         onclick={() => matter.connect()}
       >
         Reconnecter
@@ -136,18 +138,20 @@
     </div>
   {:else if matter.connectionStatus === 'connecting' && mergedRooms.length === 0}
     <div
-      class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 text-center shadow-[var(--shadow-card)]"
+      class="rounded-[var(--radius-2xl)] border p-6 text-center"
+      style="background: var(--color-card); border-color: var(--color-border);"
     >
-      <p class="text-sm text-[var(--text-secondary)]">Connexion en cours…</p>
+      <p class="text-sm" style="color: var(--color-muted-fg);">Connexion en cours…</p>
     </div>
   {:else if isEmpty}
     <div
-      class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 text-center shadow-[var(--shadow-card)]"
+      class="rounded-[var(--radius-2xl)] border p-6 text-center"
+      style="background: var(--color-card); border-color: var(--color-border);"
     >
-      <p class="text-sm text-[var(--text-secondary)]">Aucun appareil détecté</p>
+      <p class="text-sm" style="color: var(--color-muted-fg);">Aucun appareil détecté</p>
     </div>
   {:else}
-    <div class="stagger-enter grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {#each mergedRooms as r (r.room)}
         <RoomSection
           room={r.room}
@@ -161,43 +165,41 @@
 </div>
 
 <style>
-  .pill-accent,
-  .pill-primary {
+  .pill-open,
+  .pill-close {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.25rem;
+    gap: 0.375rem;
     padding: 0.375rem 0.875rem;
     border-radius: 9999px;
     font-size: 0.75rem;
-    font-weight: 500;
+    font-weight: 600;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
-    transition:
-      background-color var(--motion-fast) var(--easing-default),
-      box-shadow var(--motion-fast) var(--easing-default),
-      transform var(--motion-fast) var(--easing-default);
+    border: 1px solid transparent;
+    transition: all var(--duration-fast) var(--ease-default);
   }
-  .pill-accent {
-    color: var(--surface-base);
-    background: var(--accent-500);
-    box-shadow: 0 0 18px rgba(61, 253, 152, 0.25);
+  .pill-open {
+    color: var(--color-battery);
+    background: var(--color-battery-muted);
+    border-color: var(--color-battery);
   }
-  .pill-accent:hover {
-    background: var(--accent-600);
-    box-shadow: 0 0 24px rgba(61, 253, 152, 0.4);
+  .pill-open:hover {
+    background: var(--color-battery);
+    color: var(--color-primary-fg);
   }
-  .pill-primary {
-    color: var(--text-primary);
-    background: var(--primary-500);
-    box-shadow: 0 0 18px rgba(110, 69, 255, 0.25);
+  .pill-close {
+    color: var(--color-primary);
+    background: var(--color-primary-muted);
+    border-color: var(--color-primary);
   }
-  .pill-primary:hover {
-    background: var(--primary-600);
-    box-shadow: 0 0 24px rgba(110, 69, 255, 0.4);
+  .pill-close:hover {
+    background: var(--color-primary);
+    color: var(--color-primary-fg);
   }
-  .pill-accent:active,
-  .pill-primary:active {
-    transform: scale(0.96);
+  .pill-open:active,
+  .pill-close:active {
+    transform: scale(0.97);
   }
 </style>
