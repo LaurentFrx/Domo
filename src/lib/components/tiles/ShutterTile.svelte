@@ -347,16 +347,26 @@
   }
 
   .shutter-name {
-    font-size: 12px;
-    /* Permet le wrap sur 2 lignes pour les noms longs (Salle à manger,
-       Chambre parents, Chambre amis) sur iPhone. */
-    word-break: break-word;
-    overflow-wrap: anywhere;
-    hyphens: auto;
+    font-size: 13px;
+    line-height: 1.2;
+    text-align: center;
+    /* Wrap autorisé UNIQUEMENT aux espaces (jamais dans un mot) :
+       'parents' reste entier, le browser choisit la coupure naturelle. */
+    white-space: normal;
+    word-break: keep-all;
+    overflow-wrap: normal;
+    hyphens: none;
+    /* Réserve 2 lignes même pour les noms courts (Salon, Balcon) :
+       toutes les cards alignées peu importe la longueur du nom. */
+    min-height: 2.4em;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
   @media (max-width: 639px) {
     .shutter-name {
-      font-size: 10.5px;
+      font-size: 12px;
     }
   }
 
