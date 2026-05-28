@@ -378,6 +378,9 @@
     left: 0;
     right: 0;
     background: linear-gradient(to bottom, var(--color-primary), oklch(0.48 0.26 293));
+    /* Le track est overflow:visible (pour le hit-area du thumb), donc le fill
+       doit gérer son propre arrondi pour matcher la forme du track. */
+    border-radius: 9999px;
     transition: height 120ms linear;
     pointer-events: none;
   }
