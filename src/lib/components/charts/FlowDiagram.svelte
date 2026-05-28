@@ -2,31 +2,25 @@
   /**
    * Flow Diagram énergie — disposition radiale autour de la Maison.
    *
-   * 4 nœuds périphériques (PV ↑, Batterie ←, Réseau →, Cumulus ↓) reliés
-   * à la Maison centrale via des courbes de Bézier. Lignes animées via
-   * stroke-dashoffset (CSS, GPU) avec direction du flux respectée.
-   * Largeur de ligne proportionnelle à la puissance.
+   * 100 % SVG : nœuds, icônes, textes et lignes sont tous dans le viewBox.
+   * Alignement parfait quelle que soit la largeur du container (plus de
+   * superposition HTML/SVG comme avant). Container max-w 520px centré.
    *
-   * Valeurs affichées en Watts (séparateur milliers fr).
-   * Désactivé si prefers-reduced-motion.
+   * 4 nœuds périphériques : PV ↑, Batterie ←, Réseau →, Cumulus ↓
+   * Lignes Bézier courbes, animation stroke-dashoffset CSS.
    */
 
   interface Props {
-    /** Production PV instantanée (W). */
     pvPowerW: number;
-    /** Consommation maison instantanée (W). */
     homePowerW: number;
-    /** Puissance batterie nette : + charge, - décharge (W). */
+    /** + charge, - décharge. */
     batteryNetW: number;
-    /** SoC batterie 0-100. */
+    /** 0-100. */
     batterySoc: number;
-    /** Puissance réseau : + import, - export (W). */
+    /** + import, - export. */
     gridPowerW: number;
-    /** Température cumulus °C. */
     cumulusTempC: number;
-    /** Puissance cumulus (W). */
     cumulusPowerW: number;
-    /** Cumulus actif (relais ON) ? */
     cumulusOn: boolean;
   }
 
@@ -51,7 +45,7 @@
 
   /** Format Watts avec séparateur de milliers (espace insécable). */
   function fmtW(w: number): string {
-    return Math.round(Math.abs(w)).toLocaleString('fr-FR').replace(/\s/g, ' ');
+    return Math.round(Math.abs(w)).toLocaleString('fr-FR').replace(/\s/g, ' ');
   }
 
   // ─── Décisions de flux ─────────────────────────────────────────────────
@@ -66,217 +60,255 @@
     batteryNetW > 30 ? 'Charge' : batteryNetW < -30 ? 'Décharge' : 'Repos'
   );
 
-  // Couleurs sémantiques utilisées dans le SVG
+  const gridLabel = $derived(
+    gridExportActive ? 'Injection' : gridImportActive ? 'Import' : 'Repos'
+  );
+
+  // Positions des nœuds dans le viewBox 400×400
+  const N = {
+    pv: { x: 200, y: 60 },
+    bat: { x: 60, y: 200 },
+    home: { x: 200, y: 200 },
+    grid: { x: 340, y: 200 },
+    cum: { x: 200, y: 340 }
+  };
+
   const SOLAR = 'var(--color-solar)';
   const BAT = 'var(--color-battery)';
   const HOME = 'var(--color-consumption)';
   const GRID = 'var(--color-grid-energy)';
   const HC = 'var(--color-hc)';
-  const MUTED = 'var(--color-border-strong)';
 </script>
 
-<div
-  class="flow-card relative w-full overflow-hidden rounded-[var(--radius-2xl)] border"
-  style="background: var(--color-card); border-color: var(--color-border); height: 280px;"
->
-  <!-- Halo radial discret sous la maison -->
+<div class="mx-auto w-full" style="max-width: 520px;">
   <div
-    class="pointer-events-none absolute left-1/2 top-1/2 h-48 w-48 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-50"
-    style="background: radial-gradient(circle, var(--color-primary-muted) 0%, transparent 65%);"
-    aria-hidden="true"
-  ></div>
-
-  <svg
-    viewBox="0 0 240 200"
-    preserveAspectRatio="xMidYMid meet"
-    class="absolute inset-0 h-full w-full"
-    role="img"
-    aria-label="Diagramme des flux d'énergie en watts"
+    class="relative rounded-[var(--radius-2xl)] border"
+    style="background: var(--color-card); border-color: var(--color-border); aspect-ratio: 1;"
   >
-    <!-- ═══ Lignes (sous les nœuds) ═══════════════════════════════════ -->
+    <svg
+      viewBox="0 0 400 400"
+      preserveAspectRatio="xMidYMid meet"
+      class="absolute inset-0 h-full w-full"
+      role="img"
+      aria-label="Diagramme des flux d'énergie en watts"
+    >
+      <!-- ═══ Halo radial discret sous la maison ═══ -->
+      <defs>
+        <radialGradient id="house-halo" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="var(--color-primary)" stop-opacity="0.12" />
+          <stop offset="60%" stop-color="var(--color-primary)" stop-opacity="0.04" />
+          <stop offset="100%" stop-color="var(--color-primary)" stop-opacity="0" />
+        </radialGradient>
+      </defs>
+      <circle cx="200" cy="200" r="130" fill="url(#house-halo)" />
 
-    <!-- PV (120,30) → Maison (120,100). Verticale, dérivation gauche pour batterie. -->
-    <path
-      class="flow-line"
-      class:flow-active={pvToHomeActive}
-      d="M 120 42 Q 120 65, 120 88"
-      fill="none"
-      stroke={SOLAR}
-      stroke-width={pvToHomeActive ? strokeForW(pvPowerW) : 1}
-      stroke-dasharray={pvToHomeActive ? '4 8' : '2 4'}
-      stroke-linecap="round"
-      opacity={pvToHomeActive ? 1 : 0.18}
-    />
+      <!-- ═══ Lignes (sous les nœuds) ═══════════════════════════════════ -->
 
-    <!-- PV → Batterie : Bezier courbe -->
-    <path
-      class="flow-line"
-      class:flow-active={pvToBatActive}
-      d="M 110 38 Q 70 50, 48 92"
-      fill="none"
-      stroke={BAT}
-      stroke-width={pvToBatActive ? strokeForW(batteryNetW) : 1}
-      stroke-dasharray={pvToBatActive ? '4 8' : '2 4'}
-      stroke-linecap="round"
-      opacity={pvToBatActive ? 1 : 0.18}
-    />
-
-    <!-- Batterie (40,100) → Maison : Bezier (sens décharge) -->
-    <path
-      class="flow-line"
-      class:flow-active={batToHomeActive}
-      class:flow-reverse={batToHomeActive}
-      d="M 104 100 Q 80 100, 56 100"
-      fill="none"
-      stroke={BAT}
-      stroke-width={batToHomeActive ? strokeForW(-batteryNetW) : 1}
-      stroke-dasharray={batToHomeActive ? '4 8' : '2 4'}
-      stroke-linecap="round"
-      opacity={batToHomeActive ? 1 : 0.18}
-    />
-
-    <!-- Réseau (200,100) → Maison : Bezier (sens import) -->
-    <path
-      class="flow-line"
-      class:flow-active={gridImportActive}
-      class:flow-reverse={gridImportActive}
-      d="M 136 100 Q 160 100, 184 100"
-      fill="none"
-      stroke={GRID}
-      stroke-width={gridImportActive ? strokeForW(gridPowerW) : 1}
-      stroke-dasharray={gridImportActive ? '4 8' : '2 4'}
-      stroke-linecap="round"
-      opacity={gridImportActive ? 1 : 0.18}
-    />
-
-    <!-- Maison → Réseau (export) - même path mais sens normal -->
-    {#if gridExportActive}
+      <!-- PV → Maison (vertical) -->
       <path
-        class="flow-line flow-active"
-        d="M 136 100 Q 160 100, 184 100"
+        class="flow-line"
+        class:flow-active={pvToHomeActive}
+        d="M 200 100 L 200 160"
         fill="none"
         stroke={SOLAR}
-        stroke-width={strokeForW(-gridPowerW)}
-        stroke-dasharray="4 8"
+        stroke-width={pvToHomeActive ? strokeForW(pvPowerW) : 1}
+        stroke-dasharray={pvToHomeActive ? '6 10' : '3 6'}
         stroke-linecap="round"
-        opacity="1"
+        opacity={pvToHomeActive ? 1 : 0.15}
       />
-    {/if}
 
-    <!-- Maison (120,100) → Cumulus (120,170) : verticale descendante -->
-    <path
-      class="flow-line"
-      class:flow-active={homeToCumActive}
-      d="M 120 116 Q 120 138, 120 158"
-      fill="none"
-      stroke={cumulusOn ? HC : MUTED}
-      stroke-width={homeToCumActive ? strokeForW(cumulusPowerW) : 1}
-      stroke-dasharray={homeToCumActive ? '4 8' : '2 4'}
-      stroke-linecap="round"
-      opacity={homeToCumActive ? 1 : 0.18}
-    />
+      <!-- PV → Batterie (Bezier) -->
+      <path
+        class="flow-line"
+        class:flow-active={pvToBatActive}
+        d="M 180 90 Q 120 130, 90 180"
+        fill="none"
+        stroke={BAT}
+        stroke-width={pvToBatActive ? strokeForW(batteryNetW) : 1}
+        stroke-dasharray={pvToBatActive ? '6 10' : '3 6'}
+        stroke-linecap="round"
+        opacity={pvToBatActive ? 1 : 0.15}
+      />
 
-    <!-- ═══ Nœud central : MAISON ═════════════════════════════════════ -->
-    <g transform="translate(120 100)">
-      <!-- Halo de fond -->
-      <circle r="22" fill="var(--color-card)" stroke="var(--color-consumption)" stroke-width="1.5" opacity="0.4" />
-      <circle r="20" fill="var(--color-consumption-muted)" />
-      <!-- Icône maison -->
-      <g transform="translate(-9 -9)" stroke={HOME} stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 8L9 3l6 5v8H3z" />
-        <path d="M7 16v-4h4v4" />
-      </g>
-    </g>
-  </svg>
+      <!-- Batterie → Maison (Bezier, sens décharge) -->
+      <path
+        class="flow-line"
+        class:flow-active={batToHomeActive}
+        class:flow-reverse={batToHomeActive}
+        d="M 160 200 L 100 200"
+        fill="none"
+        stroke={BAT}
+        stroke-width={batToHomeActive ? strokeForW(-batteryNetW) : 1}
+        stroke-dasharray={batToHomeActive ? '6 10' : '3 6'}
+        stroke-linecap="round"
+        opacity={batToHomeActive ? 1 : 0.15}
+      />
 
-  <!-- ═══ HTML par-dessus le SVG : valeurs/labels ═══════════════════════ -->
+      <!-- Réseau → Maison (sens import) -->
+      <path
+        class="flow-line"
+        class:flow-active={gridImportActive}
+        class:flow-reverse={gridImportActive}
+        d="M 240 200 L 300 200"
+        fill="none"
+        stroke={GRID}
+        stroke-width={gridImportActive ? strokeForW(gridPowerW) : 1}
+        stroke-dasharray={gridImportActive ? '6 10' : '3 6'}
+        stroke-linecap="round"
+        opacity={gridImportActive ? 1 : 0.15}
+      />
 
-  <!-- PV en haut -->
-  <div class="node-html" style="left: 50%; top: 8px; transform: translateX(-50%);">
-    <div class="node-circle" style="background: var(--color-solar-muted); color: var(--color-solar);">
-      <!-- Soleil -->
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="4" />
-        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-      </svg>
-    </div>
-  </div>
-  <div class="node-label" style="left: 50%; top: 53px; transform: translateX(-50%); text-align: center;">
-    <div class="node-value" style="color: {pvToHomeActive ? SOLAR : 'var(--color-muted-fg)'};">
-      {fmtW(pvPowerW)} <span class="unit">W</span>
-    </div>
-    <div class="node-name">Solaire</div>
-  </div>
-
-  <!-- Batterie à gauche -->
-  <div class="node-html" style="left: 12px; top: 50%; transform: translateY(-50%);">
-    <div class="node-circle" style="background: var(--color-battery-muted); color: var(--color-battery);">
-      <!-- Batterie pleine -->
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <rect x="3" y="8" width="15" height="10" rx="1.5" />
-        <line x1="20" y1="11" x2="20" y2="15" />
-        <rect x="5" y="10" width="{Math.max(2, batterySoc / 100 * 11)}" height="6" rx="0.5" fill="currentColor" stroke="none" />
-      </svg>
-    </div>
-  </div>
-  <div class="node-label" style="left: 55px; top: 50%; transform: translateY(-50%); text-align: left;">
-    <div class="node-value" style="color: {BAT};">
-      {batterySoc.toFixed(0)}<span class="unit">%</span>
-    </div>
-    <div class="node-name">{batteryLabel}</div>
-  </div>
-
-  <!-- Réseau à droite -->
-  <div class="node-html" style="right: 12px; top: 50%; transform: translateY(-50%);">
-    <div class="node-circle" style="background: var(--color-grid-energy-muted); color: var(--color-grid-energy);">
-      <!-- Tour réseau -->
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M12 2v20M5 8l7-6 7 6M7 14l5-4 5 4M9 20l3-3 3 3" />
-      </svg>
-    </div>
-  </div>
-  <div class="node-label" style="right: 55px; top: 50%; transform: translateY(-50%); text-align: right;">
-    <div class="node-value" style="color: {gridExportActive ? SOLAR : gridImportActive ? GRID : 'var(--color-muted-fg)'};">
+      <!-- Maison → Réseau (export) — superposée -->
       {#if gridExportActive}
-        <span class="arrow">↑</span>
-      {:else if gridImportActive}
-        <span class="arrow">↓</span>
+        <path
+          class="flow-line flow-active"
+          d="M 240 200 L 300 200"
+          fill="none"
+          stroke={SOLAR}
+          stroke-width={strokeForW(-gridPowerW)}
+          stroke-dasharray="6 10"
+          stroke-linecap="round"
+          opacity="1"
+        />
       {/if}
-      {fmtW(gridPowerW)} <span class="unit">W</span>
-    </div>
-    <div class="node-name">{gridExportActive ? 'Injection' : gridImportActive ? 'Import' : 'Repos'}</div>
-  </div>
 
-  <!-- Cumulus en bas -->
-  <div class="node-html" style="left: 50%; bottom: 8px; transform: translateX(-50%);">
-    <div
-      class="node-circle"
-      style="background: var(--color-hc-muted); color: {cumulusOn ? HC : 'var(--color-muted-fg)'};"
-    >
-      <!-- Flamme -->
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M12 3c0 4-3 5-3 9a3 3 0 006 0c0-1-1-2-1-3 2 1 3 3 3 5a5 5 0 01-10 0c0-3 2-4 3-7 .5-1.5 1-2.5 2-4z" />
-      </svg>
-    </div>
-  </div>
-  <div class="node-label" style="left: 50%; bottom: 53px; transform: translateX(-50%); text-align: center;">
-    <div class="node-value" style="color: {cumulusOn ? HC : 'var(--color-muted-fg)'};">
-      {cumulusTempC.toFixed(0)}<span class="unit">°C</span>
-    </div>
-    <div class="node-name">
-      {cumulusOn ? `${fmtW(cumulusPowerW)} W` : 'Cumulus'}
-    </div>
+      <!-- Maison → Cumulus (vertical) -->
+      <path
+        class="flow-line"
+        class:flow-active={homeToCumActive}
+        d="M 200 240 L 200 300"
+        fill="none"
+        stroke={cumulusOn ? HC : GRID}
+        stroke-width={homeToCumActive ? strokeForW(cumulusPowerW) : 1}
+        stroke-dasharray={homeToCumActive ? '6 10' : '3 6'}
+        stroke-linecap="round"
+        opacity={homeToCumActive ? 1 : 0.15}
+      />
+
+      <!-- ═══ Nœud central : MAISON ═══════════════════════════════════ -->
+      <g transform="translate(200 200)">
+        <circle r="40" fill="var(--color-card)" stroke="var(--color-consumption)" stroke-width="1.5" opacity="0.5" />
+        <circle r="36" fill="var(--color-consumption-muted)" stroke="var(--color-consumption)" stroke-width="1.5" />
+        <g transform="translate(-12 -12)" stroke="var(--color-consumption)" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11L12 3l9 8v10H3z" />
+          <path d="M9 21v-6h6v6" />
+        </g>
+        <text
+          x="0"
+          y="60"
+          text-anchor="middle"
+          fill="var(--color-consumption)"
+          style="font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums;"
+        >{fmtW(homePowerW)}<tspan dx="2" style="font-size: 11px; font-weight: 500; fill: var(--color-muted-fg);">W</tspan></text>
+        <text
+          x="0"
+          y="76"
+          text-anchor="middle"
+          fill="var(--color-muted-fg)"
+          style="font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;"
+        >Maison</text>
+      </g>
+
+      <!-- ═══ Nœud PV (haut) ═══════════════════════════════════════════ -->
+      <g transform="translate({N.pv.x} {N.pv.y})">
+        <circle r="30" fill="var(--color-solar-muted)" stroke={SOLAR} stroke-width="1.5" />
+        <g stroke={SOLAR} stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="0" cy="0" r="6" />
+          <path d="M0 -14V-11M0 11V14M-14 0H-11M11 0H14M-9.9 -9.9L-7.8 -7.8M7.8 7.8L9.9 9.9M-9.9 9.9L-7.8 7.8M7.8 -7.8L9.9 -9.9" />
+        </g>
+        <text
+          x="0"
+          y="-44"
+          text-anchor="middle"
+          style="font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; fill: var(--color-muted-fg);"
+        >Solaire</text>
+        <text
+          x="0"
+          y="50"
+          text-anchor="middle"
+          style="font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums;"
+          fill={pvToHomeActive || pvToBatActive ? SOLAR : 'var(--color-muted-fg)'}
+        >{fmtW(pvPowerW)}<tspan dx="2" style="font-size: 10px; font-weight: 500; fill: var(--color-muted-fg);">W</tspan></text>
+      </g>
+
+      <!-- ═══ Nœud Batterie (gauche) ═══════════════════════════════════ -->
+      <g transform="translate({N.bat.x} {N.bat.y})">
+        <circle r="30" fill="var(--color-battery-muted)" stroke={BAT} stroke-width="1.5" />
+        <g stroke={BAT} stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="-13" y="-7" width="22" height="14" rx="2" />
+          <line x1="11" y1="-3" x2="11" y2="3" />
+        </g>
+        <!-- Remplissage SoC dynamique -->
+        <rect
+          x={-11}
+          y={-5}
+          width={Math.max(2, (batterySoc / 100) * 18)}
+          height="10"
+          rx="1"
+          fill={BAT}
+        />
+        <text
+          x="0"
+          y="-44"
+          text-anchor="middle"
+          style="font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; fill: var(--color-muted-fg);"
+        >{batteryLabel}</text>
+        <text
+          x="0"
+          y="50"
+          text-anchor="middle"
+          fill={BAT}
+          style="font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums;"
+        >{batterySoc.toFixed(0)}<tspan dx="1" style="font-size: 10px; font-weight: 500; fill: var(--color-muted-fg);">%</tspan></text>
+      </g>
+
+      <!-- ═══ Nœud Réseau (droite) ═════════════════════════════════════ -->
+      <g transform="translate({N.grid.x} {N.grid.y})">
+        <circle r="30" fill="var(--color-grid-energy-muted)" stroke={GRID} stroke-width="1.5" />
+        <g stroke={gridExportActive ? SOLAR : GRID} stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M0 -13V13M-8 -7L0 -13L8 -7M-7 0L0 -5L7 0M-6 6L0 2L6 6" />
+        </g>
+        <text
+          x="0"
+          y="-44"
+          text-anchor="middle"
+          style="font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; fill: var(--color-muted-fg);"
+        >{gridLabel}</text>
+        <text
+          x="0"
+          y="50"
+          text-anchor="middle"
+          style="font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums;"
+          fill={gridExportActive ? SOLAR : gridImportActive ? GRID : 'var(--color-muted-fg)'}
+        >{#if gridExportActive}↑ {:else if gridImportActive}↓ {/if}{fmtW(gridPowerW)}<tspan dx="2" style="font-size: 10px; font-weight: 500; fill: var(--color-muted-fg);">W</tspan></text>
+      </g>
+
+      <!-- ═══ Nœud Cumulus (bas) ═══════════════════════════════════════ -->
+      <g transform="translate({N.cum.x} {N.cum.y})">
+        <circle r="30" fill="var(--color-hc-muted)" stroke={cumulusOn ? HC : 'var(--color-muted-fg)'} stroke-width="1.5" />
+        <g stroke={cumulusOn ? HC : 'var(--color-muted-fg)'} stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M0 -13C0 -13 -4 -9 -4 -3C-4 1 -2 4 0 4C2 4 4 1 4 -3C4 -7 2 -9 2 -9C2 -7 1 -5 0 -5C-1 -5 0 -9 0 -13Z" />
+          <path d="M-6 8C-6 4 -3 0 0 -2C0 0 2 2 2 4C4 5 6 7 6 10C6 13 4 14 0 14C-4 14 -6 13 -6 8Z" />
+        </g>
+        <text
+          x="0"
+          y="50"
+          text-anchor="middle"
+          style="font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums;"
+          fill={cumulusOn ? HC : 'var(--color-muted-fg)'}
+        >{cumulusTempC.toFixed(0)}<tspan dx="1" style="font-size: 10px; font-weight: 500; fill: var(--color-muted-fg);">°C</tspan></text>
+        <text
+          x="0"
+          y="66"
+          text-anchor="middle"
+          style="font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; fill: var(--color-muted-fg);"
+        >{cumulusOn ? `${fmtW(cumulusPowerW)} W` : 'Cumulus'}</text>
+      </g>
+    </svg>
   </div>
 </div>
 
 <style>
-  .flow-card {
-    /* léger over-glow violet pour donner du caractère */
-    box-shadow:
-      0 1px 2px oklch(0.145 0 0 / 0.03),
-      0 0 0 1px var(--color-border);
-  }
-
   .flow-line {
     transition:
       stroke-width 400ms var(--ease-out),
@@ -290,14 +322,10 @@
   }
 
   @keyframes flow-forward {
-    to {
-      stroke-dashoffset: -12;
-    }
+    to { stroke-dashoffset: -16; }
   }
   @keyframes flow-reverse {
-    to {
-      stroke-dashoffset: 12;
-    }
+    to { stroke-dashoffset: 16; }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -305,56 +333,5 @@
     .flow-reverse {
       animation: none;
     }
-  }
-
-  .node-html {
-    position: absolute;
-    pointer-events: none;
-  }
-
-  .node-circle {
-    width: 44px;
-    height: 44px;
-    border-radius: 9999px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1.5px solid currentColor;
-    background-clip: padding-box;
-  }
-
-  .node-label {
-    position: absolute;
-    line-height: 1.1;
-    pointer-events: none;
-  }
-
-  .node-value {
-    font-size: 13px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em;
-    white-space: nowrap;
-  }
-
-  .node-value .unit {
-    font-size: 10px;
-    font-weight: 500;
-    opacity: 0.7;
-    margin-left: 1px;
-  }
-
-  .node-value .arrow {
-    font-weight: 700;
-    margin-right: 1px;
-  }
-
-  .node-name {
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--color-muted-fg);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-top: 2px;
   }
 </style>
