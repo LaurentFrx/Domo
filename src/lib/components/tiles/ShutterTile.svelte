@@ -45,8 +45,8 @@
 
   const isMoving = $derived(animPos !== null || shutter.moving);
 
-  // Slider 32×100 sur iPad — thumb 28px (touch target confortable au doigt)
-  const THUMB_SIZE = 28;
+  // Slider 36×120 sur iPad — thumb 32px (touch target ≥ 44pt avec hit-area)
+  const THUMB_SIZE = 32;
 
   $effect(() => {
     const pos = shutter.position;
@@ -238,8 +238,8 @@
     </span>
   </div>
 
-  <!-- Corps : slider vertical 100px à gauche + 3 actions équi-réparties sur la même hauteur -->
-  <div class="flex items-stretch gap-2" style="height: 100px;">
+  <!-- Corps : slider vertical 120px à gauche + 3 actions carrées 36×36 -->
+  <div class="flex items-stretch gap-2" style="height: 120px;">
     <div
       bind:this={trackEl}
       class="slider-track"
@@ -263,18 +263,18 @@
       ></div>
     </div>
 
-    <div class="flex flex-1 flex-col justify-between">
+    <div class="flex flex-col justify-between" style="width: 36px;">
       <button
         type="button"
-        class="action-btn"
+        class="action-btn action-btn--open"
         class:action-active={activeAction === 'open'}
-        class:action-open={activeAction === 'open'}
         disabled={!shutter.available}
         onclick={onOpenClick}
         aria-label="Ouvrir {shutter.name}"
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M18 15l-6-6-6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+        <!-- Triangle plein vers le haut -->
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 5 L20 18 L4 18 Z" fill="currentColor" />
         </svg>
       </button>
       <button
@@ -285,21 +285,21 @@
         onclick={onStopClick}
         aria-label="Arrêter {shutter.name}"
       >
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <rect x="6" y="6" width="12" height="12" rx="1.5" />
         </svg>
       </button>
       <button
         type="button"
-        class="action-btn"
+        class="action-btn action-btn--close"
         class:action-active={activeAction === 'close'}
-        class:action-close={activeAction === 'close'}
         disabled={!shutter.available}
         onclick={onCloseClick}
         aria-label="Fermer {shutter.name}"
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+        <!-- Triangle plein vers le bas -->
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 19 L4 6 L20 6 Z" fill="currentColor" />
         </svg>
       </button>
     </div>
@@ -327,9 +327,9 @@
   /* ─── Slider vertical (taille tactile iPad) ─── */
   .slider-track {
     position: relative;
-    width: 32px;
+    width: 36px;
     height: 100%;
-    border-radius: 16px;
+    border-radius: 18px;
     background: var(--color-muted);
     border: 1px solid var(--color-border);
     cursor: grab;
@@ -362,8 +362,8 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     background: #ffffff;
     box-shadow:
@@ -381,44 +381,51 @@
       0 0 0 3px var(--color-primary-muted);
   }
 
-  /* ─── Actions tactiles iPad ─── */
+  /* ─── Actions carrées 36×36 — triangles colorés (vert open / violet close) ─── */
   .action-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 28px;
+    width: 36px;
+    height: 36px;
     border-radius: var(--radius-md);
     background: var(--color-muted);
-    color: var(--color-muted-fg);
     border: 1px solid var(--color-border);
     transition: all var(--duration-fast) var(--ease-default);
   }
+  .action-btn--open {
+    color: var(--color-battery);
+  }
+  .action-btn--close {
+    color: var(--color-primary);
+  }
+  .action-btn--stop {
+    color: var(--color-warning);
+  }
   .action-btn:hover:not(:disabled) {
-    background: var(--color-muted);
-    color: var(--color-fg);
     border-color: var(--color-border-strong);
   }
   .action-btn:active:not(:disabled) {
-    transform: scale(0.95);
+    transform: scale(0.94);
   }
   .action-btn:disabled {
     cursor: not-allowed;
     opacity: 0.4;
   }
-  .action-btn--stop {
-    color: var(--color-warning);
-  }
-  .action-active.action-open {
+  /* État actif après tap : fill plein de la couleur sémantique */
+  .action-active.action-btn--open {
     background: var(--color-battery);
     border-color: var(--color-battery);
     color: var(--color-primary-fg);
+    box-shadow: 0 0 0 3px var(--color-battery-muted);
   }
-  .action-active.action-close {
+  .action-active.action-btn--close {
     background: var(--color-primary);
     border-color: var(--color-primary);
     color: var(--color-primary-fg);
+    box-shadow: 0 0 0 3px var(--color-primary-muted);
   }
-  .action-btn--stop.action-active {
+  .action-active.action-btn--stop {
     background: var(--color-warning);
     border-color: var(--color-warning);
     color: var(--color-primary-fg);

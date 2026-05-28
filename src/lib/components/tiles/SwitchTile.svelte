@@ -93,7 +93,7 @@
   type="button"
   class="switch-tile flex w-full items-center gap-3 rounded-[var(--radius-xl)] border p-3 text-left"
   class:opacity-50={!sw.available}
-  style="background: var(--color-card); border-color: var(--color-border);"
+  style="background: var(--color-card); border-color: var(--color-border); --neon: {style.color};"
   role="switch"
   aria-checked={displayedOn}
   aria-label="Basculer {sw.name}"
@@ -103,8 +103,8 @@
 >
   <!-- Icône sémantique colorée -->
   <span
-    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-lg)]"
-    style="background: {style.muted}; color: {style.color};"
+    class="switch-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-lg)]"
+    style="background: {displayedOn ? style.color : style.muted}; color: {displayedOn ? 'white' : style.color};"
     aria-hidden="true"
   >
     {#if style.glyph === 'ev-charger'}
@@ -161,7 +161,9 @@
 
 <style>
   .switch-tile {
-    transition: border-color var(--duration-normal) var(--ease-default);
+    transition:
+      border-color var(--duration-normal) var(--ease-default),
+      box-shadow var(--duration-normal) var(--ease-default);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
@@ -177,6 +179,25 @@
   }
   .switch-tile:disabled {
     cursor: not-allowed;
+  }
+
+  /* ─── Lueur néon quand ON ─── */
+  .switch-tile[aria-checked='true'] {
+    border-color: var(--neon);
+    box-shadow:
+      0 0 14px color-mix(in oklch, var(--neon) 50%, transparent),
+      0 0 32px color-mix(in oklch, var(--neon) 22%, transparent);
+  }
+  .switch-tile[aria-checked='true'] .switch-icon {
+    box-shadow:
+      0 0 10px color-mix(in oklch, var(--neon) 55%, transparent),
+      0 0 20px color-mix(in oklch, var(--neon) 30%, transparent);
+  }
+  .switch-icon {
+    transition:
+      background-color var(--duration-normal) var(--ease-default),
+      color var(--duration-normal) var(--ease-default),
+      box-shadow var(--duration-normal) var(--ease-default);
   }
 
   .toggle-track {

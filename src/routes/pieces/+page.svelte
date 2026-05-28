@@ -69,8 +69,10 @@
 <div class="flex flex-col gap-4 py-4">
   <header class="flex items-center justify-between gap-3">
     <h1 class="text-2xl font-semibold tracking-tight">Pièces</h1>
+    <!-- Pills "Tout ouvrir/fermer" visibles uniquement sur mobile.
+         Sur sm+ elles sont dans le header de la card Volets. -->
     {#if matterConnected && hasShutters && matter.onlineCount > 0}
-      <div class="flex gap-2">
+      <div class="flex gap-2 sm:hidden">
         <button
           type="button"
           class="pill-open"
@@ -159,12 +161,34 @@
         class="hidden flex-col gap-3 rounded-[var(--radius-2xl)] border p-4 sm:flex"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
-        <h2
-          class="text-[11px] font-semibold tracking-[0.08em] uppercase"
-          style="color: var(--color-muted-fg);"
-        >
-          Volets · {matter.shutters.length}
-        </h2>
+        <div class="flex items-center justify-between gap-3">
+          <h2
+            class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+            style="color: var(--color-muted-fg);"
+          >
+            Volets · {matter.shutters.length}
+          </h2>
+          {#if matterConnected && matter.onlineCount > 0}
+            <div class="flex gap-2">
+              <button
+                type="button"
+                class="pill-open"
+                onclick={() => { haptic('heavy'); matter.openAll(); }}
+                aria-label="Ouvrir tous les volets"
+              >
+                <span aria-hidden="true">▲</span> Tout ouvrir
+              </button>
+              <button
+                type="button"
+                class="pill-close"
+                onclick={() => { haptic('heavy'); matter.closeAll(); }}
+                aria-label="Fermer tous les volets"
+              >
+                <span aria-hidden="true">▼</span> Tout fermer
+              </button>
+            </div>
+          {/if}
+        </div>
         <div
           class="shutters-strip"
           style="--shutter-count: {matter.shutters.length};"
