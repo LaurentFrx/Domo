@@ -166,8 +166,8 @@
           Volets · {matter.shutters.length}
         </h2>
         <div
-          class="grid gap-2"
-          style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));"
+          class="shutters-strip"
+          style="--shutter-count: {matter.shutters.length};"
         >
           {#each matter.shutters as shutter (shutter.nodeId)}
             <ShutterTile {shutter} />
@@ -227,5 +227,17 @@
   .pill-open:active,
   .pill-close:active {
     transform: scale(0.97);
+  }
+
+  /* Strip "Volets" : auto-fit en sm-lg (peut wrap), force N cols sur lg+ (iPad landscape garanti une ligne) */
+  .shutters-strip {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+  @media (min-width: 1024px) {
+    .shutters-strip {
+      grid-template-columns: repeat(var(--shutter-count, 6), minmax(0, 1fr));
+    }
   }
 </style>

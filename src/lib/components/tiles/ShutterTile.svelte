@@ -45,8 +45,8 @@
 
   const isMoving = $derived(animPos !== null || shutter.moving);
 
-  // Slider compact 24×64 — thumb 20px pour rester touchable
-  const THUMB_SIZE = 20;
+  // Slider 32×100 sur iPad — thumb 28px (touch target confortable au doigt)
+  const THUMB_SIZE = 28;
 
   $effect(() => {
     const pos = shutter.position;
@@ -238,8 +238,8 @@
     </span>
   </div>
 
-  <!-- Corps : slider vertical 72px à gauche + 3 actions équi-réparties sur la même hauteur -->
-  <div class="flex items-stretch gap-2" style="height: 72px;">
+  <!-- Corps : slider vertical 100px à gauche + 3 actions équi-réparties sur la même hauteur -->
+  <div class="flex items-stretch gap-2" style="height: 100px;">
     <div
       bind:this={trackEl}
       class="slider-track"
@@ -324,12 +324,12 @@
     50% { opacity: 1; }
   }
 
-  /* ─── Slider vertical compact ─── */
+  /* ─── Slider vertical (taille tactile iPad) ─── */
   .slider-track {
     position: relative;
-    width: 24px;
-    height: 72px;
-    border-radius: 14px;
+    width: 32px;
+    height: 100%;
+    border-radius: 16px;
     background: var(--color-muted);
     border: 1px solid var(--color-border);
     cursor: grab;
@@ -362,8 +362,8 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    width: 20px;
-    height: 20px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     background: #ffffff;
     box-shadow:
@@ -381,12 +381,12 @@
       0 0 0 3px var(--color-primary-muted);
   }
 
-  /* ─── Actions compactes ─── */
+  /* ─── Actions tactiles iPad ─── */
   .action-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 22px;
+    height: 28px;
     border-radius: var(--radius-md);
     background: var(--color-muted);
     color: var(--color-muted-fg);

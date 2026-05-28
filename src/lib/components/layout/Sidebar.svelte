@@ -53,13 +53,14 @@
   <div
     class="flex h-14 items-center justify-center px-5 lg:justify-start lg:gap-2.5"
   >
-    <span
-      class="inline-flex h-7 w-7 items-center justify-center rounded-lg text-sm font-bold"
-      style="background: var(--color-primary); color: var(--color-primary-fg);"
-      aria-hidden="true"
-    >
-      D
-    </span>
+    <img
+      src="/icons/apple-touch-icon.png"
+      alt="Domo"
+      width="32"
+      height="32"
+      class="h-8 w-8 rounded-lg"
+      style="object-fit: cover;"
+    />
     <span class="hidden text-base font-semibold tracking-tight lg:inline">
       Domo
     </span>
