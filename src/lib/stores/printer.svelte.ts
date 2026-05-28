@@ -15,6 +15,8 @@
 const SUCCESS_INTERVAL_MS = 5 * 60 * 1000;
 const ERROR_INTERVAL_MS = 30 * 1000;
 const INITIAL_DELAY_MS = 500;
+const CACHE_KEY = 'domo.printer.cache.v1';
+const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 jours — encre évolue lentement
 
 export type InkColor = 'BK' | 'C' | 'M' | 'Y';
 export interface InkTank {
@@ -23,10 +25,38 @@ export interface InkTank {
   percent: number;
 }
 
+function loadCachedInks(): { inks: InkTank[]; ts: number | null } {
+  if (typeof window === 'undefined') return { inks: [], ts: null };
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return { inks: [], ts: null };
+    const parsed = JSON.parse(raw) as { ts: number; inks: InkTank[] };
+    if (Date.now() - parsed.ts > CACHE_MAX_AGE_MS) return { inks: [], ts: null };
+    return { inks: parsed.inks ?? [], ts: parsed.ts };
+  } catch {
+    return { inks: [], ts: null };
+  }
+}
+
+function saveCachedInks(inks: InkTank[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), inks }));
+  } catch {
+    // ignore
+  }
+}
+
 class PrinterState {
-  inks = $state<InkTank[]>([]);
+  private initial = loadCachedInks();
+  /** Niveaux d'encre — gardés MÊME quand l'imprimante est offline.
+   * Source : dernier scrape réussi, ou cache localStorage au mount. */
+  inks = $state<InkTank[]>(this.initial.inks);
+  /** Date du dernier scrape réussi (peut venir du cache). */
+  lastUpdate = $state<Date | null>(this.initial.ts ? new Date(this.initial.ts) : null);
+  /** true si la dernière requête a réussi. Indépendant des niveaux d'encre :
+   * on garde les valeurs cached même si online=false (imprimante éteinte). */
   online = $state(false);
-  lastUpdate = $state<Date | null>(null);
   lastError = $state<string | null>(null);
   status = $state<'idle' | 'polling' | 'connected' | 'unconfigured' | 'error'>('idle');
 
@@ -94,14 +124,20 @@ class PrinterState {
         error?: string;
       };
       this.online = data.online;
-      this.inks = data.inks ?? [];
+      // ⚠ Ne JAMAIS écraser inks par [] : on garde les dernières valeurs connues
+      // pour que la carte reste utile quand l'imprimante est éteinte.
+      if (data.inks && data.inks.length > 0) {
+        this.inks = data.inks;
+        saveCachedInks(data.inks);
+        this.lastUpdate = new Date();
+      }
       this.lastError = data.error ?? null;
       this.status = data.error || !data.online ? 'error' : 'connected';
-      this.lastUpdate = new Date();
     } catch (e) {
       this.online = false;
       this.status = 'error';
       this.lastError = (e as Error).message;
+      // Idem : on ne touche pas à `inks`, l'utilisateur garde la dernière vue.
     }
   }
 }
