@@ -110,26 +110,6 @@
         ></span>
         Zigbee · {zigbee.devices.length}
       </span>
-
-      <!-- Pills 'Tout ouvrir/fermer' sur mobile uniquement (sm+ : dans card Volets) -->
-      {#if matterConnected && hasShutters && matter.onlineCount > 0}
-        <button
-          type="button"
-          class="pill-open sm:hidden"
-          onclick={() => { haptic('heavy'); matter.openAll(); }}
-          aria-label="Ouvrir tous les volets"
-        >
-          <span aria-hidden="true">▲</span> Tout ouvrir
-        </button>
-        <button
-          type="button"
-          class="pill-close sm:hidden"
-          onclick={() => { haptic('heavy'); matter.closeAll(); }}
-          aria-label="Fermer tous les volets"
-        >
-          <span aria-hidden="true">▼</span> Tout fermer
-        </button>
-      {/if}
     </div>
   </header>
 
