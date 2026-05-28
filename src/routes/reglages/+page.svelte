@@ -9,11 +9,13 @@
   import { zigbee } from '$stores/zigbee.svelte';
   import { cumulus } from '$stores/cumulus.svelte';
   import { preferences } from '$stores/preferences.svelte';
+  import { settings } from '$stores/settings.svelte';
 
   const APP_VERSION = '0.2.0';
 
   onMount(() => {
     preferences.hydrate();
+    settings.hydrate();
     if (matter.connectionStatus === 'disconnected') {
       matter.connect();
     }
@@ -86,11 +88,7 @@
     return `il y a ${Math.round(min / 60)} h`;
   }
 
-  // ─── Section 4 : Tarifs ───────────────────────────────────────────
-  let priceHc = $state(0.1812);
-  let priceHp = $state(0.2318);
-  let priceExport = $state(0.04);
-  let subscription = $state(13.5);
+  // ─── Section 4 : Tarifs (sync serveur via store settings) ────────
 </script>
 
 <svelte:head>
@@ -354,7 +352,8 @@
         <input
           type="number"
           step="0.0001"
-          bind:value={priceHc}
+          bind:value={settings.priceHc}
+          onchange={() => settings.save()}
           class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
           style="color: var(--color-hc);"
         />
@@ -369,7 +368,8 @@
         <input
           type="number"
           step="0.0001"
-          bind:value={priceHp}
+          bind:value={settings.priceHp}
+          onchange={() => settings.save()}
           class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
           style="color: var(--color-hp);"
         />
@@ -384,7 +384,8 @@
         <input
           type="number"
           step="0.0001"
-          bind:value={priceExport}
+          bind:value={settings.priceExport}
+          onchange={() => settings.save()}
           class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
           style="color: var(--color-solar);"
         />
@@ -399,7 +400,8 @@
         <input
           type="number"
           step="0.01"
-          bind:value={subscription}
+          bind:value={settings.subscription}
+          onchange={() => settings.save()}
           class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
           style="color: var(--color-fg);"
         />
