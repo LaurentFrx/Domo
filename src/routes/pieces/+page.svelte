@@ -81,15 +81,42 @@
 </svelte:head>
 
 <div class="flex flex-col gap-4 py-4">
-  <header class="flex items-center justify-between gap-3">
+  <header class="flex flex-wrap items-center justify-between gap-3">
     <h1 class="text-2xl font-semibold tracking-tight">Pièces</h1>
-    <!-- Pills "Tout ouvrir/fermer" visibles uniquement sur mobile.
-         Sur sm+ elles sont dans le header de la card Volets. -->
-    {#if matterConnected && hasShutters && matter.onlineCount > 0}
-      <div class="flex gap-2 sm:hidden">
+    <div class="flex flex-wrap items-center gap-2">
+      <!-- Pills sources Matter + Zigbee : toujours visibles, à droite du titre -->
+      <span
+        class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px]"
+        style="
+          border-color: var(--color-border);
+          color: {matterConnected ? 'var(--color-battery)' : 'var(--color-muted-fg)'};
+        "
+      >
+        <span
+          class="h-1.5 w-1.5 rounded-full"
+          style:background-color={matterConnected ? 'var(--color-battery)' : 'var(--color-muted-fg)'}
+        ></span>
+        Matter
+      </span>
+      <span
+        class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px]"
+        style="
+          border-color: var(--color-border);
+          color: {zigbeeColor(zigbee.connectionStatus)};
+        "
+      >
+        <span
+          class="h-1.5 w-1.5 rounded-full"
+          style:background-color={zigbeeColor(zigbee.connectionStatus)}
+        ></span>
+        Zigbee · {zigbee.devices.length}
+      </span>
+
+      <!-- Pills 'Tout ouvrir/fermer' sur mobile uniquement (sm+ : dans card Volets) -->
+      {#if matterConnected && hasShutters && matter.onlineCount > 0}
         <button
           type="button"
-          class="pill-open"
+          class="pill-open sm:hidden"
           onclick={() => { haptic('heavy'); matter.openAll(); }}
           aria-label="Ouvrir tous les volets"
         >
@@ -97,45 +124,15 @@
         </button>
         <button
           type="button"
-          class="pill-close"
+          class="pill-close sm:hidden"
           onclick={() => { haptic('heavy'); matter.closeAll(); }}
           aria-label="Fermer tous les volets"
         >
           <span aria-hidden="true">▼</span> Tout fermer
         </button>
-      </div>
-    {/if}
+      {/if}
+    </div>
   </header>
-
-  <!-- Sources status -->
-  <div class="flex flex-wrap gap-2 text-[10px]">
-    <span
-      class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5"
-      style="
-        border-color: var(--color-border);
-        color: {matterConnected ? 'var(--color-battery)' : 'var(--color-muted-fg)'};
-      "
-    >
-      <span
-        class="h-1.5 w-1.5 rounded-full"
-        style:background-color={matterConnected ? 'var(--color-battery)' : 'var(--color-muted-fg)'}
-      ></span>
-      Matter
-    </span>
-    <span
-      class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5"
-      style="
-        border-color: var(--color-border);
-        color: {zigbeeColor(zigbee.connectionStatus)};
-      "
-    >
-      <span
-        class="h-1.5 w-1.5 rounded-full"
-        style:background-color={zigbeeColor(zigbee.connectionStatus)}
-      ></span>
-      Zigbee · {zigbee.devices.length}
-    </span>
-  </div>
 
   {#if matterDisconnected}
     <div

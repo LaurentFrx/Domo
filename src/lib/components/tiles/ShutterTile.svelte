@@ -27,6 +27,11 @@
   let activeAction = $state<'open' | 'close' | 'stop' | null>(null);
   let activeTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Direction du mouvement en cours — utilisé pour le glow néon du bouton
+  // correspondant pendant TOUTE la durée du déplacement (vs activeAction
+  // qui est purement temporaire 1.5s pour le fill plein).
+  let movingDirection = $state<'open' | 'close' | null>(null);
+
   function setActive(action: 'open' | 'close' | 'stop') {
     activeAction = action;
     if (activeTimer) clearTimeout(activeTimer);
@@ -128,7 +133,14 @@
       failsafeTimer = null;
     }
     animPos = null;
+    movingDirection = null;
   }
+
+  // Si le serveur indique que le mouvement est terminé (shutter.moving = false
+  // ET animPos null), couper le glow.
+  $effect(() => {
+    if (!isMoving) movingDirection = null;
+  });
 
   onDestroy(() => {
     stopAnimation();
@@ -178,7 +190,9 @@
     const finalPos = pointerToPosition(e.clientY);
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     matter.goToPosition(shutter.nodeId, finalPos);
-    setActive(finalPos < shutter.position ? 'open' : 'close');
+    const dir = finalPos < shutter.position ? 'open' : 'close';
+    setActive(dir);
+    movingDirection = dir;
     haptic('light');
     animPos = finalPos;
     animTarget = finalPos;
@@ -189,18 +203,21 @@
   function onOpenClick() {
     matter.open(shutter.nodeId);
     setActive('open');
+    movingDirection = 'open';
     haptic('medium');
     setVisualTarget(0);
   }
   function onCloseClick() {
     matter.close(shutter.nodeId);
     setActive('close');
+    movingDirection = 'close';
     haptic('medium');
     setVisualTarget(100);
   }
   function onStopClick() {
     matter.stop(shutter.nodeId);
     setActive('stop');
+    movingDirection = null;
     haptic('heavy');
     if (rafId !== null) {
       cancelAnimationFrame(rafId);
@@ -269,6 +286,7 @@
         type="button"
         class="action-btn action-btn--open"
         class:action-active={activeAction === 'open'}
+        class:action-moving={movingDirection === 'open'}
         disabled={!shutter.available}
         onclick={onOpenClick}
         aria-label="Ouvrir {shutter.name}"
@@ -293,6 +311,7 @@
         type="button"
         class="action-btn action-btn--close"
         class:action-active={activeAction === 'close'}
+        class:action-moving={movingDirection === 'close'}
         disabled={!shutter.available}
         onclick={onCloseClick}
         aria-label="Fermer {shutter.name}"
@@ -459,5 +478,25 @@
     background: var(--color-warning);
     border-color: var(--color-warning);
     color: var(--color-primary-fg);
+  }
+
+  /* ─── Glow néon pendant que le moteur tourne (idem switches ON) ─── */
+  .action-btn.action-moving {
+    transition:
+      background-color var(--duration-normal) var(--ease-default),
+      border-color var(--duration-normal) var(--ease-default),
+      box-shadow var(--duration-normal) var(--ease-default);
+  }
+  .action-btn--open.action-moving {
+    border-color: var(--color-battery);
+    box-shadow:
+      0 0 14px color-mix(in oklch, var(--color-battery) 50%, transparent),
+      0 0 32px color-mix(in oklch, var(--color-battery) 22%, transparent);
+  }
+  .action-btn--close.action-moving {
+    border-color: var(--color-primary);
+    box-shadow:
+      0 0 14px color-mix(in oklch, var(--color-primary) 50%, transparent),
+      0 0 32px color-mix(in oklch, var(--color-primary) 22%, transparent);
   }
 </style>
