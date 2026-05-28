@@ -10,7 +10,7 @@
   onDestroy(() => zigbee.disconnect());
 
   // Prises Zigbee suivies pour la conso électroménager (Frigo, Lave-linge).
-  const TRACKED_APPLIANCES = new Set(['frigo', 'lave-linge']);
+  const TRACKED_APPLIANCES = new Set(['frigo', 'lave-linge', 'lave_vaisselle']);
   const appliancePlugs = $derived(
     zigbee.devices.filter(
       (d) => d.category === 'plug' && TRACKED_APPLIANCES.has(d.friendlyName.toLowerCase())

@@ -73,7 +73,8 @@
     'chargeur laurent', // remplacé par Matter
     'ordi moniteur', // remplacé par Matter
     'frigo', // affiché sur /energie
-    'lave-linge' // affiché sur /energie
+    'lave-linge', // affiché sur /energie
+    'lave_vaisselle' // affiché sur /energie
   ]);
   function isHidden(name: string): boolean {
     return HIDDEN_ZIGBEE.has(name.toLowerCase());
