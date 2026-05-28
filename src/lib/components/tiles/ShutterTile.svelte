@@ -45,8 +45,8 @@
 
   const isMoving = $derived(animPos !== null || shutter.moving);
 
-  // Slider 56×230 — thumb 56px assez grand pour contenir icône + % à l'intérieur
-  const THUMB_SIZE = 56;
+  // Slider 40×230 — thumb 40px pour rentrer dans la card avec les boutons 70px
+  const THUMB_SIZE = 40;
 
   $effect(() => {
     const pos = shutter.position;
@@ -254,22 +254,9 @@
         class="slider-thumb"
         style:bottom="calc((100% - {THUMB_SIZE}px) * {(100 - displayedPosition) / 100})"
       >
-        {#if displayedPosition < 50}
-          <!-- Volet plutôt ouvert : icône stores relevés -->
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <line x1="3" y1="8" x2="21" y2="8" />
-          </svg>
-        {:else}
-          <!-- Volet plutôt fermé : icône stores baissés -->
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <line x1="3" y1="8" x2="21" y2="8" />
-            <line x1="3" y1="13" x2="21" y2="13" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
+        {#if displayedPosition > 1 && displayedPosition < 99}
+          <span class="thumb-pct">{displayedPosition}</span>
         {/if}
-        <span class="thumb-pct">{displayedPosition}<span class="thumb-pct-unit">%</span></span>
       </div>
     </div>
 
@@ -335,9 +322,9 @@
   /* ─── Slider vertical (taille tactile iPad) ─── */
   .slider-track {
     position: relative;
-    width: 56px;
+    width: 40px;
     height: 100%;
-    border-radius: 28px;
+    border-radius: 20px;
     background: var(--color-muted);
     border: 1px solid var(--color-border);
     cursor: grab;
@@ -370,22 +357,20 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    width: 56px;
-    height: 56px;
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
     background: #ffffff;
     box-shadow:
-      0 2px 8px oklch(0 0 0 / 0.18),
+      0 2px 6px oklch(0 0 0 / 0.18),
       0 1px 2px oklch(0 0 0 / 0.10);
     pointer-events: none;
     transition: bottom 120ms linear;
     will-change: bottom;
     z-index: 1;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
     color: oklch(0.30 0.01 280);
   }
   .thumb-pct {
@@ -395,17 +380,11 @@
     letter-spacing: -0.02em;
     line-height: 1;
   }
-  .thumb-pct-unit {
-    font-size: 9px;
-    font-weight: 600;
-    margin-left: 1px;
-    opacity: 0.6;
-  }
   .slider-track.dragging .slider-thumb {
     transition: none;
     box-shadow:
-      0 4px 12px oklch(0 0 0 / 0.25),
-      0 0 0 4px var(--color-primary-muted);
+      0 3px 10px oklch(0 0 0 / 0.25),
+      0 0 0 3px var(--color-primary-muted);
   }
 
   /* ─── Actions carrées 70×70 — triangles colorés (vert open / violet close) ─── */
