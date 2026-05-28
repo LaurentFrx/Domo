@@ -64,17 +64,33 @@
     return 'var(--color-warning)';
   }
 
-  // ─── sm+ : flat. Tous les non-volets à plat, sans wrapper de pièce. ───
+  // ─── Filtres d'affichage Zigbee sur cette page ─────────────────────────
   // Les thermomètres (Thermo SdB / Salon / Garage / cumulus / ext / velos)
-  // sont déplacés sur la page /climat.
+  // sont déplacés sur /climat.
+  // Cette liste est ignorée (devices retirés ou remplacés par Matter).
+  const HIDDEN_ZIGBEE = new Set([
+    'chargeur isa', // plus en fonctionnement
+    'chargeur laurent', // remplacé par Matter
+    'ordi moniteur' // remplacé par Matter
+  ]);
+  function isHidden(name: string): boolean {
+    return HIDDEN_ZIGBEE.has(name.toLowerCase());
+  }
   const flatZigbeeSensors = $derived(
     zigbee.devices.filter(
-      (d) => d.category === 'sensor' && !d.friendlyName.toLowerCase().includes('thermo')
+      (d) =>
+        d.category === 'sensor' &&
+        !d.friendlyName.toLowerCase().includes('thermo') &&
+        !isHidden(d.friendlyName)
     )
   );
-  const flatZigbeePlugs = $derived(zigbee.devices.filter((d) => d.category === 'plug'));
+  const flatZigbeePlugs = $derived(
+    zigbee.devices.filter((d) => d.category === 'plug' && !isHidden(d.friendlyName))
+  );
   const flatZigbeeOthers = $derived(
-    zigbee.devices.filter((d) => !['sensor', 'plug'].includes(d.category))
+    zigbee.devices.filter(
+      (d) => !['sensor', 'plug'].includes(d.category) && !isHidden(d.friendlyName)
+    )
   );
   const hasFlatDevices = $derived(
     matter.switches.length + zigbee.devices.length > 0
