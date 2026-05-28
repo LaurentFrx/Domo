@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import RoomSection from '$components/tiles/RoomSection.svelte';
+  import ShutterTile from '$components/tiles/ShutterTile.svelte';
   import { matter } from '$stores/matter.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
   import { haptic } from '$utils/haptic';
@@ -152,6 +153,30 @@
       <p class="text-sm" style="color: var(--color-muted-fg);">Aucun appareil détecté</p>
     </div>
   {:else}
+    <!-- ═══ Strip "Tous les volets" — sm+ uniquement (iPad+) ═══ -->
+    {#if matter.shutters.length > 0}
+      <section
+        class="hidden flex-col gap-3 rounded-[var(--radius-2xl)] border p-4 sm:flex"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <h2
+          class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Volets · {matter.shutters.length}
+        </h2>
+        <div
+          class="grid gap-2"
+          style="grid-template-columns: repeat({matter.shutters.length}, minmax(0, 1fr));"
+        >
+          {#each matter.shutters as shutter (shutter.nodeId)}
+            <ShutterTile {shutter} />
+          {/each}
+        </div>
+      </section>
+    {/if}
+
+    <!-- ═══ Grille pièces — volets cachés en sm+ (déjà dans la strip) ═══ -->
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {#each mergedRooms as r (r.room)}
         <RoomSection

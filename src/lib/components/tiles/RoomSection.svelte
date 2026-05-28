@@ -61,10 +61,17 @@
   }
 
   const hasAnyToggleable = $derived(hasSwitches || zigbeeOnable.length > 0);
+
+  /** Sur sm+, les volets sont dans la strip globale en haut de page :
+   * si la pièce ne contient QUE des volets, la section devient vide. */
+  const onlyShuttersOnTablet = $derived(
+    hasShutters && !hasSwitches && zigbeeDevices.length === 0
+  );
 </script>
 
 <section
   class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-4"
+  class:sm:hidden={onlyShuttersOnTablet}
   style="background: var(--color-card); border-color: var(--color-border);"
 >
   <header class="flex flex-wrap items-center justify-between gap-2">
@@ -82,9 +89,10 @@
 
     <div class="flex flex-wrap gap-1.5">
       {#if hasShutters}
+        <!-- Pills volets : visibles uniquement sur mobile, sm+ a la strip -->
         <button
           type="button"
-          class="room-pill"
+          class="room-pill sm:hidden"
           onclick={openRoomTap}
           aria-label="Ouvrir tous les volets de {room}"
         >
@@ -92,7 +100,7 @@
         </button>
         <button
           type="button"
-          class="room-pill"
+          class="room-pill sm:hidden"
           onclick={closeRoomTap}
           aria-label="Fermer tous les volets de {room}"
         >
@@ -121,7 +129,8 @@
   </header>
 
   {#if hasShutters}
-    <div class="grid grid-cols-2 gap-2">
+    <!-- Grille volets : visible uniquement sur mobile, sm+ a la strip -->
+    <div class="grid grid-cols-2 gap-2 sm:hidden">
       {#each shutters as shutter (shutter.nodeId)}
         <ShutterTile {shutter} />
       {/each}
