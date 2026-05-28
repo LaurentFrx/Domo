@@ -23,8 +23,13 @@
   const plugs = $derived(zigbeeDevices.filter((d) => d.category === 'plug'));
   const others = $derived(zigbeeDevices.filter((d) => !['sensor', 'plug'].includes(d.category)));
 
+  // Mobile : total réel. sm+ : on exclut les volets (déplacés dans la strip globale).
   const total = $derived(shutters.length + switches.length + zigbeeDevices.length);
-  const deviceLabel = $derived(total > 1 ? `${total} appareils` : `${total} appareil`);
+  const totalNoShutters = $derived(switches.length + zigbeeDevices.length);
+
+  function fmtCount(n: number): string {
+    return n > 1 ? `${n} appareils` : `${n} appareil`;
+  }
 
   const hasShutters = $derived(shutters.length > 0);
   const hasSwitches = $derived(switches.length > 0);
@@ -32,6 +37,9 @@
   const zigbeeOnable = $derived(
     [...plugs, ...others].filter((d) => typeof d.state.state === 'string')
   );
+
+  /** Affiche les pills "Tout ON/OFF" uniquement si ≥2 toggleables. */
+  const showAllOnOff = $derived(switches.length + zigbeeOnable.length >= 2);
 
   function zigbeeAllOn() {
     for (const d of zigbeeOnable) zigbee.setState(d.friendlyName, 'ON');
@@ -60,8 +68,6 @@
     if (zigbeeOnable.length > 0) zigbeeAllOff();
   }
 
-  const hasAnyToggleable = $derived(hasSwitches || zigbeeOnable.length > 0);
-
   /** Sur sm+, les volets sont dans la strip globale en haut de page :
    * si la pièce ne contient QUE des volets, la section devient vide. */
   const onlyShuttersOnTablet = $derived(
@@ -82,17 +88,21 @@
       >
         {room}
       </h2>
-      <span class="text-[10px]" style="color: var(--color-muted-fg);">
-        · {deviceLabel}
+      <!-- Compteur : différent mobile vs sm+ (sm+ exclut les volets) -->
+      <span class="text-[10px] sm:hidden" style="color: var(--color-muted-fg);">
+        · {fmtCount(total)}
+      </span>
+      <span class="hidden text-[10px] sm:inline" style="color: var(--color-muted-fg);">
+        · {fmtCount(totalNoShutters)}
       </span>
     </div>
 
     <div class="flex flex-wrap gap-1.5">
       {#if hasShutters}
-        <!-- Pills volets : visibles uniquement sur mobile, sm+ a la strip -->
+        <!-- Pills volets : visibles uniquement sur mobile (sm+ utilise la strip) -->
         <button
           type="button"
-          class="room-pill sm:hidden"
+          class="room-pill pill-shutter"
           onclick={openRoomTap}
           aria-label="Ouvrir tous les volets de {room}"
         >
@@ -100,14 +110,14 @@
         </button>
         <button
           type="button"
-          class="room-pill sm:hidden"
+          class="room-pill pill-shutter"
           onclick={closeRoomTap}
           aria-label="Fermer tous les volets de {room}"
         >
           Tout fermer
         </button>
       {/if}
-      {#if hasAnyToggleable}
+      {#if showAllOnOff}
         <button
           type="button"
           class="room-pill"
@@ -198,5 +208,11 @@
   }
   .room-pill:active {
     transform: scale(0.97);
+  }
+  /* Pills volets : masquées sur sm+ (les volets sont dans la strip globale) */
+  @media (min-width: 640px) {
+    .pill-shutter {
+      display: none;
+    }
   }
 </style>

@@ -167,7 +167,7 @@
         </h2>
         <div
           class="grid gap-2"
-          style="grid-template-columns: repeat({matter.shutters.length}, minmax(0, 1fr));"
+          style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));"
         >
           {#each matter.shutters as shutter (shutter.nodeId)}
             <ShutterTile {shutter} />
@@ -176,8 +176,8 @@
       </section>
     {/if}
 
-    <!-- ═══ Grille pièces — volets cachés en sm+ (déjà dans la strip) ═══ -->
-    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <!-- ═══ Grille pièces — volets cachés en sm+ (déjà dans la strip). 2 cols max pour éviter les sections fantômes à 1 device. ═══ -->
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {#each mergedRooms as r (r.room)}
         <RoomSection
           room={r.room}

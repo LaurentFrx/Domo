@@ -238,8 +238,8 @@
     </span>
   </div>
 
-  <!-- Corps : slider vertical compact à gauche + 3 actions verticales à droite -->
-  <div class="flex items-center gap-2">
+  <!-- Corps : slider vertical 72px à gauche + 3 actions équi-réparties sur la même hauteur -->
+  <div class="flex items-stretch gap-2" style="height: 72px;">
     <div
       bind:this={trackEl}
       class="slider-track"
@@ -263,7 +263,7 @@
       ></div>
     </div>
 
-    <div class="flex flex-1 flex-col gap-1">
+    <div class="flex flex-1 flex-col justify-between">
       <button
         type="button"
         class="action-btn"
