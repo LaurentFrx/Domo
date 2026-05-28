@@ -19,18 +19,23 @@
 </script>
 
 <div
-  class="tile-press relative flex flex-col gap-2 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 shadow-[var(--shadow-card)] md:rounded-2xl md:p-3"
+  class="zigbee-tile relative flex flex-col gap-2 rounded-[var(--radius-xl)] border p-3"
   class:opacity-50={!device.available}
+  style="background: var(--color-card); border-color: var(--color-border);"
 >
   <div class="flex items-start justify-between gap-2">
-    <div class="flex flex-col gap-0.5">
-      <span class="text-sm leading-tight font-medium text-white">{device.friendlyName}</span>
-      <span class="text-[10px] text-[var(--text-tertiary)]">{device.model}</span>
+    <div class="flex flex-col gap-0.5 min-w-0">
+      <span class="text-[12px] font-semibold leading-tight truncate" style="color: var(--color-fg);">
+        {device.friendlyName}
+      </span>
+      <span class="text-[10px]" style="color: var(--color-muted-fg);">
+        {device.model}
+      </span>
     </div>
     {#if hasStateControl}
       <span
-        class="text-[10px] font-semibold tracking-wider uppercase"
-        style:color={isOn ? 'var(--accent-500)' : 'var(--text-tertiary)'}
+        class="shrink-0 text-[10px] font-semibold tracking-[0.04em] uppercase"
+        style:color={isOn ? 'var(--color-primary)' : 'var(--color-muted-fg)'}
       >
         {isOn ? 'On' : 'Off'}
       </span>
@@ -40,14 +45,15 @@
   {#if power !== null}
     <div class="flex items-baseline gap-1">
       <span
-        class="text-xl font-light tabular-nums md:text-2xl"
-        style:color={power > 5 ? 'var(--accent-500)' : 'var(--text-secondary)'}
+        class="text-[20px] font-bold tabular-nums leading-none"
+        style:color={power > 5 ? 'var(--color-consumption)' : 'var(--color-muted-fg)'}
+        style:letter-spacing="-0.01em"
       >
         {power.toFixed(power < 10 ? 1 : 0)}
       </span>
-      <span class="text-[10px] text-[var(--text-secondary)]">W</span>
+      <span class="text-[11px]" style="color: var(--color-muted-fg);">W</span>
       {#if energy !== null}
-        <span class="ml-auto text-[10px] text-[var(--text-tertiary)] tabular-nums">
+        <span class="ml-auto text-[10px] tabular-nums" style="color: var(--color-muted-fg);">
           {energy.toFixed(1)} kWh
         </span>
       {/if}
@@ -58,7 +64,7 @@
     <button
       type="button"
       class="plug-toggle"
-      class:on={isOn}
+      class:plug-on={isOn}
       role="switch"
       aria-checked={isOn}
       aria-label="Basculer {device.friendlyName}"
@@ -73,24 +79,22 @@
 <style>
   .plug-toggle {
     position: relative;
-    width: 44px;
-    height: 22px;
+    width: 46px;
+    height: 24px;
     border-radius: 9999px;
-    background: rgba(0, 0, 0, 0.4);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+    background: var(--color-muted);
+    border: 1px solid var(--color-border);
     cursor: pointer;
     padding: 0;
-    transition: background-color var(--motion-base) var(--easing-default);
+    transition:
+      background-color var(--duration-normal) var(--ease-default),
+      border-color var(--duration-normal) var(--ease-default);
     -webkit-tap-highlight-color: transparent;
     align-self: flex-start;
   }
-  .plug-toggle.on {
-    background: linear-gradient(135deg, var(--accent-600), var(--accent-500));
-    border-color: rgba(141, 253, 195, 0.4);
-    box-shadow:
-      inset 0 2px 4px rgba(0, 0, 0, 0.2),
-      0 0 10px rgba(61, 253, 152, 0.4);
+  .plug-on {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
   }
   .plug-toggle:disabled {
     cursor: not-allowed;
@@ -98,16 +102,16 @@
   .plug-knob {
     position: absolute;
     top: 50%;
-    left: 3px;
-    width: 16px;
-    height: 16px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #fff, #e8e6f0);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    background: #ffffff;
+    box-shadow: 0 1px 3px oklch(0 0 0 / 0.2);
     transform: translateY(-50%);
-    transition: left var(--motion-base) var(--easing-default);
+    transition: left var(--duration-normal) var(--ease-spring);
   }
-  .plug-toggle.on .plug-knob {
-    left: calc(100% - 19px);
+  .plug-on .plug-knob {
+    left: calc(100% - 21px);
   }
 </style>

@@ -44,14 +44,20 @@
 </script>
 
 <section
-  class="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2.5 shadow-[var(--shadow-card)] md:gap-3 md:rounded-2xl md:p-3"
+  class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-4"
+  style="background: var(--color-card); border-color: var(--color-border);"
 >
   <header class="flex flex-wrap items-center justify-between gap-2">
     <div class="flex items-baseline gap-2">
-      <h2 class="text-xs font-medium tracking-wider text-[var(--text-secondary)]">
-        {room.toUpperCase()}
+      <h2
+        class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+        style="color: var(--color-muted-fg);"
+      >
+        {room}
       </h2>
-      <span class="text-[10px] text-[var(--text-tertiary)]">·&nbsp;{deviceLabel}</span>
+      <span class="text-[10px]" style="color: var(--color-muted-fg);">
+        · {deviceLabel}
+      </span>
     </div>
 
     <div class="flex flex-wrap gap-1.5">
@@ -109,7 +115,7 @@
   {/if}
 
   {#if (hasShutters && (hasSwitches || zigbeeDevices.length > 0)) || (hasSwitches && zigbeeDevices.length > 0)}
-    <div class="h-px w-full bg-white/[0.06]" aria-hidden="true"></div>
+    <div class="h-px w-full" style="background: var(--color-border);" aria-hidden="true"></div>
   {/if}
 
   {#if hasSwitches}
@@ -150,28 +156,24 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0.25rem 0.625rem;
+    padding: 0.25rem 0.75rem;
     border-radius: 9999px;
     font-size: 10px;
-    font-weight: 500;
+    font-weight: 600;
     line-height: 1.2;
-    color: var(--text-secondary);
-    background: var(--border-default);
-    border: 1px solid transparent;
+    color: var(--color-muted-fg);
+    background: var(--color-muted);
+    border: 1px solid var(--color-border);
     cursor: pointer;
-    transition:
-      background-color var(--motion-fast) var(--easing-default),
-      color var(--motion-fast) var(--easing-default),
-      transform var(--motion-fast) var(--easing-default);
+    transition: all var(--duration-fast) var(--ease-default);
     -webkit-tap-highlight-color: transparent;
   }
-
   .room-pill:hover {
-    background: var(--border-strong);
-    color: var(--text-primary);
+    background: var(--color-primary-muted);
+    border-color: var(--color-primary);
+    color: var(--color-primary);
   }
-
   .room-pill:active {
-    transform: scale(0.96);
+    transform: scale(0.97);
   }
 </style>

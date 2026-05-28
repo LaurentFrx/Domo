@@ -1,27 +1,25 @@
 /**
- * Types pour la prévision PV (provider Solcast).
- *
- * Le modèle est volontairement provider-agnostique : la réponse Solcast
- * est mappée vers `ForecastPoint` côté serveur, le client ne connaît
- * que ce format normalisé.
+ * Types de la prévision Solcast — utilisés par l'endpoint serveur
+ * /api/solcast/forecast et le store stores/solcast.svelte.ts (à terme,
+ * mode 'direct').
  */
 
 export interface ForecastPoint {
-  /** Horodatage de fin de période, ISO 8601 UTC. */
+  /** ISO 8601 UTC du end-of-period. */
   time: string;
-  /** Estimation centrale de production (kW). */
+  /** Estimation médiane P50 (kW). */
   pvEstimate: number;
-  /** Estimation pessimiste (percentile 10, kW). */
+  /** Borne basse P10 (kW). */
   pvEstimate10: number;
-  /** Estimation optimiste (percentile 90, kW). */
+  /** Borne haute P90 (kW). */
   pvEstimate90: number;
-  /** Durée de la période en secondes (typiquement 1800 = 30 min). */
+  /** Durée du créneau en secondes (30 min = 1800). */
   periodSeconds: number;
 }
 
 export interface ForecastResponse {
-  /** Points de prévision triés par `time` croissant. */
-  points: ForecastPoint[];
-  /** Horodatage ISO du fetch côté serveur. */
+  /** Date du fetch côté serveur. */
   fetchedAt: string;
+  /** Points de prévision pour les ~7 prochains jours. */
+  points: ForecastPoint[];
 }

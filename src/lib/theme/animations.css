@@ -1,14 +1,13 @@
 /* ════════════════════════════════════════════════════════════════════════ */
 /*                                                                          */
 /*   Domo — Animations globales                                             */
-/*   Easings & durées Yeldra (cf. tokens.css)                               */
+/*   Easings et durées définis dans app.css @theme                          */
 /*                                                                          */
 /* ════════════════════════════════════════════════════════════════════════ */
 
-/* ─── Glow pulse : halos décoratifs ────────────────────────────────── */
+/* ─── Glow pulse : halos décoratifs ─────────────────────────────────── */
 @keyframes glow-pulse {
-  0%,
-  100% {
+  0%, 100% {
     opacity: 0.1;
     transform: scale(1);
   }
@@ -19,25 +18,20 @@
 }
 
 .glow-animated {
-  animation: glow-pulse 3s var(--easing-default) infinite;
+  animation: glow-pulse 3s var(--ease-default) infinite;
 }
 
-/* ─── Charge pulse : batterie en charge ────────────────────────────── */
+/* ─── Charge pulse : batterie en charge ─────────────────────────────── */
 @keyframes charge-pulse {
-  0%,
-  100% {
-    opacity: 0.7;
-  }
-  50% {
-    opacity: 1;
-  }
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
 }
 
-/* ─── Slide up + fade : entrée des tiles ───────────────────────────── */
+/* ─── Slide up + fade : entrée des tiles ────────────────────────────── */
 @keyframes slide-up-fade {
   from {
     opacity: 0;
-    transform: translateY(16px);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
@@ -45,60 +39,37 @@
   }
 }
 
-/* ─── Stagger : applique slide-up-fade en cascade sur les enfants ──── */
+/* ─── Stagger : cascade sur les enfants directs ─────────────────────── */
 .stagger-enter > * {
   opacity: 0;
-  animation: slide-up-fade var(--duration-long) var(--easing-quart) forwards;
+  animation: slide-up-fade 400ms var(--ease-out) forwards;
 }
+.stagger-enter > *:nth-child(1) { animation-delay: 0s; }
+.stagger-enter > *:nth-child(2) { animation-delay: 0.05s; }
+.stagger-enter > *:nth-child(3) { animation-delay: 0.10s; }
+.stagger-enter > *:nth-child(4) { animation-delay: 0.15s; }
+.stagger-enter > *:nth-child(5) { animation-delay: 0.20s; }
+.stagger-enter > *:nth-child(6) { animation-delay: 0.25s; }
+.stagger-enter > *:nth-child(7) { animation-delay: 0.30s; }
+.stagger-enter > *:nth-child(8) { animation-delay: 0.35s; }
+.stagger-enter > *:nth-child(9) { animation-delay: 0.40s; }
+.stagger-enter > *:nth-child(10) { animation-delay: 0.45s; }
 
-.stagger-enter > *:nth-child(1) {
-  animation-delay: 0s;
-}
-.stagger-enter > *:nth-child(2) {
-  animation-delay: 0.06s;
-}
-.stagger-enter > *:nth-child(3) {
-  animation-delay: 0.12s;
-}
-.stagger-enter > *:nth-child(4) {
-  animation-delay: 0.18s;
-}
-.stagger-enter > *:nth-child(5) {
-  animation-delay: 0.24s;
-}
-.stagger-enter > *:nth-child(6) {
-  animation-delay: 0.3s;
-}
-.stagger-enter > *:nth-child(7) {
-  animation-delay: 0.36s;
-}
-.stagger-enter > *:nth-child(8) {
-  animation-delay: 0.42s;
-}
-.stagger-enter > *:nth-child(9) {
-  animation-delay: 0.48s;
-}
-.stagger-enter > *:nth-child(10) {
-  animation-delay: 0.54s;
-}
-
-/* ─── Tile press : feedback tactile (easing-quart pour feeling premium) ─ */
+/* ─── Tile press : feedback tactile ─────────────────────────────────── */
 .tile-press {
-  transition: transform var(--duration-short) var(--easing-quart);
+  transition: transform var(--duration-fast) var(--ease-out);
 }
-
 .tile-press:active {
   transform: scale(0.97);
 }
 
-/* ─── Ping : pastille connexion en cours ───────────────────────────── */
+/* ─── Dot ping : pastille connexion ─────────────────────────────────── */
 @keyframes dot-ping {
   0% {
     transform: scale(1);
     opacity: 0.8;
   }
-  75%,
-  100% {
+  75%, 100% {
     transform: scale(2.2);
     opacity: 0;
   }
@@ -110,5 +81,17 @@
   inset: 0;
   border-radius: 9999px;
   background-color: currentColor;
-  animation: dot-ping 1.4s var(--easing-default) infinite;
+  animation: dot-ping 1.4s var(--ease-default) infinite;
+}
+
+/* ─── prefers-reduced-motion : désactive toutes les animations ──────── */
+@media (prefers-reduced-motion: reduce) {
+  .glow-animated,
+  .stagger-enter > *,
+  .dot-ping::after {
+    animation: none !important;
+  }
+  .stagger-enter > * {
+    opacity: 1;
+  }
 }

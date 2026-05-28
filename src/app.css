@@ -136,66 +136,6 @@
 }
 
 /* ════════════════════════════════════════════════════════════════════════ */
-/*   Alias legacy — pour ne pas casser les composants pas encore migrés     */
-/*   À supprimer progressivement au fil des refontes de composants          */
-/* ════════════════════════════════════════════════════════════════════════ */
-
-:root {
-  --surface-base: var(--color-bg);
-  --surface-elevated: var(--color-card);
-  --surface-deep: var(--color-card-hover);
-  --surface-card: var(--color-card);
-  --surface-card-hover: var(--color-card-hover);
-  --surface-darkest: var(--color-sidebar);
-
-  --text-primary: var(--color-fg);
-  --text-secondary: var(--color-muted-fg);
-  --text-tertiary: var(--color-muted-fg);
-  --text-muted: var(--color-muted-fg);
-  --text-disabled: var(--color-muted);
-
-  --border-subtle: var(--color-border);
-  --border-default: var(--color-border);
-  --border-strong: var(--color-border-strong);
-
-  --brand-400: var(--color-primary);
-  --primary-500: var(--color-primary);
-  --primary-600: var(--color-primary-hover);
-  --accent-500: var(--color-battery);
-  --accent-600: var(--color-battery);
-
-  --error: var(--color-alert);
-  --warning: var(--color-warning);
-
-  --mode-off: var(--color-grid-energy);
-  --mode-pv: var(--color-solar);
-  --mode-hc: var(--color-hc);
-  --mode-force: var(--color-alert);
-
-  --easing-default: var(--ease-default);
-  --easing-quart: var(--ease-out);
-  --easing-spring: var(--ease-spring);
-  --duration-short: var(--duration-fast);
-  --duration-default: var(--duration-normal);
-  --duration-long: 500ms;
-
-  --motion-fast: var(--duration-fast);
-  --motion-base: var(--duration-normal);
-  --motion-slow: var(--duration-slow);
-
-  --shadow-elevated: var(--shadow-lg);
-  --shadow-card: var(--shadow-md);
-  --shadow-subtle: var(--shadow-sm);
-
-  --glow-primary: 0 0 40px oklch(0.541 0.281 293 / 0.4);
-  --glow-accent: 0 0 40px oklch(0.627 0.194 149 / 0.3);
-  --glow-soft: 0 0 60px oklch(0.541 0.281 293 / 0.15);
-
-  --radius-xs: 2px;
-  --radius-xl2: var(--radius-3xl);
-}
-
-/* ════════════════════════════════════════════════════════════════════════ */
 /*   Reset & base                                                            */
 /* ════════════════════════════════════════════════════════════════════════ */
 
