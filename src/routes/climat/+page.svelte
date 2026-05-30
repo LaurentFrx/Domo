@@ -823,65 +823,6 @@
     color: var(--mode-color);
   }
 
-  /* ─── Boutons segmentés (mode / fan / swing) ─── */
-  .seg-btn {
-    padding: 0.45rem 0.75rem;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: transparent;
-    color: var(--color-muted-fg);
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    transition: all var(--duration-fast) var(--ease-default);
-    white-space: nowrap;
-  }
-  .seg-btn:hover:not(:disabled) {
-    border-color: var(--color-border-strong);
-    color: var(--color-fg);
-  }
-  .seg-btn:active:not(:disabled) {
-    transform: scale(0.97);
-  }
-  .seg-btn:disabled {
-    cursor: not-allowed;
-    opacity: 0.4;
-  }
-  /* seg-active : couleur via --seg-bg (préfixe alpha sur la couleur du mode).
-     Évite color-mix(... transparent) qui bug sur Safari iOS dans certains
-     contextes. Le HTML pose --seg-bg avec une oklch + /α directe. */
-  .seg-active {
-    border-color: var(--seg-color, var(--color-primary));
-    background: var(--seg-bg, var(--color-primary-muted));
-    color: var(--seg-color, var(--color-primary));
-  }
-
-  /* ─── Boutons +/- de la consigne ─── */
-  .target-btn {
-    display: inline-flex;
-    width: 32px;
-    height: 32px;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--color-border);
-    border-radius: 9999px;
-    background: var(--color-card);
-    color: var(--color-muted-fg);
-    font-size: 18px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-default);
-    -webkit-tap-highlight-color: transparent;
-  }
-  .target-btn:hover {
-    border-color: var(--color-border-strong);
-    color: var(--color-fg);
-  }
-  .target-btn:active {
-    transform: scale(0.94);
-  }
-
   /* ─── Toggle (cohérent SwitchTile) ─── */
   .toggle-track {
     position: relative;

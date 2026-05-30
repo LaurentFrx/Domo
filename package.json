@@ -6,6 +6,7 @@
   "description": "Tableau de bord énergie de la maison Feroux",
   "author": "Laurent Feroux",
   "license": "MIT",
+  "packageManager": "pnpm@11.2.2",
   "scripts": {
     "dev": "vite dev --host 0.0.0.0",
     "build": "vite build",
