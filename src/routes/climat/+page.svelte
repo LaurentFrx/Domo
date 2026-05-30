@@ -17,8 +17,14 @@
   import TempGauge from '$components/ui/TempGauge.svelte';
   import ZigbeeSensorTile from '$components/tiles/ZigbeeSensorTile.svelte';
 
-  onMount(() => zigbee.connect());
-  onDestroy(() => zigbee.disconnect());
+  onMount(() => {
+    zigbee.connect();
+    daikin.connect();
+  });
+  onDestroy(() => {
+    zigbee.disconnect();
+    daikin.disconnect();
+  });
 
   // Thermomètres Zigbee (SNZB-02 etc.) — détectés par 'thermo' dans le nom.
   const thermoSensors = $derived(

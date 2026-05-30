@@ -1,11 +1,21 @@
 /**
- * Daikin store — climatisation Onecta cloud.
+ * Daikin store — climatisation Onecta.
  *
  * Modes :
- *   - 'mock'    : valeurs réalistes
- *   - 'proxy'   : via HA (futur, sera supprimé)
- *   - 'direct'  : python-daikin-onecta sur RPi4 (cible — OAuth Daikin
- *                 + polling périodique, exposé via Caddy comme anker-bridge)
+ *   - 'mock'    : valeurs réalistes (fallback tant que le bridge n'est pas
+ *                 configuré, ou en cas d'erreur réseau).
+ *   - 'direct'  : polling REST du microservice daikin-bridge sur le RPi4
+ *                 (OAuth Onecta + cache), proxié en HTTPS via Caddy comme
+ *                 l'anker-bridge. Activé dès que PUBLIC_DAIKIN_URL est défini.
+ *
+ * Contrat JSON du bridge (snake_case) :
+ *   GET  {PUBLIC_DAIKIN_URL}/api/status            → StatusPayload | 503 (non configuré)
+ *   POST {PUBLIC_DAIKIN_URL}/api/units/{id}/command  body: Command (champs partiels)
+ *
+ * ⚠️ Onecta cloud est rate-limité (~200 req/jour). Le BRIDGE met l'état en
+ * cache et n'interroge Onecta que toutes les ~10-15 min ; le FRONT poll le
+ * cache du bridge (gratuit) toutes les 30 s. Les commandes consomment l'API
+ * → on les envoie à la demande puis on re-poll le cache.
  *
  * Périmètre Domo (décisions Laurent 2026-05-28) :
  *   on garde : operationMode (heating/cooling/off), onOff, outdoor
@@ -14,6 +24,8 @@
  *   ailleurs : conso → /energie ; ambiante + humidité → thermo Zigbee
  *              de la pièce (pas l'unité Daikin).
  */
+
+import { env } from '$env/dynamic/public';
 
 export type DaikinOperationMode = 'heating' | 'cooling' | 'off';
 export type FanSpeed = 'auto' | 'quiet' | 'level1' | 'level2' | 'level3' | 'level4' | 'level5';
@@ -43,6 +55,39 @@ export type DaikinUnit = {
   swingVertical: SwingMode;
 };
 
+// ─── Contrat bridge (snake_case) ────────────────────────────────────────
+type ApiUnit = {
+  id: string;
+  name: string;
+  zone: string;
+  online: boolean;
+  on_off: boolean;
+  operation_mode: DaikinOperationMode;
+  outdoor_temp_c: number;
+  target_heating: number;
+  target_cooling: number;
+  fan_speed: FanSpeed;
+  swing_horizontal: SwingMode;
+  swing_vertical: SwingMode;
+};
+type StatusPayload = {
+  connected: boolean;
+  last_update: number | null;
+  units: ApiUnit[];
+};
+type Command = Partial<{
+  on_off: boolean;
+  operation_mode: DaikinOperationMode;
+  target_heating: number;
+  target_cooling: number;
+  fan_speed: FanSpeed;
+  swing_horizontal: SwingMode;
+  swing_vertical: SwingMode;
+}>;
+
+const PUBLIC_DAIKIN_URL = env.PUBLIC_DAIKIN_URL || '';
+const POLL_INTERVAL_MS = 30_000;
+
 const TARGET_MIN = 16;
 const TARGET_MAX = 30;
 
@@ -52,9 +97,13 @@ function clampTarget(v: number): number {
 
 class DaikinState {
   mode = $state<'mock' | 'proxy' | 'direct'>('mock');
-  connected = $state(true);
-  lastUpdate = $state<Date | null>(new Date());
+  connected = $state(false);
+  status = $state<'idle' | 'polling' | 'connected' | 'unconfigured' | 'error'>('idle');
+  lastError = $state<string | null>(null);
+  lastUpdate = $state<Date | null>(null);
 
+  // Seed mock : sert d'affichage tant que le bridge n'a pas répondu (fallback
+  // gracieux — le dashboard ne casse pas avant que la clim soit connectée).
   units = $state<DaikinUnit[]>([
     {
       id: 'salon',
@@ -86,6 +135,79 @@ class DaikinState {
     }
   ]);
 
+  private intervalId: ReturnType<typeof setInterval> | null = null;
+
+  // ─── Connexion / polling du cache bridge ──────────────────────────────
+  connect() {
+    if (typeof window === 'undefined') return;
+    if (this.intervalId !== null) return;
+    if (!PUBLIC_DAIKIN_URL) {
+      // Pas de bridge configuré → on reste en mock, sans polling.
+      this.mode = 'mock';
+      this.status = 'unconfigured';
+      return;
+    }
+    this.poll();
+    this.intervalId = setInterval(() => this.poll(), POLL_INTERVAL_MS);
+  }
+
+  disconnect() {
+    if (this.intervalId !== null) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+  }
+
+  private async poll() {
+    if (!PUBLIC_DAIKIN_URL) return;
+    this.status = 'polling';
+    try {
+      const res = await fetch(`${PUBLIC_DAIKIN_URL}/api/status`, {
+        signal: AbortSignal.timeout(15_000)
+      });
+      if (res.status === 503) {
+        this.connected = false;
+        this.mode = 'mock';
+        this.status = 'unconfigured';
+        const body = await res.json().catch(() => ({}));
+        this.lastError = (body as { detail?: string }).detail || 'service unavailable';
+        return;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as StatusPayload;
+      this.applySnapshot(json);
+      this.connected = true;
+      this.mode = 'direct';
+      this.status = 'connected';
+      this.lastError = null;
+      this.lastUpdate = new Date();
+    } catch (e) {
+      // Réseau/bridge KO → on garde le dernier état affiché (ou le mock).
+      this.connected = false;
+      this.status = 'error';
+      this.lastError = (e as Error).message;
+    }
+  }
+
+  private applySnapshot(p: StatusPayload) {
+    if (!Array.isArray(p.units)) return;
+    this.units = p.units.map((u) => ({
+      id: u.id,
+      name: u.name,
+      zone: u.zone,
+      online: u.online,
+      onOff: u.on_off,
+      operationMode: u.operation_mode,
+      outdoorTempC: u.outdoor_temp_c ?? 0,
+      targetHeating: u.target_heating,
+      targetCooling: u.target_cooling,
+      fanSpeed: u.fan_speed,
+      swingHorizontal: u.swing_horizontal,
+      swingVertical: u.swing_vertical
+    }));
+  }
+
+  // ─── Mutations locales (optimistes) ───────────────────────────────────
   private mutate(unitId: string, patch: Partial<DaikinUnit>) {
     const idx = this.units.findIndex((u) => u.id === unitId);
     if (idx < 0) return;
@@ -93,26 +215,57 @@ class DaikinState {
     this.lastUpdate = new Date();
   }
 
+  /**
+   * Envoie la commande au bridge (mode direct) puis re-poll pour refléter
+   * l'état réel. En mode mock (pas de bridge) : mutation locale seulement.
+   */
+  private async sendCommand(unitId: string, cmd: Command) {
+    if (!PUBLIC_DAIKIN_URL) return;
+    try {
+      const res = await fetch(`${PUBLIC_DAIKIN_URL}/api/units/${unitId}/command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cmd),
+        signal: AbortSignal.timeout(15_000)
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Reflète l'état réel renvoyé par Onecta (le cache du bridge se met à jour).
+      this.poll();
+    } catch (e) {
+      this.lastError = (e as Error).message;
+      // L'optimiste reste affiché ; le prochain poll corrigera si besoin.
+    }
+  }
+
   setOnOff(unitId: string, onOff: boolean) {
     this.mutate(unitId, { onOff });
+    this.sendCommand(unitId, { on_off: onOff });
   }
   setOperationMode(unitId: string, operationMode: DaikinOperationMode) {
     this.mutate(unitId, { operationMode });
+    this.sendCommand(unitId, { operation_mode: operationMode });
   }
   setTargetHeating(unitId: string, v: number) {
-    this.mutate(unitId, { targetHeating: clampTarget(v) });
+    const t = clampTarget(v);
+    this.mutate(unitId, { targetHeating: t });
+    this.sendCommand(unitId, { target_heating: t });
   }
   setTargetCooling(unitId: string, v: number) {
-    this.mutate(unitId, { targetCooling: clampTarget(v) });
+    const t = clampTarget(v);
+    this.mutate(unitId, { targetCooling: t });
+    this.sendCommand(unitId, { target_cooling: t });
   }
   setFanSpeed(unitId: string, fanSpeed: FanSpeed) {
     this.mutate(unitId, { fanSpeed });
+    this.sendCommand(unitId, { fan_speed: fanSpeed });
   }
   setSwingHorizontal(unitId: string, swingHorizontal: SwingMode) {
     this.mutate(unitId, { swingHorizontal });
+    this.sendCommand(unitId, { swing_horizontal: swingHorizontal });
   }
   setSwingVertical(unitId: string, swingVertical: SwingMode) {
     this.mutate(unitId, { swingVertical });
+    this.sendCommand(unitId, { swing_vertical: swingVertical });
   }
 }
 
