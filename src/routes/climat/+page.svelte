@@ -14,6 +14,7 @@
   import { haptic } from '$utils/haptic';
   import { onMount, onDestroy } from 'svelte';
   import Sparkline from '$components/ui/Sparkline.svelte';
+  import TempGauge from '$components/ui/TempGauge.svelte';
   import ZigbeeSensorTile from '$components/tiles/ZigbeeSensorTile.svelte';
 
   onMount(() => zigbee.connect());
@@ -353,8 +354,11 @@
         {@const modeBg = modeMeta?.bg ?? 'var(--color-muted)'}
         {@const TGT_MIN = 16}
         {@const TGT_MAX = 30}
-        {@const sliderPct = tgt !== null ? ((tgt - TGT_MIN) / (TGT_MAX - TGT_MIN)) * 100 : 50}
         {@const active = unit.onOff && unit.operationMode !== 'off'}
+        {@const gaugeFrom =
+          unit.operationMode === 'cooling' ? 'oklch(0.52 0.15 260)' : 'oklch(0.5 0.15 22)'}
+        {@const gaugeTo =
+          unit.operationMode === 'cooling' ? 'oklch(0.8 0.13 220)' : 'oklch(0.72 0.18 48)'}
         <article
           class="daikin-card relative flex flex-col gap-5 overflow-hidden rounded-[var(--radius-2xl)] border p-5"
           class:daikin-on={active}
@@ -395,54 +399,28 @@
             </button>
           </header>
 
-          <!-- HERO : consigne énorme + sous-label -->
-          <div class="relative z-10 flex flex-col items-center gap-1 py-2">
-            {#if tgt !== null && unit.onOff}
-              <div class="hero-temp" style="color: {modeColor};">
-                <span class="hero-temp-int">{Math.floor(tgt)}</span><span class="hero-temp-dec"
-                  >{tgt % 1 ? '.5' : ''}</span><span class="hero-temp-unit">°</span>
-              </div>
-              <span
-                class="text-[11px] font-semibold tracking-[0.08em] uppercase"
-                style="color: {modeColor};"
-              >
-                {unit.operationMode === 'heating' ? 'Chauffage' : 'Climatisation'}
-                {#if unit.operationMode === 'heating'}
-                  · cible chaud
-                {:else}
-                  · cible froid
-                {/if}
-              </span>
-            {:else}
-              <div class="hero-off" style="color: var(--color-muted-fg);">
-                {unit.online ? 'À l\'arrêt' : 'Hors ligne'}
-              </div>
-              <span class="text-[11px] font-semibold tracking-[0.08em] uppercase" style="color: var(--color-muted-fg);">
-                Consigne {tgt ?? unit.targetHeating}° chaud · {unit.targetCooling}° froid
-              </span>
-            {/if}
+          <!-- Gauge circulaire de consigne (signature Yeldra) -->
+          <div class="relative z-10 flex items-center justify-center">
+            <TempGauge
+              value={tgt ?? unit.targetHeating}
+              min={TGT_MIN}
+              max={TGT_MAX}
+              step={0.5}
+              color={active ? modeColor : 'var(--color-muted-fg)'}
+              colorFrom={gaugeFrom}
+              colorTo={gaugeTo}
+              currentValue={indoorT}
+              disabled={!active}
+              label={unit.operationMode === 'heating'
+                ? 'Cible chaud'
+                : unit.operationMode === 'cooling'
+                  ? 'Cible froid'
+                  : ''}
+              offLabel={unit.online ? "À l'arrêt" : 'Hors ligne'}
+              offSubLabel="Consigne {unit.targetHeating}° chaud · {unit.targetCooling}° froid"
+              onChange={(v) => setTarget(unit, v)}
+            />
           </div>
-
-          <!-- Slider horizontal de consigne (16-30°C par 0.5°) -->
-          {#if tgt !== null && unit.onOff}
-            <div class="relative z-10 flex flex-col gap-1.5">
-              <input
-                type="range"
-                min="16"
-                max="30"
-                step="0.5"
-                value={tgt}
-                oninput={(e) => setTarget(unit, +(e.currentTarget as HTMLInputElement).value)}
-                class="temp-slider"
-                style="--slider-pct: {sliderPct}%;"
-                aria-label="Consigne température"
-              />
-              <div class="flex justify-between text-[10px] tabular-nums" style="color: var(--color-muted-fg);">
-                <span>{TGT_MIN}°</span>
-                <span>{TGT_MAX}°</span>
-              </div>
-            </div>
-          {/if}
 
           <!-- Mode opérationnel -->
           <div class="relative z-10 flex gap-2">
@@ -750,87 +728,6 @@
   }
   .daikin-on .ambient-halo {
     opacity: 1;
-  }
-
-  /* HERO consigne : énorme chiffre signature Yeldra (font-light) */
-  .hero-temp {
-    display: flex;
-    align-items: flex-start;
-    line-height: 0.85;
-    letter-spacing: -0.04em;
-    font-variant-numeric: tabular-nums;
-    transition: color 400ms var(--ease-default);
-  }
-  .hero-temp-int {
-    font-size: 96px;
-    font-weight: 200;
-  }
-  .hero-temp-dec {
-    font-size: 48px;
-    font-weight: 300;
-    margin-top: 0.5rem;
-    opacity: 0.7;
-  }
-  .hero-temp-unit {
-    font-size: 36px;
-    font-weight: 300;
-    margin-top: 0.5rem;
-    opacity: 0.6;
-  }
-
-  /* Variante OFF : texte propre, hauteur équivalente au hero-temp,
-     pour ne pas faire « sauter » la carte entre on/off */
-  .hero-off {
-    font-size: 30px;
-    font-weight: 300;
-    letter-spacing: -0.01em;
-    line-height: 1;
-    padding: 1.4rem 0;
-    text-align: center;
-    transition: color 400ms var(--ease-default);
-  }
-
-  /* Slider linéaire de consigne */
-  .temp-slider {
-    appearance: none;
-    -webkit-appearance: none;
-    width: 100%;
-    height: 8px;
-    background: linear-gradient(
-      to right,
-      var(--mode-color) 0%,
-      var(--mode-color) var(--slider-pct, 50%),
-      var(--color-muted) var(--slider-pct, 50%),
-      var(--color-muted) 100%
-    );
-    border-radius: 9999px;
-    outline: none;
-    cursor: pointer;
-    transition: background 200ms linear;
-  }
-  .temp-slider::-webkit-slider-thumb {
-    appearance: none;
-    -webkit-appearance: none;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: #ffffff;
-    border: 2px solid var(--mode-color);
-    box-shadow: 0 2px 8px oklch(0 0 0 / 0.18);
-    cursor: pointer;
-    transition: transform var(--duration-fast) var(--ease-default);
-  }
-  .temp-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.15);
-  }
-  .temp-slider::-moz-range-thumb {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: #ffffff;
-    border: 2px solid var(--mode-color);
-    box-shadow: 0 2px 8px oklch(0 0 0 / 0.18);
-    cursor: pointer;
   }
 
   /* Mode pills */
