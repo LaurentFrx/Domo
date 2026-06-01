@@ -2,6 +2,8 @@
   import type { CumulusMode } from '$theme/tokens';
   import { cumulus } from '$stores/cumulus.svelte';
   import { daikin } from '$stores/daikin.svelte';
+  import { airzone } from '$stores/airzone.svelte';
+  import type { AirzoneMode } from '$stores/airzone.svelte';
   import type {
     DaikinOperationMode,
     DaikinUnit,
@@ -20,11 +22,27 @@
   onMount(() => {
     zigbee.connect();
     daikin.connect();
+    airzone.connect();
   });
   onDestroy(() => {
     zigbee.disconnect();
     daikin.disconnect();
+    airzone.disconnect();
   });
+
+  // ─── Airzone (gainable) : libellés + couleurs de mode ────────────────
+  const AIRZONE_MODE_META: Record<AirzoneMode, { label: string; color: string; bg: string }> = {
+    cooling: { label: 'Froid', color: 'var(--color-consumption)', bg: 'var(--color-consumption-muted)' },
+    heating: { label: 'Chaud', color: 'var(--color-hp)', bg: 'var(--color-hp-muted)' },
+    fan: { label: 'Vent.', color: 'var(--color-muted-fg)', bg: 'var(--color-muted)' },
+    dry: { label: 'Sec', color: 'var(--color-solar)', bg: 'var(--color-muted)' },
+    stop: { label: 'Arrêt', color: 'var(--color-muted-fg)', bg: 'var(--color-muted)' },
+    auto: { label: 'Auto', color: 'var(--color-battery)', bg: 'var(--color-muted)' },
+    unknown: { label: '—', color: 'var(--color-muted-fg)', bg: 'var(--color-muted)' }
+  };
+  function airzoneModeMeta(m: AirzoneMode) {
+    return AIRZONE_MODE_META[m] ?? AIRZONE_MODE_META.unknown;
+  }
 
   // Thermomètres Zigbee (SNZB-02 etc.) — détectés par 'thermo' dans le nom.
   const thermoSensors = $derived(
@@ -56,8 +74,12 @@
   const legionnellaDays = $derived(daysUntil(cumulus.nextLegionnellaCycle));
 
   // ─── Daikin ────────────────────────────────────────────────────────
+  // Sélecteur de mode = uniquement Chaud / Froid. L'allumage/extinction passe
+  // par l'interrupteur du header (onOffMode). 'off' reste un état possible de
+  // l'unité (affiché au centre de la jauge) mais n'est plus un bouton — éviter
+  // la redondance avec le toggle, et le faux « Off » que le bridge ignorait.
   const operationModes: {
-    id: DaikinOperationMode;
+    id: Exclude<DaikinOperationMode, 'off'>;
     label: string;
     color: string;
     bg: string;
@@ -68,8 +90,7 @@
       label: 'Froid',
       color: 'var(--color-consumption)',
       bg: 'var(--color-consumption-muted)'
-    },
-    { id: 'off', label: 'Off', color: 'var(--color-muted-fg)', bg: 'var(--color-muted)' }
+    }
   ];
   const fanSpeeds: { id: FanSpeed; label: string }[] = [
     { id: 'auto', label: 'Auto' },
@@ -91,24 +112,48 @@
     if (u.operationMode === 'heating') daikin.setTargetHeating(u.id, v);
     else if (u.operationMode === 'cooling') daikin.setTargetCooling(u.id, v);
   }
-  function tapOperationMode(unitId: string, mode: DaikinOperationMode) {
-    haptic('medium');
-    daikin.setOperationMode(unitId, mode);
+  // ─── Changement de mode Chaud/Froid : appui LONG anti-fausse-manip ──────
+  // Un tap simple ne suffit pas (risque d'envoyer une mauvaise consigne par
+  // erreur) : il faut maintenir ~600 ms. Retour haptique au début (light) puis
+  // à la validation (success). Un anneau de progression remplit le bouton.
+  const HOLD_MS = 600;
+  let holdMode = $state<{ unitId: string; mode: DaikinOperationMode } | null>(null);
+  let holdTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function isHolding(unitId: string, mode: DaikinOperationMode): boolean {
+    return holdMode?.unitId === unitId && holdMode?.mode === mode;
   }
+  function cancelHold() {
+    if (holdTimer) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+    holdMode = null;
+  }
+  function startHoldMode(unitId: string, mode: DaikinOperationMode, current: DaikinOperationMode) {
+    if (mode === current) return; // déjà ce mode → rien à faire
+    cancelHold();
+    holdMode = { unitId, mode };
+    haptic('light'); // « j'ai bien démarré l'appui »
+    holdTimer = setTimeout(() => {
+      haptic('success'); // « validé »
+      daikin.setOperationMode(unitId, mode);
+      holdMode = null;
+      holdTimer = null;
+    }, HOLD_MS);
+  }
+
   function tapOnOff(u: DaikinUnit) {
     haptic('medium');
     daikin.setOnOff(u.id, !u.onOff);
   }
   function tapFanSpeed(unitId: string, sp: FanSpeed) {
-    haptic('light');
     daikin.setFanSpeed(unitId, sp);
   }
   function tapSwingH(unitId: string, sw: SwingMode) {
-    haptic('light');
     daikin.setSwingHorizontal(unitId, sw);
   }
   function tapSwingV(unitId: string, sw: SwingMode) {
-    haptic('light');
     daikin.setSwingVertical(unitId, sw);
   }
 
@@ -117,17 +162,27 @@
     cumulus.setMode(mode);
   }
 
-  // ─── Référence Thermo Salon (Zigbee) pour temp + humidité intérieures ─
-  const thermoSalon = $derived(
-    zigbee.devices.find((d) => d.friendlyName.toLowerCase() === 'thermo salon') ?? null
-  );
-  function thermoForZone(zone: string) {
-    if (zone === 'Séjour') return thermoSalon;
-    if (zone === 'Salle de bain') {
-      return (
-        zigbee.devices.find((d) => d.friendlyName.toLowerCase() === 'thermo sdb') ?? null
-      );
-    }
+  // ─── Thermo Zigbee de référence pour chaque split Daikin ────────────────
+  // L'ambiante + l'humidité de la carte clim viennent du thermomètre Zigbee de
+  // la pièce (le capteur interne du split est faussé — il est au plafond).
+  // ⚠️ Le bridge Onecta renvoie zone:"Daikin" (non fiable) → on associe chaque
+  // unité à un thermo par friendly_name via son id. L'unité réelle (id "daikin")
+  // est au séjour → "Thermo Salon". (ids "salon"/"sdb" = seed mock.)
+  const DAIKIN_UNIT_THERMO: Record<string, string> = {
+    daikin: 'Thermo Salon',
+    salon: 'Thermo Salon',
+    sdb: 'Thermo SdB'
+  };
+  function thermoByName(name: string) {
+    const n = name.toLowerCase();
+    return zigbee.devices.find((d) => d.friendlyName.toLowerCase() === n) ?? null;
+  }
+  function thermoForUnit(unit: DaikinUnit) {
+    const mapped = DAIKIN_UNIT_THERMO[unit.id];
+    if (mapped) return thermoByName(mapped);
+    // Repli (compat seed mock) : association par zone.
+    if (unit.zone === 'Séjour') return thermoByName('Thermo Salon');
+    if (unit.zone === 'Salle de bain') return thermoByName('Thermo SdB');
     return null;
   }
 
@@ -210,6 +265,7 @@
           {@const active = cumulus.currentMode === m.id}
           <button
             type="button"
+            data-no-haptic
             onclick={() => tapCumulusMode(m.id)}
             class="flex-1 rounded-full border py-2 text-[11px] font-semibold tracking-[0.04em] transition-colors"
             style="
@@ -351,7 +407,7 @@
     </h2>
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       {#each daikin.units as unit (unit.id)}
-        {@const thermo = thermoForZone(unit.zone)}
+        {@const thermo = thermoForUnit(unit)}
         {@const indoorT = typeof thermo?.state.temperature === 'number' ? (thermo.state.temperature as number) : null}
         {@const indoorH = typeof thermo?.state.humidity === 'number' ? (thermo.state.humidity as number) : null}
         {@const tgt = currentTarget(unit)}
@@ -393,6 +449,7 @@
             </div>
             <button
               type="button"
+              data-no-haptic
               class="toggle-track shrink-0"
               class:toggle-on={unit.onOff}
               role="switch"
@@ -428,20 +485,28 @@
             />
           </div>
 
-          <!-- Mode opérationnel -->
+          <!-- Mode opérationnel — appui LONG pour changer (anti-fausse-manip) -->
           <div class="relative z-10 flex gap-2">
             {#each operationModes as m (m.id)}
               {@const isActive = unit.operationMode === m.id}
+              {@const holding = isHolding(unit.id, m.id)}
               <button
                 type="button"
-                onclick={() => tapOperationMode(unit.id, m.id)}
+                data-no-haptic
+                onpointerdown={() => startHoldMode(unit.id, m.id, unit.operationMode)}
+                onpointerup={cancelHold}
+                onpointerleave={cancelHold}
+                onpointercancel={cancelHold}
+                oncontextmenu={(e) => e.preventDefault()}
                 disabled={!unit.onOff || !unit.online}
                 class="mode-pill flex-1"
                 class:mode-active={isActive}
-                style="--mp-color: {m.color}; --mp-bg: {m.bg};"
+                class:mode-holding={holding}
+                style="--mp-color: {m.color}; --mp-bg: {m.bg}; --hold-ms: {HOLD_MS}ms;"
                 aria-pressed={isActive}
+                title={isActive ? undefined : 'Maintenir pour activer'}
               >
-                {m.label}
+                <span class="mode-pill-label">{m.label}</span>
               </button>
             {/each}
           </div>
@@ -550,6 +615,159 @@
                 </svg>
               </button>
             </div>
+          </div>
+        </article>
+      {/each}
+    </div>
+  </section>
+
+  <!-- ═══ Climatisation gainable Airzone (3 zones) ═══ -->
+  <section class="flex flex-col gap-3">
+    <div class="flex items-center justify-between">
+      <h2
+        class="text-[14px] font-semibold tracking-[0.04em] uppercase"
+        style="color: var(--color-muted-fg);"
+      >
+        Gainable Airzone · {airzone.zones.length} zones
+      </h2>
+      <span class="flex items-center gap-1.5 text-[11px]" style="color: var(--color-muted-fg);">
+        <span
+          class="h-1.5 w-1.5 rounded-full"
+          style:background-color={airzone.connected ? 'var(--color-battery)' : 'var(--color-alert)'}
+        ></span>
+        Système
+      </span>
+    </div>
+
+    <!-- Sélecteur de mode GLOBAL (système → appliqué via la zone master) -->
+    <div class="flex gap-2">
+      {#each airzone.availableModes as m (m)}
+        {@const mm = airzoneModeMeta(m)}
+        <button
+          type="button"
+          data-no-haptic
+          class="mode-pill flex-1"
+          class:mode-active={airzone.systemMode === m}
+          style="--mp-color: {mm.color}; --mp-bg: {mm.bg};"
+          aria-pressed={airzone.systemMode === m}
+          onclick={() => {
+            if (airzone.systemMode === m) return;
+            haptic('medium');
+            airzone.setMode(m);
+          }}
+        >
+          <span class="mode-pill-label">{mm.label}</span>
+        </button>
+      {/each}
+    </div>
+
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      {#each airzone.zones as zone (zone.id)}
+        {@const meta = airzoneModeMeta(zone.mode)}
+        <article
+          class="flex flex-col gap-2.5 rounded-[var(--radius-xl)] border p-4"
+          style="background: var(--color-card); border-color: {zone.on ? meta.color : 'var(--color-border)'};"
+        >
+          <!-- header : nom + demande + toggle on/off -->
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[14px] font-semibold" style="color: var(--color-fg);">
+              {zone.name}
+            </span>
+            <div class="flex items-center gap-2">
+              {#if zone.demand}
+                <span
+                  class="rounded-full px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.06em]"
+                  style="color: {meta.color}; background: {meta.bg};"
+                >
+                  actif
+                </span>
+              {/if}
+              <button
+                type="button"
+                data-no-haptic
+                class="toggle-track shrink-0"
+                class:toggle-on={zone.on}
+                role="switch"
+                aria-checked={zone.on}
+                aria-label="Allumer / éteindre {zone.name}"
+                onclick={() => {
+                  haptic('medium');
+                  airzone.setOn(zone.id, !zone.on);
+                }}
+              >
+                <span class="toggle-knob"></span>
+              </button>
+            </div>
+          </div>
+
+          <!-- température ambiante + humidité -->
+          <div class="flex items-baseline gap-2">
+            <div class="flex items-baseline gap-0.5">
+              <span
+                class="text-[32px] font-bold leading-none tabular-nums"
+                style="color: var(--color-fg); letter-spacing: -0.02em;"
+              >
+                {zone.roomTemp !== null ? zone.roomTemp.toFixed(1) : '—'}
+              </span>
+              <span class="text-[14px] font-medium" style="color: var(--color-muted-fg);">°C</span>
+            </div>
+            {#if zone.humidity !== null}
+              <span class="text-[13px] tabular-nums" style="color: var(--color-consumption);">
+                {Math.round(zone.humidity)}%
+              </span>
+            {/if}
+          </div>
+
+          <!-- consigne réglable (− / +) -->
+          <div
+            class="flex items-center justify-between border-t pt-2"
+            style="border-color: var(--color-border);"
+          >
+            <span class="text-[11px]" style="color: var(--color-muted-fg);">Consigne</span>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                data-no-haptic
+                class="az-step"
+                aria-label="Baisser la consigne {zone.name}"
+                onclick={() => {
+                  haptic('light');
+                  airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) - zone.tempStep);
+                }}
+              >−</button>
+              <span
+                class="text-[15px] font-semibold tabular-nums"
+                style="color: var(--color-fg); min-width: 3.5ch; text-align: center;"
+              >
+                {zone.setpoint !== null ? zone.setpoint.toFixed(1) : '—'}°
+              </span>
+              <button
+                type="button"
+                data-no-haptic
+                class="az-step"
+                aria-label="Monter la consigne {zone.name}"
+                onclick={() => {
+                  haptic('light');
+                  airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) + zone.tempStep);
+                }}
+              >+</button>
+            </div>
+          </div>
+
+          <!-- mode courant + batterie/couverture (zones radio) -->
+          <div class="flex items-center justify-between text-[10px]" style="color: var(--color-muted-fg);">
+            <span class="font-semibold" style="color: {zone.on ? meta.color : 'var(--color-muted-fg)'};">
+              {meta.label}
+            </span>
+            {#if zone.battery !== null}
+              <span class="flex items-center gap-1">
+                <span
+                  class="h-1 w-1 rounded-full"
+                  style:background-color={zone.battery > 30 ? 'var(--color-battery)' : 'var(--color-alert)'}
+                ></span>
+                Batt. {zone.battery}%{#if zone.coverage !== null} · couv. {zone.coverage}%{/if}
+              </span>
+            {/if}
           </div>
         </article>
       {/each}
@@ -765,6 +983,43 @@
     background: var(--mp-bg);
     color: var(--mp-color);
   }
+  .mode-pill:active:not(:disabled) {
+    transform: scale(0.96);
+  }
+
+  /* Appui long : la pastille se remplit de --mp-color via un overlay qui
+     grandit sur --hold-ms ; quand plein (= validé), le mode devient actif. */
+  .mode-pill {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .mode-pill::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: var(--mp-color);
+    opacity: 0.28;
+    transform: scaleX(0);
+    transform-origin: left center;
+  }
+  .mode-pill.mode-holding {
+    color: var(--mp-color);
+    border-color: var(--mp-color);
+  }
+  .mode-pill.mode-holding::after {
+    transform: scaleX(1);
+    transition: transform var(--hold-ms, 600ms) linear;
+  }
+  .mode-pill-label {
+    position: relative;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mode-pill.mode-holding::after {
+      transition-duration: 0ms;
+    }
+  }
 
   /* Fan segments : compact horizontal bar */
   .fan-seg {
@@ -867,5 +1122,32 @@
   .toggle-track:disabled {
     cursor: not-allowed;
     opacity: 0.5;
+  }
+
+  /* Airzone : steppers de consigne (− / +) */
+  .az-step {
+    display: inline-flex;
+    width: 30px;
+    height: 30px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-border);
+    border-radius: 9999px;
+    background: var(--color-card);
+    color: var(--color-fg);
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      border-color var(--duration-fast) var(--ease-default),
+      transform var(--duration-fast) var(--ease-default);
+  }
+  .az-step:hover {
+    border-color: var(--color-border-strong);
+  }
+  .az-step:active {
+    transform: scale(0.92);
   }
 </style>
