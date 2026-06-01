@@ -7,8 +7,26 @@
   import { anker } from '$stores/anker.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
   import { preferences } from '$stores/preferences.svelte';
+  import { haptic } from '$utils/haptic';
 
   let { children } = $props();
+
+  // ─── Retour haptique GLOBAL ────────────────────────────────────────────
+  // Un seul écouteur délégué : tout bouton (ou contrôle interactif) activé dans
+  // l'app vibre, sans câbler haptic() partout. Les handlers qui appellent déjà
+  // haptic() avec une intensité précise ne double-buzzent pas (garde anti-rebond
+  // dans l'utilitaire). Opt-out via [data-no-haptic]. On écoute pointerdown pour
+  // un retour synchrone du geste (et non au click, plus tardif).
+  function onRootPointerDown(ev: PointerEvent) {
+    const el = ev.target as Element | null;
+    const hit = el?.closest?.(
+      'button, [role="button"], [role="switch"], [role="slider"], a[href], summary'
+    );
+    if (!hit) return;
+    if (hit.closest('[data-no-haptic]')) return;
+    if (hit.hasAttribute('disabled') || hit.getAttribute('aria-disabled') === 'true') return;
+    haptic('light');
+  }
 
   // ─── Hydrater les préférences (theme, animations…) global, dès le mount ─
   // Sans ça, un reload sur n'importe quelle page autre que /reglages
@@ -49,7 +67,15 @@
   });
 </script>
 
-<div class="min-h-screen" style="background: var(--color-bg); color: var(--color-fg);">
+<!-- Écouteur de délégation PASSIF : déclenche seulement le retour haptique ; les
+     vraies interactions restent sur les boutons enfants (qui ont leur rôle). Un
+     role ARIA ici serait trompeur → on désactive la règle a11y pour ce nœud. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+  class="min-h-screen"
+  style="background: var(--color-bg); color: var(--color-fg);"
+  onpointerdown={onRootPointerDown}
+>
   <Sidebar />
 
   <main

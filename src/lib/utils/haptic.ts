@@ -62,8 +62,18 @@ function detectPlatform(): 'ios' | 'android' | 'other' {
  * Déclenche un retour haptique.
  * @param style intensité/pattern parmi 'light' | 'medium' | 'heavy' | 'success' | 'warning'
  */
+// Anti-double-buzz : un même geste peut déclencher haptic() deux fois (handler
+// explicite d'un bouton + écouteur global délégué, cf. +layout.svelte). On
+// coalesce les appels très rapprochés en un seul — la 1re intensité demandée
+// gagne (souvent la plus spécifique, ex. 'medium' sur on/off vs 'light' global).
+let lastHapticAt = 0;
+const HAPTIC_DEDUPE_MS = 80;
+
 export function haptic(style: HapticStyle = 'light'): void {
   if (typeof window === 'undefined') return;
+  const now = Date.now();
+  if (now - lastHapticAt < HAPTIC_DEDUPE_MS) return;
+  lastHapticAt = now;
   const platform = detectPlatform();
 
   if (platform === 'android') {

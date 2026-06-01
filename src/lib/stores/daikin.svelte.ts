@@ -137,6 +137,20 @@ class DaikinState {
 
   private intervalId: ReturnType<typeof setInterval> | null = null;
 
+  // ─── Protection optimiste ─────────────────────────────────────────────
+  // Après une commande, le(s) champ(s) touché(s) sont « verrouillés » pendant
+  // une courte fenêtre : un snapshot de polling ne peut PAS réécraser la valeur
+  // optimiste tant que (a) la fenêtre n'a pas expiré ET (b) le snapshot ne
+  // confirme pas déjà cette valeur. Neutralise le yo-yo dû au rate-limit Onecta
+  // (429 → cache périmé) et au délai de propagation cloud (lecture en avance).
+  // Clé = `${unitId}:${champ}`.
+  private pending = new Map<string, { value: unknown; until: number }>();
+  private static readonly PROTECT_MS = 12_000;
+
+  private lockKey(unitId: string, field: keyof DaikinUnit) {
+    return `${unitId}:${field}`;
+  }
+
   // ─── Connexion / polling du cache bridge ──────────────────────────────
   connect() {
     if (typeof window === 'undefined') return;
@@ -191,20 +205,47 @@ class DaikinState {
 
   private applySnapshot(p: StatusPayload) {
     if (!Array.isArray(p.units)) return;
-    this.units = p.units.map((u) => ({
-      id: u.id,
-      name: u.name,
-      zone: u.zone,
-      online: u.online,
-      onOff: u.on_off,
-      operationMode: u.operation_mode,
-      outdoorTempC: u.outdoor_temp_c ?? 0,
-      targetHeating: u.target_heating,
-      targetCooling: u.target_cooling,
-      fanSpeed: u.fan_speed,
-      swingHorizontal: u.swing_horizontal,
-      swingVertical: u.swing_vertical
-    }));
+    const now = Date.now();
+    // Champs pilotables → susceptibles d'être verrouillés après une commande.
+    const PROTECTED: (keyof DaikinUnit)[] = [
+      'onOff',
+      'operationMode',
+      'targetHeating',
+      'targetCooling',
+      'fanSpeed',
+      'swingHorizontal',
+      'swingVertical'
+    ];
+    this.units = p.units.map((u) => {
+      const incoming: DaikinUnit = {
+        id: u.id,
+        name: u.name,
+        zone: u.zone,
+        online: u.online,
+        onOff: u.on_off,
+        operationMode: u.operation_mode,
+        outdoorTempC: u.outdoor_temp_c ?? 0,
+        targetHeating: u.target_heating,
+        targetCooling: u.target_cooling,
+        fanSpeed: u.fan_speed,
+        swingHorizontal: u.swing_horizontal,
+        swingVertical: u.swing_vertical
+      };
+      const current = this.units.find((c) => c.id === u.id);
+      for (const field of PROTECTED) {
+        const key = this.lockKey(u.id, field);
+        const lock = this.pending.get(key);
+        if (!lock) continue;
+        if (now >= lock.until || incoming[field] === lock.value) {
+          // Fenêtre expirée OU le snapshot confirme enfin la valeur → on lève le verrou.
+          this.pending.delete(key);
+        } else if (current) {
+          // Toujours protégé et non confirmé → on conserve la valeur optimiste.
+          (incoming as Record<string, unknown>)[field] = current[field];
+        }
+      }
+      return incoming;
+    });
   }
 
   // ─── Mutations locales (optimistes) ───────────────────────────────────
@@ -213,6 +254,12 @@ class DaikinState {
     if (idx < 0) return;
     this.units[idx] = { ...this.units[idx], ...patch };
     this.lastUpdate = new Date();
+    // Verrouille chaque champ muté pour la durée de protection : un snapshot de
+    // polling ne pourra pas le réécraser tant qu'il ne confirme pas la valeur.
+    const until = Date.now() + DaikinState.PROTECT_MS;
+    for (const field of Object.keys(patch) as (keyof DaikinUnit)[]) {
+      this.pending.set(this.lockKey(unitId, field), { value: patch[field], until });
+    }
   }
 
   /**
@@ -229,8 +276,10 @@ class DaikinState {
         signal: AbortSignal.timeout(15_000)
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // Reflète l'état réel renvoyé par Onecta (le cache du bridge se met à jour).
-      this.poll();
+      // Pas de re-poll immédiat : le bridge a déjà mis son cache à jour de façon
+      // optimiste (PATCH 2xx), et une relecture immédiate d'Onecta serait soit
+      // rate-limitée (429), soit en retard de propagation → c'était la cause du
+      // yo-yo. Le polling régulier (30 s) réconciliera, en respectant les verrous.
     } catch (e) {
       this.lastError = (e as Error).message;
       // L'optimiste reste affiché ; le prochain poll corrigera si besoin.

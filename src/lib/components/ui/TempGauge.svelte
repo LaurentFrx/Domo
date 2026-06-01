@@ -60,6 +60,30 @@
 
   const uid = `tg${__tgCounter++}`;
 
+  // ─── Valeur affichée : découplage geste / réseau ────────────────
+  // Pendant un glissement (et brièvement après), l'affichage suit une valeur
+  // LOCALE qui colle au doigt — sinon le thumb suivrait `value` (piloté par le
+  // parent via le réseau), qui fait l'aller-retour store→commande→cloud et
+  // produit un yo-yo. onChange n'est émis qu'au relâchement (1 commande, pas 10).
+  // Seed neutre : localValue est toujours (ré)écrit dans onPointerDown avant
+  // d'être lu via `shown` (jamais affiché hors drag/garde), et l'$effect ci-
+  // dessous le resynchronise sur `value` au repos. Le seed n'est donc jamais vu.
+  let localValue = $state(0);
+  let dragging = $state(false);
+  // Garde : ignore les valeurs entrantes périmées un court instant après commit,
+  // le temps que le parent/cloud reflète la consigne choisie.
+  let holdUntil = $state(0);
+
+  // Valeur réellement affichée (thumb, fill, ticks, chiffre central).
+  const shown = $derived(dragging || Date.now() < holdUntil ? localValue : value);
+
+  // Resynchronise la valeur locale sur le parent quand on n'interagit pas et
+  // hors fenêtre de garde (ex. consigne changée par un autre client / le poll).
+  $effect(() => {
+    const v = value; // dépendance trackée
+    if (!dragging && Date.now() >= holdUntil) localValue = v;
+  });
+
   // ─── Géométrie (viewBox 200×200) ────────────────────────────────
   const CX = 100;
   const CY = 100;
@@ -85,7 +109,7 @@
   }
 
   const trackPath = arc(START, END);
-  const valueAngle = $derived(START + ((value - min) / (max - min)) * SWEEP);
+  const valueAngle = $derived(START + ((shown - min) / (max - min)) * SWEEP);
   const fillPath = $derived(arc(START, valueAngle));
   const thumb = $derived(polar(valueAngle));
 
@@ -111,14 +135,13 @@
       const anchor = t === min || t === max || t === Math.round((min + max) / 2);
       const p1 = polar(a, TICK_IN);
       const p2 = polar(a, anchor ? TICK_ANCHOR : TICK_OUT);
-      out.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, active: t <= value + 1e-6, anchor });
+      out.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, active: t <= shown + 1e-6, anchor });
     }
     return out;
   });
 
   // ─── Drag interactif ────────────────────────────────────────────
   let svgEl = $state<SVGSVGElement | null>(null);
-  let dragging = $state(false);
 
   function pointerToValue(ev: PointerEvent): number {
     if (!svgEl) return value;
@@ -141,14 +164,14 @@
     ev.preventDefault();
     dragging = true;
     svgEl.setPointerCapture(ev.pointerId);
-    const v = pointerToValue(ev);
-    if (v !== value) onChange(v);
+    // L'affichage suit le doigt localement, sans rien envoyer encore.
+    localValue = pointerToValue(ev);
   }
 
   function onPointerMove(ev: PointerEvent) {
     if (!dragging) return;
-    const v = pointerToValue(ev);
-    if (v !== value) onChange(v);
+    // Mise à jour purement locale → thumb collé au doigt, zéro réseau.
+    localValue = pointerToValue(ev);
   }
 
   function onPointerUp(ev: PointerEvent) {
@@ -159,6 +182,11 @@
     } catch {
       // pointer déjà libéré
     }
+    // Commit unique au relâchement. On maintient l'affichage sur la valeur
+    // choisie pendant une courte garde, le temps que le parent (store + cloud)
+    // reflète la consigne — évite un dernier sursaut vers l'ancienne valeur.
+    holdUntil = Date.now() + 1500;
+    if (localValue !== value) onChange(localValue);
   }
 </script>
 
@@ -179,7 +207,7 @@
     role="slider"
     aria-valuemin={min}
     aria-valuemax={max}
-    aria-valuenow={value}
+    aria-valuenow={shown}
     aria-disabled={disabled}
     tabindex={disabled ? -1 : 0}
   >
@@ -255,8 +283,8 @@
       {/if}
     {:else}
       <div class="gauge-value">
-        <span class="val-int">{Math.floor(value)}</span><span class="val-dec"
-          >{value % 1 ? '.5' : ''}</span
+        <span class="val-int">{Math.floor(shown)}</span><span class="val-dec"
+          >{shown % 1 ? '.5' : ''}</span
         ><span class="val-unit">°</span>
       </div>
       {#if label}
