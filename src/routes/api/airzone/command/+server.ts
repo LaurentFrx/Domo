@@ -10,7 +10,11 @@ import { error, json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
 
-const bridgeUrl = () => (env.AIRZONE_BRIDGE_URL || 'http://127.0.0.1:8097').replace(/\/+$/, '');
+const bridgeUrl = () => {
+  const u = env.AIRZONE_BRIDGE_URL;
+  if (!u) throw error(503, 'AIRZONE_BRIDGE_URL non configurée');
+  return u.replace(/\/+$/, '');
+};
 const TIMEOUT_MS = 15_000;
 
 export const POST: RequestHandler = async ({ request }) => {
