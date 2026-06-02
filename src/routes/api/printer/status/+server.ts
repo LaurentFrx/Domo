@@ -119,10 +119,7 @@ const COLOR_LABELS: Record<InkTank['color'], string> = {
 export const GET: RequestHandler = async () => {
   const host = env.PRINTER_HOST;
   if (!host) {
-    throw error(
-      503,
-      "PRINTER_HOST non défini dans .env — l'endpoint reste désactivé."
-    );
+    throw error(503, "PRINTER_HOST non défini dans .env — l'endpoint reste désactivé.");
   }
   const timeoutMs = Number(env.PRINTER_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
 

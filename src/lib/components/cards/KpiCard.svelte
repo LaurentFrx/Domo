@@ -65,16 +65,13 @@
   <!-- Value + unit -->
   <div class="flex items-baseline gap-1">
     <span
-      class="text-[24px] font-semibold leading-none sm:text-[28px]"
+      class="text-[24px] leading-none font-semibold sm:text-[28px]"
       style="color: {colorVar}; letter-spacing: -0.01em;"
     >
       {value}
     </span>
     {#if unit}
-      <span
-        class="text-[13px] font-medium"
-        style="color: var(--color-muted-fg);"
-      >
+      <span class="text-[13px] font-medium" style="color: var(--color-muted-fg);">
         {unit}
       </span>
     {/if}

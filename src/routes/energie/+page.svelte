@@ -21,9 +21,7 @@
   const pvSeries = pvSeries24h(2.5);
   const consoSeries = consoSeries24h();
   const batteryCharge = pvSeries.map((p) => Math.max(0, p - 0.5) * 0.3);
-  const gridImport = consoSeries.map((c, i) =>
-    Math.max(0, c - pvSeries[i] - batteryCharge[i])
-  );
+  const gridImport = consoSeries.map((c, i) => Math.max(0, c - pvSeries[i] - batteryCharge[i]));
 
   function buildAreaPath(
     series: number[],
@@ -83,13 +81,42 @@
   });
 
   // ─── Section 3 : Tableau mensuel ───────────────────────────────────
-  const months = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Jui', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
+  const months = [
+    'Jan',
+    'Fév',
+    'Mar',
+    'Avr',
+    'Mai',
+    'Juin',
+    'Jui',
+    'Aoû',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Déc'
+  ];
   const currentMonthIdx = new Date().getMonth();
   const rows: { label: string; values: number[]; unit: string }[] = [
-    { label: 'Production PV', values: [85, 120, 210, 380, 520, 580, 595, 540, 410, 260, 150, 95], unit: 'kWh' },
-    { label: 'Autoconsommation', values: [72, 98, 178, 312, 436, 478, 482, 442, 338, 215, 124, 82], unit: 'kWh' },
-    { label: 'Surplus injecté', values: [13, 22, 32, 68, 84, 102, 113, 98, 72, 45, 26, 13], unit: 'kWh' },
-    { label: 'Import réseau', values: [238, 192, 92, 0, 0, 0, 0, 0, 12, 84, 168, 224], unit: 'kWh' },
+    {
+      label: 'Production PV',
+      values: [85, 120, 210, 380, 520, 580, 595, 540, 410, 260, 150, 95],
+      unit: 'kWh'
+    },
+    {
+      label: 'Autoconsommation',
+      values: [72, 98, 178, 312, 436, 478, 482, 442, 338, 215, 124, 82],
+      unit: 'kWh'
+    },
+    {
+      label: 'Surplus injecté',
+      values: [13, 22, 32, 68, 84, 102, 113, 98, 72, 45, 26, 13],
+      unit: 'kWh'
+    },
+    {
+      label: 'Import réseau',
+      values: [238, 192, 92, 0, 0, 0, 0, 0, 12, 84, 168, 224],
+      unit: 'kWh'
+    },
     { label: 'Économies', values: [16, 23, 41, 72, 101, 112, 115, 105, 78, 49, 28, 18], unit: '€' }
   ];
 
@@ -144,32 +171,23 @@
           onclick={() => changeDay(-1)}
           class="flex h-7 w-7 items-center justify-center rounded-md border text-[14px] transition-colors"
           style="border-color: var(--color-border); color: var(--color-muted-fg);"
-          aria-label="Jour précédent"
-        >‹</button>
+          aria-label="Jour précédent">‹</button
+        >
         <button
           type="button"
           onclick={() => changeDay(1)}
           disabled={selectedDay === 0}
           class="flex h-7 w-7 items-center justify-center rounded-md border text-[14px] transition-colors disabled:opacity-40"
           style="border-color: var(--color-border); color: var(--color-muted-fg);"
-          aria-label="Jour suivant"
-        >›</button>
+          aria-label="Jour suivant">›</button
+        >
       </div>
     </div>
 
-    <svg
-      viewBox="0 0 240 120"
-      class="w-full"
-      style="height: 160px;"
-      preserveAspectRatio="none"
-    >
+    <svg viewBox="0 0 240 120" class="w-full" style="height: 160px;" preserveAspectRatio="none">
       <line x1="0" y1="60" x2="240" y2="60" stroke="var(--color-border)" stroke-width="0.5" />
 
-      <path
-        d={buildAreaPath(pvSeries, yScale, 'up')}
-        fill="var(--color-solar)"
-        opacity="0.22"
-      />
+      <path d={buildAreaPath(pvSeries, yScale, 'up')} fill="var(--color-solar)" opacity="0.22" />
       <path
         d={buildAreaPath(consoSeries, yScale, 'down')}
         fill="var(--color-consumption)"

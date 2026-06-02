@@ -4,12 +4,7 @@
   import { daikin } from '$stores/daikin.svelte';
   import { airzone } from '$stores/airzone.svelte';
   import type { AirzoneMode } from '$stores/airzone.svelte';
-  import type {
-    DaikinOperationMode,
-    DaikinUnit,
-    FanSpeed,
-    SwingMode
-  } from '$stores/daikin.svelte';
+  import type { DaikinOperationMode, DaikinUnit, FanSpeed, SwingMode } from '$stores/daikin.svelte';
   import { weather } from '$stores/weather.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
   import { daysUntil } from '$utils/mock-curves';
@@ -32,7 +27,11 @@
 
   // ─── Airzone (gainable) : libellés + couleurs de mode ────────────────
   const AIRZONE_MODE_META: Record<AirzoneMode, { label: string; color: string; bg: string }> = {
-    cooling: { label: 'Froid', color: 'var(--color-consumption)', bg: 'var(--color-consumption-muted)' },
+    cooling: {
+      label: 'Froid',
+      color: 'var(--color-consumption)',
+      bg: 'var(--color-consumption-muted)'
+    },
     heating: { label: 'Chaud', color: 'var(--color-hp)', bg: 'var(--color-hp-muted)' },
     fan: { label: 'Vent.', color: 'var(--color-muted-fg)', bg: 'var(--color-muted)' },
     dry: { label: 'Sec', color: 'var(--color-solar)', bg: 'var(--color-muted)' },
@@ -68,9 +67,7 @@
 
   const tempHistory = [55, 56, 57, 58, 60, 62, 63, 64, 64, 65, 65, 64];
 
-  const cumulusProgress = $derived(
-    Math.min(1, cumulus.temperatureC / cumulus.targetTempC)
-  );
+  const cumulusProgress = $derived(Math.min(1, cumulus.temperatureC / cumulus.targetTempC));
   const legionnellaDays = $derived(daysUntil(cumulus.nextLegionnellaCycle));
 
   // ─── Daikin ────────────────────────────────────────────────────────
@@ -222,9 +219,7 @@
 <div class="flex flex-col gap-6 py-4">
   <header class="flex items-center justify-between">
     <h1 class="text-2xl font-semibold tracking-tight">Climat</h1>
-    <span class="text-[12px]" style="color: var(--color-muted-fg);">
-      Sanguinet
-    </span>
+    <span class="text-[12px]" style="color: var(--color-muted-fg);"> Sanguinet </span>
   </header>
 
   <!-- ═══ Section 1 : Cumulus hero ═══ -->
@@ -243,14 +238,12 @@
           </span>
           <div class="mt-1 flex items-baseline gap-1.5">
             <span
-              class="text-[44px] font-bold leading-none tracking-tight"
+              class="text-[44px] leading-none font-bold tracking-tight"
               style="color: var(--color-fg); letter-spacing: -0.02em;"
             >
               {cumulus.temperatureC.toFixed(0)}
             </span>
-            <span class="text-[20px] font-medium" style="color: var(--color-muted-fg);">
-              °C
-            </span>
+            <span class="text-[20px] font-medium" style="color: var(--color-muted-fg);"> °C </span>
           </div>
           <div class="mt-1 text-[12px]" style="color: var(--color-muted-fg);">
             {cumulus.trendCh >= 0 ? '↑' : '↓'}
@@ -408,8 +401,12 @@
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       {#each daikin.units as unit (unit.id)}
         {@const thermo = thermoForUnit(unit)}
-        {@const indoorT = typeof thermo?.state.temperature === 'number' ? (thermo.state.temperature as number) : null}
-        {@const indoorH = typeof thermo?.state.humidity === 'number' ? (thermo.state.humidity as number) : null}
+        {@const indoorT =
+          typeof thermo?.state.temperature === 'number'
+            ? (thermo.state.temperature as number)
+            : null}
+        {@const indoorH =
+          typeof thermo?.state.humidity === 'number' ? (thermo.state.humidity as number) : null}
         {@const tgt = currentTarget(unit)}
         {@const modeMeta = operationModes.find((m) => m.id === unit.operationMode)}
         {@const modeColor = modeMeta?.color ?? 'var(--color-muted-fg)'}
@@ -439,7 +436,10 @@
                 aria-hidden="true"
               ></span>
               <div class="flex min-w-0 flex-col gap-0">
-                <span class="text-[15px] font-semibold leading-tight" style="color: var(--color-fg);">
+                <span
+                  class="text-[15px] leading-tight font-semibold"
+                  style="color: var(--color-fg);"
+                >
                   {unit.zone}
                 </span>
                 <span class="text-[10px]" style="color: var(--color-muted-fg);">
@@ -512,7 +512,10 @@
           </div>
 
           <!-- Métadonnées : intérieur + extérieur (compact) -->
-          <div class="relative z-10 grid grid-cols-2 gap-3 rounded-[var(--radius-lg)] border p-3" style="border-color: var(--color-border); background: var(--color-muted);">
+          <div
+            class="relative z-10 grid grid-cols-2 gap-3 rounded-[var(--radius-lg)] border p-3"
+            style="border-color: var(--color-border); background: var(--color-muted);"
+          >
             <div class="flex flex-col gap-0.5">
               <span
                 class="text-[9px] font-semibold tracking-[0.06em] uppercase"
@@ -522,7 +525,10 @@
               </span>
               {#if indoorT !== null}
                 <div class="flex items-baseline gap-1.5">
-                  <span class="text-[18px] font-semibold tabular-nums" style="color: var(--color-fg); letter-spacing: -0.01em;">
+                  <span
+                    class="text-[18px] font-semibold tabular-nums"
+                    style="color: var(--color-fg); letter-spacing: -0.01em;"
+                  >
                     {indoorT.toFixed(1)}°
                   </span>
                   {#if indoorH !== null}
@@ -533,7 +539,10 @@
                 </div>
               {:else}
                 <div class="flex items-baseline gap-1.5">
-                  <span class="text-[18px] font-semibold tabular-nums" style="color: var(--color-muted-fg); letter-spacing: -0.01em;">
+                  <span
+                    class="text-[18px] font-semibold tabular-nums"
+                    style="color: var(--color-muted-fg); letter-spacing: -0.01em;"
+                  >
                     —°
                   </span>
                 </div>
@@ -546,7 +555,10 @@
               >
                 Extérieur
               </span>
-              <span class="text-[18px] font-semibold tabular-nums" style="color: var(--color-fg); letter-spacing: -0.01em;">
+              <span
+                class="text-[18px] font-semibold tabular-nums"
+                style="color: var(--color-fg); letter-spacing: -0.01em;"
+              >
                 {unit.outdoorTempC.toFixed(1)}°
               </span>
             </div>
@@ -554,7 +566,10 @@
 
           <!-- Ventilation : segments compactes -->
           <div class="relative z-10 flex flex-col gap-1.5">
-            <span class="text-[9px] font-semibold tracking-[0.06em] uppercase" style="color: var(--color-muted-fg);">
+            <span
+              class="text-[9px] font-semibold tracking-[0.06em] uppercase"
+              style="color: var(--color-muted-fg);"
+            >
               Ventilation
             </span>
             <div class="flex gap-1">
@@ -576,13 +591,17 @@
 
           <!-- Orientation : 2 boutons icônes -->
           <div class="relative z-10 flex items-center justify-between gap-3">
-            <span class="text-[9px] font-semibold tracking-[0.06em] uppercase" style="color: var(--color-muted-fg);">
+            <span
+              class="text-[9px] font-semibold tracking-[0.06em] uppercase"
+              style="color: var(--color-muted-fg);"
+            >
               Orientation
             </span>
             <div class="flex gap-2">
               <button
                 type="button"
-                onclick={() => tapSwingH(unit.id, unit.swingHorizontal === 'swing' ? 'off' : 'swing')}
+                onclick={() =>
+                  tapSwingH(unit.id, unit.swingHorizontal === 'swing' ? 'off' : 'swing')}
                 disabled={!active}
                 class="swing-btn"
                 class:swing-active={unit.swingHorizontal === 'swing'}
@@ -590,7 +609,16 @@
                 title="Oscillation horizontale"
               >
                 <!-- Icône ↔ -->
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
                   <polyline points="17 1 21 5 17 9" />
                   <path d="M3 11V9a4 4 0 0 1 4-4h14" />
                   <polyline points="7 23 3 19 7 15" />
@@ -607,7 +635,16 @@
                 title="Oscillation verticale"
               >
                 <!-- Icône ↕ -->
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
                   <polyline points="1 17 5 21 9 17" />
                   <path d="M11 3H9a4 4 0 0 0-4 4v14" />
                   <polyline points="23 7 19 3 15 7" />
@@ -666,7 +703,9 @@
         {@const meta = airzoneModeMeta(zone.mode)}
         <article
           class="flex flex-col gap-2.5 rounded-[var(--radius-xl)] border p-4"
-          style="background: var(--color-card); border-color: {zone.on ? meta.color : 'var(--color-border)'};"
+          style="background: var(--color-card); border-color: {zone.on
+            ? meta.color
+            : 'var(--color-border)'};"
         >
           <!-- header : nom + demande + toggle on/off -->
           <div class="flex items-center justify-between gap-2">
@@ -676,7 +715,7 @@
             <div class="flex items-center gap-2">
               {#if zone.demand}
                 <span
-                  class="rounded-full px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.06em]"
+                  class="rounded-full px-1.5 py-0.5 text-[8px] font-semibold tracking-[0.06em] uppercase"
                   style="color: {meta.color}; background: {meta.bg};"
                 >
                   actif
@@ -704,7 +743,7 @@
           <div class="flex items-baseline gap-2">
             <div class="flex items-baseline gap-0.5">
               <span
-                class="text-[32px] font-bold leading-none tabular-nums"
+                class="text-[32px] leading-none font-bold tabular-nums"
                 style="color: var(--color-fg); letter-spacing: -0.02em;"
               >
                 {zone.roomTemp !== null ? zone.roomTemp.toFixed(1) : '—'}
@@ -733,8 +772,8 @@
                 onclick={() => {
                   haptic('light');
                   airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) - zone.tempStep);
-                }}
-              >−</button>
+                }}>−</button
+              >
               <span
                 class="text-[15px] font-semibold tabular-nums"
                 style="color: var(--color-fg); min-width: 3.5ch; text-align: center;"
@@ -749,23 +788,32 @@
                 onclick={() => {
                   haptic('light');
                   airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) + zone.tempStep);
-                }}
-              >+</button>
+                }}>+</button
+              >
             </div>
           </div>
 
           <!-- mode courant + batterie/couverture (zones radio) -->
-          <div class="flex items-center justify-between text-[10px]" style="color: var(--color-muted-fg);">
-            <span class="font-semibold" style="color: {zone.on ? meta.color : 'var(--color-muted-fg)'};">
+          <div
+            class="flex items-center justify-between text-[10px]"
+            style="color: var(--color-muted-fg);"
+          >
+            <span
+              class="font-semibold"
+              style="color: {zone.on ? meta.color : 'var(--color-muted-fg)'};"
+            >
               {meta.label}
             </span>
             {#if zone.battery !== null}
               <span class="flex items-center gap-1">
                 <span
                   class="h-1 w-1 rounded-full"
-                  style:background-color={zone.battery > 30 ? 'var(--color-battery)' : 'var(--color-alert)'}
+                  style:background-color={zone.battery > 30
+                    ? 'var(--color-battery)'
+                    : 'var(--color-alert)'}
                 ></span>
-                Batt. {zone.battery}%{#if zone.coverage !== null} · couv. {zone.coverage}%{/if}
+                Batt. {zone.battery}%{#if zone.coverage !== null}
+                  · couv. {zone.coverage}%{/if}
               </span>
             {/if}
           </div>
@@ -793,7 +841,7 @@
 
   <!-- ═══ Section 3 : Météo ═══ -->
   <section
-    class="grid grid-cols-2 gap-3 sm:grid-cols-4 rounded-[var(--radius-2xl)] border p-4"
+    class="grid grid-cols-2 gap-3 rounded-[var(--radius-2xl)] border p-4 sm:grid-cols-4"
     style="background: var(--color-card); border-color: var(--color-border);"
   >
     <div class="flex flex-col gap-1">
@@ -804,13 +852,17 @@
         Extérieur
       </span>
       <div class="flex items-baseline gap-0.5">
-        <span class="text-[28px] font-semibold" style="color: var(--color-fg); letter-spacing: -0.01em;">
+        <span
+          class="text-[28px] font-semibold"
+          style="color: var(--color-fg); letter-spacing: -0.01em;"
+        >
           {weather.tempC.toFixed(0)}
         </span>
         <span class="text-[14px]" style="color: var(--color-muted-fg);">°C</span>
       </div>
       <span class="text-[11px]" style="color: var(--color-muted-fg);">
-        {conditionIcon[weather.condition]} {conditionLabel[weather.condition]}
+        {conditionIcon[weather.condition]}
+        {conditionLabel[weather.condition]}
       </span>
     </div>
 
@@ -822,7 +874,10 @@
         Humidité
       </span>
       <div class="flex items-baseline gap-0.5">
-        <span class="text-[28px] font-semibold" style="color: var(--color-fg); letter-spacing: -0.01em;">
+        <span
+          class="text-[28px] font-semibold"
+          style="color: var(--color-fg); letter-spacing: -0.01em;"
+        >
           {weather.humidity}
         </span>
         <span class="text-[14px]" style="color: var(--color-muted-fg);">%</span>
@@ -837,14 +892,15 @@
         Vent
       </span>
       <div class="flex items-baseline gap-0.5">
-        <span class="text-[28px] font-semibold" style="color: var(--color-fg); letter-spacing: -0.01em;">
+        <span
+          class="text-[28px] font-semibold"
+          style="color: var(--color-fg); letter-spacing: -0.01em;"
+        >
           {weather.windSpeedKmh}
         </span>
         <span class="text-[14px]" style="color: var(--color-muted-fg);">km/h</span>
       </div>
-      <span class="text-[11px]" style="color: var(--color-muted-fg);">
-        Ouest
-      </span>
+      <span class="text-[11px]" style="color: var(--color-muted-fg);"> Ouest </span>
     </div>
 
     <div class="flex flex-col gap-1">
@@ -855,7 +911,10 @@
         UV
       </span>
       <div class="flex items-baseline gap-0.5">
-        <span class="text-[28px] font-semibold" style="color: var(--color-solar); letter-spacing: -0.01em;">
+        <span
+          class="text-[28px] font-semibold"
+          style="color: var(--color-solar); letter-spacing: -0.01em;"
+        >
           {weather.uvIndex}
         </span>
       </div>
@@ -878,12 +937,13 @@
       >
         Confort thermique
       </span>
-      <div class="text-[44px] font-bold leading-none" style="color: var(--color-battery); letter-spacing: -0.02em;">
+      <div
+        class="text-[44px] leading-none font-bold"
+        style="color: var(--color-battery); letter-spacing: -0.02em;"
+      >
         {comfortIndex}
       </div>
-      <span class="text-[12px]" style="color: var(--color-muted-fg);">
-        sur 100
-      </span>
+      <span class="text-[12px]" style="color: var(--color-muted-fg);"> sur 100 </span>
     </article>
 
     <!-- Prévisions 3j -->
@@ -899,7 +959,10 @@
       </span>
       <div class="mt-3 grid grid-cols-3 gap-2">
         {#each weather.forecast3d as day (day.date.toISOString())}
-          <div class="flex flex-col items-center gap-1.5 rounded-[var(--radius-md)] py-2" style="background: var(--color-muted);">
+          <div
+            class="flex flex-col items-center gap-1.5 rounded-[var(--radius-md)] py-2"
+            style="background: var(--color-muted);"
+          >
             <span class="text-[11px] font-medium" style="color: var(--color-muted-fg);">
               {fmtDayShort(day.date)}
             </span>

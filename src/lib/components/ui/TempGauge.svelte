@@ -128,7 +128,12 @@
   // Ticks à chaque degré entier ; actifs (≤ valeur) teintés du mode.
   const ticks = $derived.by(() => {
     const out: {
-      x1: number; y1: number; x2: number; y2: number; active: boolean; anchor: boolean;
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      active: boolean;
+      anchor: boolean;
     }[] = [];
     for (let t = Math.ceil(min); t <= Math.floor(max); t += 1) {
       const a = START + ((t - min) / (max - min)) * SWEEP;
@@ -192,7 +197,8 @@
 
 <div
   class="gauge-wrap relative aspect-square w-full max-w-[260px]"
-  style="--gauge-color: {color}; --gauge-from: {colorFrom ?? color}; --gauge-to: {colorTo ?? color};"
+  style="--gauge-color: {color}; --gauge-from: {colorFrom ?? color}; --gauge-to: {colorTo ??
+    color};"
 >
   <svg
     bind:this={svgEl}
@@ -212,7 +218,14 @@
     tabindex={disabled ? -1 : 0}
   >
     <defs>
-      <linearGradient id="{uid}-fill" x1="100" y1="168" x2="100" y2="24" gradientUnits="userSpaceOnUse">
+      <linearGradient
+        id="{uid}-fill"
+        x1="100"
+        y1="168"
+        x2="100"
+        y2="24"
+        gradientUnits="userSpaceOnUse"
+      >
         <stop offset="0%" stop-color="var(--gauge-from)" />
         <stop offset="100%" stop-color="var(--gauge-to)" />
       </linearGradient>
@@ -228,7 +241,13 @@
     {/if}
 
     <!-- Track -->
-    <path d={trackPath} class="gauge-track" fill="none" stroke-width={STROKE} stroke-linecap="round" />
+    <path
+      d={trackPath}
+      class="gauge-track"
+      fill="none"
+      stroke-width={STROKE}
+      stroke-linecap="round"
+    />
 
     <!-- Anneau de ticks gradués -->
     {#each ticks as t (t.x1)}
@@ -275,7 +294,9 @@
   </svg>
 
   <!-- Centre : chiffre énorme OU label off -->
-  <div class="gauge-center pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+  <div
+    class="gauge-center pointer-events-none absolute inset-0 flex flex-col items-center justify-center"
+  >
     {#if disabled}
       <div class="off-label">{offLabel}</div>
       {#if offSubLabel}

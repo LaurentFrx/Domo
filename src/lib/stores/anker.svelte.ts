@@ -126,14 +126,10 @@ class AnkerState {
   );
 
   /** Capacité totale du parc batteries (Wh). */
-  totalBatteryCapacityWh = $derived(
-    this.batteries.reduce((s, b) => s + b.capacityWh, 0)
-  );
+  totalBatteryCapacityWh = $derived(this.batteries.reduce((s, b) => s + b.capacityWh, 0));
 
   /** Énergie actuellement stockée (Wh). */
-  totalBatteryEnergyWh = $derived(
-    this.batteries.reduce((s, b) => s + b.energyWh, 0)
-  );
+  totalBatteryEnergyWh = $derived(this.batteries.reduce((s, b) => s + b.energyWh, 0));
 
   /** Statut batterie haut niveau pour le dashboard. */
   batteryStatus = $derived.by<'charge' | 'discharge' | 'idle'>(() => {

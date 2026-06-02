@@ -70,9 +70,7 @@
 
   /** Sur sm+, les volets sont dans la strip globale en haut de page :
    * si la pièce ne contient QUE des volets, la section devient vide. */
-  const onlyShuttersOnTablet = $derived(
-    hasShutters && !hasSwitches && zigbeeDevices.length === 0
-  );
+  const onlyShuttersOnTablet = $derived(hasShutters && !hasSwitches && zigbeeDevices.length === 0);
 </script>
 
 <section

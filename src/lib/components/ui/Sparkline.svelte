@@ -29,7 +29,9 @@
       const y = height - ((v - min) / range) * height;
       return [x, y] as const;
     });
-    const line = points.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`).join(' ');
+    const line = points
+      .map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`)
+      .join(' ');
     const area = `${line} L100,${height} L0,${height} Z`;
     return { line, area };
   });

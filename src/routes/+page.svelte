@@ -9,10 +9,14 @@
 
   // ─── Source canonique : Anker quand connecté, mock sinon ─────────────
   // Tout en watts, signed (+ import / − export).
-  const pvPowerW = $derived(anker.connected ? anker.solarPowerW : Math.round(dashboard.solarPower * 1000));
+  const pvPowerW = $derived(
+    anker.connected ? anker.solarPowerW : Math.round(dashboard.solarPower * 1000)
+  );
   const gridPowerW = $derived(anker.connected ? anker.gridPowerW : shelly.gridPowerW);
   const batterySoc = $derived(anker.connected ? (anker.averageSoc ?? 0) : dashboard.batteryLevel);
-  const batteryNetW = $derived(anker.connected ? anker.netBatteryPowerW : (dashboard.batteryStatus === 'charge' ? 400 : -600));
+  const batteryNetW = $derived(
+    anker.connected ? anker.netBatteryPowerW : dashboard.batteryStatus === 'charge' ? 400 : -600
+  );
 
   // Maison = PV + import réseau − charge batterie (équilibre énergétique
   // instantané — on ignore les pertes de conversion < 5%)
@@ -20,9 +24,7 @@
 
   // ─── Hero : auto-conso + flux net ─────────────────────────────────────
   const autoConso = $derived(
-    anker.connected
-      ? Math.round(anker.selfConsumptionRate ?? 0)
-      : dashboard.solarSelfConsumption
+    anker.connected ? Math.round(anker.selfConsumptionRate ?? 0) : dashboard.solarSelfConsumption
   );
   const isExporting = $derived(gridPowerW < -5);
   const isImporting = $derived(gridPowerW > 5);
@@ -63,10 +65,12 @@
     <div class="flex flex-col gap-1">
       <div class="flex items-baseline gap-2">
         <span
-          class="text-[40px] font-bold leading-none tracking-tight sm:text-[48px]"
+          class="text-[40px] leading-none font-bold tracking-tight sm:text-[48px]"
           style="color: var(--color-fg); letter-spacing: -0.02em;"
         >
-          {autoConso}<span class="text-[24px] font-semibold" style="color: var(--color-muted-fg);">%</span>
+          {autoConso}<span class="text-[24px] font-semibold" style="color: var(--color-muted-fg);"
+            >%</span
+          >
         </span>
         <span
           class="text-[11px] font-semibold tracking-[0.08em] uppercase"
@@ -77,7 +81,11 @@
       </div>
       <span
         class="text-[13px] font-medium"
-        style="color: {isExporting ? 'var(--color-solar)' : isImporting ? 'var(--color-grid-energy)' : 'var(--color-muted-fg)'};"
+        style="color: {isExporting
+          ? 'var(--color-solar)'
+          : isImporting
+            ? 'var(--color-grid-energy)'
+            : 'var(--color-muted-fg)'};"
       >
         {#if isExporting}
           ↑ {fmtW(gridPowerW)} W injectés sur le réseau
@@ -91,7 +99,11 @@
 
     <span
       class="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-[0.04em] uppercase"
-      style="background: {anker.connected ? 'var(--color-battery-muted)' : 'var(--color-warning) / 0.15'}; color: {anker.connected ? 'var(--color-battery)' : 'var(--color-warning)'};"
+      style="background: {anker.connected
+        ? 'var(--color-battery-muted)'
+        : 'var(--color-warning) / 0.15'}; color: {anker.connected
+        ? 'var(--color-battery)'
+        : 'var(--color-warning)'};"
     >
       <span
         class="h-1.5 w-1.5 rounded-full"
@@ -143,7 +155,10 @@
       class="rounded-[var(--radius-xl)] border p-4"
       style="background: var(--color-card); border-color: var(--color-border);"
     >
-      <span class="text-[11px] font-semibold tracking-[0.08em] uppercase" style="color: var(--color-muted-fg);">
+      <span
+        class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+        style="color: var(--color-muted-fg);"
+      >
         Statistiques
       </span>
       <p class="mt-1 text-[13px]" style="color: var(--color-muted-fg);">
@@ -158,7 +173,10 @@
     style="background: var(--color-card); border-color: var(--color-border);"
   >
     <div class="flex flex-col gap-0.5">
-      <span class="font-semibold tracking-[0.08em] uppercase" style="color: var(--color-muted-fg); font-size: 10px;">
+      <span
+        class="font-semibold tracking-[0.08em] uppercase"
+        style="color: var(--color-muted-fg); font-size: 10px;"
+      >
         Tarif en cours
       </span>
       <span
@@ -170,7 +188,10 @@
     </div>
 
     <div class="flex flex-col items-center gap-0.5">
-      <span class="font-semibold tracking-[0.08em] uppercase" style="color: var(--color-muted-fg); font-size: 10px;">
+      <span
+        class="font-semibold tracking-[0.08em] uppercase"
+        style="color: var(--color-muted-fg); font-size: 10px;"
+      >
         Réseau aujourd'hui
       </span>
       <span class="text-[14px] tabular-nums" style="color: var(--color-fg);">
@@ -179,7 +200,10 @@
     </div>
 
     <div class="flex flex-col items-end gap-0.5">
-      <span class="font-semibold tracking-[0.08em] uppercase" style="color: var(--color-muted-fg); font-size: 10px;">
+      <span
+        class="font-semibold tracking-[0.08em] uppercase"
+        style="color: var(--color-muted-fg); font-size: 10px;"
+      >
         Bascule
       </span>
       <span class="text-[14px] tabular-nums" style="color: var(--color-fg);">

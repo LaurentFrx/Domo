@@ -101,8 +101,7 @@
     lastFrameTime = t;
     const direction = animTarget > animPos ? 1 : -1;
     const next = animPos + direction * SPEED_PERCENT_PER_SECOND * dt;
-    const reached =
-      (direction > 0 && next >= animTarget) || (direction < 0 && next <= animTarget);
+    const reached = (direction > 0 && next >= animTarget) || (direction < 0 && next <= animTarget);
     if (reached) {
       animPos = animTarget;
       scheduleFailsafeRelease();
@@ -246,7 +245,10 @@
 >
   <!-- Nom de la pièce (statut implicite via la position du thumb).
        Le wrap est autorisé pour les noms longs sur iPhone (Salle à manger…). -->
-  <span class="shutter-name text-center font-semibold leading-tight" style="color: var(--color-fg);">
+  <span
+    class="shutter-name text-center leading-tight font-semibold"
+    style="color: var(--color-fg);"
+  >
     {shutter.name}
     {#if isMoving}
       <span class="moving-dots ml-1" style="color: var(--color-primary);">●●●</span>
@@ -376,8 +378,13 @@
     letter-spacing: -2px;
   }
   @keyframes pulse-dots {
-    0%, 100% { opacity: 0.4; }
-    50% { opacity: 1; }
+    0%,
+    100% {
+      opacity: 0.4;
+    }
+    50% {
+      opacity: 1;
+    }
   }
 
   .shutter-body {
@@ -428,7 +435,7 @@
     background: #ffffff;
     box-shadow:
       0 2px 6px oklch(0 0 0 / 0.18),
-      0 1px 2px oklch(0 0 0 / 0.10);
+      0 1px 2px oklch(0 0 0 / 0.1);
     pointer-events: auto;
     cursor: grab;
     /* drag : empêche le browser de consumer le geste vertical */
@@ -439,7 +446,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: oklch(0.30 0.01 280);
+    color: oklch(0.3 0.01 280);
     -webkit-tap-highlight-color: transparent;
   }
   .slider-track.dragging .slider-thumb {

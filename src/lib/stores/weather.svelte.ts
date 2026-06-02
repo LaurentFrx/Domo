@@ -9,12 +9,7 @@
 
 import { hourOfDay, outdoorTemp, outdoorHumidity } from '$utils/mock-curves';
 
-export type WeatherCondition =
-  | 'clear'
-  | 'partly-cloudy'
-  | 'cloudy'
-  | 'rain'
-  | 'thunderstorm';
+export type WeatherCondition = 'clear' | 'partly-cloudy' | 'cloudy' | 'rain' | 'thunderstorm';
 
 export type DailyForecast = {
   date: Date;

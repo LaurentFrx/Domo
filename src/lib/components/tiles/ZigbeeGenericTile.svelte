@@ -38,7 +38,14 @@
         muted: 'var(--color-grid-energy-muted)'
       };
     }
-    if (isLight || n.includes('lumiere') || n.includes('lumière') || n.includes('atelier') || n.includes('bulb') || n.includes('lampe')) {
+    if (
+      isLight ||
+      n.includes('lumiere') ||
+      n.includes('lumière') ||
+      n.includes('atelier') ||
+      n.includes('bulb') ||
+      n.includes('lampe')
+    ) {
       return {
         glyph: 'bulb',
         color: 'var(--color-solar)',
@@ -91,7 +98,16 @@
       style="background: {style.muted}; color: {style.color};"
       aria-hidden="true"
     >
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <svg
+        width="22"
+        height="22"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.75"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
         <rect x="4" y="3" width="16" height="18" rx="1.5" />
         <line x1="4" y1="8" x2="20" y2="8" />
         <line x1="4" y1="13" x2="20" y2="13" />
@@ -99,10 +115,13 @@
       </svg>
     </span>
     <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span class="text-[13px] font-semibold leading-tight truncate" style="color: var(--color-fg);">
+      <span
+        class="truncate text-[13px] leading-tight font-semibold"
+        style="color: var(--color-fg);"
+      >
         {displayName}
       </span>
-      <span class="text-[10px] truncate" style="color: var(--color-muted-fg);">
+      <span class="truncate text-[10px]" style="color: var(--color-muted-fg);">
         {device.vendor} · {device.model}
       </span>
     </div>
@@ -137,20 +156,56 @@
     >
       {#if style.glyph === 'bulb'}
         <!-- Ampoule -->
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          width="22"
+          height="22"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <path d="M9 18h6" />
           <path d="M10 22h4" />
           <path d="M12 2a7 7 0 0 1 4 12.8c-.6.5-1 1.2-1 2v1H9v-1c0-.8-.4-1.5-1-2A7 7 0 0 1 12 2z" />
         </svg>
       {:else if style.glyph === 'light-switch'}
         <!-- Interrupteur mural -->
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          width="22"
+          height="22"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <rect x="5" y="3" width="14" height="18" rx="2" />
-          <rect x="9" y="8" width="6" height="8" rx="1" fill="currentColor" stroke="none" opacity="0.8" />
+          <rect
+            x="9"
+            y="8"
+            width="6"
+            height="8"
+            rx="1"
+            fill="currentColor"
+            stroke="none"
+            opacity="0.8"
+          />
         </svg>
       {:else}
         <!-- Prise par défaut -->
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          width="22"
+          height="22"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <path d="M9 2v6M15 2v6" />
           <path d="M5 8h14v3a7 7 0 01-14 0V8z" />
           <path d="M12 18v4" />
@@ -159,7 +214,10 @@
     </span>
 
     <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span class="text-[13px] font-semibold leading-tight truncate" style="color: var(--color-fg);">
+      <span
+        class="truncate text-[13px] leading-tight font-semibold"
+        style="color: var(--color-fg);"
+      >
         {displayName}
       </span>
       <span

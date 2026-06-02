@@ -29,10 +29,7 @@
   // - light : variante un poil éclaircie pour le dégradé du fill
   // Pas de color-mix() dans les calculs (mal supporté sur Safari iOS
   // dans certains contextes — notamment à l'intérieur des gradients).
-  const INK: Record<
-    InkColor,
-    { base: string; track: string; glow: string; light: string }
-  > = {
+  const INK: Record<InkColor, { base: string; track: string; glow: string; light: string }> = {
     BK: {
       base: 'oklch(0.32 0.005 280)',
       track: 'oklch(0.32 0.005 280 / 0.20)',
@@ -82,7 +79,9 @@
   <header class="flex items-center gap-3">
     <span
       class="printer-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-lg)]"
-      style="background: {isOn ? 'var(--color-consumption)' : 'var(--color-consumption-muted)'}; color: {isOn ? 'white' : 'var(--color-consumption)'};"
+      style="background: {isOn
+        ? 'var(--color-consumption)'
+        : 'var(--color-consumption-muted)'}; color: {isOn ? 'white' : 'var(--color-consumption)'};"
       aria-hidden="true"
     >
       <svg
@@ -101,7 +100,7 @@
       </svg>
     </span>
     <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span class="text-[13px] font-semibold leading-tight" style="color: var(--color-fg);">
+      <span class="text-[13px] leading-tight font-semibold" style="color: var(--color-fg);">
         Imprimante Epson
       </span>
       <span class="text-[10px]" style="color: var(--color-muted-fg);">
@@ -138,7 +137,10 @@
         {@const c = INK[ink.color]}
         <div
           class="ink-pill"
-          style="--ink-base: {c.base}; --ink-light: {c.light}; --ink-track: {c.track}; --ink-glow: {c.glow}; --ink-percent: {Math.max(0, Math.min(100, ink.percent))}%;"
+          style="--ink-base: {c.base}; --ink-light: {c.light}; --ink-track: {c.track}; --ink-glow: {c.glow}; --ink-percent: {Math.max(
+            0,
+            Math.min(100, ink.percent)
+          )}%;"
           title="{ink.label} · {ink.percent}%"
         >
           <span class="ink-pill-fill" aria-hidden="true"></span>
@@ -182,13 +184,13 @@
   .printer-on {
     border-color: var(--color-consumption);
     box-shadow:
-      0 0 14px oklch(0.546 0.215 262 / 0.50),
+      0 0 14px oklch(0.546 0.215 262 / 0.5),
       0 0 32px oklch(0.546 0.215 262 / 0.22);
   }
   .printer-on .printer-icon {
     box-shadow:
       0 0 10px oklch(0.546 0.215 262 / 0.55),
-      0 0 20px oklch(0.546 0.215 262 / 0.30);
+      0 0 20px oklch(0.546 0.215 262 / 0.3);
   }
   .printer-icon {
     transition:

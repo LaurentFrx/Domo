@@ -50,9 +50,7 @@
   aria-label="Navigation principale"
 >
   <!-- Branding -->
-  <div
-    class="flex h-14 items-center justify-center px-5 lg:justify-start lg:gap-2.5"
-  >
+  <div class="flex h-14 items-center justify-center px-5 lg:justify-start lg:gap-2.5">
     <img
       src="/icons/apple-touch-icon.png"
       alt="Domo"
@@ -61,9 +59,7 @@
       class="h-8 w-8 rounded-lg"
       style="object-fit: cover;"
     />
-    <span class="hidden text-base font-semibold tracking-tight lg:inline">
-      Domo
-    </span>
+    <span class="hidden text-base font-semibold tracking-tight lg:inline"> Domo </span>
   </div>
 
   <nav class="flex flex-1 flex-col gap-4 px-2 pt-3 pb-4 lg:px-3">
@@ -128,12 +124,7 @@
     </span>
     <div class="flex flex-col leading-tight">
       <span class="text-[12px] font-semibold">Laurent Feroux</span>
-      <span
-        class="text-[11px]"
-        style="color: var(--color-sidebar-muted);"
-      >
-        domo.feroux.fr
-      </span>
+      <span class="text-[11px]" style="color: var(--color-sidebar-muted);"> domo.feroux.fr </span>
     </div>
   </div>
 </aside>

@@ -26,7 +26,14 @@
   type ConnEntry = {
     name: string;
     connected: boolean;
-    mode: 'mock' | 'proxy' | 'direct' | 'connected' | 'connecting' | 'disconnected' | 'unconfigured';
+    mode:
+      | 'mock'
+      | 'proxy'
+      | 'direct'
+      | 'connected'
+      | 'connecting'
+      | 'disconnected'
+      | 'unconfigured';
     lastUpdate: Date | null;
     devices?: number;
   };
@@ -120,8 +127,8 @@
             class="h-2 w-2 shrink-0 rounded-full"
             style:background={conn.connected ? 'var(--color-battery)' : 'var(--color-muted-fg)'}
           ></span>
-          <div class="flex flex-1 flex-col gap-0.5 min-w-0">
-            <span class="text-[13px] font-semibold truncate" style="color: var(--color-fg);">
+          <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span class="truncate text-[13px] font-semibold" style="color: var(--color-fg);">
               {conn.name}
             </span>
             <span class="text-[11px]" style="color: var(--color-muted-fg);">
@@ -149,7 +156,10 @@
       style="background: var(--color-card); border-color: var(--color-border); --tw-divide-opacity: 1;"
     >
       <!-- Theme toggle -->
-      <div class="flex items-center justify-between gap-3 px-4 py-3" style="border-bottom: 1px solid var(--color-border);">
+      <div
+        class="flex items-center justify-between gap-3 px-4 py-3"
+        style="border-bottom: 1px solid var(--color-border);"
+      >
         <div class="flex flex-col gap-0.5">
           <span class="text-[13px] font-semibold">Apparence</span>
           <span class="text-[11px]" style="color: var(--color-muted-fg);">
@@ -161,7 +171,10 @@
             {@const active = preferences.theme === t && !preferences.autoTheme}
             <button
               type="button"
-              onclick={() => { haptic('light'); preferences.setTheme(t as 'light' | 'dark'); }}
+              onclick={() => {
+                haptic('light');
+                preferences.setTheme(t as 'light' | 'dark');
+              }}
               class="rounded-full border px-3 py-1 text-[12px] font-medium capitalize transition-colors"
               style="
                 border-color: {active ? 'var(--color-primary)' : 'var(--color-border)'};
@@ -176,7 +189,10 @@
       </div>
 
       <!-- Auto theme -->
-      <div class="flex items-center justify-between gap-3 px-4 py-3" style="border-bottom: 1px solid var(--color-border);">
+      <div
+        class="flex items-center justify-between gap-3 px-4 py-3"
+        style="border-bottom: 1px solid var(--color-border);"
+      >
         <div class="flex flex-col gap-0.5">
           <span class="text-[13px] font-semibold">Apparence auto</span>
           <span class="text-[11px]" style="color: var(--color-muted-fg);">
@@ -187,14 +203,20 @@
           <input
             type="checkbox"
             checked={preferences.autoTheme}
-            onchange={(e) => { haptic('light'); preferences.setAutoTheme((e.target as HTMLInputElement).checked); }}
+            onchange={(e) => {
+              haptic('light');
+              preferences.setAutoTheme((e.target as HTMLInputElement).checked);
+            }}
           />
           <span class="toggle-pill-knob"></span>
         </label>
       </div>
 
       <!-- Power unit -->
-      <div class="flex items-center justify-between gap-3 px-4 py-3" style="border-bottom: 1px solid var(--color-border);">
+      <div
+        class="flex items-center justify-between gap-3 px-4 py-3"
+        style="border-bottom: 1px solid var(--color-border);"
+      >
         <div class="flex flex-col gap-0.5">
           <span class="text-[13px] font-semibold">Unité de puissance</span>
           <span class="text-[11px]" style="color: var(--color-muted-fg);">
@@ -206,7 +228,10 @@
             {@const active = preferences.powerUnit === u}
             <button
               type="button"
-              onclick={() => { haptic('light'); preferences.setPowerUnit(u as 'W' | 'kW'); }}
+              onclick={() => {
+                haptic('light');
+                preferences.setPowerUnit(u as 'W' | 'kW');
+              }}
               class="rounded-full border px-3 py-1 text-[12px] font-medium transition-colors"
               style="
                 border-color: {active ? 'var(--color-primary)' : 'var(--color-border)'};
@@ -232,7 +257,10 @@
           <input
             type="checkbox"
             checked={preferences.animationsEnabled}
-            onchange={(e) => { haptic('light'); preferences.setAnimationsEnabled((e.target as HTMLInputElement).checked); }}
+            onchange={(e) => {
+              haptic('light');
+              preferences.setAnimationsEnabled((e.target as HTMLInputElement).checked);
+            }}
           />
           <span class="toggle-pill-knob"></span>
         </label>
@@ -248,14 +276,15 @@
     >
       Cumulus
     </h2>
-    <div
-      class="grid grid-cols-2 gap-3 sm:grid-cols-3"
-    >
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
       <div
         class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           Seuil surplus ON
         </span>
         <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
@@ -266,7 +295,10 @@
         class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           Seuil surplus OFF
         </span>
         <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
@@ -277,7 +309,10 @@
         class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           Durée ON min.
         </span>
         <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
@@ -288,7 +323,10 @@
         class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           Anti-cycling
         </span>
         <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
@@ -299,7 +337,10 @@
         class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           Cible
         </span>
         <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
@@ -310,7 +351,10 @@
         class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           Max sécurité
         </span>
         <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-alert);">
@@ -321,7 +365,10 @@
         class="col-span-2 flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3 sm:col-span-3"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           Plage HC
         </span>
         <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-hc);">
@@ -347,14 +394,20 @@
         class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           HC (€/kWh)
         </span>
         <input
           type="number"
           step="0.0001"
           bind:value={settings.priceHc}
-          onchange={() => { haptic('success'); settings.save(); }}
+          onchange={() => {
+            haptic('success');
+            settings.save();
+          }}
           class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
           style="color: var(--color-hc);"
         />
@@ -363,14 +416,20 @@
         class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           HP (€/kWh)
         </span>
         <input
           type="number"
           step="0.0001"
           bind:value={settings.priceHp}
-          onchange={() => { haptic('success'); settings.save(); }}
+          onchange={() => {
+            haptic('success');
+            settings.save();
+          }}
           class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
           style="color: var(--color-hp);"
         />
@@ -379,14 +438,20 @@
         class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           Revente OA
         </span>
         <input
           type="number"
           step="0.0001"
           bind:value={settings.priceExport}
-          onchange={() => { haptic('success'); settings.save(); }}
+          onchange={() => {
+            haptic('success');
+            settings.save();
+          }}
           class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
           style="color: var(--color-solar);"
         />
@@ -395,14 +460,20 @@
         class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           Abonnement
         </span>
         <input
           type="number"
           step="0.01"
           bind:value={settings.subscription}
-          onchange={() => { haptic('success'); settings.save(); }}
+          onchange={() => {
+            haptic('success');
+            settings.save();
+          }}
           class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
           style="color: var(--color-fg);"
         />
@@ -419,11 +490,14 @@
       Système
     </h2>
     <div
-      class="grid grid-cols-2 gap-3 sm:grid-cols-4 rounded-[var(--radius-xl)] border p-4"
+      class="grid grid-cols-2 gap-3 rounded-[var(--radius-xl)] border p-4 sm:grid-cols-4"
       style="background: var(--color-card); border-color: var(--color-border);"
     >
       <div class="flex flex-col gap-1">
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           Version
         </span>
         <span class="text-[16px] font-semibold tabular-nums" style="color: var(--color-fg);">
@@ -431,15 +505,19 @@
         </span>
       </div>
       <div class="flex flex-col gap-1">
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           Hôte
         </span>
-        <span class="text-[16px] font-semibold" style="color: var(--color-fg);">
-          tazieff-dev
-        </span>
+        <span class="text-[16px] font-semibold" style="color: var(--color-fg);"> tazieff-dev </span>
       </div>
       <div class="flex flex-col gap-1">
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           Domaine
         </span>
         <span class="text-[16px] font-semibold" style="color: var(--color-fg);">
@@ -447,7 +525,10 @@
         </span>
       </div>
       <div class="flex flex-col gap-1">
-        <span class="text-[10px] font-semibold tracking-[0.04em] uppercase" style="color: var(--color-muted-fg);">
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
           Code éditeur
         </span>
         <a

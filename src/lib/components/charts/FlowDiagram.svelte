@@ -187,9 +187,27 @@
 
       <!-- ═══ Nœud central : MAISON ═══════════════════════════════════ -->
       <g transform="translate(200 200)">
-        <circle r="40" fill="var(--color-card)" stroke="var(--color-consumption)" stroke-width="1.5" opacity="0.5" />
-        <circle r="36" fill="var(--color-consumption-muted)" stroke="var(--color-consumption)" stroke-width="1.5" />
-        <g transform="translate(-12 -12)" stroke="var(--color-consumption)" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <circle
+          r="40"
+          fill="var(--color-card)"
+          stroke="var(--color-consumption)"
+          stroke-width="1.5"
+          opacity="0.5"
+        />
+        <circle
+          r="36"
+          fill="var(--color-consumption-muted)"
+          stroke="var(--color-consumption)"
+          stroke-width="1.5"
+        />
+        <g
+          transform="translate(-12 -12)"
+          stroke="var(--color-consumption)"
+          stroke-width="2"
+          fill="none"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <path d="M3 11L12 3l9 8v10H3z" />
           <path d="M9 21v-6h6v6" />
         </g>
@@ -199,36 +217,54 @@
           text-anchor="middle"
           fill="var(--color-consumption)"
           style="font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums;"
-        >{fmtW(homePowerW)}<tspan dx="2" style="font-size: 11px; font-weight: 500; fill: var(--color-muted-fg);">W</tspan></text>
+          >{fmtW(homePowerW)}<tspan
+            dx="2"
+            style="font-size: 11px; font-weight: 500; fill: var(--color-muted-fg);">W</tspan
+          ></text
+        >
         <text
           x="0"
           y="76"
           text-anchor="middle"
           fill="var(--color-muted-fg)"
           style="font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;"
-        >Maison</text>
+          >Maison</text
+        >
       </g>
 
       <!-- ═══ Nœud PV (haut) ═══════════════════════════════════════════ -->
       <g transform="translate({N.pv.x} {N.pv.y})">
         <circle r="30" fill="var(--color-solar-muted)" stroke={SOLAR} stroke-width="1.5" />
-        <g stroke={SOLAR} stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <g
+          stroke={SOLAR}
+          stroke-width="2"
+          fill="none"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <circle cx="0" cy="0" r="6" />
-          <path d="M0 -14V-11M0 11V14M-14 0H-11M11 0H14M-9.9 -9.9L-7.8 -7.8M7.8 7.8L9.9 9.9M-9.9 9.9L-7.8 7.8M7.8 -7.8L9.9 -9.9" />
+          <path
+            d="M0 -14V-11M0 11V14M-14 0H-11M11 0H14M-9.9 -9.9L-7.8 -7.8M7.8 7.8L9.9 9.9M-9.9 9.9L-7.8 7.8M7.8 -7.8L9.9 -9.9"
+          />
         </g>
         <text
           x="0"
           y="-44"
           text-anchor="middle"
           style="font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; fill: var(--color-muted-fg);"
-        >Solaire</text>
+          >Solaire</text
+        >
         <text
           x="0"
           y="50"
           text-anchor="middle"
           style="font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums;"
           fill={pvToHomeActive || pvToBatActive ? SOLAR : 'var(--color-muted-fg)'}
-        >{fmtW(pvPowerW)}<tspan dx="2" style="font-size: 10px; font-weight: 500; fill: var(--color-muted-fg);">W</tspan></text>
+          >{fmtW(pvPowerW)}<tspan
+            dx="2"
+            style="font-size: 10px; font-weight: 500; fill: var(--color-muted-fg);">W</tspan
+          ></text
+        >
       </g>
 
       <!-- ═══ Nœud Batterie (gauche) ═══════════════════════════════════ -->
@@ -252,20 +288,31 @@
           y="-44"
           text-anchor="middle"
           style="font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; fill: var(--color-muted-fg);"
-        >{batteryLabel}</text>
+          >{batteryLabel}</text
+        >
         <text
           x="0"
           y="50"
           text-anchor="middle"
           fill={BAT}
           style="font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums;"
-        >{batterySoc.toFixed(0)}<tspan dx="1" style="font-size: 10px; font-weight: 500; fill: var(--color-muted-fg);">%</tspan></text>
+          >{batterySoc.toFixed(0)}<tspan
+            dx="1"
+            style="font-size: 10px; font-weight: 500; fill: var(--color-muted-fg);">%</tspan
+          ></text
+        >
       </g>
 
       <!-- ═══ Nœud Réseau (droite) ═════════════════════════════════════ -->
       <g transform="translate({N.grid.x} {N.grid.y})">
         <circle r="30" fill="var(--color-grid-energy-muted)" stroke={GRID} stroke-width="1.5" />
-        <g stroke={gridExportActive ? SOLAR : GRID} stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <g
+          stroke={gridExportActive ? SOLAR : GRID}
+          stroke-width="2"
+          fill="none"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <path d="M0 -13V13M-8 -7L0 -13L8 -7M-7 0L0 -5L7 0M-6 6L0 2L6 6" />
         </g>
         <text
@@ -273,22 +320,44 @@
           y="-44"
           text-anchor="middle"
           style="font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; fill: var(--color-muted-fg);"
-        >{gridLabel}</text>
+          >{gridLabel}</text
+        >
         <text
           x="0"
           y="50"
           text-anchor="middle"
           style="font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums;"
           fill={gridExportActive ? SOLAR : gridImportActive ? GRID : 'var(--color-muted-fg)'}
-        >{#if gridExportActive}↑ {:else if gridImportActive}↓ {/if}{fmtW(gridPowerW)}<tspan dx="2" style="font-size: 10px; font-weight: 500; fill: var(--color-muted-fg);">W</tspan></text>
+          >{#if gridExportActive}↑
+          {:else if gridImportActive}↓
+          {/if}{fmtW(gridPowerW)}<tspan
+            dx="2"
+            style="font-size: 10px; font-weight: 500; fill: var(--color-muted-fg);">W</tspan
+          ></text
+        >
       </g>
 
       <!-- ═══ Nœud Cumulus (bas) ═══════════════════════════════════════ -->
       <g transform="translate({N.cum.x} {N.cum.y})">
-        <circle r="30" fill="var(--color-hc-muted)" stroke={cumulusOn ? HC : 'var(--color-muted-fg)'} stroke-width="1.5" />
-        <g stroke={cumulusOn ? HC : 'var(--color-muted-fg)'} stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M0 -13C0 -13 -4 -9 -4 -3C-4 1 -2 4 0 4C2 4 4 1 4 -3C4 -7 2 -9 2 -9C2 -7 1 -5 0 -5C-1 -5 0 -9 0 -13Z" />
-          <path d="M-6 8C-6 4 -3 0 0 -2C0 0 2 2 2 4C4 5 6 7 6 10C6 13 4 14 0 14C-4 14 -6 13 -6 8Z" />
+        <circle
+          r="30"
+          fill="var(--color-hc-muted)"
+          stroke={cumulusOn ? HC : 'var(--color-muted-fg)'}
+          stroke-width="1.5"
+        />
+        <g
+          stroke={cumulusOn ? HC : 'var(--color-muted-fg)'}
+          stroke-width="2"
+          fill="none"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path
+            d="M0 -13C0 -13 -4 -9 -4 -3C-4 1 -2 4 0 4C2 4 4 1 4 -3C4 -7 2 -9 2 -9C2 -7 1 -5 0 -5C-1 -5 0 -9 0 -13Z"
+          />
+          <path
+            d="M-6 8C-6 4 -3 0 0 -2C0 0 2 2 2 4C4 5 6 7 6 10C6 13 4 14 0 14C-4 14 -6 13 -6 8Z"
+          />
         </g>
         <text
           x="0"
@@ -296,13 +365,18 @@
           text-anchor="middle"
           style="font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums;"
           fill={cumulusOn ? HC : 'var(--color-muted-fg)'}
-        >{cumulusTempC.toFixed(0)}<tspan dx="1" style="font-size: 10px; font-weight: 500; fill: var(--color-muted-fg);">°C</tspan></text>
+          >{cumulusTempC.toFixed(0)}<tspan
+            dx="1"
+            style="font-size: 10px; font-weight: 500; fill: var(--color-muted-fg);">°C</tspan
+          ></text
+        >
         <text
           x="0"
           y="66"
           text-anchor="middle"
           style="font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; fill: var(--color-muted-fg);"
-        >{cumulusOn ? `${fmtW(cumulusPowerW)} W` : 'Cumulus'}</text>
+          >{cumulusOn ? `${fmtW(cumulusPowerW)} W` : 'Cumulus'}</text
+        >
       </g>
     </svg>
   </div>
@@ -322,10 +396,14 @@
   }
 
   @keyframes flow-forward {
-    to { stroke-dashoffset: -16; }
+    to {
+      stroke-dashoffset: -16;
+    }
   }
   @keyframes flow-reverse {
-    to { stroke-dashoffset: 16; }
+    to {
+      stroke-dashoffset: 16;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {

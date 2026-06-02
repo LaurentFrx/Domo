@@ -67,14 +67,25 @@
         muted: 'var(--color-solar-muted)'
       };
     }
-    if (n.includes('multim') || n.includes('bureau') || n.includes('media') || n.includes('écran') || n.includes('ecran')) {
+    if (
+      n.includes('multim') ||
+      n.includes('bureau') ||
+      n.includes('media') ||
+      n.includes('écran') ||
+      n.includes('ecran')
+    ) {
       return {
         glyph: 'monitor',
         color: 'var(--color-consumption)',
         muted: 'var(--color-consumption-muted)'
       };
     }
-    if (n.includes('serviette') || n.includes('sèche') || n.includes('seche') || n.includes('radiateur')) {
+    if (
+      n.includes('serviette') ||
+      n.includes('sèche') ||
+      n.includes('seche') ||
+      n.includes('radiateur')
+    ) {
       return {
         glyph: 'towel-heater',
         color: 'var(--color-hp)',
@@ -104,24 +115,53 @@
   <!-- Icône sémantique colorée -->
   <span
     class="switch-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-lg)]"
-    style="background: {displayedOn ? style.color : style.muted}; color: {displayedOn ? 'white' : style.color};"
+    style="background: {displayedOn ? style.color : style.muted}; color: {displayedOn
+      ? 'white'
+      : style.color};"
     aria-hidden="true"
   >
     {#if style.glyph === 'ev-charger'}
       <!-- Prise EV / chargeur (éclair dans une borne) -->
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <svg
+        width="22"
+        height="22"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.75"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
         <path d="M13 2L4 14h7l-2 8 9-12h-7l2-8z" />
       </svg>
     {:else if style.glyph === 'monitor'}
       <!-- Écran multimédia -->
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <svg
+        width="22"
+        height="22"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.75"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
         <rect x="2.5" y="4" width="19" height="13" rx="2" />
         <line x1="8" y1="21" x2="16" y2="21" />
         <line x1="12" y1="17" x2="12" y2="21" />
       </svg>
     {:else if style.glyph === 'towel-heater'}
       <!-- Sèche-serviette : radiateur vertical -->
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <svg
+        width="22"
+        height="22"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.75"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
         <line x1="6" y1="3" x2="6" y2="21" />
         <line x1="18" y1="3" x2="18" y2="21" />
         <line x1="6" y1="7" x2="18" y2="7" />
@@ -130,7 +170,16 @@
       </svg>
     {:else}
       <!-- Prise classique -->
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <svg
+        width="22"
+        height="22"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.75"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
         <path d="M9 2v6M15 2v6" />
         <path d="M5 8h14v3a7 7 0 01-14 0V8z" />
         <path d="M12 18v4" />
@@ -139,7 +188,7 @@
   </span>
 
   <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-    <span class="text-[13px] font-semibold leading-tight truncate" style="color: var(--color-fg);">
+    <span class="truncate text-[13px] leading-tight font-semibold" style="color: var(--color-fg);">
       {sw.name}
     </span>
     <span

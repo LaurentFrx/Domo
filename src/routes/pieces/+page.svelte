@@ -109,9 +109,7 @@
       (d) => !['sensor', 'plug'].includes(d.category) && !isHidden(d.friendlyName)
     )
   );
-  const hasFlatDevices = $derived(
-    matter.switches.length + zigbee.devices.length > 0
-  );
+  const hasFlatDevices = $derived(matter.switches.length + zigbee.devices.length > 0);
 
   // ─── Tri custom des volets (ordre choisi par Laurent) ───
   const SHUTTER_ORDER = [
@@ -128,9 +126,7 @@
     return idx === -1 ? 999 : idx;
   }
   const sortedShutters = $derived(
-    [...matter.shutters].sort(
-      (a, b) => shutterOrderIdx(a.name) - shutterOrderIdx(b.name)
-    )
+    [...matter.shutters].sort((a, b) => shutterOrderIdx(a.name) - shutterOrderIdx(b.name))
   );
 </script>
 
@@ -152,7 +148,9 @@
       >
         <span
           class="h-1.5 w-1.5 rounded-full"
-          style:background-color={matterConnected ? 'var(--color-battery)' : 'var(--color-muted-fg)'}
+          style:background-color={matterConnected
+            ? 'var(--color-battery)'
+            : 'var(--color-muted-fg)'}
         ></span>
         Matter
       </span>
@@ -222,7 +220,10 @@
               <button
                 type="button"
                 class="pill-open"
-                onclick={() => { haptic('heavy'); matter.openAll(); }}
+                onclick={() => {
+                  haptic('heavy');
+                  matter.openAll();
+                }}
                 aria-label="Ouvrir tous les volets"
               >
                 <span aria-hidden="true">▲</span> Tout ouvrir
@@ -230,7 +231,10 @@
               <button
                 type="button"
                 class="pill-close"
-                onclick={() => { haptic('heavy'); matter.closeAll(); }}
+                onclick={() => {
+                  haptic('heavy');
+                  matter.closeAll();
+                }}
                 aria-label="Fermer tous les volets"
               >
                 <span aria-hidden="true">▼</span> Tout fermer
@@ -238,10 +242,7 @@
             </div>
           {/if}
         </div>
-        <div
-          class="shutters-strip"
-          style="--shutter-count: {sortedShutters.length};"
-        >
+        <div class="shutters-strip" style="--shutter-count: {sortedShutters.length};">
           {#each sortedShutters as shutter (shutter.nodeId)}
             <ShutterTile {shutter} />
           {/each}

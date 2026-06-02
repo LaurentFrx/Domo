@@ -82,9 +82,63 @@ function clamp(v: number, lo: number, hi: number, step: number): number {
 
 // Seed mock : affichage gracieux avant la 1re réponse du backend.
 const MOCK_ZONES: AirzoneZone[] = [
-  { id: 1, name: 'Parents', on: false, roomTemp: 24, humidity: 60, setpoint: 24, mode: 'cooling', modeRaw: 2, availableModes: ['stop', 'cooling', 'heating', 'fan', 'dry'], minTemp: 18, maxTemp: 30, tempStep: 0.5, demand: false, isMaster: true, masterZoneId: 1, battery: null, coverage: null },
-  { id: 2, name: 'Amis', on: false, roomTemp: 24, humidity: 60, setpoint: 24, mode: 'cooling', modeRaw: 2, availableModes: null, minTemp: 18, maxTemp: 30, tempStep: 0.5, demand: false, isMaster: false, masterZoneId: 1, battery: 70, coverage: 90 },
-  { id: 3, name: 'Bureau', on: false, roomTemp: 24, humidity: 60, setpoint: 24, mode: 'cooling', modeRaw: 2, availableModes: null, minTemp: 18, maxTemp: 30, tempStep: 0.5, demand: false, isMaster: false, masterZoneId: 1, battery: 70, coverage: 70 }
+  {
+    id: 1,
+    name: 'Parents',
+    on: false,
+    roomTemp: 24,
+    humidity: 60,
+    setpoint: 24,
+    mode: 'cooling',
+    modeRaw: 2,
+    availableModes: ['stop', 'cooling', 'heating', 'fan', 'dry'],
+    minTemp: 18,
+    maxTemp: 30,
+    tempStep: 0.5,
+    demand: false,
+    isMaster: true,
+    masterZoneId: 1,
+    battery: null,
+    coverage: null
+  },
+  {
+    id: 2,
+    name: 'Amis',
+    on: false,
+    roomTemp: 24,
+    humidity: 60,
+    setpoint: 24,
+    mode: 'cooling',
+    modeRaw: 2,
+    availableModes: null,
+    minTemp: 18,
+    maxTemp: 30,
+    tempStep: 0.5,
+    demand: false,
+    isMaster: false,
+    masterZoneId: 1,
+    battery: 70,
+    coverage: 90
+  },
+  {
+    id: 3,
+    name: 'Bureau',
+    on: false,
+    roomTemp: 24,
+    humidity: 60,
+    setpoint: 24,
+    mode: 'cooling',
+    modeRaw: 2,
+    availableModes: null,
+    minTemp: 18,
+    maxTemp: 30,
+    tempStep: 0.5,
+    demand: false,
+    isMaster: false,
+    masterZoneId: 1,
+    battery: 70,
+    coverage: 70
+  }
 ];
 
 class AirzoneState {
