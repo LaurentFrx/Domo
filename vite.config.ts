@@ -51,6 +51,11 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['client/**/*.{js,css,ico,png,svg,woff,woff2}'],
+        // navigateFallback ('/') ne doit JAMAIS court-circuiter ces routes une
+        // fois la PWA installée (SW actif) : /auth pose le cookie de session
+        // (sinon /denied perpétuel), /api/* sont des endpoints serveur (dont
+        // /api/forecast), /denied est la page publique de refus.
+        navigateFallbackDenylist: [/^\/auth/, /^\/api\//, /^\/denied/],
         // TODO: cache orchestrateur
         runtimeCaching: []
       },
