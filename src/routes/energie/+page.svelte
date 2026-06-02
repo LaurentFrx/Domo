@@ -1,13 +1,19 @@
 <script lang="ts">
-  import { solcast } from '$stores/solcast.svelte';
+  import { forecast } from '$stores/forecast.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
   import { consoSeries24h, pvSeries24h, hourOfDay } from '$utils/mock-curves';
   import { onMount, onDestroy } from 'svelte';
   import KpiCard from '$components/cards/KpiCard.svelte';
   import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
 
-  onMount(() => zigbee.connect());
-  onDestroy(() => zigbee.disconnect());
+  onMount(() => {
+    zigbee.connect();
+    forecast.connect();
+  });
+  onDestroy(() => {
+    zigbee.disconnect();
+    forecast.disconnect();
+  });
 
   // Prises Zigbee suivies pour la conso électroménager (Frigo, Lave-linge).
   const TRACKED_APPLIANCES = new Set(['frigo', 'lave-linge', 'lave_vaisselle']);
@@ -47,38 +53,22 @@
     selectedDay = Math.max(-6, Math.min(0, selectedDay + delta));
   }
 
-  // ─── Section 2 : Prévisions Solcast 48h ─────────────────────────────
-  const forecast = $derived(solcast.forecast.slice(0, 48));
-  const maxForecast = $derived(Math.max(...forecast.map((p) => p.p90), 1));
+  // ─── Section 2 : Prévision PV 48h — forecast-bridge (Open-Meteo + PVLib) ──
+  const fc = $derived(forecast.points.slice(0, 48));
+  const maxKw = $derived(Math.max(...fc.map((p) => p.kw), 0.1));
 
-  function buildForecastLine(prop: 'p10' | 'p50' | 'p90'): string {
-    const w = forecast.length - 1 || 1;
-    return forecast
+  // Ligne simple déterministe (pas de bande P10/P90). Total = sud + ouest,
+  // écrêté onduleur/SB ; le plan sud porte ~2× plus de Wc que l'ouest.
+  function pvLine(prop: 'kw' | 'kwSud' | 'kwOuest'): string {
+    const w = fc.length - 1 || 1;
+    return fc
       .map((p, i) => {
         const x = (i / w) * 480;
-        const y = 80 - (p[prop] / maxForecast) * 70;
+        const y = 80 - (Math.max(0, p[prop]) / maxKw) * 70;
         return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
       })
       .join(' ');
   }
-
-  const forecastBand = $derived.by(() => {
-    if (forecast.length === 0) return '';
-    const w = forecast.length - 1;
-    const upper = forecast.map((p, i) => {
-      const x = (i / w) * 480;
-      const y = 80 - (p.p90 / maxForecast) * 70;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    });
-    const lower = forecast
-      .map((p, i) => {
-        const x = (i / w) * 480;
-        const y = 80 - (p.p10 / maxForecast) * 70;
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .reverse();
-    return `M${upper.join(' L')} L${lower.join(' L')} Z`;
-  });
 
   // ─── Section 3 : Tableau mensuel ───────────────────────────────────
   const months = [
@@ -269,7 +259,7 @@
     </section>
   {/if}
 
-  <!-- ═══ Section 3 : Prévisions Solcast ═══ -->
+  <!-- ═══ Section 3 : Prévision PV — forecast-bridge ═══ -->
   <section
     class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-4"
     style="background: var(--color-card); border-color: var(--color-border);"
@@ -278,22 +268,41 @@
       <div class="flex flex-col gap-0.5">
         <span class="text-[14px] font-semibold">Prévisions PV 48h</span>
         <span class="text-[11px]" style="color: var(--color-muted-fg);">
-          Solcast P10/P50/P90 · Confiance {solcast.confidence}
+          {#if forecast.status === 'error'}
+            Prévision indisponible
+          {:else}
+            Open-Meteo · AROME · sud + ouest
+          {/if}
         </span>
       </div>
       <span
         class="rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.04em]"
         style="background: var(--color-solar-muted); color: var(--color-solar);"
       >
-        {solcast.expected24hKwh.toFixed(1)} kWh 24h
+        +{forecast.next24hKwh.toFixed(1)} kWh / 24h
       </span>
     </div>
 
     <svg viewBox="0 0 480 90" class="w-full" style="height: 140px;" preserveAspectRatio="none">
       <line x1="0" y1="80" x2="480" y2="80" stroke="var(--color-border)" stroke-width="0.5" />
-      <path d={forecastBand} fill="var(--color-solar)" opacity="0.15" />
       <path
-        d={buildForecastLine('p50')}
+        d={pvLine('kwSud')}
+        fill="none"
+        stroke="var(--color-sud)"
+        stroke-width="1"
+        opacity="0.75"
+        vector-effect="non-scaling-stroke"
+      />
+      <path
+        d={pvLine('kwOuest')}
+        fill="none"
+        stroke="var(--color-ouest)"
+        stroke-width="1"
+        opacity="0.75"
+        vector-effect="non-scaling-stroke"
+      />
+      <path
+        d={pvLine('kw')}
         fill="none"
         stroke="var(--color-solar)"
         stroke-width="1.75"
@@ -301,11 +310,26 @@
       />
     </svg>
 
+    <div class="flex flex-wrap gap-3 text-[11px]" style="color: var(--color-muted-fg);">
+      <span class="inline-flex items-center gap-1.5">
+        <span class="h-1 w-3 rounded-full" style="background: var(--color-solar);"></span>
+        Total
+      </span>
+      <span class="inline-flex items-center gap-1.5">
+        <span class="h-1 w-3 rounded-full" style="background: var(--color-sud);"></span>
+        Sud
+      </span>
+      <span class="inline-flex items-center gap-1.5">
+        <span class="h-1 w-3 rounded-full" style="background: var(--color-ouest);"></span>
+        Ouest
+      </span>
+    </div>
+
     <div class="flex justify-between text-[10px]" style="color: var(--color-muted-fg);">
-      <span>Maintenant</span>
-      <span>+12h</span>
-      <span>+24h</span>
-      <span>+36h</span>
+      <span>Auj.</span>
+      <span>12h</span>
+      <span>Dem.</span>
+      <span>12h</span>
       <span>+48h</span>
     </div>
   </section>

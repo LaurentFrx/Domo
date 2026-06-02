@@ -55,6 +55,10 @@
   --color-success: oklch(0.627 0.194 149);
   --color-warning: oklch(0.795 0.184 86);
 
+  /* ─── PV par orientation (prévision forecast-bridge) ─── */
+  --color-sud: oklch(0.7 0.18 52);
+  --color-ouest: oklch(0.58 0.21 300);
+
   /* ─── Sidebar (immutable dark) ─── */
   --color-sidebar: oklch(0.175 0.018 280);
   --color-sidebar-fg: oklch(0.935 0.005 280);
@@ -127,6 +131,9 @@
   --color-grid-energy: oklch(0.55 0.01 280);
   --color-alert: oklch(0.704 0.17 22.2);
   --color-alert-muted: oklch(0.704 0.17 22.2 / 0.12);
+
+  --color-sud: oklch(0.78 0.16 52);
+  --color-ouest: oklch(0.7 0.19 300);
 
   --shadow-sm: 0 1px 3px oklch(0 0 0 / 0.3), 0 1px 2px oklch(0 0 0 / 0.2);
   --shadow-md: 0 4px 6px oklch(0 0 0 / 0.35), 0 2px 4px oklch(0 0 0 / 0.2);
