@@ -93,8 +93,15 @@
 </svelte:element>
 
 <style>
+  .kpi-card {
+    box-shadow: var(--shadow-sm);
+    transition:
+      background var(--duration-fast) var(--ease-default),
+      box-shadow var(--duration-fast) var(--ease-default);
+  }
   .kpi-card:hover {
     background: var(--color-card-hover);
+    box-shadow: var(--shadow-md);
   }
   a.kpi-card {
     text-decoration: none;

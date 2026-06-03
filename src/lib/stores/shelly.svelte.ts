@@ -39,10 +39,13 @@ class ShellyState {
     this.gridImportTodayKwh = +Math.max(0, h * 0.3 - 2).toFixed(2);
     this.gridExportTodayKwh = +Math.max(0, h * 0.2 - 1).toFixed(2);
 
-    // Cumulus ON entre 11h et 16h (surplus PV) ou 22h-6h (HC)
-    const cumulusOn = (h >= 11 && h < 16) || h >= 22 || h < 6;
-    this.cumulusRelayOn = cumulusOn;
-    this.cumulusPowerW = cumulusOn ? 1850 : 0;
+    // Relais cumulus : AUCUN feed réel (le Shelly 1 Pro n'est ni lu ni piloté
+    // pour l'instant — cf. orchestrateur cumulus à venir). On ne fabrique donc
+    // pas de chauffe fantôme : l'état véridique par défaut est « éteint ».
+    // Le FlowDiagram n'affichera un flux Maison→Cumulus que si une vraie source
+    // (ou un toggle manuel) passe le relais ON.
+    this.cumulusRelayOn = false;
+    this.cumulusPowerW = 0;
     this.cumulusLastToggleSec = 1200;
   }
 
