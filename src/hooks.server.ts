@@ -25,6 +25,13 @@ function isAsset(pathname: string): boolean {
 export const handle: Handle = async ({ event, resolve }) => {
   const { pathname } = event.url;
 
+  // Endpoint portail : appelable par un raccourci iPhone sans cookie Domo.
+  // Sa propre auth par token (Authorization: Bearer) est appliquée dans la route.
+  // Match EXACT — ne PAS élargir aux autres routes /api.
+  if (pathname === '/api/portail/pulse') {
+    return resolve(event);
+  }
+
   if (isAsset(pathname) || isPublic(pathname)) {
     return resolve(event);
   }
