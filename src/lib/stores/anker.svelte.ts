@@ -11,7 +11,13 @@ import { env } from '$env/dynamic/public';
 
 const PUBLIC_ANKER_URL = env.PUBLIC_ANKER_URL || 'https://domo.feroux.fr/anker';
 
-const POLL_INTERVAL_MS = 30_000;
+// Polling client. Le bridge Anker (RPi4) sert un CACHE rafraîchi côté cloud
+// Solix toutes les ~60 s (mesuré : last_update figé 63 s puis saut). Poller plus
+// vite ne livre PAS de donnée plus fraîche — c'est le mur physique. 15 s = on
+// découvre chaque nouvelle mesure cloud avec ≤ 15 s de retard (vs 30 s avant)
+// sans marteler le bridge. Le vrai gain de fraîcheur perçue vient du refetch
+// immédiat au retour de visibilité (PWA rouverte) + pause en arrière-plan.
+const POLL_INTERVAL_MS = 15_000;
 
 export type AnkerBattery = {
   id: string;
@@ -151,20 +157,46 @@ class AnkerState {
   });
 
   private intervalId: ReturnType<typeof setInterval> | null = null;
+  private visibilityHandler: (() => void) | null = null;
 
   connect() {
     if (typeof window === 'undefined') return;
-    if (this.intervalId !== null) return;
+    if (this.visibilityHandler !== null) return; // déjà connecté (layout + pages)
     if (!PUBLIC_ANKER_URL) {
       this.status = 'unconfigured';
       this.lastError = 'PUBLIC_ANKER_URL non défini';
       return;
     }
+    // Onglet/PWA en arrière-plan → on suspend le polling (rien à afficher, et on
+    // épargne le bridge). Au retour au premier plan → refetch IMMÉDIAT pour une
+    // carte à jour dès la réouverture, sans attendre le prochain tick.
+    this.visibilityHandler = () => {
+      if (document.visibilityState === 'visible') {
+        this.poll();
+        this.startInterval();
+      } else {
+        this.stopInterval();
+      }
+    };
+    document.addEventListener('visibilitychange', this.visibilityHandler);
     this.poll();
-    this.intervalId = setInterval(() => this.poll(), POLL_INTERVAL_MS);
+    this.startInterval();
   }
 
   disconnect() {
+    this.stopInterval();
+    if (this.visibilityHandler !== null && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
+  }
+
+  private startInterval() {
+    if (this.intervalId !== null) return;
+    this.intervalId = setInterval(() => this.poll(), POLL_INTERVAL_MS);
+  }
+
+  private stopInterval() {
     if (this.intervalId !== null) {
       clearInterval(this.intervalId);
       this.intervalId = null;
