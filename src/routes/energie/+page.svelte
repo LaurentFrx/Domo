@@ -18,7 +18,6 @@
   } from '$utils/chart';
   import { onMount, onDestroy } from 'svelte';
   import KpiCard from '$components/cards/KpiCard.svelte';
-  import SavingsCard from '$components/cards/SavingsCard.svelte';
   import ChartHoverLayer from '$components/charts/ChartHoverLayer.svelte';
   import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
 
@@ -301,9 +300,6 @@
       {now.getFullYear()}
     </span>
   </header>
-
-  <!-- ═══ HÉRO : Économies solaires (auto-conso valorisée HP/HC, données réelles) ═══ -->
-  <SavingsCard />
 
   <!-- ═══ Paysage (iPad/desktop) : production + prévisions côte à côte ═══ -->
   <div class="grid gap-6 lg:grid-cols-2 lg:items-start">

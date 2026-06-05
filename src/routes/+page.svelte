@@ -115,6 +115,9 @@
   {/if}
 
   <div class="stagger-enter relative flex flex-col gap-5 py-4" style="z-index: 1;">
+    <!-- ═══ Économies solaires — carte héro en première position ═══ -->
+    <SavingsCard />
+
     <!-- ═══ Hero — Auto-consommation ═══ -->
     <header class="flex items-center justify-between gap-4">
       <div class="flex flex-col gap-1">
@@ -183,9 +186,6 @@
       />
 
       <div class="flex flex-col gap-5">
-        <!-- ═══ Économies solaires (auto-conso valorisée HP/HC, données réelles) ═══ -->
-        <SavingsCard compact />
-
         <!-- ═══ KPI lifetime (vraies données Anker) ═══ -->
         {#if hasLifetime}
           <div class="grid grid-cols-2 gap-3">
