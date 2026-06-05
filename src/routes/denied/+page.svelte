@@ -1,12 +1,21 @@
+<script lang="ts">
+  import ConcentricRings from '$components/effects/ConcentricRings.svelte';
+</script>
+
 <svelte:head>
   <title>Accès restreint — Domo</title>
 </svelte:head>
 
 <div
-  class="flex min-h-[100dvh] items-center justify-center px-4"
+  class="relative flex min-h-[100dvh] items-center justify-center overflow-hidden px-4"
   style="background: var(--color-bg);"
 >
-  <div class="flex max-w-sm flex-col items-center gap-6 text-center">
+  <!-- Anneaux orbitaux (vert OVNI) centrés derrière la carte d'accès -->
+  <div class="pointer-events-none absolute inset-0" aria-hidden="true">
+    <ConcentricRings />
+  </div>
+
+  <div class="relative z-[1] flex max-w-sm flex-col items-center gap-6 text-center">
     <div
       class="flex h-16 w-16 items-center justify-center rounded-2xl"
       style="background: var(--color-primary-muted); color: var(--color-primary);"

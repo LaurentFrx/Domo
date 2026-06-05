@@ -76,6 +76,9 @@
   style="background: var(--color-bg); color: var(--color-fg);"
   onpointerdown={onRootPointerDown}
 >
+  <!-- Calque d'ambiance (halos verts/indigo) : matière pour le verre + profondeur -->
+  <div class="app-ambient" aria-hidden="true"></div>
+
   <Sidebar />
 
   <main

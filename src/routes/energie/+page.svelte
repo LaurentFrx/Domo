@@ -1,18 +1,40 @@
 <script lang="ts">
   import { forecast } from '$stores/forecast.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
-  import { consoSeries24h, pvSeries24h, hourOfDay } from '$utils/mock-curves';
+  import { apsystems } from '$stores/apsystems.svelte';
+  import { anker } from '$stores/anker.svelte';
+  import { production } from '$stores/production.svelte';
+  import { productionHistory } from '$stores/productionHistory.svelte';
+  import { preferences } from '$stores/preferences.svelte';
+  import { formatPower } from '$utils/format';
+  import {
+    smoothLinePath,
+    smoothAreaPath,
+    smoothSeries,
+    nearestIndex,
+    type XY
+  } from '$utils/chart';
   import { onMount, onDestroy } from 'svelte';
   import KpiCard from '$components/cards/KpiCard.svelte';
+  import ChartHoverLayer from '$components/charts/ChartHoverLayer.svelte';
   import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
 
   onMount(() => {
     zigbee.connect();
     forecast.connect();
+    // Production réelle « maintenant » : apsystems est propre à cette page ;
+    // anker est déjà connecté par +layout.svelte (connect() idempotent ici).
+    apsystems.connect();
+    anker.connect();
+    productionHistory.connect();
   });
   onDestroy(() => {
     zigbee.disconnect();
     forecast.disconnect();
+    apsystems.disconnect();
+    productionHistory.disconnect();
+    // Pas de anker.disconnect() : son cycle de vie appartient au layout racine
+    // (anker est utilisé app-wide, notamment par le dashboard).
   });
 
   // Prises Zigbee suivies pour la conso électroménager (Frigo, Lave-linge).
@@ -23,52 +45,168 @@
     )
   );
 
-  // ─── Section 1 : Stacked Area Chart 24h ─────────────────────────────
-  const pvSeries = pvSeries24h(2.5);
-  const consoSeries = consoSeries24h();
-  const batteryCharge = pvSeries.map((p) => Math.max(0, p - 0.5) * 0.3);
-  const gridImport = consoSeries.map((c, i) => Math.max(0, c - pvSeries[i] - batteryCharge[i]));
+  // ─── Section 1 : production RÉELLE (domo-recorder) ──────────────────
+  // Graphe mono-série : la production réelle de /api/production/history.
+  // Axe X = fenêtre temporelle réelle des points (min→max ts, glissante sur
+  // ~24h), axe Y = kW.
 
-  function buildAreaPath(
-    series: number[],
-    scale: number,
-    direction: 'up' | 'down',
-    baseline = 60
-  ): string {
-    const w = series.length - 1 || 1;
-    const points = series.map((v, i) => {
-      const x = (i / w) * 240;
-      const y = direction === 'up' ? baseline - v * scale : baseline + v * scale;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
+  // Géométrie du SVG (viewBox 240×120). Aire de production depuis le BAS, sur
+  // (quasi) toute la hauteur — fini le demi-graphe vide de l'ancien design 2 séries.
+  const SVG_W = 240;
+  const BASE_Y = 116; // ligne de base près du bas (petite marge anti-rognage)
+  const TOP_Y = 8; // marge haute au-dessus du pic
+  const CHART_H = BASE_Y - TOP_Y; // hauteur utile du tracé (~108 px)
+
+  function hhmm(tsSec: number): string {
+    return new Date(tsSec * 1000).toLocaleTimeString('fr-FR', {
+      hour: '2-digit',
+      minute: '2-digit'
     });
-    return `M0,${baseline} L${points.join(' L')} L240,${baseline} Z`;
   }
 
-  const maxValue = Math.max(...pvSeries, ...consoSeries, 1.5);
-  const yScale = 50 / maxValue;
-
-  let selectedDay = $state(0);
-
-  function changeDay(delta: number) {
-    selectedDay = Math.max(-6, Math.min(0, selectedDay + delta));
+  // Graduations Y « rondes » selon l'échelle max (kW) — partagé S1 + Prévisions.
+  function yTickValues(maxKw: number): number[] {
+    const step = maxKw <= 1 ? 0.25 : maxKw <= 2 ? 0.5 : maxKw <= 5 ? 1 : 2;
+    const out: number[] = [];
+    for (let v = step; v < maxKw - 1e-6; v += step) out.push(v);
+    return out;
   }
+
+  // Lissage RÉGLABLE de la production (moyenne glissante centrée ; ½-fenêtre en
+  // échantillons ~2 min ; 0 = brut). Persisté dans les préférences (curseur sous le graphe).
+  const prodKwSmoothed = $derived(
+    smoothSeries(
+      productionHistory.points.map((p) => Math.max(0, (p.production_w ?? 0) / 1000)),
+      preferences.productionSmoothHalf
+    )
+  );
+
+  // Échelle Y (kW) : auto sur le pic (lissé) + 10 % de marge, plancher 1 kW.
+  const prodKwMax = $derived(prodKwSmoothed.reduce((m, v) => Math.max(m, v), 0));
+  const yMaxKw = $derived(Math.max(1, prodKwMax * 1.1));
+
+  // Vue dérivée de la série réelle. null si 0-1 point → état « en attente ».
+  const prodView = $derived.by(() => {
+    const pts = productionHistory.points;
+    if (pts.length < 2) return null;
+    const t0 = pts[0].ts;
+    const t1 = pts[pts.length - 1].ts;
+    const span = Math.max(1, t1 - t0); // évite une division par 0
+    const xy = pts.map((p, i) => ({
+      x: ((p.ts - t0) / span) * SVG_W,
+      y: BASE_Y - ((prodKwSmoothed[i] ?? 0) / yMaxKw) * CHART_H
+    }));
+    // 4 graduations HH:MM réparties uniformément sur la plage temporelle.
+    const ticks = Array.from({ length: 4 }, (_, i) => hhmm(t0 + (span * i) / 3));
+    return { xy, ticks };
+  });
+
+  // Courbe lissée (spline monotone, façon Recharts/Yeldra) via d3-shape.
+  const prodLine = $derived(prodView ? smoothLinePath(prodView.xy) : '');
+  const prodArea = $derived(prodView ? smoothAreaPath(prodView.xy, BASE_Y) : '');
+
+  // Énergie cumulée sur la fenêtre (kWh) — intégration trapézoïdale des échantillons
+  // de puissance (∑ (P[i]+P[i-1])/2 × Δt).
+  const dayKwh = $derived.by(() => {
+    const pts = productionHistory.points;
+    let wh = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const dtH = (pts[i].ts - pts[i - 1].ts) / 3600;
+      wh += (((pts[i].production_w ?? 0) + (pts[i - 1].production_w ?? 0)) / 2) * dtH;
+    }
+    return wh / 1000;
+  });
+
+  // Repères Y : valeur kW ronde → position SVG (y) + position HTML (topPct %) + label.
+  const yTicks = $derived(
+    yTickValues(yMaxKw).map((kw) => {
+      const y = BASE_Y - (kw / yMaxKw) * CHART_H;
+      return { kw, y, topPct: (y / 120) * 100, label: `${parseFloat(kw.toFixed(2))} kW` };
+    })
+  );
+
+  // Repères X discrets (verticaux), alignés sur les 2 graduations HH:MM intérieures.
+  const gridX = [SVG_W / 3, (2 * SVG_W) / 3];
+
+  // ── Survol : index du point sous le curseur → étiquette flottante (valeur + heure).
+  let prodHover = $state<number | null>(null);
+  function onProdMove(e: MouseEvent) {
+    if (!prodView) return;
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    prodHover = nearestIndex(prodView.xy, frac, SVG_W);
+  }
+  const prodHoverView = $derived.by(() => {
+    if (prodHover == null || !prodView) return null;
+    const i = Math.min(prodHover, prodView.xy.length - 1);
+    const pt = prodView.xy[i];
+    const data = productionHistory.points[i];
+    if (!pt || !data) return null;
+    return {
+      xPct: (pt.x / SVG_W) * 100,
+      yPct: (pt.y / 120) * 100,
+      label: `${formatPower((prodKwSmoothed[i] ?? 0) * 1000)} · ${hhmm(data.ts)}`
+    };
+  });
 
   // ─── Section 2 : Prévision PV 48h — forecast-bridge (Open-Meteo + PVLib) ──
   const fc = $derived(forecast.points.slice(0, 48));
   const maxKw = $derived(Math.max(...fc.map((p) => p.kw), 0.1));
 
-  // Ligne simple déterministe (pas de bande P10/P90). Total = sud + ouest,
-  // écrêté onduleur/SB ; le plan sud porte ~2× plus de Wc que l'ouest.
-  function pvLine(prop: 'kw' | 'kwSud' | 'kwOuest'): string {
+  // Points {x,y} d'une série (Total = sud + ouest, écrêté onduleur/SB).
+  function fcXY(prop: 'kw' | 'kwSud' | 'kwOuest'): XY[] {
     const w = fc.length - 1 || 1;
-    return fc
-      .map((p, i) => {
-        const x = (i / w) * 480;
-        const y = 80 - (Math.max(0, p[prop]) / maxKw) * 70;
-        return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(' ');
+    return fc.map((p, i) => ({
+      x: (i / w) * 480,
+      y: 80 - (Math.max(0, p[prop]) / maxKw) * 70
+    }));
   }
+  // Courbes lissées (spline monotone), harmonisées avec la production.
+  function pvLine(prop: 'kw' | 'kwSud' | 'kwOuest'): string {
+    return smoothLinePath(fcXY(prop));
+  }
+  function pvArea(): string {
+    return smoothAreaPath(fcXY('kw'), 80);
+  }
+
+  // Repères Y du graphe Prévisions (mêmes valeurs kW rondes que la prod).
+  const fcTicks = $derived(
+    yTickValues(maxKw).map((kw) => {
+      const y = 80 - (kw / maxKw) * 70;
+      return { kw, y, topPct: (y / 90) * 100, label: `${parseFloat(kw.toFixed(2))} kW` };
+    })
+  );
+  const fcGridX = [120, 240, 360];
+
+  // ── Survol prévisions → étiquette flottante (Total + heure).
+  let fcHover = $state<number | null>(null);
+  function fcTime(iso: string): string {
+    return new Date(iso).toLocaleString('fr-FR', {
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+  function onFcMove(e: MouseEvent) {
+    const xy = fcXY('kw');
+    if (xy.length < 2) return;
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    fcHover = nearestIndex(xy, frac, 480);
+  }
+  const fcHoverView = $derived.by(() => {
+    if (fcHover == null) return null;
+    const xy = fcXY('kw');
+    const i = Math.min(fcHover, xy.length - 1);
+    const pt = xy[i];
+    const data = fc[i];
+    if (!pt || !data) return null;
+    return {
+      xPct: (pt.x / 480) * 100,
+      yPct: (pt.y / 90) * 100,
+      label: `${formatPower(data.kw * 1000)} · ${fcTime(data.time)}`
+    };
+  });
 
   // ─── Section 3 : Tableau mensuel ───────────────────────────────────
   const months = [
@@ -139,108 +277,339 @@
     </span>
   </header>
 
-  <!-- ═══ Section 1 : Stacked area 24h ═══ -->
-  <section
-    class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-4"
-    style="background: var(--color-card); border-color: var(--color-border);"
-  >
-    <div class="flex items-center justify-between">
-      <div class="flex flex-col gap-0.5">
-        <span class="text-[14px] font-semibold">Flux d'énergie 24h</span>
-        <span class="text-[11px]" style="color: var(--color-muted-fg);">
-          {selectedDay === 0
-            ? "Aujourd'hui"
-            : selectedDay === -1
-              ? 'Hier'
-              : `Il y a ${-selectedDay} jours`}
+  <!-- ═══ Paysage (iPad/desktop) : production + prévisions côte à côte ═══ -->
+  <div class="grid gap-6 lg:grid-cols-2 lg:items-start">
+    <!-- ═══ Section 1 : Stacked area 24h ═══ -->
+    <section
+      class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-4"
+      style="background: var(--color-card); border-color: var(--color-border);"
+    >
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex flex-col gap-0.5">
+          <span class="text-[14px] font-semibold">Flux d'énergie 24h</span>
+          <span class="text-[11px]" style="color: var(--color-muted-fg);">Aujourd'hui</span>
+        </div>
+        {#if prodView}
+          <span
+            class="rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.04em]"
+            style="background: var(--color-solar-muted); color: var(--color-solar);"
+          >
+            {dayKwh.toFixed(1)} kWh
+          </span>
+        {/if}
+      </div>
+
+      <!-- Production réelle instantanée = APS (bridge 8100) + SolarBank site (bridge 8095). -->
+      <div class="flex items-end justify-between gap-2">
+        <span
+          class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Production maintenant
+        </span>
+        <div class="flex flex-col items-end gap-0.5">
+          <span
+            class="text-[24px] leading-none font-semibold sm:text-[28px]"
+            style="color: var(--color-solar); letter-spacing: -0.01em;"
+          >
+            {formatPower(production.productionNowW)}
+          </span>
+          <span class="text-[12px]" style="color: var(--color-muted-fg);">
+            APS {formatPower(production.apsW)} · SolarBank {formatPower(production.sbW)}
+          </span>
+        </div>
+      </div>
+
+      <!-- Graphe mono-série : production RÉELLE (aire dégradée + repères/valeurs kW). -->
+      {#if prodView}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="relative"
+          style="height: 160px;"
+          role="presentation"
+          onmousemove={onProdMove}
+          onmouseleave={() => (prodHover = null)}
+        >
+          <svg
+            viewBox="0 0 240 120"
+            class="block w-full"
+            style="height: 160px;"
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <linearGradient id="prodGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" style="stop-color: var(--color-solar); stop-opacity: 0.02;" />
+                <stop offset="100%" style="stop-color: var(--color-solar); stop-opacity: 0.22;" />
+              </linearGradient>
+            </defs>
+
+            <!-- Repères Y (horizontaux) -->
+            {#each yTicks as g (g.kw)}
+              <line
+                x1="0"
+                y1={g.y}
+                x2="240"
+                y2={g.y}
+                stroke="var(--color-border)"
+                stroke-width="1"
+                opacity="0.6"
+                vector-effect="non-scaling-stroke"
+              />
+            {/each}
+            <!-- Repères X (verticaux, alignés sur les labels HH:MM) -->
+            {#each gridX as gx (gx)}
+              <line
+                x1={gx}
+                y1={TOP_Y}
+                x2={gx}
+                y2={BASE_Y}
+                stroke="var(--color-border)"
+                stroke-width="1"
+                opacity="0.6"
+                vector-effect="non-scaling-stroke"
+              />
+            {/each}
+
+            <!-- Ligne de base -->
+            <line
+              x1="0"
+              y1={BASE_Y}
+              x2="240"
+              y2={BASE_Y}
+              stroke="var(--color-border)"
+              stroke-width="0.5"
+            />
+            <!-- Aire (dégradé) + courbe -->
+            <path d={prodArea} fill="url(#prodGrad)" />
+            <path
+              d={prodLine}
+              fill="none"
+              stroke="var(--color-solar)"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              vector-effect="non-scaling-stroke"
+            />
+          </svg>
+          <!-- Valeurs kW (HTML net) alignées sur les repères Y -->
+          <div class="pointer-events-none absolute inset-0">
+            {#each yTicks as g (g.kw)}
+              <span
+                class="absolute left-0 rounded-sm px-1 text-[9px] leading-none"
+                style="top: {g.topPct}%; transform: translateY(-50%); color: var(--color-muted-fg); background: color-mix(in oklab, var(--color-card) 70%, transparent);"
+                >{g.label}</span
+              >
+            {/each}
+          </div>
+          <ChartHoverLayer
+            show={!!prodHoverView}
+            xPct={prodHoverView?.xPct ?? 0}
+            yPct={prodHoverView?.yPct ?? 0}
+            label={prodHoverView?.label ?? ''}
+          />
+        </div>
+      {:else}
+        <!-- État vide en HTML : le texte SVG se déformerait (preserveAspectRatio=none). -->
+        <div
+          class="flex items-center justify-center text-[12px]"
+          style="height: 160px; color: var(--color-muted-fg);"
+        >
+          En attente de données…
+        </div>
+      {/if}
+
+      <div class="flex justify-between text-[10px]" style="color: var(--color-muted-fg);">
+        {#if prodView}
+          {#each prodView.ticks as label, i (i)}
+            <span>{label}</span>
+          {/each}
+        {/if}
+      </div>
+
+      <div
+        class="flex flex-wrap items-center justify-between gap-3 text-[11px]"
+        style="color: var(--color-muted-fg);"
+      >
+        <span class="inline-flex items-center gap-1.5">
+          <span class="h-1 w-3 rounded-full" style="background: var(--color-solar);"></span>
+          Production PV
+        </span>
+        {#if prodView}
+          <div class="flex items-center gap-3">
+            <label class="flex items-center gap-1.5">
+              <span class="text-[10px]">Lissage</span>
+              <input
+                type="range"
+                min="0"
+                max="7"
+                step="1"
+                value={preferences.productionSmoothHalf}
+                oninput={(e) =>
+                  preferences.setProductionSmoothHalf(
+                    Number((e.currentTarget as HTMLInputElement).value)
+                  )}
+                class="h-1 w-20 cursor-pointer"
+                style="accent-color: var(--color-primary);"
+                aria-label="Lissage de la courbe de production"
+              />
+              <span class="text-[10px] tabular-nums" style="min-width: 3.4rem;">
+                {preferences.productionSmoothHalf === 0
+                  ? 'brut'
+                  : `~${(2 * preferences.productionSmoothHalf + 1) * 2} min`}
+              </span>
+            </label>
+            <span>pic {formatPower(prodKwMax * 1000)}</span>
+          </div>
+        {/if}
+      </div>
+    </section>
+
+    <!-- ═══ Section 3 : Prévision PV — forecast-bridge ═══ -->
+    <section
+      class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-4"
+      style="background: var(--color-card); border-color: var(--color-border);"
+    >
+      <div class="flex items-center justify-between">
+        <div class="flex flex-col gap-0.5">
+          <span class="text-[14px] font-semibold">Prévisions PV 48h</span>
+          <span class="text-[11px]" style="color: var(--color-muted-fg);">
+            {#if forecast.status === 'error'}
+              Prévision indisponible
+            {:else}
+              Open-Meteo · AROME · sud + ouest
+            {/if}
+          </span>
+        </div>
+        <span
+          class="rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.04em]"
+          style="background: var(--color-solar-muted); color: var(--color-solar);"
+        >
+          +{forecast.next24hKwh.toFixed(1)} kWh / 24h
         </span>
       </div>
-      <div class="flex items-center gap-1">
-        <button
-          type="button"
-          onclick={() => changeDay(-1)}
-          class="flex h-7 w-7 items-center justify-center rounded-md border text-[14px] transition-colors"
-          style="border-color: var(--color-border); color: var(--color-muted-fg);"
-          aria-label="Jour précédent">‹</button
+
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="relative"
+        style="height: 140px;"
+        role="presentation"
+        onmousemove={onFcMove}
+        onmouseleave={() => (fcHover = null)}
+      >
+        <svg
+          viewBox="0 0 480 90"
+          class="block w-full"
+          style="height: 140px;"
+          preserveAspectRatio="none"
         >
-        <button
-          type="button"
-          onclick={() => changeDay(1)}
-          disabled={selectedDay === 0}
-          class="flex h-7 w-7 items-center justify-center rounded-md border text-[14px] transition-colors disabled:opacity-40"
-          style="border-color: var(--color-border); color: var(--color-muted-fg);"
-          aria-label="Jour suivant">›</button
-        >
+          <defs>
+            <linearGradient id="fcGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" style="stop-color: var(--color-solar); stop-opacity: 0.02;" />
+              <stop offset="100%" style="stop-color: var(--color-solar); stop-opacity: 0.18;" />
+            </linearGradient>
+          </defs>
+
+          <!-- Repères Y / X (mêmes que la production) -->
+          {#each fcTicks as g (g.kw)}
+            <line
+              x1="0"
+              y1={g.y}
+              x2="480"
+              y2={g.y}
+              stroke="var(--color-border)"
+              stroke-width="1"
+              opacity="0.6"
+              vector-effect="non-scaling-stroke"
+            />
+          {/each}
+          {#each fcGridX as gx (gx)}
+            <line
+              x1={gx}
+              y1="6"
+              x2={gx}
+              y2="80"
+              stroke="var(--color-border)"
+              stroke-width="1"
+              opacity="0.6"
+              vector-effect="non-scaling-stroke"
+            />
+          {/each}
+
+          <line x1="0" y1="80" x2="480" y2="80" stroke="var(--color-border)" stroke-width="0.5" />
+          <!-- Aire dégradée sous Total (harmonisée avec la prod) -->
+          <path d={pvArea()} fill="url(#fcGrad)" />
+          <path
+            d={pvLine('kwSud')}
+            fill="none"
+            stroke="var(--color-sud)"
+            stroke-width="1"
+            opacity="0.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            vector-effect="non-scaling-stroke"
+          />
+          <path
+            d={pvLine('kwOuest')}
+            fill="none"
+            stroke="var(--color-ouest)"
+            stroke-width="1"
+            opacity="0.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            vector-effect="non-scaling-stroke"
+          />
+          <path
+            d={pvLine('kw')}
+            fill="none"
+            stroke="var(--color-solar)"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            vector-effect="non-scaling-stroke"
+          />
+        </svg>
+        <!-- Valeurs kW (HTML net) alignées sur les repères Y -->
+        <div class="pointer-events-none absolute inset-0">
+          {#each fcTicks as g (g.kw)}
+            <span
+              class="absolute left-0 rounded-sm px-1 text-[9px] leading-none"
+              style="top: {g.topPct}%; transform: translateY(-50%); color: var(--color-muted-fg); background: color-mix(in oklab, var(--color-card) 70%, transparent);"
+              >{g.label}</span
+            >
+          {/each}
+        </div>
+        <ChartHoverLayer
+          show={!!fcHoverView}
+          xPct={fcHoverView?.xPct ?? 0}
+          yPct={fcHoverView?.yPct ?? 0}
+          label={fcHoverView?.label ?? ''}
+        />
       </div>
-    </div>
 
-    <svg viewBox="0 0 240 120" class="w-full" style="height: 160px;" preserveAspectRatio="none">
-      <line x1="0" y1="60" x2="240" y2="60" stroke="var(--color-border)" stroke-width="0.5" />
+      <div class="flex flex-wrap gap-3 text-[11px]" style="color: var(--color-muted-fg);">
+        <span class="inline-flex items-center gap-1.5">
+          <span class="h-1 w-3 rounded-full" style="background: var(--color-solar);"></span>
+          Total
+        </span>
+        <span class="inline-flex items-center gap-1.5">
+          <span class="h-1 w-3 rounded-full" style="background: var(--color-sud);"></span>
+          Sud
+        </span>
+        <span class="inline-flex items-center gap-1.5">
+          <span class="h-1 w-3 rounded-full" style="background: var(--color-ouest);"></span>
+          Ouest
+        </span>
+      </div>
 
-      <path d={buildAreaPath(pvSeries, yScale, 'up')} fill="var(--color-solar)" opacity="0.22" />
-      <path
-        d={buildAreaPath(consoSeries, yScale, 'down')}
-        fill="var(--color-consumption)"
-        opacity="0.22"
-      />
-
-      <path
-        d={pvSeries
-          .map(
-            (v, i) =>
-              `${i === 0 ? 'M' : 'L'}${(i / (pvSeries.length - 1)) * 240},${60 - v * yScale}`
-          )
-          .join(' ')}
-        fill="none"
-        stroke="var(--color-solar)"
-        stroke-width="1.5"
-        vector-effect="non-scaling-stroke"
-      />
-      <path
-        d={consoSeries
-          .map(
-            (v, i) =>
-              `${i === 0 ? 'M' : 'L'}${(i / (consoSeries.length - 1)) * 240},${60 + v * yScale}`
-          )
-          .join(' ')}
-        fill="none"
-        stroke="var(--color-consumption)"
-        stroke-width="1.5"
-        vector-effect="non-scaling-stroke"
-      />
-
-      <line
-        x1={(hourOfDay() / 23) * 240}
-        y1="0"
-        x2={(hourOfDay() / 23) * 240}
-        y2="120"
-        stroke="var(--color-primary)"
-        stroke-width="1"
-        stroke-dasharray="2 2"
-        vector-effect="non-scaling-stroke"
-        opacity="0.5"
-      />
-    </svg>
-
-    <div class="flex justify-between text-[10px]" style="color: var(--color-muted-fg);">
-      <span>00h</span>
-      <span>06h</span>
-      <span>12h</span>
-      <span>18h</span>
-      <span>24h</span>
-    </div>
-
-    <div class="flex flex-wrap gap-3 text-[11px]" style="color: var(--color-muted-fg);">
-      <span class="inline-flex items-center gap-1.5">
-        <span class="h-1 w-3 rounded-full" style="background: var(--color-solar);"></span>
-        Production PV
-      </span>
-      <span class="inline-flex items-center gap-1.5">
-        <span class="h-1 w-3 rounded-full" style="background: var(--color-consumption);"></span>
-        Consommation
-      </span>
-    </div>
-  </section>
+      <div class="flex justify-between text-[10px]" style="color: var(--color-muted-fg);">
+        <span>Auj.</span>
+        <span>12h</span>
+        <span>Dem.</span>
+        <span>12h</span>
+        <span>+48h</span>
+      </div>
+    </section>
+  </div>
 
   <!-- ═══ Section 2 : Conso électroménager (Frigo, Lave-linge…) ═══ -->
   {#if appliancePlugs.length > 0}
@@ -258,81 +627,6 @@
       </div>
     </section>
   {/if}
-
-  <!-- ═══ Section 3 : Prévision PV — forecast-bridge ═══ -->
-  <section
-    class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-4"
-    style="background: var(--color-card); border-color: var(--color-border);"
-  >
-    <div class="flex items-center justify-between">
-      <div class="flex flex-col gap-0.5">
-        <span class="text-[14px] font-semibold">Prévisions PV 48h</span>
-        <span class="text-[11px]" style="color: var(--color-muted-fg);">
-          {#if forecast.status === 'error'}
-            Prévision indisponible
-          {:else}
-            Open-Meteo · AROME · sud + ouest
-          {/if}
-        </span>
-      </div>
-      <span
-        class="rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.04em]"
-        style="background: var(--color-solar-muted); color: var(--color-solar);"
-      >
-        +{forecast.next24hKwh.toFixed(1)} kWh / 24h
-      </span>
-    </div>
-
-    <svg viewBox="0 0 480 90" class="w-full" style="height: 140px;" preserveAspectRatio="none">
-      <line x1="0" y1="80" x2="480" y2="80" stroke="var(--color-border)" stroke-width="0.5" />
-      <path
-        d={pvLine('kwSud')}
-        fill="none"
-        stroke="var(--color-sud)"
-        stroke-width="1"
-        opacity="0.75"
-        vector-effect="non-scaling-stroke"
-      />
-      <path
-        d={pvLine('kwOuest')}
-        fill="none"
-        stroke="var(--color-ouest)"
-        stroke-width="1"
-        opacity="0.75"
-        vector-effect="non-scaling-stroke"
-      />
-      <path
-        d={pvLine('kw')}
-        fill="none"
-        stroke="var(--color-solar)"
-        stroke-width="1.75"
-        vector-effect="non-scaling-stroke"
-      />
-    </svg>
-
-    <div class="flex flex-wrap gap-3 text-[11px]" style="color: var(--color-muted-fg);">
-      <span class="inline-flex items-center gap-1.5">
-        <span class="h-1 w-3 rounded-full" style="background: var(--color-solar);"></span>
-        Total
-      </span>
-      <span class="inline-flex items-center gap-1.5">
-        <span class="h-1 w-3 rounded-full" style="background: var(--color-sud);"></span>
-        Sud
-      </span>
-      <span class="inline-flex items-center gap-1.5">
-        <span class="h-1 w-3 rounded-full" style="background: var(--color-ouest);"></span>
-        Ouest
-      </span>
-    </div>
-
-    <div class="flex justify-between text-[10px]" style="color: var(--color-muted-fg);">
-      <span>Auj.</span>
-      <span>12h</span>
-      <span>Dem.</span>
-      <span>12h</span>
-      <span>+48h</span>
-    </div>
-  </section>
 
   <!-- ═══ Section 3 : Tableau mensuel ═══ -->
   <section class="overflow-x-auto">

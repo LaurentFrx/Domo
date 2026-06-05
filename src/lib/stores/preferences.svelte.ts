@@ -18,6 +18,7 @@ type Persisted = {
   animationsEnabled: boolean;
   theme: Theme;
   autoTheme: boolean;
+  productionSmoothHalf: number;
 };
 
 const DEFAULTS: Persisted = {
@@ -26,7 +27,8 @@ const DEFAULTS: Persisted = {
   powerUnit: 'kW',
   animationsEnabled: true,
   theme: 'light',
-  autoTheme: false
+  autoTheme: false,
+  productionSmoothHalf: 3
 };
 
 function load(): Persisted {
@@ -48,6 +50,8 @@ class PreferencesState {
   animationsEnabled = $state(DEFAULTS.animationsEnabled);
   theme = $state<Theme>(DEFAULTS.theme);
   autoTheme = $state(DEFAULTS.autoTheme);
+  /** ½-fenêtre de lissage (échantillons ~2 min) de la courbe de production. */
+  productionSmoothHalf = $state(DEFAULTS.productionSmoothHalf);
 
   hydrate() {
     if (typeof window === 'undefined') return;
@@ -58,6 +62,7 @@ class PreferencesState {
     this.animationsEnabled = p.animationsEnabled;
     this.theme = p.theme;
     this.autoTheme = p.autoTheme;
+    this.productionSmoothHalf = p.productionSmoothHalf;
     this.applyTheme();
   }
 
@@ -69,7 +74,8 @@ class PreferencesState {
       powerUnit: this.powerUnit,
       animationsEnabled: this.animationsEnabled,
       theme: this.theme,
-      autoTheme: this.autoTheme
+      autoTheme: this.autoTheme,
+      productionSmoothHalf: this.productionSmoothHalf
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(snap));
@@ -124,6 +130,10 @@ class PreferencesState {
     this.autoTheme = enabled;
     this.persist();
     this.applyTheme();
+  }
+  setProductionSmoothHalf(v: number) {
+    this.productionSmoothHalf = v;
+    this.persist();
   }
 }
 
