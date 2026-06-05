@@ -264,11 +264,7 @@
 
   <!-- Corps centré : slider fin (24px) + gap + colonne actions carrées (60px). Body 210px = 3×60 + 2×15 gap. -->
   <div class="shutter-body flex items-stretch justify-center gap-3">
-    <div
-      bind:this={trackEl}
-      class="slider-track"
-      class:dragging
-    >
+    <div bind:this={trackEl} class="slider-track" class:dragging>
       <div class="slider-fill" style:height="{displayedPosition}%"></div>
       <!-- Le thumb (rond blanc) seul est draggable ET porte la sémantique slider
            (role + aria + focus), puisque c'est lui qui reçoit les gestes. Le reste

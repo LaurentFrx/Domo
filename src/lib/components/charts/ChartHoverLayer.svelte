@@ -41,7 +41,7 @@
 
   <!-- Étiquette flottante (pastille indigo qui glisse) -->
   <div
-    class="pointer-events-none absolute z-10 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[12px] font-semibold"
+    class="pointer-events-none absolute z-10 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold whitespace-nowrap"
     style="left: {pillLeft}%; top: 6px; transform: translateX(-50%);
            background: var(--color-primary); color: var(--color-primary-fg);
            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.35), 0 8px 10px -6px rgba(0, 0, 0, 0.3);

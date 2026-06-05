@@ -13,8 +13,7 @@ import { env } from '$env/dynamic/private';
 import Database from 'better-sqlite3';
 import type { RequestHandler } from './$types';
 
-const SQL =
-  'SELECT ts, production_w, aps_w, sb_w FROM pv_samples WHERE ts >= ? ORDER BY ts ASC';
+const SQL = 'SELECT ts, production_w, aps_w, sb_w FROM pv_samples WHERE ts >= ? ORDER BY ts ASC';
 
 export const GET: RequestHandler = async ({ url }) => {
   // Fenêtre demandée : défaut 24 h, bornée 1..168 h (7 j).
@@ -44,7 +43,10 @@ export const GET: RequestHandler = async ({ url }) => {
     return json({ points });
   } catch (e) {
     // DB absente / verrouillée / illisible → 503 + points vides, jamais de crash.
-    return json({ points: [], error: e instanceof Error ? e.message : 'db error' }, { status: 503 });
+    return json(
+      { points: [], error: e instanceof Error ? e.message : 'db error' },
+      { status: 503 }
+    );
   } finally {
     try {
       db?.close();
