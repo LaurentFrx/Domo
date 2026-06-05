@@ -5,8 +5,10 @@
   import { anker } from '$stores/anker.svelte';
   import { production } from '$stores/production.svelte';
   import { productionHistory } from '$stores/productionHistory.svelte';
+  import { savings } from '$stores/savings.svelte';
+  import { energyMonthly } from '$stores/energyMonthly.svelte';
   import { preferences } from '$stores/preferences.svelte';
-  import { formatPower } from '$utils/format';
+  import { formatPower, formatCurrency } from '$utils/format';
   import {
     smoothLinePath,
     smoothAreaPath,
@@ -28,12 +30,16 @@
     apsystems.connect();
     anker.connect();
     productionHistory.connect();
+    // Ventilation mensuelle (tableau + KPI). savings est déjà connecté app-wide
+    // par +layout.svelte (utilisé pour le ROI annuel) → pas besoin ici.
+    energyMonthly.connect();
   });
   onDestroy(() => {
     zigbee.disconnect();
     forecast.disconnect();
     apsystems.disconnect();
     productionHistory.disconnect();
+    energyMonthly.disconnect();
     // Pas de anker.disconnect() : son cycle de vie appartient au layout racine
     // (anker est utilisé app-wide, notamment par le dashboard).
   });
@@ -209,7 +215,7 @@
     };
   });
 
-  // ─── Section 3 : Tableau mensuel ───────────────────────────────────
+  // ─── Section 3 : Tableau mensuel (données RÉELLES : store energyMonthly) ──
   const months = [
     'Jan',
     'Fév',
@@ -224,45 +230,62 @@
     'Nov',
     'Déc'
   ];
-  const currentMonthIdx = new Date().getMonth();
-  const rows: { label: string; values: number[]; unit: string }[] = [
+  const now = new Date();
+  const currentMonthIdx = now.getMonth();
+  // En-tête : nom de mois plein, capitalisé (« Juin », « Janvier »…).
+  const monthTitle = (() => {
+    const m = now.toLocaleDateString('fr-FR', { month: 'long' });
+    return m.charAt(0).toUpperCase() + m.slice(1);
+  })();
+
+  // Lignes du tableau dérivées des 12 mois agrégés (kWh / €). « — » géré au rendu.
+  const rows = $derived<{ label: string; values: number[]; unit: string }[]>([
     {
       label: 'Production PV',
-      values: [85, 120, 210, 380, 520, 580, 595, 540, 410, 260, 150, 95],
+      values: energyMonthly.months.map((m) => m.production_kwh),
       unit: 'kWh'
     },
     {
       label: 'Autoconsommation',
-      values: [72, 98, 178, 312, 436, 478, 482, 442, 338, 215, 124, 82],
+      values: energyMonthly.months.map((m) => m.autoconso_kwh),
       unit: 'kWh'
     },
     {
       label: 'Surplus injecté',
-      values: [13, 22, 32, 68, 84, 102, 113, 98, 72, 45, 26, 13],
+      values: energyMonthly.months.map((m) => m.surplus_kwh),
       unit: 'kWh'
     },
     {
       label: 'Import réseau',
-      values: [238, 192, 92, 0, 0, 0, 0, 0, 12, 84, 168, 224],
+      values: energyMonthly.months.map((m) => m.import_kwh),
       unit: 'kWh'
     },
-    { label: 'Économies', values: [16, 23, 41, 72, 101, 112, 115, 105, 78, 49, 28, 18], unit: '€' }
-  ];
+    {
+      label: 'Économies',
+      values: energyMonthly.months.map((m) => m.savings_eur),
+      unit: '€'
+    }
+  ]);
 
-  // ─── Section 4 : KPIs humanisés ────────────────────────────────────
-  const monthEconomy = rows[4].values[currentMonthIdx];
-  const yearEconomy = rows[4].values.reduce((s, v) => s + v, 0);
-  const co2Saved = rows[1].values[currentMonthIdx] * 0.05;
-  const evKmEquiv = co2Saved * 6;
-  const autonomyPct = Math.round(
-    (rows[1].values[currentMonthIdx] /
-      (rows[1].values[currentMonthIdx] + rows[3].values[currentMonthIdx])) *
-      100
-  );
-  const roiYears = Math.round(8500 / Math.max(yearEconomy, 100));
+  // ─── Section 4 : KPIs humanisés (mois courant réel) ─────────────────
+  // Mois courant : auto-conso + import réels (store mensuel). ROI : économies
+  // annuelles du store savings (baseline incluse, cohérent avec la SavingsCard).
+  const curMonth = $derived(energyMonthly.months[currentMonthIdx] ?? energyMonthly.months[0]);
+  const co2Saved = $derived((curMonth?.autoconso_kwh ?? 0) * 0.05);
+  const evKmEquiv = $derived(co2Saved * 6);
+  const autonomyPct = $derived.by(() => {
+    const auto = curMonth?.autoconso_kwh ?? 0;
+    const denom = auto + (curMonth?.import_kwh ?? 0);
+    return denom > 0 ? Math.round((100 * auto) / denom) : 0;
+  });
+  const roiYears = $derived(Math.round(8500 / Math.max(savings.year.eur, 100)));
 
+  // Rendu d'une cellule : kWh arrondi (≥ 1), € via formatCurrency (≥ 0,005),
+  // sinon tiret « — » (mois sans donnée, ou valeur négligeable).
   function fmtCell(v: number, unit: string): string {
-    return unit === '€' ? `${v} €` : v.toString();
+    if (unit === '€') return v >= 0.005 ? formatCurrency(v) : '—';
+    const r = Math.round(v);
+    return r >= 1 ? r.toString() : '—';
   }
 </script>
 
@@ -274,9 +297,13 @@
   <header class="flex items-center justify-between">
     <h1 class="text-2xl font-semibold tracking-tight">Énergie</h1>
     <span class="text-[12px]" style="color: var(--color-muted-fg);">
-      Sanguinet · Mai {new Date().getFullYear()}
+      Sanguinet · {monthTitle}
+      {now.getFullYear()}
     </span>
   </header>
+
+  <!-- ═══ HÉRO : Économies solaires (auto-conso valorisée HP/HC, données réelles) ═══ -->
+  <SavingsCard />
 
   <!-- ═══ Paysage (iPad/desktop) : production + prévisions côte à côte ═══ -->
   <div class="grid gap-6 lg:grid-cols-2 lg:items-start">
@@ -612,9 +639,6 @@
     </section>
   </div>
 
-  <!-- ═══ Économies solaires (auto-conso valorisée HP/HC, données réelles) ═══ -->
-  <SavingsCard />
-
   <!-- ═══ Section 2 : Conso électroménager (Frigo, Lave-linge…) ═══ -->
   {#if appliancePlugs.length > 0}
     <section class="flex flex-col gap-3">
@@ -655,7 +679,7 @@
                 class:future={i > currentMonthIdx}
                 class="numeric"
               >
-                {v > 0 ? fmtCell(v, row.unit) : '—'}
+                {fmtCell(v, row.unit)}
               </td>
             {/each}
           </tr>
