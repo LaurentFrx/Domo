@@ -15,6 +15,12 @@ export interface Shutter {
   targetPosition: number;
   /** true if motor is moving */
   moving: boolean;
+  /** Durée de course pleine AFFICHÉE (ms) — cale l'animation sur le temps réel
+   *  pour les stores bridés. Absent = vitesse d'animation par défaut. */
+  travelMs?: number;
+  /** Libellés des extrêmes (store-banne) : 0 % et 100 %. Défaut Ouvert/Fermé. */
+  labelMin?: string;
+  labelMax?: string;
 }
 
 export interface Switch {
@@ -40,7 +46,10 @@ const NODE_NAMES: Record<number, { name: string; room: string }> = {
   18: { name: 'Salon', room: 'Séjour' },
   19: { name: 'Bureau', room: 'Étage' },
   20: { name: 'Chambre parents', room: 'Étage' },
-  21: { name: 'Chambre amis', room: 'Étage' }
+  21: { name: 'Chambre amis', room: 'Étage' },
+  // node 25 commissionné le 2026-06-04 (Sonoff « WiFi Smart Switch »,
+  // device type 514 WindowCovering) — store roulant du séjour.
+  25: { name: 'Store', room: 'Séjour' }
 };
 
 // Sonoff Matter Smart Switch — assignation par date de commissioning.
@@ -51,6 +60,44 @@ const SWITCH_NAMES: Record<number, { name: string; room: string }> = {
   22: { name: 'Bureau multimédia', room: 'Bureau' },
   24: { name: 'Chargeur Lau', room: 'Séjour' }
 };
+
+// ─── Stores bridés (sécurité matérielle) ───────────────────────────────
+// La position du module (rapportée ET commandée via GoToLiftPercentage) va de
+// 0 (replié/enroulé, au repos) à 100 (course pleine). Certains stores ne
+// peuvent pas faire toute leur course sans heurter un obstacle : on borne le
+// déploiement à maxOpenPercent ET on étire la plage [0 … maxOpenPercent] sur
+// 0–100 % à l'écran (l'utilisateur voit un store « normal », butée = 100 %).
+//   maxOpenPercent : déploiement physique maxi autorisé (au-delà = obstacle) ;
+//   travelMs       : durée réelle mesurée de la course bridée (0 → maxOpenPercent) ;
+//   labelMin/Max   : libellés des extrêmes (store-banne).
+// Sens VÉRIFIÉ le 2026-06-05 par test direct : GoToLiftPercentage(x) déploie le
+// module à x % (0 = enroulé), honoré au centième, le moteur s'arrête seul.
+const SHUTTER_LIMITS: Record<
+  number,
+  { maxOpenPercent: number; travelMs: number; labelMin: string; labelMax: string }
+> = {
+  // node 25 (Store, Séjour) : au-delà de 75 % de déploiement il heurte des
+  // tuiles voisines. Course 0 → 75 % chronométrée à ~42 s.
+  25: { maxOpenPercent: 75, travelMs: 42_000, labelMin: 'Rentré', labelMax: 'Déployé' }
+};
+
+const clampPct = (p: number) => Math.max(0, Math.min(100, p));
+
+/** Déploiement PHYSIQUE (%) à commander au module depuis une consigne AFFICHÉE.
+ *  Borné DUR à maxOpenPercent → jamais déployé au-delà de la butée, quelle que
+ *  soit l'entrée (sécurité anti-obstacle). */
+function realFromDisplay(nodeId: number, displayPct: number): number {
+  const limit = SHUTTER_LIMITS[nodeId];
+  if (!limit) return clampPct(displayPct);
+  return (clampPct(displayPct) / 100) * limit.maxOpenPercent;
+}
+
+/** % AFFICHÉ (0–100) depuis le déploiement PHYSIQUE rapporté par le module. */
+function displayFromReal(nodeId: number, realPct: number): number {
+  const limit = SHUTTER_LIMITS[nodeId];
+  if (!limit) return clampPct(realPct);
+  return clampPct(Math.round((realPct / limit.maxOpenPercent) * 100));
+}
 
 function parseShutter(node: Record<string, unknown>): Shutter | null {
   const nodeId = node.node_id as number;
@@ -80,9 +127,13 @@ function parseShutter(node: Record<string, unknown>): Shutter | null {
     name: meta.name,
     room: meta.room,
     available,
-    position: Math.round(pos100ths / 100),
-    targetPosition: Math.round(target100ths / 100),
-    moving: opStatus !== 0
+    // Déploiement réel (% de course) → échelle AFFICHÉE pour les stores bridés.
+    position: displayFromReal(nodeId, Math.round(pos100ths / 100)),
+    targetPosition: displayFromReal(nodeId, Math.round(target100ths / 100)),
+    moving: opStatus !== 0,
+    travelMs: SHUTTER_LIMITS[nodeId]?.travelMs,
+    labelMin: SHUTTER_LIMITS[nodeId]?.labelMin,
+    labelMax: SHUTTER_LIMITS[nodeId]?.labelMax
   };
 }
 
@@ -176,27 +227,37 @@ class MatterState {
   }
 
   async open(nodeId: number) {
+    // « Rentrer » : UpOrOpen ramène à la position 0 (enroulé) → sûr pour tous,
+    // y compris les stores bridés (s'éloigne de l'obstacle).
     await this.client?.open(nodeId);
   }
   async close(nodeId: number) {
-    await this.client?.close(nodeId);
+    const limit = SHUTTER_LIMITS[nodeId];
+    if (limit) {
+      // Store bridé : « déployer » = aller à la BUTÉE (maxOpenPercent) par
+      // positionnement. JAMAIS DownOrClose (qui irait à 100 % → obstacle).
+      await this.client?.goToPosition(nodeId, limit.maxOpenPercent);
+    } else {
+      await this.client?.close(nodeId);
+    }
   }
   async stop(nodeId: number) {
     await this.client?.stop(nodeId);
   }
   async goToPosition(nodeId: number, percent: number) {
-    await this.client?.goToPosition(nodeId, percent);
+    // percent = consigne AFFICHÉE (0–100) → déploiement physique borné dur.
+    await this.client?.goToPosition(nodeId, realFromDisplay(nodeId, percent));
   }
 
   async openAll() {
     for (const s of this.shutters.filter((s) => s.available)) {
-      await this.client?.open(s.nodeId);
+      await this.open(s.nodeId); // « rentrer » tous (UpOrOpen → 0)
     }
   }
 
   async closeAll() {
     for (const s of this.shutters.filter((s) => s.available)) {
-      await this.client?.close(s.nodeId);
+      await this.close(s.nodeId); // routé via close() → déploiement borné des stores bridés
     }
   }
 
@@ -220,13 +281,13 @@ class MatterState {
 
   async openRoom(room: string) {
     for (const s of this.shutters.filter((s) => s.available && s.room === room)) {
-      await this.client?.open(s.nodeId);
+      await this.open(s.nodeId); // « rentrer » la pièce (UpOrOpen → 0)
     }
   }
 
   async closeRoom(room: string) {
     for (const s of this.shutters.filter((s) => s.available && s.room === room)) {
-      await this.client?.close(s.nodeId);
+      await this.close(s.nodeId); // routé via close() → déploiement borné des stores bridés
     }
   }
 

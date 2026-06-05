@@ -17,7 +17,7 @@
   let dragPos = $state(0);
   let trackEl = $state<HTMLDivElement | null>(null);
 
-  const SPEED_PERCENT_PER_SECOND = 10;
+  const DEFAULT_SPEED_PCT_PER_SEC = 10;
   let animPos = $state<number | null>(null);
   let animTarget = 0;
   let lastFrameTime = 0;
@@ -45,7 +45,11 @@
   );
 
   const positionLabel = $derived(
-    displayedPosition <= 1 ? 'Ouvert' : displayedPosition >= 99 ? 'Fermé' : `${displayedPosition}%`
+    displayedPosition <= 1
+      ? (shutter.labelMin ?? 'Ouvert')
+      : displayedPosition >= 99
+        ? (shutter.labelMax ?? 'Fermé')
+        : `${displayedPosition}%`
   );
 
   const isMoving = $derived(animPos !== null || shutter.moving);
@@ -100,7 +104,10 @@
     const dt = (t - lastFrameTime) / 1000;
     lastFrameTime = t;
     const direction = animTarget > animPos ? 1 : -1;
-    const next = animPos + direction * SPEED_PERCENT_PER_SECOND * dt;
+    // Vitesse calée sur le temps de course réel si le store est bridé (travelMs),
+    // sinon vitesse par défaut → affichage synchronisé avec le déplacement physique.
+    const speed = shutter.travelMs ? 100_000 / shutter.travelMs : DEFAULT_SPEED_PCT_PER_SEC;
+    const next = animPos + direction * speed * dt;
     const reached = (direction > 0 && next >= animTarget) || (direction < 0 && next <= animTarget);
     if (reached) {
       animPos = animTarget;
@@ -261,19 +268,20 @@
       bind:this={trackEl}
       class="slider-track"
       class:dragging
-      role="slider"
-      tabindex={shutter.available ? 0 : -1}
-      aria-label="Position {shutter.name}"
-      aria-valuemin="0"
-      aria-valuemax="100"
-      aria-valuenow={shutter.position}
-      aria-valuetext={positionLabel}
     >
       <div class="slider-fill" style:height="{displayedPosition}%"></div>
-      <!-- Le thumb (rond blanc) seul est draggable. Le reste du track laisse
-           passer les gestes de scroll de l'iPhone (touch-action: pan-y). -->
+      <!-- Le thumb (rond blanc) seul est draggable ET porte la sémantique slider
+           (role + aria + focus), puisque c'est lui qui reçoit les gestes. Le reste
+           du track laisse passer le scroll de l'iPhone (touch-action: pan-y). -->
       <div
         class="slider-thumb"
+        role="slider"
+        tabindex={shutter.available ? 0 : -1}
+        aria-label="Position {shutter.name}"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow={shutter.position}
+        aria-valuetext={positionLabel}
         style:bottom="calc((100% - var(--ssize)) * {(100 - displayedPosition) / 100})"
         onpointerdown={onPointerDown}
         onpointermove={onPointerMove}
@@ -363,6 +371,7 @@
     min-height: 2.4em;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
