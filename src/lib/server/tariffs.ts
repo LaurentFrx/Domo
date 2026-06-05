@@ -91,7 +91,8 @@ function normalize(raw: unknown): TariffConfig {
     baseline_eur?: number;
     baseline_kwh?: number;
   };
-  const regimes = Array.isArray(o.regimes) && o.regimes.length > 0 ? o.regimes : DEFAULT_CONFIG.regimes;
+  const regimes =
+    Array.isArray(o.regimes) && o.regimes.length > 0 ? o.regimes : DEFAULT_CONFIG.regimes;
   const b = (o.baseline ?? {}) as Partial<TariffBaseline>;
   const n = (v: unknown) => Number(v ?? 0) || 0;
   const baseline: TariffBaseline = {

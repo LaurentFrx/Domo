@@ -77,9 +77,16 @@
       class="flex items-center justify-between text-[11px] tabular-nums"
       style="color: var(--color-muted-fg);"
     >
-      <span>Mois <span style="color: var(--color-fg);">{connected ? eur(month.eur) : DASH}</span></span>
-      <span>Année <span style="color: var(--color-fg);">{connected ? eur(year.eur) : DASH}</span></span>
-      <span>Total <span style="color: var(--color-fg);">{connected ? eur(total.eur) : DASH}</span></span>
+      <span
+        >Mois <span style="color: var(--color-fg);">{connected ? eur(month.eur) : DASH}</span></span
+      >
+      <span
+        >Année <span style="color: var(--color-fg);">{connected ? eur(year.eur) : DASH}</span></span
+      >
+      <span
+        >Total <span style="color: var(--color-fg);">{connected ? eur(total.eur) : DASH}</span
+        ></span
+      >
     </div>
   </div>
 {:else}

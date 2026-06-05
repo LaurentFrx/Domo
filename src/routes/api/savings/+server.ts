@@ -79,7 +79,10 @@ export const GET: RequestHandler = async () => {
   const now = new Date();
   const path = env.RECORDER_DB_PATH;
   if (!path) {
-    return json({ ...emptyPayload(now), error: 'RECORDER_DB_PATH non configurée' }, { status: 503 });
+    return json(
+      { ...emptyPayload(now), error: 'RECORDER_DB_PATH non configurée' },
+      { status: 503 }
+    );
   }
 
   const today = parisDate(now); // 'YYYY-MM-DD' Paris
@@ -155,9 +158,17 @@ export const GET: RequestHandler = async () => {
 
     const payload: SavingsPayload = {
       today: { ...toPeriod(todayAgg), rate_eur_h: rateEurH, coverage_pct: coveragePct },
-      month: { ...monthPeriod, eur: monthPeriod.eur + b.month.eur, kwh: monthPeriod.kwh + b.month.kwh },
+      month: {
+        ...monthPeriod,
+        eur: monthPeriod.eur + b.month.eur,
+        kwh: monthPeriod.kwh + b.month.kwh
+      },
       year: { ...yearPeriod, eur: yearPeriod.eur + b.year.eur, kwh: yearPeriod.kwh + b.year.kwh },
-      total: { ...totalPeriod, eur: totalPeriod.eur + b.total.eur, kwh: totalPeriod.kwh + b.total.kwh }
+      total: {
+        ...totalPeriod,
+        eur: totalPeriod.eur + b.total.eur,
+        kwh: totalPeriod.kwh + b.total.kwh
+      }
     };
     return json(payload);
   } catch (e) {

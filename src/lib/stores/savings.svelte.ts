@@ -142,7 +142,11 @@ class SavingsState {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const p = (await res.json()) as SavingsPayload;
       this.#snap = {
-        today: { ...normPeriod(p.today), rate_eur_h: num(p.today?.rate_eur_h), coverage_pct: num(p.today?.coverage_pct) },
+        today: {
+          ...normPeriod(p.today),
+          rate_eur_h: num(p.today?.rate_eur_h),
+          coverage_pct: num(p.today?.coverage_pct)
+        },
         month: normPeriod(p.month),
         year: normPeriod(p.year),
         total: normPeriod(p.total)
