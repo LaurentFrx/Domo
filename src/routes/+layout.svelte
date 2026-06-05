@@ -5,6 +5,7 @@
   import TabBar from '$components/layout/TabBar.svelte';
   import { startDemoTicker, stopDemoTicker } from '$stores/demo-ticker.svelte';
   import { anker } from '$stores/anker.svelte';
+  import { savings } from '$stores/savings.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { haptic } from '$utils/haptic';
@@ -45,6 +46,13 @@
   $effect(() => {
     anker.connect();
     return () => anker.disconnect();
+  });
+
+  // ─── Économies d'autoconsommation (route locale, base recorder) ────────
+  // App-wide : carte affichée sur Accueil + Énergie. Poll 60 s, visibility-aware.
+  $effect(() => {
+    savings.connect();
+    return () => savings.disconnect();
   });
 
   // ─── Synchro Anker → dashboard quand l'API est dispo ───────────────────

@@ -1,6 +1,7 @@
 <script lang="ts">
   import FlowDiagram from '$components/charts/FlowDiagram.svelte';
   import KpiCard from '$components/cards/KpiCard.svelte';
+  import SavingsCard from '$components/cards/SavingsCard.svelte';
   import ParticleField from '$components/effects/ParticleField.svelte';
   import ConcentricRings from '$components/effects/ConcentricRings.svelte';
   import { anker } from '$stores/anker.svelte';
@@ -77,9 +78,6 @@
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals
     });
-  }
-  function fmtEuro(n: number): string {
-    return fmtNumber(n, 0) + ' €';
   }
   function fmtW(w: number): string {
     return Math.round(Math.abs(w)).toLocaleString('fr-FR').replace(/\s/g, ' ');
@@ -185,9 +183,12 @@
       />
 
       <div class="flex flex-col gap-5">
+        <!-- ═══ Économies solaires (auto-conso valorisée HP/HC, données réelles) ═══ -->
+        <SavingsCard compact />
+
         <!-- ═══ KPI lifetime (vraies données Anker) ═══ -->
         {#if hasLifetime}
-          <div class="grid grid-cols-3 gap-3">
+          <div class="grid grid-cols-2 gap-3">
             <KpiCard
               label="Production totale"
               value={fmtNumber(anker.lifetimeProductionKwh, 0)}
@@ -201,12 +202,6 @@
               unit="kg"
               trend={`≈ ${fmtNumber(anker.lifetimeCo2SavedKg * 6, 0)} km en VE`}
               domain="battery"
-            />
-            <KpiCard
-              label="Économies"
-              value={fmtEuro(anker.lifetimeSavingsEur)}
-              trend="depuis l'installation"
-              domain="hc"
             />
           </div>
         {:else}

@@ -16,6 +16,7 @@
   } from '$utils/chart';
   import { onMount, onDestroy } from 'svelte';
   import KpiCard from '$components/cards/KpiCard.svelte';
+  import SavingsCard from '$components/cards/SavingsCard.svelte';
   import ChartHoverLayer from '$components/charts/ChartHoverLayer.svelte';
   import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
 
@@ -610,6 +611,9 @@
       </div>
     </section>
   </div>
+
+  <!-- ═══ Économies solaires (auto-conso valorisée HP/HC, données réelles) ═══ -->
+  <SavingsCard />
 
   <!-- ═══ Section 2 : Conso électroménager (Frigo, Lave-linge…) ═══ -->
   {#if appliancePlugs.length > 0}
