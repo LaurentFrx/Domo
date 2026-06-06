@@ -13,13 +13,16 @@ type Persisted = {
   priceHp: number;
   priceExport: number;
   subscription: number;
+  /** Coût total de l'installation PV+batterie (€) — sert au calcul du ROI. */
+  installationCostEur: number;
 };
 
 const DEFAULTS: Persisted = {
   priceHc: 0.1812,
   priceHp: 0.2318,
   priceExport: 0.04,
-  subscription: 13.5
+  subscription: 13.5,
+  installationCostEur: 8500
 };
 
 class SettingsState {
@@ -27,6 +30,7 @@ class SettingsState {
   priceHp = $state(DEFAULTS.priceHp);
   priceExport = $state(DEFAULTS.priceExport);
   subscription = $state(DEFAULTS.subscription);
+  installationCostEur = $state(DEFAULTS.installationCostEur);
 
   /** true pendant le fetch initial — évite de save pendant hydrate. */
   hydrating = $state(false);
@@ -46,6 +50,8 @@ class SettingsState {
       if (typeof data.priceHp === 'number') this.priceHp = data.priceHp;
       if (typeof data.priceExport === 'number') this.priceExport = data.priceExport;
       if (typeof data.subscription === 'number') this.subscription = data.subscription;
+      if (typeof data.installationCostEur === 'number')
+        this.installationCostEur = data.installationCostEur;
       this.lastError = null;
     } catch (e) {
       this.lastError = (e as Error).message;
@@ -66,7 +72,8 @@ class SettingsState {
           priceHc: this.priceHc,
           priceHp: this.priceHp,
           priceExport: this.priceExport,
-          subscription: this.subscription
+          subscription: this.subscription,
+          installationCostEur: this.installationCostEur
         })
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

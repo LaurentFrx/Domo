@@ -478,6 +478,28 @@
           style="color: var(--color-fg);"
         />
       </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Coût installation (€)
+        </span>
+        <input
+          type="number"
+          step="100"
+          bind:value={settings.installationCostEur}
+          onchange={() => {
+            haptic('success');
+            settings.save();
+          }}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-fg);"
+        />
+      </label>
     </div>
   </section>
 

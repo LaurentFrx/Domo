@@ -6,6 +6,7 @@
   import { production } from '$stores/production.svelte';
   import { productionHistory } from '$stores/productionHistory.svelte';
   import { savings } from '$stores/savings.svelte';
+  import { settings } from '$stores/settings.svelte';
   import { energyMonthly } from '$stores/energyMonthly.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { formatPower, formatCurrency } from '$utils/format';
@@ -22,6 +23,7 @@
   import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
 
   onMount(() => {
+    settings.hydrate(); // coût installation (ROI) + prix, depuis /api/settings
     zigbee.connect();
     forecast.connect();
     // anker ET apsystems sont désormais connectés app-wide par +layout.svelte
@@ -278,7 +280,10 @@
     const denom = auto + (curMonth?.import_kwh ?? 0);
     return denom > 0 ? Math.round((100 * auto) / denom) : 0;
   });
-  const roiYears = $derived(Math.round(8500 / Math.max(savings.year.eur, 100)));
+  // Coût d'installation = réglage (modifiable dans Réglages), plus de 8500 € en dur.
+  const roiYears = $derived(
+    Math.round(settings.installationCostEur / Math.max(savings.year.eur, 100))
+  );
 
   // Rendu d'une cellule : kWh arrondi (≥ 1), € via formatCurrency (≥ 0,005),
   // sinon tiret « — » (mois sans donnée, ou valeur négligeable).
