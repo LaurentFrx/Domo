@@ -145,7 +145,11 @@
     </div>
   {/if}
 
-  <div class="stagger-enter relative flex flex-col gap-5 py-4" style="z-index: 1;">
+  <!-- gap/padding plus serrés sur mobile (condensation iPhone vertical) ; généreux dès sm. -->
+  <div
+    class="stagger-enter relative flex flex-col gap-3.5 py-3 sm:gap-5 sm:py-4"
+    style="z-index: 1;"
+  >
     <!-- ═══ Économies solaires — carte héro en première position ═══ -->
     <SavingsCard />
 
@@ -205,7 +209,7 @@
     <!-- ═══ Paysage (iPad/desktop) : Sankey | stats côte à côte ; mobile : empilé ═══ -->
     <!-- items-stretch : la colonne stats remplit la hauteur du Sankey carré (sinon
          un grand vide à droite sur desktop). -->
-    <div class="grid gap-5 lg:grid-cols-2 lg:items-stretch">
+    <div class="grid gap-3.5 sm:gap-5 lg:grid-cols-2 lg:items-stretch">
       <!-- Flow Diagram (carré centré, max 520px) -->
       <FlowDiagram
         pvSudW={pvSudA}

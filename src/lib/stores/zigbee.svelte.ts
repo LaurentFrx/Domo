@@ -42,7 +42,9 @@ const ZIGBEE_ROOMS: Record<string, string> = {
   'Thermo SdB': 'Salle de bain',
   'Thermo Salon': 'Séjour',
   'Chargeur Isa': 'Séjour',
-  'Chargeur Laurent': 'Séjour',
+  // « Chargeur Laurent » a été rebranché sur le frigo et renommé « Frigo » (z2m) ;
+  // l'ancienne prise « Frigo » (vide) est devenue « Prise libre ».
+  'Prise libre': 'Cuisine',
   'Thermo Garage': 'Garage',
   thermo_cumulus: 'Garage',
   Thermo_ext: 'Extérieur',
