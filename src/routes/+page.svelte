@@ -6,11 +6,11 @@
   import { anker } from '$stores/anker.svelte';
   import { production } from '$stores/production.svelte';
   import { savings } from '$stores/savings.svelte';
+  import { tariff } from '$stores/tariff.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
   import { cumulus } from '$stores/cumulus.svelte';
   import { shelly } from '$stores/shelly.svelte';
   import { preferences } from '$stores/preferences.svelte';
-  import { hourOfDay, tariffMode, tariffPrice } from '$utils/mock-curves';
   import { Tween } from 'svelte/motion';
   import { cubicOut } from 'svelte/easing';
 
@@ -111,14 +111,12 @@
     return Math.round(Math.abs(w)).toLocaleString('fr-FR').replace(/\s/g, ' ');
   }
 
-  // ─── Footer : tarif courant + prochaine bascule ──────────────────────
-  const hour = $derived(hourOfDay());
-  const currentTariff = $derived(tariffMode(hour));
-  const currentPrice = $derived(tariffPrice(hour));
-  const nextSwitchHour = $derived(currentTariff === 'HC' ? 6 : 22);
-  const hoursUntilSwitch = $derived(
-    nextSwitchHour > hour ? Math.ceil(nextSwitchHour - hour) : Math.ceil(24 - hour + nextSwitchHour)
-  );
+  // ─── Footer : tarif RÉEL (store tariff, vraie fenêtre HC 00:06–08:06) ──
+  const currentTariff = $derived(tariff.period);
+  const currentPrice = $derived(tariff.priceEurKwh); // €/kWh
+  const nextTariff = $derived(tariff.next.period);
+  const nextSwitchAt = $derived(tariff.next.at); // 'HH:MM' local Paris
+  const hoursUntilSwitch = $derived(tariff.nextInHours);
 </script>
 
 <svelte:head>
@@ -305,7 +303,7 @@
               Prochaine bascule
             </span>
             <span class="text-[14px] tabular-nums" style="color: var(--color-fg);">
-              {currentTariff === 'HC' ? 'HP' : 'HC'} à {nextSwitchHour}h · dans {hoursUntilSwitch} h
+              {nextTariff} à {nextSwitchAt} · dans {hoursUntilSwitch} h
             </span>
           </div>
         </div>

@@ -18,11 +18,13 @@
     zigbee.connect();
     daikin.connect();
     airzone.connect();
+    weather.connect();
   });
   onDestroy(() => {
     zigbee.disconnect();
     daikin.disconnect();
     airzone.disconnect();
+    weather.disconnect();
   });
 
   // ─── Airzone (gainable) : libellés + couleurs de mode ────────────────
@@ -65,7 +67,19 @@
   // 270° d'arc = 75% de la circonférence
   const ARC_LENGTH = ARC_CIRCUMFERENCE * 0.75;
 
-  const tempHistory = [55, 56, 57, 58, 60, 62, 63, 64, 64, 65, 65, 64];
+  // Historique RÉEL glissant de la température cumulus (relevés sonde Zigbee de la
+  // session) — plus de série factice. Démarre vide, se remplit au fil des lectures.
+  let tempHistory = $state<number[]>([]);
+  $effect(() => {
+    const t = cumulus.temperatureC;
+    if (t > 0) tempHistory = [...tempHistory, t].slice(-24);
+  });
+
+  // Direction du vent : degrés (météo réelle Open-Meteo) → cardinal FR.
+  function windCardinal(deg: number): string {
+    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
+    return dirs[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+  }
 
   const cumulusProgress = $derived(Math.min(1, cumulus.temperatureC / cumulus.targetTempC));
   const legionnellaDays = $derived(daysUntil(cumulus.nextLegionnellaCycle));
@@ -900,7 +914,9 @@
         </span>
         <span class="text-[14px]" style="color: var(--color-muted-fg);">km/h</span>
       </div>
-      <span class="text-[11px]" style="color: var(--color-muted-fg);"> Ouest </span>
+      <span class="text-[11px]" style="color: var(--color-muted-fg);">
+        {windCardinal(weather.windDirection)}
+      </span>
     </div>
 
     <div class="flex flex-col gap-1">

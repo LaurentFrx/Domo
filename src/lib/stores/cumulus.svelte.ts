@@ -17,6 +17,7 @@
 
 import type { CumulusMode } from '$theme/tokens';
 import { hourOfDay, cumulusTemp } from '$utils/mock-curves';
+import { zigbee } from './zigbee.svelte';
 
 class CumulusState {
   mode = $state<'mock' | 'proxy' | 'direct'>('mock');
@@ -26,8 +27,18 @@ class CumulusState {
   // ─── État ───────────────────────────────────────
   /** Mode courant. */
   currentMode = $state<CumulusMode>('PV');
-  /** Température mesurée (°C). */
-  temperatureC = $state(0);
+  /** Température mock interne (placeholder avant/sans sonde réelle). */
+  #mockTempC = $state(0);
+  /**
+   * Température mesurée (°C) — RÉELLE depuis la sonde Zigbee `thermo_cumulus`
+   * (SNZB-02LD) si elle remonte, sinon repli sur le mock. La sonde est sur le
+   * réseau Zigbee (store zigbee, connecté sur /climat & /pieces).
+   */
+  temperatureC = $derived.by(() => {
+    const d = zigbee.devices.find((x) => x.friendlyName === 'thermo_cumulus');
+    const t = d?.state?.temperature;
+    return typeof t === 'number' ? +t.toFixed(1) : this.#mockTempC;
+  });
   /** Tendance (°C/h, + = chauffe, - = refroidit). */
   trendCh = $state(0);
   /** Énergie injectée aujourd'hui (kWh). */
@@ -50,10 +61,10 @@ class CumulusState {
   targetTempC = $state(62);
   /** Température max sécurité (°C). */
   maxTempC = $state(75);
-  /** Plage HC : début (h, 0-24). */
-  hcStartHour = $state(22);
-  /** Plage HC : fin (h, 0-24). */
-  hcEndHour = $state(6);
+  /** Plage HC : début (h décimal — 0.1 = 00:06). Fenêtre RÉELLE 00:06–08:06. */
+  hcStartHour = $state(0.1);
+  /** Plage HC : fin (h décimal — 8.1 = 08:06). */
+  hcEndHour = $state(8.1);
 
   constructor() {
     this.generateMock();
@@ -61,12 +72,13 @@ class CumulusState {
 
   private generateMock() {
     const h = hourOfDay();
-    this.temperatureC = +cumulusTemp(h).toFixed(1);
+    this.#mockTempC = +cumulusTemp(h).toFixed(1);
     // Tendance : dérivée numérique
     const next = cumulusTemp(h + 0.1);
-    this.trendCh = +((next - this.temperatureC) * 10).toFixed(1);
+    this.trendCh = +((next - this.#mockTempC) * 10).toFixed(1);
     this.energyTodayKwh = +(Math.max(0, h - 6) * 0.55).toFixed(2);
-    this.currentMode = h >= 11 && h < 16 ? 'PV' : h >= 22 || h < 6 ? 'HC' : 'OFF';
+    this.currentMode =
+      h >= 11 && h < 16 ? 'PV' : h >= this.hcStartHour && h < this.hcEndHour ? 'HC' : 'OFF';
   }
 
   /**
@@ -80,7 +92,7 @@ class CumulusState {
     const h = hourOfDay();
     const base = cumulusTemp(h);
     const jitter = (Math.random() - 0.5) * 0.3; // ±0.15°C
-    this.temperatureC = +(base + jitter).toFixed(1);
+    this.#mockTempC = +(base + jitter).toFixed(1);
     const next = cumulusTemp(h + 0.1);
     this.trendCh = +((next - base) * 10).toFixed(1);
     this.lastUpdate = new Date();

@@ -188,6 +188,38 @@ export function priceAt(t: Date): { eur_kwh: number; period: TariffPeriod } {
 }
 
 /**
+ * Prochaine bascule HP/HC à partir de `t` (heure locale Paris, wrap-safe).
+ * Les bornes de bascule = débuts ET fins des fenêtres HC. `inMinutes` est l'écart
+ * jusqu'à la prochaine borne ; `period` est le régime EN VIGUEUR APRÈS la bascule.
+ * (Pour 1 fenêtre HC unique — config réelle — c'est l'inverse du régime courant.)
+ */
+export function nextTariffSwitch(t: Date): {
+  period: TariffPeriod;
+  inMinutes: number;
+  atHHMM: string;
+} {
+  const r = regimeAt(t);
+  const m = parisMinutes(t);
+  const bounds = new Set<number>();
+  for (const [a, b] of r.hc_windows ?? []) {
+    bounds.add(hhmmToMin(a));
+    bounds.add(hhmmToMin(b));
+  }
+  const sorted = [...bounds].sort((x, y) => x - y);
+  if (sorted.length === 0) {
+    return { period: isHC(t) ? 'HC' : 'HP', inMinutes: 0, atHHMM: '' };
+  }
+  let next = sorted.find((x) => x > m);
+  const inMinutes = next === undefined ? 1440 - m + sorted[0] : next - m;
+  if (next === undefined) next = sorted[0];
+  const hh = Math.floor(next / 60);
+  const mm = next % 60;
+  const atHHMM = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  // Après une borne, le régime s'inverse (cas 1 fenêtre HC = config réelle).
+  return { period: isHC(t) ? 'HP' : 'HC', inMinutes, atHHMM };
+}
+
+/**
  * Baselines APPLICABLES à l'instant `t`, par période. Le total s'applique
  * toujours ; le mois/l'année seulement si `t` est encore dans le mois/l'année
  * de l'anchor (au-delà, le recorder couvre la période entière → baseline = 0,

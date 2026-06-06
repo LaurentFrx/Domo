@@ -8,6 +8,7 @@
   import { apsystems } from '$stores/apsystems.svelte';
   import { production } from '$stores/production.svelte';
   import { savings } from '$stores/savings.svelte';
+  import { tariff } from '$stores/tariff.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { haptic } from '$utils/haptic';
@@ -64,6 +65,12 @@
   $effect(() => {
     savings.connect();
     return () => savings.disconnect();
+  });
+
+  // ─── Tarif HP/HC RÉEL (route serveur, vraie fenêtre HC) ────────────────
+  $effect(() => {
+    tariff.connect();
+    return () => tariff.disconnect();
   });
 
   // ─── Synchro Anker → dashboard quand l'API est dispo ───────────────────
