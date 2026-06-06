@@ -500,6 +500,27 @@
           style="color: var(--color-fg);"
         />
       </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Mise en service
+        </span>
+        <input
+          type="date"
+          bind:value={settings.installationDateISO}
+          onchange={() => {
+            haptic('success');
+            settings.save();
+          }}
+          class="bg-transparent text-[15px] font-semibold tabular-nums focus:outline-none"
+          style="color: var(--color-fg);"
+        />
+      </label>
     </div>
   </section>
 

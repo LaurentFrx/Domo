@@ -280,9 +280,26 @@
     const denom = auto + (curMonth?.import_kwh ?? 0);
     return denom > 0 ? Math.round((100 * auto) / denom) : 0;
   });
-  // Coût d'installation = réglage (modifiable dans Réglages), plus de 8500 € en dur.
+  // ─── ROI : amortissement RÉEL ───────────────────────────────────────
+  // Coût = réglage (Réglages). On tient compte de la part DÉJÀ AMORTIE par le
+  // total des économies cumulées, et on projette le reste au taux annuel RÉALISÉ
+  // (économies cumulées ÷ années écoulées depuis la mise en service).
+  const installEur = $derived(settings.installationCostEur);
+  const savedTotalEur = $derived(savings.total.eur);
+  const amortizedPct = $derived(
+    installEur > 0 ? Math.min(100, Math.round((100 * savedTotalEur) / installEur)) : 0
+  );
+  const remainingEur = $derived(Math.max(0, installEur - savedTotalEur));
+  const yearsElapsed = $derived(
+    Math.max(
+      0.1,
+      (Date.now() - new Date(settings.installationDateISO).getTime()) / (365.25 * 24 * 3600 * 1000)
+    )
+  );
+  const annualSavingsEur = $derived(savedTotalEur / yearsElapsed);
+  // Années RESTANTES jusqu'à l'amortissement complet (0 si déjà amorti).
   const roiYears = $derived(
-    Math.round(settings.installationCostEur / Math.max(savings.year.eur, 100))
+    remainingEur <= 0 ? 0 : annualSavingsEur > 0 ? Math.round(remainingEur / annualSavingsEur) : 0
   );
 
   // Rendu d'une cellule : kWh arrondi (≥ 1), € via formatCurrency (≥ 0,005),
@@ -722,9 +739,9 @@
       />
       <KpiCard
         label="ROI installation"
-        value={roiYears.toString()}
-        unit="ans"
-        trend="reste à amortir"
+        value={roiYears > 0 ? roiYears.toString() : '✓'}
+        unit={roiYears > 0 ? 'ans restants' : 'amorti'}
+        trend={`amorti ${amortizedPct}% · ${Math.round(savedTotalEur)} € / ${Math.round(installEur)} €`}
         domain="consumption"
       />
     </div>

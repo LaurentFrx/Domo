@@ -15,6 +15,8 @@ type Persisted = {
   subscription: number;
   /** Coût total de l'installation PV+batterie (€) — sert au calcul du ROI. */
   installationCostEur: number;
+  /** Date de mise en service 'YYYY-MM-DD' — sert au taux d'économie annuel réalisé. */
+  installationDateISO: string;
 };
 
 const DEFAULTS: Persisted = {
@@ -22,7 +24,8 @@ const DEFAULTS: Persisted = {
   priceHp: 0.2318,
   priceExport: 0.04,
   subscription: 13.5,
-  installationCostEur: 4500
+  installationCostEur: 4500,
+  installationDateISO: '2025-06-01'
 };
 
 class SettingsState {
@@ -31,6 +34,7 @@ class SettingsState {
   priceExport = $state(DEFAULTS.priceExport);
   subscription = $state(DEFAULTS.subscription);
   installationCostEur = $state(DEFAULTS.installationCostEur);
+  installationDateISO = $state(DEFAULTS.installationDateISO);
 
   /** true pendant le fetch initial — évite de save pendant hydrate. */
   hydrating = $state(false);
@@ -52,6 +56,8 @@ class SettingsState {
       if (typeof data.subscription === 'number') this.subscription = data.subscription;
       if (typeof data.installationCostEur === 'number')
         this.installationCostEur = data.installationCostEur;
+      if (typeof data.installationDateISO === 'string' && data.installationDateISO)
+        this.installationDateISO = data.installationDateISO;
       this.lastError = null;
     } catch (e) {
       this.lastError = (e as Error).message;
@@ -73,7 +79,8 @@ class SettingsState {
           priceHp: this.priceHp,
           priceExport: this.priceExport,
           subscription: this.subscription,
-          installationCostEur: this.installationCostEur
+          installationCostEur: this.installationCostEur,
+          installationDateISO: this.installationDateISO
         })
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
