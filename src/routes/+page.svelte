@@ -2,9 +2,10 @@
   import FlowDiagram from '$components/charts/FlowDiagram.svelte';
   import KpiCard from '$components/cards/KpiCard.svelte';
   import SavingsCard from '$components/cards/SavingsCard.svelte';
-  import ParticleField from '$components/effects/ParticleField.svelte';
   import ConcentricRings from '$components/effects/ConcentricRings.svelte';
   import { anker } from '$stores/anker.svelte';
+  import { production } from '$stores/production.svelte';
+  import { savings } from '$stores/savings.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
   import { cumulus } from '$stores/cumulus.svelte';
   import { shelly } from '$stores/shelly.svelte';
@@ -15,13 +16,32 @@
 
   // ─── Source canonique : Anker quand connecté, mock sinon ─────────────
   // Tout en watts, signed (+ import / − export).
-  const pvPowerW = $derived(
-    anker.connected ? anker.solarPowerW : Math.round(dashboard.solarPower * 1000)
+  // Solaire séparé par pan (installation Sanguinet) :
+  //   • Sud   = onduleur APS (EZ1) + SolarBank 1 (alias *-1)
+  //   • Ouest = SolarBank 2 (alias *-2)
+  // Répartition agrégée robuste : anker.sb1SolarW/sb2SolarW = solar_power_w (agrégat
+  // FIABLE) ventilé par le dernier ratio par-unité connu (les champs par-unité sont
+  // intermittents). Purement AFFICHAGE : n'entre JAMAIS dans le calcul d'économies
+  // (recorder serveur, 100 % AC).
+  const pvSudW = $derived(
+    anker.connected
+      ? production.apsW + anker.sb1SolarW
+      : Math.round(dashboard.solarPower * 1000 * 0.6)
   );
-  const gridPowerW = $derived(anker.connected ? anker.gridPowerW : shelly.gridPowerW);
+  const pvOuestW = $derived(
+    anker.connected ? anker.sb2SolarW : Math.round(dashboard.solarPower * 1000 * 0.4)
+  );
+  // Réseau FILTRÉ (anti-transitoire cache cloud ~60 s) : plus de soutirage/injection
+  // « fantôme » figé. Cf. anker.gridFilteredW.
+  const gridPowerW = $derived(anker.connected ? anker.gridFilteredW : shelly.gridPowerW);
   const batterySoc = $derived(anker.connected ? (anker.averageSoc ?? 0) : dashboard.batteryLevel);
-  const batteryNetW = $derived(
-    anker.connected ? anker.netBatteryPowerW : dashboard.batteryStatus === 'charge' ? 400 : -600
+  // Charge (→ usage) et décharge (→ apport) SÉPARÉES, depuis l'agrégat fiable du
+  // bridge. Le Sankey peut ainsi montrer la batterie du bon côté (voire les deux).
+  const batteryChargeW = $derived(
+    anker.connected ? anker.batteryChargeW : dashboard.batteryStatus === 'charge' ? 400 : 0
+  );
+  const batteryDischargeW = $derived(
+    anker.connected ? anker.batteryDischargeW : dashboard.batteryStatus === 'charge' ? 0 : 600
   );
 
   // ─── Transitions d'affichage ─────────────────────────────────────────
@@ -39,19 +59,27 @@
   });
   const animMs = $derived(preferences.animationsEnabled && !reducedMotion ? 600 : 0);
 
-  const pvTw = new Tween(0, { easing: cubicOut });
+  const pvSudTw = new Tween(0, { easing: cubicOut });
+  const pvOuestTw = new Tween(0, { easing: cubicOut });
   const gridTw = new Tween(0, { easing: cubicOut });
-  const batTw = new Tween(0, { easing: cubicOut });
+  const batChargeTw = new Tween(0, { easing: cubicOut });
+  const batDischargeTw = new Tween(0, { easing: cubicOut });
   const socTw = new Tween(0, { easing: cubicOut });
-  $effect(() => void pvTw.set(pvPowerW, { duration: animMs, easing: cubicOut }));
+  $effect(() => void pvSudTw.set(pvSudW, { duration: animMs, easing: cubicOut }));
+  $effect(() => void pvOuestTw.set(pvOuestW, { duration: animMs, easing: cubicOut }));
   $effect(() => void gridTw.set(gridPowerW, { duration: animMs, easing: cubicOut }));
-  $effect(() => void batTw.set(batteryNetW, { duration: animMs, easing: cubicOut }));
+  $effect(() => void batChargeTw.set(batteryChargeW, { duration: animMs, easing: cubicOut }));
+  $effect(() => void batDischargeTw.set(batteryDischargeW, { duration: animMs, easing: cubicOut }));
   $effect(() => void socTw.set(batterySoc, { duration: animMs, easing: cubicOut }));
 
   // Valeurs ANIMÉES consommées par le Sankey + le hero.
-  const pvA = $derived(pvTw.current);
+  const pvSudA = $derived(pvSudTw.current);
+  const pvOuestA = $derived(pvOuestTw.current);
+  const pvA = $derived(pvSudA + pvOuestA); // total animé (bilan Maison)
   const gridA = $derived(gridTw.current);
-  const batA = $derived(batTw.current);
+  const batChargeA = $derived(batChargeTw.current);
+  const batDischargeA = $derived(batDischargeTw.current);
+  const batA = $derived(batChargeA - batDischargeA); // net (pour le bilan Maison)
   const socA = $derived(socTw.current);
   // Maison = PV + import réseau − charge batterie (équilibre instantané ; pertes
   // de conversion < 5 % ignorées).
@@ -110,7 +138,6 @@
       <div class="absolute inset-x-0 top-0" style="height: 660px;">
         <ConcentricRings />
       </div>
-      <ParticleField />
     </div>
   {/if}
 
@@ -172,12 +199,16 @@
     </header>
 
     <!-- ═══ Paysage (iPad/desktop) : Sankey | stats côte à côte ; mobile : empilé ═══ -->
-    <div class="grid gap-5 lg:grid-cols-2 lg:items-start">
+    <!-- items-stretch : la colonne stats remplit la hauteur du Sankey carré (sinon
+         un grand vide à droite sur desktop). -->
+    <div class="grid gap-5 lg:grid-cols-2 lg:items-stretch">
       <!-- Flow Diagram (carré centré, max 520px) -->
       <FlowDiagram
-        pvPowerW={pvA}
+        pvSudW={pvSudA}
+        pvOuestW={pvOuestA}
         homePowerW={homeA}
-        batteryNetW={batA}
+        batteryChargeW={batChargeA}
+        batteryDischargeW={batDischargeA}
         batterySoc={socA}
         gridPowerW={gridA}
         cumulusTempC={cumulus.temperatureC}
@@ -185,7 +216,8 @@
         cumulusOn={shelly.cumulusRelayOn}
       />
 
-      <div class="flex flex-col gap-5">
+      <!-- Colonne stats : remplit la hauteur du Sankey (justify-between) ─────── -->
+      <div class="flex flex-col gap-4 lg:justify-between">
         <!-- ═══ KPI lifetime (vraies données Anker) ═══ -->
         {#if hasLifetime}
           <div class="grid grid-cols-2 gap-3">
@@ -222,15 +254,17 @@
           </div>
         {/if}
 
-        <!-- ═══ Footer — Tarif & bascule ═══ -->
-        <footer
-          class="grid grid-cols-3 items-center gap-3 rounded-[var(--radius-xl)] border px-4 py-3"
+        <!-- ═══ Tarif & réseau réel — carte verticale (3 lignes) ═══ -->
+        <!-- Réseau = import RÉEL du jour (recorder, pince SmartMeter, filtré
+             transitoires) — fini le mock shelly. -->
+        <div
+          class="flex flex-col rounded-[var(--radius-xl)] border"
           style="background: var(--color-card); border-color: var(--color-border);"
         >
-          <div class="flex flex-col gap-0.5">
+          <div class="flex items-center justify-between gap-3 px-4 py-3">
             <span
-              class="font-semibold tracking-[0.08em] uppercase"
-              style="color: var(--color-muted-fg); font-size: 10px;"
+              class="text-[10px] font-semibold tracking-[0.08em] uppercase"
+              style="color: var(--color-muted-fg);"
             >
               Tarif en cours
             </span>
@@ -242,30 +276,39 @@
             </span>
           </div>
 
-          <div class="flex flex-col items-center gap-0.5">
+          <div
+            class="flex items-center justify-between gap-3 border-t px-4 py-3"
+            style="border-color: var(--color-border);"
+          >
             <span
-              class="font-semibold tracking-[0.08em] uppercase"
-              style="color: var(--color-muted-fg); font-size: 10px;"
+              class="text-[10px] font-semibold tracking-[0.08em] uppercase"
+              style="color: var(--color-muted-fg);"
             >
-              Réseau aujourd'hui
+              Réseau soutiré aujourd'hui
             </span>
-            <span class="text-[14px] tabular-nums" style="color: var(--color-fg);">
-              ↓ {shelly.gridImportTodayKwh.toFixed(1)} · ↑ {shelly.gridExportTodayKwh.toFixed(1)} kWh
+            <span
+              class="text-[14px] font-semibold tabular-nums"
+              style="color: var(--color-grid-energy);"
+            >
+              ↓ {savings.today.import_kwh.toFixed(2)} kWh
             </span>
           </div>
 
-          <div class="flex flex-col items-end gap-0.5">
+          <div
+            class="flex items-center justify-between gap-3 border-t px-4 py-3"
+            style="border-color: var(--color-border);"
+          >
             <span
-              class="font-semibold tracking-[0.08em] uppercase"
-              style="color: var(--color-muted-fg); font-size: 10px;"
+              class="text-[10px] font-semibold tracking-[0.08em] uppercase"
+              style="color: var(--color-muted-fg);"
             >
-              Bascule
+              Prochaine bascule
             </span>
             <span class="text-[14px] tabular-nums" style="color: var(--color-fg);">
               {currentTariff === 'HC' ? 'HP' : 'HC'} à {nextSwitchHour}h · dans {hoursUntilSwitch} h
             </span>
           </div>
-        </footer>
+        </div>
       </div>
     </div>
   </div>

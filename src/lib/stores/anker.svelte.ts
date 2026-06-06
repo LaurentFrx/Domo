@@ -40,8 +40,17 @@ export type AnkerSmartMeter = {
   id: string;
   name: string | null;
   model: string;
+  /** NET de la pince ampèremétrique : + soutirage / − injection (W). SEULE source fiable. */
   gridPowerW: number;
+  /**
+   * ⚠️ CASSÉ côté bridge Anker — NE JAMAIS UTILISER pour un calcul.
+   * Observé en live : net=24 W mais grid_to_home=0 et pv_to_grid=−24 (non conservatif).
+   * Le découpage directionnel est faux ; dériver l'import/export du NET :
+   *   import = max(0, gridPowerW) · export = max(0, −gridPowerW).
+   * Conservés ici par fidélité au payload, mais aucun composant ne doit les lire.
+   */
   gridToHomeW: number;
+  /** ⚠️ CASSÉ — voir gridToHomeW. Ne jamais utiliser. */
   pvToGridW: number;
   status: string | null;
 };
@@ -63,6 +72,9 @@ type ApiPayload = {
   lifetime_co2_saved_kg?: number;
   lifetime_savings_eur?: number;
   co2_saved_kg?: number;
+  battery_charge_power_w?: number;
+  battery_discharge_power_w?: number;
+  sb_output_power_w?: number;
   batteries: {
     id: string;
     name: string;
@@ -94,11 +106,44 @@ type ApiPayload = {
 class AnkerState {
   /** Puissance PV totale en Watts. */
   solarPowerW = $state(0);
-  /** Puissance réseau : + soutirage, - injection. Watts. */
+  /** Puissance réseau BRUTE (net pince) : + soutirage, − injection. Watts. */
   gridPowerW = $state(0);
+  /**
+   * Puissance réseau FILTRÉE anti-transitoire : + soutirage / − injection (W).
+   * Le bridge ressert un CACHE cloud ~60 s ; un transitoire réel de ~3 s (charge
+   * qui démarre, batterie qui prend le relais) reste figé jusqu'à 60 s et apparaît
+   * sinon comme un soutirage/injection « fantôme » soutenu. On ne retient donc
+   * l'import/export que CONFIRMÉ sur 2 snapshots cloud FRAIS consécutifs (via
+   * last_update) — même logique que le recorder des économies. À privilégier
+   * partout pour l'affichage temps réel (Sankey, surplus, libellés réseau).
+   */
+  gridFilteredW = $state(0);
+  /** Horodatage (s) du snapshot cloud courant (= last_update du bridge), ou null. */
+  snapshotTs = $state<number | null>(null);
+
+  /**
+   * Flux batterie AGRÉGÉ FIABLE (W), exposé par le bridge depuis solarbank_info
+   * (total_photovoltaic_power − total_output_power). Les champs par-unité
+   * (charging_power_w…) sont intermittents → on privilégie ces agrégats.
+   */
+  batteryChargeW = $state(0);
+  batteryDischargeW = $state(0);
+  /** Sortie AC SolarBank → maison (W), agrégat fiable. */
+  sbOutputW = $state(0);
+
   batteries = $state<AnkerBattery[]>([]);
   smartMeter = $state<AnkerSmartMeter | null>(null);
   sites = $state<AnkerSite[]>([]);
+
+  /**
+   * Fraction de la prod PV SolarBank attribuée à l'unité 1 (pan Sud), 0..1.
+   * Les `input_power_w` PAR UNITÉ sont INTERMITTENTS (mesuré : souvent 0 pour les
+   * deux alors que `solar_power_w` agrégé est correct → un split naïf afficherait
+   * 0/0). On mémorise donc le dernier ratio FIABLE (mis à jour seulement quand le
+   * par-unité est présent) et on l'applique à l'agrégat fiable. Défaut 0,5
+   * (2× SolarBank E2700 Pro, même capacité).
+   */
+  sb1SolarFraction = $state(0.5);
 
   /** Production cumulée du jour (Wh) — suspect si égal au lifetime. */
   dailyProductionWh = $state(0);
@@ -126,10 +171,24 @@ class AnkerState {
       : this.batteries.reduce((s, b) => s + b.soc, 0) / this.batteries.length
   );
 
-  /** Puissance batterie nette : + charge, − décharge (W). */
-  netBatteryPowerW = $derived(
-    this.batteries.reduce((s, b) => s + b.chargingPowerW - b.dischargingPowerW, 0)
-  );
+  /**
+   * Puissance batterie nette : + charge, − décharge (W).
+   * Source FIABLE : agrégat bridge (batteryChargeW − batteryDischargeW). Repli sur
+   * la somme par-unité seulement si l'agrégat est absent (0) mais qu'une unité bouge.
+   */
+  netBatteryPowerW = $derived.by(() => {
+    const agg = this.batteryChargeW - this.batteryDischargeW;
+    if (agg !== 0) return agg;
+    return this.batteries.reduce((s, b) => s + b.chargingPowerW - b.dischargingPowerW, 0);
+  });
+
+  /**
+   * Prod PV (agrégat DC fiable) répartie par unité via le dernier ratio fiable.
+   * sb1SolarW → pan Sud (avec l'APS, côté page), sb2SolarW → pan Ouest.
+   * Toujours : sb1SolarW + sb2SolarW = solarPowerW (donc total accueil exact).
+   */
+  sb1SolarW = $derived(this.solarPowerW * this.sb1SolarFraction);
+  sb2SolarW = $derived(this.solarPowerW * (1 - this.sb1SolarFraction));
 
   /** Capacité totale du parc batteries (Wh). */
   totalBatteryCapacityWh = $derived(this.batteries.reduce((s, b) => s + b.capacityWh, 0));
@@ -158,6 +217,32 @@ class AnkerState {
 
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private visibilityHandler: (() => void) | null = null;
+
+  // ─── État interne du filtre réseau anti-transitoire (non réactif) ──────
+  private lastSnapTs: number | null = null;
+  private prevFreshImportW = 0;
+  private prevFreshExportW = 0;
+
+  /**
+   * Met à jour gridFilteredW à partir du net brut + de l'horodatage cloud.
+   * On n'agit QUE sur un snapshot cloud RÉELLEMENT nouveau (last_update changé) :
+   * import/export retenus = min(valeur fraîche courante, valeur fraîche précédente)
+   * → un pic présent dans un seul snapshot frais (transitoire de ~3 s) est ramené à
+   * 0 ; un soutirage/injection SOUTENU (présent sur 2 snapshots frais) passe.
+   * Snapshot resservi (cache identique) → on conserve la dernière valeur filtrée.
+   */
+  private applyGridFilter(gridRaw: number, ts: number | null) {
+    const importW = Math.max(0, gridRaw);
+    const exportW = Math.max(0, -gridRaw);
+    const fresh = ts !== null && ts !== this.lastSnapTs;
+    if (!fresh) return;
+    const confImport = Math.min(importW, this.prevFreshImportW);
+    const confExport = Math.min(exportW, this.prevFreshExportW);
+    this.gridFilteredW = confImport - confExport;
+    this.prevFreshImportW = importW;
+    this.prevFreshExportW = exportW;
+    this.lastSnapTs = ts;
+  }
 
   connect() {
     if (typeof window === 'undefined') return;
@@ -235,12 +320,17 @@ class AnkerState {
   private applySnapshot(p: ApiPayload) {
     this.solarPowerW = p.solar_power_w ?? 0;
     this.gridPowerW = p.grid_power_w ?? 0;
+    this.snapshotTs = p.last_update ?? null;
+    this.applyGridFilter(this.gridPowerW, this.snapshotTs);
     this.dailyProductionWh = p.daily_production_wh ?? 0;
     this.dailyConsumptionWh = p.daily_consumption_wh ?? 0;
     this.selfConsumptionRate = p.self_consumption_rate;
     this.lifetimeProductionKwh = p.lifetime_production_kwh ?? 0;
     this.lifetimeCo2SavedKg = p.lifetime_co2_saved_kg ?? 0;
     this.lifetimeSavingsEur = p.lifetime_savings_eur ?? 0;
+    this.batteryChargeW = p.battery_charge_power_w ?? 0;
+    this.batteryDischargeW = p.battery_discharge_power_w ?? 0;
+    this.sbOutputW = p.sb_output_power_w ?? 0;
 
     this.batteries = (p.batteries ?? []).map((b) => ({
       id: b.id,
@@ -258,6 +348,14 @@ class AnkerState {
       energyWh: b.battery_energy_wh ?? 0,
       status: b.status ?? null
     }));
+
+    // Ratio Sud:Ouest depuis l'input PV par-unité, SEULEMENT quand il est présent
+    // (intermittent) ; sinon on conserve le dernier ratio fiable mémorisé.
+    const b1 = this.batteries.find((b) => (b.alias ?? '').endsWith('1')) ?? this.batteries[0];
+    const b2 = this.batteries.find((b) => (b.alias ?? '').endsWith('2')) ?? this.batteries[1];
+    const in1 = b1?.inputPowerW ?? 0;
+    const in2 = b2?.inputPowerW ?? 0;
+    if (in1 + in2 > 1) this.sb1SolarFraction = in1 / (in1 + in2);
 
     this.smartMeter = p.smart_meter
       ? {

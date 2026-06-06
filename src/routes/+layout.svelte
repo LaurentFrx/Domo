@@ -5,6 +5,8 @@
   import TabBar from '$components/layout/TabBar.svelte';
   import { startDemoTicker, stopDemoTicker } from '$stores/demo-ticker.svelte';
   import { anker } from '$stores/anker.svelte';
+  import { apsystems } from '$stores/apsystems.svelte';
+  import { production } from '$stores/production.svelte';
   import { savings } from '$stores/savings.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
   import { preferences } from '$stores/preferences.svelte';
@@ -48,6 +50,15 @@
     return () => anker.disconnect();
   });
 
+  // ─── Connexion APsystems (onduleur EZ1, bridge local) ──────────────────
+  // App-wide : la production APS doit entrer dans le bilan de l'ACCUEIL (Sankey,
+  // « Solaire »), pas seulement sur la page Énergie. Poll 10 s, visibility-aware,
+  // connect() idempotent → un seul polling même si une page la rappelle.
+  $effect(() => {
+    apsystems.connect();
+    return () => apsystems.disconnect();
+  });
+
   // ─── Économies d'autoconsommation (route locale, base recorder) ────────
   // App-wide : carte affichée sur Accueil + Énergie. Poll 60 s, visibility-aware.
   $effect(() => {
@@ -59,12 +70,16 @@
   $effect(() => {
     if (anker.connected) {
       dashboard.connectionStatus = 'connected';
-      dashboard.solarPower = anker.solarPowerW / 1000;
+      // Production = SolarBank (solar_power_w, cohérent avec l'app Anker) + APS EZ1.
+      dashboard.solarPower = (anker.solarPowerW + production.apsW) / 1000;
       const soc = anker.averageSoc;
       if (soc !== null) dashboard.batteryLevel = soc;
       dashboard.batteryStatus = anker.batteryStatus;
-      dashboard.solarSurplus = Math.max(0, -anker.gridPowerW);
-      dashboard.solarTotal24h = anker.dailyProductionWh / 1000;
+      // Surplus = injection réseau, depuis le NET FILTRÉ (pas le brut : un pic figé
+      // ~60 s par le cache cloud ne doit pas faire clignoter un faux surplus).
+      dashboard.solarSurplus = Math.max(0, -anker.gridFilteredW);
+      // Compteur jour du bridge parfois figé (≈ lifetime) → on n'écrase que si fiable.
+      if (anker.dailyProductionReliable) dashboard.solarTotal24h = anker.dailyProductionWh / 1000;
       if (anker.selfConsumptionRate !== null) {
         dashboard.solarSelfConsumption = Math.round(anker.selfConsumptionRate);
       }

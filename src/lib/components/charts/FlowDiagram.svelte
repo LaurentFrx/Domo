@@ -20,10 +20,15 @@
   import { preferences } from '$stores/preferences.svelte';
 
   interface Props {
-    pvPowerW: number;
+    /** Apport solaire pan SUD (onduleur APS + SolarBank 1). W. */
+    pvSudW: number;
+    /** Apport solaire pan OUEST (SolarBank 2). W. */
+    pvOuestW: number;
     homePowerW: number;
-    /** + charge, - décharge. */
-    batteryNetW: number;
+    /** Charge batterie (W) → côté USAGE. */
+    batteryChargeW: number;
+    /** Décharge batterie (W) → côté APPORT. (Les deux peuvent être non nuls.) */
+    batteryDischargeW: number;
     /** 0-100. */
     batterySoc: number;
     /** + import, - export. */
@@ -35,7 +40,15 @@
 
   // Le Sankey utilise les puissances du bilan AC (+ le SoC pour l'état repos).
   // Les champs cumulus* restent dans Props pour la compat de l'appelant.
-  let { pvPowerW, homePowerW, batteryNetW, batterySoc, gridPowerW }: Props = $props();
+  let {
+    pvSudW,
+    pvOuestW,
+    homePowerW,
+    batteryChargeW,
+    batteryDischargeW,
+    batterySoc,
+    gridPowerW
+  }: Props = $props();
 
   /** Format Watts (séparateur de milliers, espace fine). */
   function fmtW(w: number): string {
@@ -44,6 +57,8 @@
 
   // ─── Couleurs sémantiques ───────────────────────────────────────────────
   const SOLAR = 'var(--color-solar)';
+  const SUD = 'var(--color-sud)';
+  const OUEST = 'var(--color-ouest)';
   const BAT = 'var(--color-battery)';
   const HOME = 'var(--color-consumption)';
   const GRID = 'var(--color-grid-energy)';
@@ -172,16 +187,26 @@
   // ─── Décomposition apports / usages ─────────────────────────────────────
   const layout = $derived.by(() => {
     const sources: Item[] = [];
-    if (pvPowerW > 1) sources.push({ key: 'pv', name: 'Solaire', color: SOLAR, w: pvPowerW });
-    if (batteryNetW < -1)
-      sources.push({ key: 'batd', name: 'Batterie', sub: 'décharge', color: BAT, w: -batteryNetW });
+    // Solaire séparé par pan : Sud (APS + SB1) et Ouest (SB2).
+    if (pvSudW > 1)
+      sources.push({ key: 'sud', name: 'Sud', sub: 'solaire', color: SUD, w: pvSudW });
+    if (pvOuestW > 1)
+      sources.push({ key: 'ouest', name: 'Ouest', sub: 'solaire', color: OUEST, w: pvOuestW });
+    if (batteryDischargeW > 1)
+      sources.push({
+        key: 'batd',
+        name: 'Batterie',
+        sub: 'décharge',
+        color: BAT,
+        w: batteryDischargeW
+      });
     if (gridPowerW > 1)
       sources.push({ key: 'gridi', name: 'Réseau', sub: 'import', color: GRID, w: gridPowerW });
 
     const sinks: Item[] = [];
     if (homePowerW > 1) sinks.push({ key: 'home', name: 'Maison', color: HOME, w: homePowerW });
-    if (batteryNetW > 1)
-      sinks.push({ key: 'batc', name: 'Batterie', sub: 'charge', color: BAT, w: batteryNetW });
+    if (batteryChargeW > 1)
+      sinks.push({ key: 'batc', name: 'Batterie', sub: 'charge', color: BAT, w: batteryChargeW });
     if (gridPowerW < -1)
       sinks.push({ key: 'gride', name: 'Réseau', sub: 'injection', color: SOLAR, w: -gridPowerW });
 

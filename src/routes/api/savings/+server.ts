@@ -32,7 +32,7 @@ interface PeriodTotals {
 }
 
 interface SavingsPayload {
-  today: PeriodTotals & { rate_eur_h: number; coverage_pct: number };
+  today: PeriodTotals & { rate_eur_h: number; coverage_pct: number; import_kwh: number };
   month: PeriodTotals;
   year: PeriodTotals;
   total: PeriodTotals;
@@ -66,7 +66,7 @@ function emptyPayload(now: Date): SavingsPayload {
   const z = toPeriod(ZERO_AGG);
   const b = applicableBaseline(now);
   return {
-    today: { ...z, rate_eur_h: 0, coverage_pct: 0 },
+    today: { ...z, rate_eur_h: 0, coverage_pct: 0, import_kwh: 0 },
     // DB vide/indispo, les totaux reflètent quand même les baselines (acquis
     // avant que le recorder n'existe).
     month: { ...z, eur: b.month.eur, kwh: b.month.kwh },
@@ -157,7 +157,12 @@ export const GET: RequestHandler = async () => {
     const totalPeriod = toPeriod(totalAgg);
 
     const payload: SavingsPayload = {
-      today: { ...toPeriod(todayAgg), rate_eur_h: rateEurH, coverage_pct: coveragePct },
+      today: {
+        ...toPeriod(todayAgg),
+        rate_eur_h: rateEurH,
+        coverage_pct: coveragePct,
+        import_kwh: importKwhToday
+      },
       month: {
         ...monthPeriod,
         eur: monthPeriod.eur + b.month.eur,

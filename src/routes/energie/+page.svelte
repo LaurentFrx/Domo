@@ -24,8 +24,10 @@
   onMount(() => {
     zigbee.connect();
     forecast.connect();
-    // Production réelle « maintenant » : apsystems est propre à cette page ;
-    // anker est déjà connecté par +layout.svelte (connect() idempotent ici).
+    // anker ET apsystems sont désormais connectés app-wide par +layout.svelte
+    // (leur production entre dans le bilan de l'accueil). connect() est idempotent
+    // → on les rappelle sans risque, MAIS on ne les disconnect PAS ici (sinon on
+    // couperait le polling global au départ de la page).
     apsystems.connect();
     anker.connect();
     productionHistory.connect();
@@ -36,11 +38,10 @@
   onDestroy(() => {
     zigbee.disconnect();
     forecast.disconnect();
-    apsystems.disconnect();
     productionHistory.disconnect();
     energyMonthly.disconnect();
-    // Pas de anker.disconnect() : son cycle de vie appartient au layout racine
-    // (anker est utilisé app-wide, notamment par le dashboard).
+    // Pas de anker.disconnect() ni apsystems.disconnect() : leur cycle de vie
+    // appartient au layout racine (utilisés app-wide, notamment par le dashboard).
   });
 
   // Prises Zigbee suivies pour la conso électroménager (Frigo, Lave-linge).
