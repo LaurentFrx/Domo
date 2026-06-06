@@ -3,12 +3,11 @@
    * Carte « Économies solaires » — auto-consommation valorisée au tarif HP/HC
    * évité (jour / mois / année / total), lue du store savings (base recorder).
    *
-   * Variante par défaut = HÉRO « Solar Harvest » (page Énergie) : 4 médailles de
-   * verre sur UNE ligne (légèrement superposées sur iPhone, 4 colonnes dès l'iPad),
-   * qui comptent en montant, flottent et brillent ; soleil + ciel d'ambiance.
-   * Valeurs auto-ajustées pour remplir chaque bulle sans déborder. `compact` =
-   * variante tassée (accueil). Store non connecté → « — » propre. Animations gated
-   * (preferences + prefers-reduced-motion).
+   * Variante par défaut = HÉRO : 4 médailles de verre sur UNE ligne (légèrement
+   * superposées sur iPhone, 4 colonnes dès l'iPad). Rendu STATIQUE (sphères
+   * glossy + lueurs douces) — seules animations : le count-up et l'apparition,
+   * one-shot (aucune boucle GPU continue, pour ne pas faire chauffer le device).
+   * `compact` = variante tassée. Store non connecté → « — » propre.
    */
   import { savings } from '$stores/savings.svelte';
   import { preferences } from '$stores/preferences.svelte';
@@ -48,7 +47,7 @@
   });
   const rich = $derived(animate && !reducedMotion);
 
-  // ── Count-up : les montants roulent 0 → valeur à l'apparition (et au refresh) ──
+  // ── Count-up : les montants roulent 0 → valeur à l'apparition (one-shot) ──
   const tToday = new Tween(0, { easing: expoOut });
   const tMonth = new Tween(0, { easing: expoOut });
   const tYear = new Tween(0, { easing: expoOut });
@@ -100,13 +99,11 @@
     const p = PALETTES[key];
     return (
       `--orb-light:${p.light}; --orb-base:${p.base}; --orb-dark:${p.dark}; --orb-glow:${p.glow};` +
-      ` --z:${i + 1}; --d:${i * 120}ms; --bob:${(i * -1.3).toFixed(2)}s; --shim:${(i * 1.4).toFixed(2)}s;`
+      ` --z:${i + 1}; --d:${i * 110}ms; --bob:${(i * -1.4).toFixed(2)}s;`
     );
   }
 
-  // Police de la valeur dimensionnée pour remplir la bulle sans déborder, selon la
-  // longueur du nombre FINAL (pas l'animé → pas de saut pendant le count-up).
-  // 1cqmin = 1 % du diamètre de la bulle (container-query) → scale auto.
+  // Police de la valeur dimensionnée pour remplir la bulle sans déborder.
   function valueFz(finalEur: number): number {
     const n = formatCurrency(finalEur).length;
     if (n <= 6) return 24; // "0,71 €"
@@ -116,30 +113,14 @@
     return 14; // ≥ 10 ("1 234,56 €")
   }
 
-  // MÊME taille de police sur les 4 bulles : on prend la plus petite (= celle qui
-  // tient pour la valeur la plus longue) et on l'applique à toutes.
+  // MÊME taille de police sur les 4 bulles : la plus petite (= tient pour la plus longue).
   const uniformFz = $derived(
     Math.min(valueFz(today.eur), valueFz(month.eur), valueFz(year.eur), valueFz(total.eur))
   );
-
-  // Photons dorés montants — params FIXES (pas de Math.random : hydratation SSR).
-  const PHOTONS = [
-    { x: 6, s: 3, d: -1.2, t: 8.5, dr: 12, o: 0.7 },
-    { x: 16, s: 4, d: -4.8, t: 10, dr: -8, o: 0.85 },
-    { x: 27, s: 2, d: -7.5, t: 7, dr: 10, o: 0.6 },
-    { x: 39, s: 5, d: -2.3, t: 11, dr: -14, o: 0.9 },
-    { x: 50, s: 3, d: -9.1, t: 9, dr: 6, o: 0.7 },
-    { x: 61, s: 2, d: -5.6, t: 7.5, dr: -10, o: 0.55 },
-    { x: 73, s: 4, d: -0.6, t: 10.5, dr: 12, o: 0.8 },
-    { x: 84, s: 3, d: -8.2, t: 8, dr: -6, o: 0.7 },
-    { x: 93, s: 5, d: -3.4, t: 11.5, dr: 14, o: 0.9 },
-    { x: 34, s: 2, d: -6.9, t: 7, dr: -12, o: 0.6 },
-    { x: 68, s: 3, d: -1.9, t: 9.5, dr: 8, o: 0.75 }
-  ];
 </script>
 
 {#if compact}
-  <!-- ═══ Variante compacte (accueil) ═══ -->
+  <!-- ═══ Variante compacte ═══ -->
   <div
     class="flex flex-col gap-2 rounded-[var(--radius-xl)] border p-4"
     style="background: var(--color-card); border-color: var(--color-border);"
@@ -196,34 +177,17 @@
     </div>
   </div>
 {:else}
-  <!-- ═══ Carte HÉRO « Solar Harvest » (page Énergie) ═══ -->
+  <!-- ═══ Carte HÉRO ═══ -->
   <section
     class="solar-hero rounded-[var(--radius-3xl)] border p-5 sm:p-6"
     class:animate={rich}
     class:disconnected={!connected}
     style="background: var(--color-card); border-color: var(--color-border);"
   >
-    <!-- ── Ciel animé ── -->
-    {#if rich}
-      <div class="sky" aria-hidden="true">
-        <div class="sunburst"></div>
-        <div class="suncore"></div>
-        <div class="aurora"></div>
-        <div class="photons">
-          {#each PHOTONS as p, i (i)}
-            <span
-              class="photon"
-              style="left:{p.x}%; width:{p.s}px; height:{p.s}px; animation-delay:{p.d}s; animation-duration:{p.t}s; --dr:{p.dr}px; --po:{p.o};"
-            ></span>
-          {/each}
-        </div>
-      </div>
-    {:else}
-      <div class="sky-static" aria-hidden="true"></div>
-    {/if}
+    <!-- Lueur d'ambiance STATIQUE (aucune animation). -->
+    <div class="sky-static" aria-hidden="true"></div>
 
     <div class="content relative flex flex-col gap-5">
-      <!-- En-tête : titre dégradé -->
       <header class="hero-head">
         <span class="hero-title">Économies solaires</span>
         <span class="hero-sub">Auto-consommation valorisée</span>
@@ -272,89 +236,16 @@
     z-index: 2;
   }
 
-  /* ───────────── Ciel animé ───────────── */
-  .sky,
+  /* Lueur d'ambiance figée (2 dégradés radiaux, aucun coût d'animation). */
   .sky-static {
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    overflow: hidden;
     pointer-events: none;
     z-index: 0;
-  }
-  .sky-static {
     background:
-      radial-gradient(circle at 50% -20%, oklch(0.82 0.16 82 / 0.18), transparent 55%),
-      radial-gradient(circle at 110% 120%, oklch(0.86 0.2 152 / 0.14), transparent 55%);
-  }
-  .sunburst {
-    position: absolute;
-    width: 560px;
-    height: 560px;
-    left: 50%;
-    top: -330px;
-    transform: translateX(-50%);
-    background: repeating-conic-gradient(
-      from 0deg,
-      oklch(0.88 0.16 84 / 0.16) 0deg 3.5deg,
-      transparent 3.5deg 13deg
-    );
-    border-radius: 50%;
-    -webkit-mask: radial-gradient(circle, #000 12%, transparent 60%);
-    mask: radial-gradient(circle, #000 12%, transparent 60%);
-    animation: spin 64s linear infinite;
-    will-change: transform;
-  }
-  .suncore {
-    position: absolute;
-    width: 380px;
-    height: 380px;
-    left: 50%;
-    top: -210px;
-    transform: translateX(-50%);
-    background: radial-gradient(
-      circle,
-      oklch(0.92 0.13 86 / 0.4),
-      oklch(0.82 0.17 80 / 0.18) 40%,
-      transparent 66%
-    );
-    animation: breathe 6s ease-in-out infinite;
-    will-change: transform, opacity;
-  }
-  .aurora {
-    position: absolute;
-    left: -10%;
-    right: -10%;
-    bottom: -60px;
-    height: 220px;
-    background: radial-gradient(
-      ellipse 60% 100% at 50% 100%,
-      oklch(0.86 0.2 152 / 0.22),
-      transparent 70%
-    );
-    animation: drift 9s ease-in-out infinite;
-    will-change: transform;
-  }
-  .photons {
-    position: absolute;
-    inset: 0;
-  }
-  .photon {
-    position: absolute;
-    bottom: -10px;
-    border-radius: 9999px;
-    background: radial-gradient(
-      circle,
-      oklch(0.95 0.13 86),
-      oklch(0.82 0.17 80 / 0.2) 70%,
-      transparent
-    );
-    box-shadow: 0 0 8px oklch(0.88 0.16 84 / 0.8);
-    opacity: 0;
-    animation-name: rise;
-    animation-timing-function: ease-in;
-    animation-iteration-count: infinite;
-    will-change: transform, opacity;
+      radial-gradient(circle at 50% -15%, oklch(0.82 0.16 82 / 0.16), transparent 55%),
+      radial-gradient(circle at 112% 118%, oklch(0.86 0.2 152 / 0.13), transparent 55%);
   }
 
   /* ───────────── En-tête ───────────── */
@@ -388,14 +279,11 @@
   }
 
   /* ───────────── Médailles ───────────── */
-  /* iPhone : 1 seule ligne, médailles légèrement superposées (pièces empilées). */
   .orbs {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
     padding-bottom: 0.4rem;
-    /* déborde légèrement dans le padding de la carte → bleu plus à gauche, rouge
-       plus à droite (moins de marge sur les côtés extérieurs). */
     margin-inline: -0.4rem;
   }
   .orb-wrap {
@@ -412,7 +300,6 @@
   .orb-wrap:hover {
     z-index: 20;
   }
-  /* Dès l'iPad/desktop : 4 colonnes franches, sans superposition. */
   @media (min-width: 640px) {
     .orbs {
       display: grid;
@@ -427,22 +314,24 @@
     }
   }
 
+  /* Apparition (one-shot) + flottement GPU-composité (transform seul → quasi gratuit). */
   .solar-hero.animate .orb-wrap {
     animation:
-      fade-in 700ms ease backwards var(--d),
-      bob 4.6s ease-in-out infinite var(--bob);
-    will-change: transform, opacity;
+      fade-in 600ms ease backwards var(--d),
+      bob 5.5s ease-in-out infinite var(--bob);
   }
+  /* Halo coloré doux (dégradé radial seul, SANS filter:blur → pas de re-raster). */
   .orb-halo {
     position: absolute;
-    inset: -11%;
+    inset: -10%;
     border-radius: 9999px;
-    background: radial-gradient(circle, var(--orb-glow), transparent 68%);
-    filter: blur(6px);
+    background: radial-gradient(circle, var(--orb-glow), transparent 66%);
+    opacity: 0.7;
     z-index: 0;
   }
+  /* Lueur qui respire (OPACITÉ seule → compositée, pas de blur animé). */
   .solar-hero.animate .orb-halo {
-    animation: halo 4.6s ease-in-out infinite var(--bob);
+    animation: halo-glow 5.5s ease-in-out infinite var(--bob);
   }
   .orb {
     position: absolute;
@@ -462,12 +351,12 @@
       var(--orb-dark) 100%
     );
     box-shadow:
-      0 14px 34px -8px var(--orb-glow),
+      0 12px 26px -10px var(--orb-glow),
       inset 3px 3px 8px oklch(0.99 0.012 286 / 0.55),
       inset -5px -6px 13px oklch(0.2 0.05 286 / 0.45);
     transition: transform 240ms var(--ease-default, cubic-bezier(0.4, 0, 0.2, 1));
   }
-  /* Reflet spéculaire glossy. */
+  /* Reflet spéculaire glossy (statique). */
   .orb::after {
     content: '';
     position: absolute;
@@ -480,42 +369,22 @@
     );
     pointer-events: none;
   }
-  /* Balayage de lumière (lent : glisse + longue pause). */
-  .orb::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: linear-gradient(
-      114deg,
-      transparent 38%,
-      oklch(0.99 0.012 286 / 0.5) 48%,
-      transparent 58%
-    );
-    background-size: 280% 100%;
-    background-position: 175% 0;
-    mix-blend-mode: screen;
-    pointer-events: none;
-  }
-  .solar-hero.animate .orb::before {
-    animation: shimmer 9s cubic-bezier(0.45, 0, 0.2, 1) infinite;
-    animation-delay: var(--shim);
-  }
   .orb-wrap:hover .orb {
     transform: scale(1.05);
   }
+  /* Flaque de lumière sous la médaille (dégradé radial seul, sans blur). */
   .orb-reflection {
     position: absolute;
-    left: 18%;
-    right: 18%;
-    bottom: -7%;
-    height: 15%;
+    left: 16%;
+    right: 16%;
+    bottom: -6%;
+    height: 16%;
     border-radius: 9999px;
-    background: radial-gradient(ellipse, var(--orb-glow), transparent 72%);
-    filter: blur(4px);
-    opacity: 0.7;
+    background: radial-gradient(ellipse, var(--orb-glow), transparent 70%);
+    opacity: 0.6;
     z-index: 0;
   }
+  /* Anneau « live » sur la sphère Aujourd'hui — pulse en OPACITÉ (compositée). */
   .ring {
     position: absolute;
     inset: -2px;
@@ -524,7 +393,7 @@
     z-index: 2;
   }
   .solar-hero.animate .ring {
-    animation: pulse 2.6s ease-in-out infinite;
+    animation: ring-pulse 2.8s ease-in-out infinite;
   }
   .orb-value {
     position: relative;
@@ -585,13 +454,9 @@
     background: var(--color-solar);
     box-shadow: 0 0 7px var(--color-solar);
   }
-  .solar-hero.animate .cov-dot {
-    animation: blink 2.2s ease-in-out infinite;
-  }
   .cov-badge.dim .cov-dot {
     background: var(--color-muted-fg);
     box-shadow: none;
-    animation: none;
   }
   .rate {
     display: inline-flex;
@@ -610,9 +475,6 @@
     background: var(--color-battery);
     box-shadow: 0 0 6px var(--color-battery);
   }
-  .solar-hero.animate .rate::before {
-    animation: blink 2.2s ease-in-out infinite;
-  }
   .split {
     display: inline-flex;
     align-items: center;
@@ -622,50 +484,6 @@
     color: var(--color-muted-fg);
   }
 
-  /* ───────────── Keyframes ───────────── */
-  @keyframes spin {
-    to {
-      transform: translateX(-50%) rotate(360deg);
-    }
-  }
-  @keyframes breathe {
-    0%,
-    100% {
-      transform: translateX(-50%) scale(1);
-      opacity: 0.85;
-    }
-    50% {
-      transform: translateX(-50%) scale(1.12);
-      opacity: 1;
-    }
-  }
-  @keyframes drift {
-    0%,
-    100% {
-      transform: translateX(0) scaleY(1);
-      opacity: 0.8;
-    }
-    50% {
-      transform: translateX(5%) scaleY(1.15);
-      opacity: 1;
-    }
-  }
-  @keyframes rise {
-    0% {
-      transform: translateY(0) translateX(0);
-      opacity: 0;
-    }
-    12% {
-      opacity: var(--po, 0.8);
-    }
-    88% {
-      opacity: var(--po, 0.8);
-    }
-    100% {
-      transform: translateY(-340px) translateX(var(--dr, 0));
-      opacity: 0;
-    }
-  }
   @keyframes fade-in {
     from {
       opacity: 0;
@@ -680,60 +498,33 @@
       transform: translateY(0);
     }
     50% {
-      transform: translateY(-6px);
+      transform: translateY(-5px);
     }
   }
-  @keyframes halo {
+  @keyframes halo-glow {
     0%,
     100% {
-      opacity: 0.6;
-      transform: scale(1);
+      opacity: 0.55;
     }
     50% {
       opacity: 0.95;
-      transform: scale(1.08);
     }
   }
-  @keyframes shimmer {
-    0% {
-      background-position: 175% 0;
-    }
-    45% {
-      background-position: -75% 0;
-    }
-    100% {
-      background-position: -75% 0;
-    }
-  }
-  @keyframes pulse {
+  @keyframes ring-pulse {
     0%,
     100% {
-      opacity: 0.6;
-      transform: scale(1);
+      opacity: 0.85;
     }
     50% {
-      opacity: 0;
-      transform: scale(1.12);
-    }
-  }
-  @keyframes blink {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.35;
+      opacity: 0.3;
     }
   }
 
-  /* Mouvement réduit : on fige tout et on retire les particules/rayons. */
   @media (prefers-reduced-motion: reduce) {
-    .solar-hero :global(*) {
-      animation: none !important;
-    }
-    .sunburst,
-    .photons {
-      display: none;
+    .solar-hero.animate .orb-wrap,
+    .solar-hero.animate .orb-halo,
+    .solar-hero.animate .ring {
+      animation: none;
     }
   }
 </style>

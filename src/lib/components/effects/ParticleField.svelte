@@ -102,6 +102,11 @@
     let last = 0;
 
     function loop(t: number) {
+      raf = requestAnimationFrame(loop);
+      // Plafond ~30 fps : on saute une frame sur deux → moitié moins de redraws
+      // canvas (clearRect + 32 drawImage), imperceptible mais ~2× moins de charge
+      // continue (important sur mobile, surtout écran 120 Hz).
+      if (last && t - last < 32) return;
       const dt = last ? Math.min(0.05, (t - last) / 1000) : 0.016;
       last = t;
       ctx!.clearRect(0, 0, w, h);
@@ -119,7 +124,6 @@
         ctx!.drawImage(sprite, p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
       }
       ctx!.globalAlpha = 1;
-      raf = requestAnimationFrame(loop);
     }
 
     function start() {

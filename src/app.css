@@ -268,6 +268,20 @@ textarea {
   }
 }
 
+/* ── Perf mobile (≤767px) : PAS de backdrop-filter ──────────────────────────
+   Sur petit écran, du décor ANIMÉ défile en permanence derrière le verre
+   (ParticleField canvas + ConcentricRings rotatifs + lueurs). Avec
+   backdrop-filter, le GPU ré-échantillonne ce fond animé À CHAQUE FRAME et pour
+   CHAQUE carte → recompositing continu → iPhone qui chauffe / batterie qui fond.
+   On le coupe sur mobile : la translucidité (--color-card) ET le relief dirigé
+   (box-shadow plexiglass) restent → l'aspect verre est préservé, sans le coût. */
+@media (max-width: 767px) {
+  [style*='background: var(--color-card)'] {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
 /* « Réduire la transparence » (iOS/macOS) : cartes opaques, aucun flou. */
 @media (prefers-reduced-transparency: reduce) {
   :root {
