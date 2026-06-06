@@ -98,9 +98,11 @@ class CumulusState {
     this.lastUpdate = new Date();
   }
 
-  /** Pourcentage progression vs cible (0-100). */
+  /** Pourcentage progression vs cible (0-100). Garde anti-division par zéro. */
   progressPercent = $derived(
-    Math.min(100, Math.round((this.temperatureC / this.targetTempC) * 100))
+    this.targetTempC > 0
+      ? Math.min(100, Math.round((this.temperatureC / this.targetTempC) * 100))
+      : 0
   );
 
   /** Coût horaire (€) si ON. */

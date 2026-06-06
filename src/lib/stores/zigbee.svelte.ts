@@ -237,9 +237,16 @@ class ZigbeeState {
   }
 
   // ─── Commandes ───
-  private publishSet(friendlyName: string, payload: Record<string, unknown>) {
-    if (!this.client || this.connectionStatus !== 'connected') return;
+  private publishSet(friendlyName: string, payload: Record<string, unknown>): boolean {
+    if (!this.client || this.connectionStatus !== 'connected') {
+      // Avant : retour silencieux → l'utilisateur cliquait sans aucun effet ni
+      // indice. On consigne l'erreur (observable via zigbee.lastError) pour pouvoir
+      // signaler « hors ligne, commande non envoyée » dans l'UI.
+      this.lastError = 'MQTT hors ligne — commande non envoyée';
+      return false;
+    }
     this.client.publish(`zigbee2mqtt/${friendlyName}/set`, JSON.stringify(payload), { qos: 0 });
+    return true;
   }
 
   setState(friendlyName: string, state: 'ON' | 'OFF' | 'TOGGLE') {

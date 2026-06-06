@@ -142,7 +142,7 @@
   function onProdMove(e: MouseEvent) {
     if (!prodView) return;
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    const frac = r.width > 0 ? Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) : 0;
     prodHover = nearestIndex(prodView.xy, frac, SVG_W);
   }
   const prodHoverView = $derived.by(() => {
@@ -200,7 +200,7 @@
     const xy = fcXY('kw');
     if (xy.length < 2) return;
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    const frac = r.width > 0 ? Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) : 0;
     fcHover = nearestIndex(xy, frac, 480);
   }
   const fcHoverView = $derived.by(() => {

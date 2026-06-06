@@ -11,10 +11,10 @@
 
   const isOn = $derived(device.state.state === 'ON');
   const power = $derived<number | null>(
-    typeof device.state.power === 'number' ? (device.state.power as number) : null
+    Number.isFinite(device.state.power) ? (device.state.power as number) : null
   );
   const energy = $derived<number | null>(
-    typeof device.state.energy === 'number' ? (device.state.energy as number) : null
+    Number.isFinite(device.state.energy) ? (device.state.energy as number) : null
   );
   const hasStateControl = $derived(typeof device.state.state === 'string');
 </script>

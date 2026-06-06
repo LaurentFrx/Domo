@@ -43,6 +43,13 @@
       <p class="text-[14px]" style="color: var(--color-muted-fg);">
         Cette application est réservée à la famille. Demande le lien d'accès à Laurent.
       </p>
+      <a
+        href="mailto:laurent@feroux.fr?subject=Demande%20d%27acc%C3%A8s%20Domo&body=Bonjour%20Laurent%2C%20peux-tu%20m%27envoyer%20le%20lien%20d%27acc%C3%A8s%20%C3%A0%20Domo%20%3F"
+        class="inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-[14px] font-semibold transition-transform active:scale-95"
+        style="background: var(--color-primary); color: white;"
+      >
+        Demander l'accès
+      </a>
     </div>
   </div>
 </div>

@@ -7,17 +7,19 @@
 
   let { device }: Props = $props();
 
+  // Number.isFinite (et non typeof === 'number') : un NaN/Infinity remonté par MQTT
+  // passerait le test typeof et s'afficherait « NaN ». On le ramène à null.
   const temp = $derived<number | null>(
-    typeof device.state.temperature === 'number' ? (device.state.temperature as number) : null
+    Number.isFinite(device.state.temperature) ? (device.state.temperature as number) : null
   );
   const humidity = $derived<number | null>(
-    typeof device.state.humidity === 'number' ? (device.state.humidity as number) : null
+    Number.isFinite(device.state.humidity) ? (device.state.humidity as number) : null
   );
   const battery = $derived<number | null>(
-    typeof device.state.battery === 'number' ? (device.state.battery as number) : null
+    Number.isFinite(device.state.battery) ? (device.state.battery as number) : null
   );
   const link = $derived<number | null>(
-    typeof device.state.linkquality === 'number' ? (device.state.linkquality as number) : null
+    Number.isFinite(device.state.linkquality) ? (device.state.linkquality as number) : null
   );
 
   const batteryColor = $derived(

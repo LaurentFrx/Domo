@@ -98,14 +98,13 @@ class SavingsState {
       }
     };
     document.addEventListener('visibilitychange', this.#visibilityHandler);
-    // Ne démarrer le polling QUE si l'onglet est visible au montage : si l'app
-    // est hydratée en arrière-plan (PWA relancée masquée, onglet ouvert en fond),
-    // on attend le 1er passage visible via le handler — sinon un interval de fond
-    // tournerait jusqu'au premier focus (contraire à « pause en arrière-plan »).
-    if (document.visibilityState === 'visible') {
-      this.poll();
-      this.#startInterval();
-    }
+    // UN fetch au montage DANS TOUS LES CAS → les données (carte Économies) sont
+    // prêtes même si l'onglet est hydraté masqué (PWA relancée en fond, restauration
+    // d'onglet) ; sinon la carte restait vide jusqu'au 1er focus. L'INTERVAL, lui, ne
+    // démarre que si visible (la « pause en arrière-plan » porte sur le polling
+    // répété, pas sur le 1er chargement) ; le handler le (re)démarre au retour visible.
+    this.poll();
+    if (document.visibilityState === 'visible') this.#startInterval();
   }
 
   disconnect() {

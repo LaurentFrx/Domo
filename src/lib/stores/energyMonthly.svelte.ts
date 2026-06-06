@@ -91,11 +91,10 @@ class EnergyMonthlyState {
       }
     };
     document.addEventListener('visibilitychange', this.#visibilityHandler);
-    // Ne démarrer le polling QUE si l'onglet est visible au montage (cf. savings).
-    if (document.visibilityState === 'visible') {
-      this.poll();
-      this.#startInterval();
-    }
+    // UN fetch au montage dans tous les cas → tableau mensuel prêt même si l'onglet
+    // est hydraté masqué ; l'interval ne démarre que si visible (cf. savings).
+    this.poll();
+    if (document.visibilityState === 'visible') this.#startInterval();
   }
 
   disconnect() {

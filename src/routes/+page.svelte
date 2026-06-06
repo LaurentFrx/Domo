@@ -117,6 +117,7 @@
   }
 
   // ─── Footer : tarif RÉEL (store tariff, vraie fenêtre HC 00:06–08:06) ──
+  const tariffReady = $derived(tariff.status === 'live'); // évite le flash 0,00 avant le 1er fetch
   const currentTariff = $derived(tariff.period);
   const currentPrice = $derived(tariff.priceEurKwh); // €/kWh
   const nextTariff = $derived(tariff.next.period);
@@ -275,7 +276,7 @@
               class="text-[14px] font-semibold tabular-nums"
               style="color: {currentTariff === 'HC' ? 'var(--color-hc)' : 'var(--color-hp)'};"
             >
-              {currentTariff} · {(currentPrice * 100).toFixed(2)} cts/kWh
+              {#if tariffReady}{currentTariff} · {(currentPrice * 100).toFixed(2)} cts/kWh{:else}—{/if}
             </span>
           </div>
 
@@ -293,7 +294,7 @@
               class="text-[14px] font-semibold tabular-nums"
               style="color: var(--color-grid-energy);"
             >
-              ↓ {savings.today.import_kwh.toFixed(2)} kWh
+              {#if savings.connected}↓ {savings.today.import_kwh.toFixed(2)} kWh{:else}—{/if}
             </span>
           </div>
 
@@ -308,7 +309,8 @@
               Prochaine bascule
             </span>
             <span class="text-[14px] tabular-nums" style="color: var(--color-fg);">
-              {nextTariff} à {nextSwitchAt} · dans {hoursUntilSwitch} h
+              {#if tariffReady && nextSwitchAt}{nextTariff} à {nextSwitchAt} · dans {hoursUntilSwitch}
+                h{:else}—{/if}
             </span>
           </div>
         </div>

@@ -68,11 +68,16 @@
   const ARC_LENGTH = ARC_CIRCUMFERENCE * 0.75;
 
   // Historique RÉEL glissant de la température cumulus (relevés sonde Zigbee de la
-  // session) — plus de série factice. Démarre vide, se remplit au fil des lectures.
-  let tempHistory = $state<number[]>([]);
+  // session) — plus de série factice. On amorce avec la lecture courante (pour que
+  // la sparkline ne soit pas vide au montage) puis on n'ajoute QUE les variations
+  // réelles (> 0,05 °C) pour éviter d'empiler des doublons à chaque tick réactif.
+  let tempHistory = $state<number[]>(cumulus.temperatureC > 0 ? [cumulus.temperatureC] : []);
   $effect(() => {
     const t = cumulus.temperatureC;
-    if (t > 0) tempHistory = [...tempHistory, t].slice(-24);
+    const last = tempHistory[tempHistory.length - 1];
+    if (t > 0 && (last === undefined || Math.abs(t - last) > 0.05)) {
+      tempHistory = [...tempHistory, t].slice(-24);
+    }
   });
 
   // Direction du vent : degrés (météo réelle Open-Meteo) → cardinal FR.
@@ -81,7 +86,9 @@
     return dirs[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
   }
 
-  const cumulusProgress = $derived(Math.min(1, cumulus.temperatureC / cumulus.targetTempC));
+  const cumulusProgress = $derived(
+    cumulus.targetTempC > 0 ? Math.min(1, cumulus.temperatureC / cumulus.targetTempC) : 0
+  );
   const legionnellaDays = $derived(daysUntil(cumulus.nextLegionnellaCycle));
 
   // ─── Daikin ────────────────────────────────────────────────────────
@@ -119,9 +126,15 @@
     return null;
   }
   function setTarget(u: DaikinUnit, v: number) {
-    haptic('light');
-    if (u.operationMode === 'heating') daikin.setTargetHeating(u.id, v);
-    else if (u.operationMode === 'cooling') daikin.setTargetCooling(u.id, v);
+    // Ne vibrer QUE si une commande part réellement (sinon faux retour haptique
+    // quand l'unité n'est ni en chaud ni en froid).
+    if (u.operationMode === 'heating') {
+      haptic('light');
+      daikin.setTargetHeating(u.id, v);
+    } else if (u.operationMode === 'cooling') {
+      haptic('light');
+      daikin.setTargetCooling(u.id, v);
+    }
   }
   // ─── Changement de mode Chaud/Froid : appui LONG anti-fausse-manip ──────
   // Un tap simple ne suffit pas (risque d'envoyer une mauvaise consigne par
@@ -785,7 +798,7 @@
                 aria-label="Baisser la consigne {zone.name}"
                 onclick={() => {
                   haptic('light');
-                  airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) - zone.tempStep);
+                  airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) - (zone.tempStep ?? 0.5));
                 }}>−</button
               >
               <span
@@ -801,7 +814,7 @@
                 aria-label="Monter la consigne {zone.name}"
                 onclick={() => {
                   haptic('light');
-                  airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) + zone.tempStep);
+                  airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) + (zone.tempStep ?? 0.5));
                 }}>+</button
               >
             </div>
