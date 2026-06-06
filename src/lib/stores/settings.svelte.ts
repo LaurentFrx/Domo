@@ -22,7 +22,7 @@ const DEFAULTS: Persisted = {
   priceHp: 0.2318,
   priceExport: 0.04,
   subscription: 13.5,
-  installationCostEur: 8500
+  installationCostEur: 4500
 };
 
 class SettingsState {
