@@ -5,7 +5,6 @@
   import ConcentricRings from '$components/effects/ConcentricRings.svelte';
   import { anker } from '$stores/anker.svelte';
   import { production } from '$stores/production.svelte';
-  import { savings } from '$stores/savings.svelte';
   import { tariff } from '$stores/tariff.svelte';
   import { settings } from '$stores/settings.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
@@ -153,59 +152,6 @@
     <!-- ═══ Économies solaires — carte héro en première position ═══ -->
     <SavingsCard />
 
-    <!-- ═══ Hero — Auto-consommation ═══ -->
-    <header class="flex items-center justify-between gap-4">
-      <div class="flex flex-col gap-1">
-        <div class="flex items-baseline gap-2">
-          <span
-            class="text-[40px] leading-none font-bold tracking-tight sm:text-[48px]"
-            style="color: var(--color-fg); letter-spacing: -0.02em;"
-          >
-            {autoA}<span class="text-[24px] font-semibold" style="color: var(--color-muted-fg);"
-              >%</span
-            >
-          </span>
-          <span
-            class="text-[11px] font-semibold tracking-[0.08em] uppercase"
-            style="color: var(--color-muted-fg);"
-          >
-            autoconso
-          </span>
-        </div>
-        <span
-          class="text-[13px] font-medium"
-          style="color: {isExporting
-            ? 'var(--color-solar)'
-            : isImporting
-              ? 'var(--color-grid-energy)'
-              : 'var(--color-muted-fg)'};"
-        >
-          {#if isExporting}
-            ↑ {fmtW(gridA)} W injectés sur le réseau
-          {:else if isImporting}
-            ↓ {fmtW(gridA)} W soutirés du réseau
-          {:else}
-            Réseau à l'équilibre
-          {/if}
-        </span>
-      </div>
-
-      <span
-        class="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-[0.04em] uppercase"
-        style="background: {anker.connected
-          ? 'var(--color-battery-muted)'
-          : 'var(--color-warning) / 0.15'}; color: {anker.connected
-          ? 'var(--color-battery)'
-          : 'var(--color-warning)'};"
-      >
-        <span
-          class="h-1.5 w-1.5 rounded-full"
-          style="background: {anker.connected ? 'var(--color-battery)' : 'var(--color-warning)'};"
-        ></span>
-        {anker.connected ? 'Anker connecté' : 'Mode démo'}
-      </span>
-    </header>
-
     <!-- ═══ Paysage (iPad/desktop) : Sankey | stats côte à côte ; mobile : empilé ═══ -->
     <!-- items-stretch : la colonne stats remplit la hauteur du Sankey carré (sinon
          un grand vide à droite sur desktop). -->
@@ -226,6 +172,59 @@
 
       <!-- Colonne stats : remplit la hauteur du Sankey (justify-between) ─────── -->
       <div class="flex flex-col gap-4 lg:justify-between">
+        <!-- ═══ Auto-consommation (résumé live — fusionné depuis l'ancien hero
+             pleine largeur : condense l'accueil + remplit la colonne) ═══ -->
+        <div
+          class="flex items-center justify-between gap-3 rounded-[var(--radius-xl)] border px-4 py-3"
+          style="background: var(--color-card); border-color: var(--color-border);"
+        >
+          <div class="flex flex-col gap-0.5">
+            <span class="flex items-baseline gap-1.5">
+              <span
+                class="text-[30px] leading-none font-bold tracking-tight sm:text-[34px]"
+                style="color: var(--color-fg); letter-spacing: -0.02em;"
+              >
+                {autoA}<span class="text-[18px] font-semibold" style="color: var(--color-muted-fg);"
+                  >%</span
+                >
+              </span>
+              <span
+                class="text-[10px] font-semibold tracking-[0.08em] uppercase"
+                style="color: var(--color-muted-fg);"
+              >
+                autoconso
+              </span>
+            </span>
+            <span
+              class="text-[12px] font-medium"
+              style="color: {isExporting
+                ? 'var(--color-solar)'
+                : isImporting
+                  ? 'var(--color-grid-energy)'
+                  : 'var(--color-muted-fg)'};"
+            >
+              {#if isExporting}↑ {fmtW(gridA)} W injectés{:else if isImporting}↓ {fmtW(gridA)} W soutirés{:else}Réseau
+                à l'équilibre{/if}
+            </span>
+          </div>
+          <span
+            class="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em] uppercase"
+            style="background: {anker.connected
+              ? 'var(--color-battery-muted)'
+              : 'var(--color-warning) / 0.15'}; color: {anker.connected
+              ? 'var(--color-battery)'
+              : 'var(--color-warning)'};"
+          >
+            <span
+              class="h-1.5 w-1.5 rounded-full"
+              style="background: {anker.connected
+                ? 'var(--color-battery)'
+                : 'var(--color-warning)'};"
+            ></span>
+            {anker.connected ? 'Anker' : 'Démo'}
+          </span>
+        </div>
+
         <!-- ═══ KPI lifetime (vraies données Anker) ═══ -->
         {#if hasLifetime}
           <div class="grid grid-cols-2 gap-3">
@@ -281,24 +280,6 @@
               style="color: {currentTariff === 'HC' ? 'var(--color-hc)' : 'var(--color-hp)'};"
             >
               {#if tariffReady}{currentTariff} · {(currentPrice * 100).toFixed(2)} cts/kWh{:else}—{/if}
-            </span>
-          </div>
-
-          <div
-            class="flex items-center justify-between gap-3 border-t px-4 py-3"
-            style="border-color: var(--color-border);"
-          >
-            <span
-              class="text-[10px] font-semibold tracking-[0.08em] uppercase"
-              style="color: var(--color-muted-fg);"
-            >
-              Réseau soutiré aujourd'hui
-            </span>
-            <span
-              class="text-[14px] font-semibold tabular-nums"
-              style="color: var(--color-grid-energy);"
-            >
-              {#if savings.connected}↓ {savings.today.import_kwh.toFixed(2)} kWh{:else}—{/if}
             </span>
           </div>
 

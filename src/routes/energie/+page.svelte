@@ -335,7 +335,13 @@
       <div class="flex items-center justify-between gap-2">
         <div class="flex flex-col gap-0.5">
           <span class="text-[14px] font-semibold">Flux d'énergie 24h</span>
-          <span class="text-[11px]" style="color: var(--color-muted-fg);">Aujourd'hui</span>
+          <!-- Réseau soutiré du jour : déplacé depuis l'accueil (sa place = page énergie). -->
+          <span class="text-[11px]" style="color: var(--color-muted-fg);">
+            Aujourd'hui{#if savings.connected}
+              · <span style="color: var(--color-grid-energy);"
+                >↓ {savings.today.import_kwh.toFixed(2)} kWh réseau</span
+              >{/if}
+          </span>
         </div>
         {#if prodView}
           <span
