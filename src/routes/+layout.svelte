@@ -11,6 +11,7 @@
   import { tariff } from '$stores/tariff.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
   import { preferences } from '$stores/preferences.svelte';
+  import { settings } from '$stores/settings.svelte';
   import { haptic } from '$utils/haptic';
 
   let { children } = $props();
@@ -37,6 +38,12 @@
   // perd le theme dark.
   $effect(() => {
     preferences.hydrate();
+  });
+
+  // ─── Réglages métier (prix, coût/date installation, facteur CO2) app-wide ──
+  // Hydratés ici pour que l'accueil (CO2 évité) et l'énergie (ROI) y aient accès.
+  $effect(() => {
+    settings.hydrate();
   });
 
   // ─── Démo ticker (mock) — actif tant qu'on n'a pas de vraie source ─────

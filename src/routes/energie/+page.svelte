@@ -273,7 +273,8 @@
   // Mois courant : auto-conso + import réels (store mensuel). ROI : économies
   // annuelles du store savings (baseline incluse, cohérent avec la SavingsCard).
   const curMonth = $derived(energyMonthly.months[currentMonthIdx] ?? energyMonthly.months[0]);
-  const co2Saved = $derived((curMonth?.autoconso_kwh ?? 0) * 0.05);
+  // CO2 évité = auto-conso × facteur réseau FRANCE (réglage, défaut ADEME 0,052).
+  const co2Saved = $derived((curMonth?.autoconso_kwh ?? 0) * settings.co2FactorKgKwh);
   const evKmEquiv = $derived(co2Saved * 6);
   const autonomyPct = $derived.by(() => {
     const auto = curMonth?.autoconso_kwh ?? 0;

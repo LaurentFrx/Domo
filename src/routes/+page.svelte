@@ -7,6 +7,7 @@
   import { production } from '$stores/production.svelte';
   import { savings } from '$stores/savings.svelte';
   import { tariff } from '$stores/tariff.svelte';
+  import { settings } from '$stores/settings.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
   import { cumulus } from '$stores/cumulus.svelte';
   import { shelly } from '$stores/shelly.svelte';
@@ -100,6 +101,10 @@
 
   // ─── 3 cards lifetime (depuis Anker, vraies données) ─────────────────
   const hasLifetime = $derived(anker.connected && anker.lifetimeProductionKwh > 0);
+  // CO2 évité = production totale × facteur réseau FRANCE (réglage, défaut ADEME
+  // 0,052 kgCO2e/kWh). Remplace le compteur Anker (~0,5/kWh, mix générique européen)
+  // largement surestimé pour le mix français bas carbone.
+  const co2SavedKg = $derived(anker.lifetimeProductionKwh * settings.co2FactorKgKwh);
 
   function fmtNumber(n: number, decimals = 0): string {
     return n.toLocaleString('fr-FR', {
@@ -228,9 +233,9 @@
             />
             <KpiCard
               label="CO₂ évité"
-              value={fmtNumber(anker.lifetimeCo2SavedKg, 0)}
+              value={fmtNumber(co2SavedKg, 0)}
               unit="kg"
-              trend={`≈ ${fmtNumber(anker.lifetimeCo2SavedKg * 6, 0)} km en VE`}
+              trend={`≈ ${fmtNumber(co2SavedKg * 6, 0)} km en voiture`}
               domain="battery"
             />
           </div>
