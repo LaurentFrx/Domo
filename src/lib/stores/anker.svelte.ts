@@ -220,28 +220,32 @@ class AnkerState {
 
   // ─── État interne du filtre réseau anti-transitoire (non réactif) ──────
   private lastSnapTs: number | null = null;
-  private prevFreshImportW = 0;
-  private prevFreshExportW = 0;
+  private gridHist: number[] = [];
 
   /**
-   * Met à jour gridFilteredW à partir du net brut + de l'horodatage cloud.
-   * On n'agit QUE sur un snapshot cloud RÉELLEMENT nouveau (last_update changé) :
-   * import/export retenus = min(valeur fraîche courante, valeur fraîche précédente)
-   * → un pic présent dans un seul snapshot frais (transitoire de ~3 s) est ramené à
-   * 0 ; un soutirage/injection SOUTENU (présent sur 2 snapshots frais) passe.
-   * Snapshot resservi (cache identique) → on conserve la dernière valeur filtrée.
+   * Met à jour gridFilteredW (réseau affiché) à partir du net signé (+ soutirage /
+   * − injection) + de l'horodatage cloud. On n'agit QUE sur un snapshot RÉELLEMENT
+   * nouveau (last_update changé).
+   *
+   * Filtre = MÉDIANE des 3 derniers snapshots frais :
+   *   • un pic transitoire présent dans UN seul snapshot (cache Solix figé ~60 s,
+   *     puis saut) est rejeté par la médiane ;
+   *   • un import/export SOUTENU passe (médiane = sa valeur) — y compris l'EXPORT
+   *     RÉSIDUEL de l'APS quand la batterie est pleine (talon couvert, surplus vers
+   *     EDF) et les inversions de sens.
+   *
+   * Remplace l'ancien min(import,prev)/min(export,prev) qui tombait à 0 dès que le
+   * sens s'inversait ou fluctuait autour de 0 → le diagramme paraissait « au repos »
+   * alors que l'APS exporte en continu. Snapshot resservi → on garde la dernière.
    */
   private applyGridFilter(gridRaw: number, ts: number | null) {
-    const importW = Math.max(0, gridRaw);
-    const exportW = Math.max(0, -gridRaw);
     const fresh = ts !== null && ts !== this.lastSnapTs;
     if (!fresh) return;
-    const confImport = Math.min(importW, this.prevFreshImportW);
-    const confExport = Math.min(exportW, this.prevFreshExportW);
-    this.gridFilteredW = confImport - confExport;
-    this.prevFreshImportW = importW;
-    this.prevFreshExportW = exportW;
     this.lastSnapTs = ts;
+    this.gridHist.push(gridRaw);
+    if (this.gridHist.length > 3) this.gridHist.shift();
+    const sorted = [...this.gridHist].sort((a, b) => a - b);
+    this.gridFilteredW = sorted[Math.floor(sorted.length / 2)];
   }
 
   connect() {
