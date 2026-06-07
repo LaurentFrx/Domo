@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { matter } from '$stores/matter.svelte';
   import { anker } from '$stores/anker.svelte';
-  import { shelly } from '$stores/shelly.svelte';
   import { daikin } from '$stores/daikin.svelte';
-  import { solcast } from '$stores/solcast.svelte';
+  import { forecast } from '$stores/forecast.svelte';
   import { weather } from '$stores/weather.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
   import { cumulus } from '$stores/cumulus.svelte';
@@ -20,6 +19,18 @@
     if (matter.connectionStatus === 'disconnected') {
       matter.connect();
     }
+    // Connecter les stores affichés dans « Connexions » pour des états RÉELS et
+    // à jour (anker/apsystems sont déjà connectés app-wide via le layout).
+    daikin.connect();
+    weather.connect();
+    zigbee.connect();
+    forecast.connect();
+  });
+  onDestroy(() => {
+    daikin.disconnect();
+    weather.disconnect();
+    zigbee.disconnect();
+    forecast.disconnect();
   });
 
   // ─── Section 1 : Connexions ────────────────────────────────────────
@@ -47,12 +58,6 @@
       devices: anker.batteries.length
     },
     {
-      name: 'Shelly EM / 1 Pro',
-      connected: shelly.connected,
-      mode: shelly.mode,
-      lastUpdate: shelly.lastUpdate
-    },
-    {
       name: 'Matter',
       connected: matter.connectionStatus === 'connected',
       mode: matter.connectionStatus,
@@ -67,10 +72,15 @@
       devices: daikin.units.length
     },
     {
-      name: 'Solcast',
-      connected: solcast.connected,
-      mode: solcast.mode,
-      lastUpdate: solcast.lastUpdate
+      name: 'Prévision PV',
+      connected: forecast.status === 'live',
+      mode:
+        forecast.status === 'live'
+          ? 'direct'
+          : forecast.status === 'error'
+            ? 'disconnected'
+            : 'connecting',
+      lastUpdate: null
     },
     {
       name: 'Open-Meteo',
