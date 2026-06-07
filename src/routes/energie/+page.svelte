@@ -21,6 +21,7 @@
   import KpiCard from '$components/cards/KpiCard.svelte';
   import ChartHoverLayer from '$components/charts/ChartHoverLayer.svelte';
   import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
+  import CumulusCard from '$components/cards/CumulusCard.svelte';
 
   onMount(() => {
     settings.hydrate(); // coût installation (ROI) + prix, depuis /api/settings
@@ -681,6 +682,9 @@
       </div>
     </section>
   {/if}
+
+  <!-- ═══ Cumulus ECS — déplacé depuis /climat, sous l'électroménager ═══ -->
+  <CumulusCard />
 
   <!-- ═══ Section 3 : Tableau mensuel ═══ -->
   <section class="overflow-x-auto">
