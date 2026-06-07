@@ -32,6 +32,9 @@
   );
   const legionnellaDays = $derived(daysUntil(cumulus.nextLegionnellaCycle));
 
+  // Puissance résistance — ESTIMÉE (≈), pas mesurée (le Pro 1 n'a pas de métrologie).
+  const powerLabel = $derived(`≈ ${(cumulus.powerW / 1000).toFixed(1).replace('.', ',')} kW`);
+
   // Bascule du relais réel (Shelly Pro 1). Confirmation par la relecture serveur.
   function toggleRelay() {
     if (!cumulus.relayConnected) return;
@@ -84,7 +87,7 @@
             {#if !cumulus.relayConnected}Boîtier hors ligne{:else if cumulus.relayOn === true}Chauffe{:else if cumulus.relayOn === false}Arrêté{:else}…{/if}
           </span>
           <span class="text-[10px] leading-tight" style="color: var(--color-muted-fg);">
-            Relais Shelly · 1850 W
+            Relais Shelly · {powerLabel}
           </span>
         </div>
       </div>
@@ -212,7 +215,7 @@
     <div class="mt-2 flex gap-4 text-[11px]" style="color: var(--color-muted-fg);">
       <span>{(cumulus.costPerHour * 100).toFixed(0)} cts/h</span>
       <span class="opacity-50">·</span>
-      <span>1850 W</span>
+      <span>{powerLabel}</span>
     </div>
   </div>
 </section>

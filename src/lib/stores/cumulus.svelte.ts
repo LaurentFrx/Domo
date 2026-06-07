@@ -115,10 +115,18 @@ class CumulusState {
       : 0
   );
 
-  /** Coût horaire (€) si ON. */
-  costPerHour = $derived(
-    1.85 * (this.currentMode === 'HC' ? 0.1812 : this.currentMode === 'OFF' ? 0 : 0.2318)
-  );
+  /** Puissance de la résistance cumulus (W). Élément 3000 W, conso réelle un peu
+   *  moindre ; le Shelly Pro 1 ne mesure pas → valeur ESTIMÉE (≈), pas mesurée. */
+  powerW = 2900;
+
+  /** Coût horaire (€) — uniquement quand le relais chauffe VRAIMENT (état réel
+   *  Shelly), au tarif HC/HP selon l'heure (fenêtre HC du store). */
+  costPerHour = $derived.by(() => {
+    if (this.relayOn !== true) return 0;
+    const h = hourOfDay();
+    const inHC = h >= this.hcStartHour && h < this.hcEndHour;
+    return (this.powerW / 1000) * (inHC ? 0.1812 : 0.2318);
+  });
 
   setMode(mode: CumulusMode) {
     this.currentMode = mode;
