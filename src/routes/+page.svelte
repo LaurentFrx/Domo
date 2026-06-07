@@ -139,6 +139,14 @@
     class="stagger-enter relative flex flex-col gap-3.5 py-3 sm:gap-5 sm:py-4"
     style="z-index: 1;"
   >
+    <!-- ═══ En-tête : bannière aurore « dôme OVNI » ═══ -->
+    <img
+      src="/header-accueil.svg?v=1"
+      alt=""
+      aria-hidden="true"
+      class="w-full rounded-[var(--radius-2xl)]"
+    />
+
     <!-- Carte Batterie définie en snippet → rendue à 2 endroits : au-dessus du
          Sankey sur mobile, dans la colonne stats droite dès lg. -->
     {#snippet batteryCard()}
