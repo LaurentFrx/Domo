@@ -112,6 +112,11 @@
   const nextTariff = $derived(tariff.next.period);
   const nextSwitchAt = $derived(tariff.next.at); // 'HH:MM' local Paris
   const hoursUntilSwitch = $derived(tariff.nextInHours);
+
+  // ─── Réglage LIVE des 3 anneaux qui gravitent (taille + hauteur) ──────
+  let ringsScale = $state(1); // facteur d'échelle des diamètres (100 % = défaut)
+  let ringsOffsetY = $state(0); // décalage vertical en px (+ = plus bas)
+  const ringSizes = $derived([560, 880, 1220].map((d) => Math.round(d * ringsScale)));
 </script>
 
 <svelte:head>
@@ -128,8 +133,11 @@
       aria-hidden="true"
     >
       <!-- Anneaux concentriques centrés sur la zone hero/carte -->
-      <div class="absolute inset-x-0 top-0" style="height: 660px;">
-        <ConcentricRings />
+      <div
+        class="absolute inset-x-0 top-0"
+        style="height: 660px; transform: translateY({ringsOffsetY}px);"
+      >
+        <ConcentricRings sizes={ringSizes} />
       </div>
     </div>
   {/if}
@@ -144,7 +152,7 @@
       src="/header-accueil.webp?v=4"
       alt=""
       aria-hidden="true"
-      class="w-full rounded-[var(--radius-2xl)]"
+      class="-mb-3.5 w-full rounded-[var(--radius-2xl)] sm:-mb-5"
     />
 
     <!-- Carte Batterie définie en snippet → rendue à 2 endroits : au-dessus du
@@ -225,6 +233,51 @@
 
     <!-- ═══ Économies solaires — carte héro en première position ═══ -->
     <SavingsCard />
+
+    <!-- ═══ Réglages LIVE des anneaux orbitaux (taille + hauteur) ═══ -->
+    <div
+      class="flex flex-col gap-2.5 rounded-[var(--radius-xl)] border px-4 py-3"
+      style="background: var(--color-card); border-color: var(--color-border);"
+    >
+      <span
+        class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+        style="color: var(--color-muted-fg);"
+      >
+        Anneaux orbitaux
+      </span>
+      <label class="flex items-center gap-3 text-[12px]">
+        <span class="w-16 shrink-0" style="color: var(--color-muted-fg);">Taille</span>
+        <input
+          type="range"
+          min="0.4"
+          max="2"
+          step="0.02"
+          bind:value={ringsScale}
+          class="h-2 flex-1 cursor-pointer"
+          style="accent-color: var(--color-glow-bright);"
+          aria-label="Taille des anneaux"
+        />
+        <span class="w-12 shrink-0 text-right tabular-nums" style="color: var(--color-fg);"
+          >{Math.round(ringsScale * 100)} %</span
+        >
+      </label>
+      <label class="flex items-center gap-3 text-[12px]">
+        <span class="w-16 shrink-0" style="color: var(--color-muted-fg);">Hauteur</span>
+        <input
+          type="range"
+          min="-300"
+          max="300"
+          step="5"
+          bind:value={ringsOffsetY}
+          class="h-2 flex-1 cursor-pointer"
+          style="accent-color: var(--color-glow-bright);"
+          aria-label="Hauteur des anneaux"
+        />
+        <span class="w-12 shrink-0 text-right tabular-nums" style="color: var(--color-fg);"
+          >{ringsOffsetY > 0 ? '+' : ''}{ringsOffsetY} px</span
+        >
+      </label>
+    </div>
 
     <!-- Batterie EN PREMIER sur mobile (au-dessus du Sankey) ; masquée dès lg. -->
     <div class="lg:hidden">{@render batteryCard()}</div>
