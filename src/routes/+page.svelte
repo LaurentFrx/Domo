@@ -85,18 +85,8 @@
   // de conversion < 5 % ignorées).
   const homeA = $derived(Math.max(0, Math.round(pvA + gridA - batA)));
 
-  // ─── Hero : auto-conso + flux net ─────────────────────────────────────
-  const autoConso = $derived(
-    anker.connected ? Math.round(anker.selfConsumptionRate ?? 0) : dashboard.solarSelfConsumption
-  );
-  const autoTw = new Tween(0, { easing: cubicOut });
-  $effect(() => void autoTw.set(autoConso, { duration: animMs, easing: cubicOut }));
-  const autoA = $derived(Math.round(autoTw.current));
-
-  // Direction du flux : seuils sur la valeur BRUTE (évite le clignotement des
-  // libellés pendant l'interpolation) ; magnitude affichée = valeur animée.
-  const isExporting = $derived(gridPowerW < -5);
-  const isImporting = $derived(gridPowerW > 5);
+  // ─── Énergie stockée en batterie (kWh) — pour la carte Batterie ───────
+  const storedKwh = $derived(anker.totalBatteryEnergyWh / 1000);
 
   // ─── 3 cards lifetime (depuis Anker, vraies données) ─────────────────
   const hasLifetime = $derived(anker.connected && anker.lifetimeProductionKwh > 0);
@@ -172,57 +162,82 @@
 
       <!-- Colonne stats : remplit la hauteur du Sankey (justify-between) ─────── -->
       <div class="flex flex-col gap-4 lg:justify-between">
-        <!-- ═══ Auto-consommation (résumé live — fusionné depuis l'ancien hero
-             pleine largeur : condense l'accueil + remplit la colonne) ═══ -->
+        <!-- ═══ Batterie — charge (SOC) + jauge segmentée OVNI ═══ -->
+        <!-- Conçue via workflow (3 variantes + juge) : jauge 10 cellules qui se
+             remplit au SOC, gros % à gauche, flux+kWh à droite ; vert charge /
+             orange décharge ; cellule de front pulse en charge. Cf. <style>. -->
         <div
-          class="flex items-center justify-between gap-3 rounded-[var(--radius-xl)] border px-4 py-3"
+          class="bat-card flex items-center gap-3 rounded-[var(--radius-xl)] border px-4 py-3"
+          class:is-charging={anker.connected && batChargeA > 1}
+          class:is-discharging={anker.connected && batDischargeA > 1}
+          class:is-low={anker.connected && socA <= 20}
+          class:is-offline={!anker.connected}
           style="background: var(--color-card); border-color: var(--color-border);"
         >
-          <div class="flex flex-col gap-0.5">
-            <span class="flex items-baseline gap-1.5">
-              <span
-                class="text-[30px] leading-none font-bold tracking-tight sm:text-[34px]"
-                style="color: var(--color-fg); letter-spacing: -0.02em;"
-              >
-                {autoA}<span class="text-[18px] font-semibold" style="color: var(--color-muted-fg);"
-                  >%</span
+          <!-- Gauche : SOC numérique + état -->
+          <div class="flex shrink-0 flex-col">
+            <div class="flex items-baseline gap-1">
+              {#if anker.connected}
+                <span
+                  class="bat-soc text-3xl leading-none font-bold tabular-nums"
+                  style="color: var(--color-fg);"
+                  >{Math.round(Math.max(0, Math.min(100, socA)))}</span
                 >
-              </span>
+                <span
+                  class="text-base leading-none font-semibold"
+                  style="color: var(--color-muted-fg);">%</span
+                >
+              {:else}
+                <span
+                  class="bat-soc text-3xl leading-none font-bold"
+                  style="color: var(--color-muted-fg);">—</span
+                >
+              {/if}
+            </div>
+            <div class="mt-1.5 flex items-center gap-1.5">
+              <span class="bat-dot h-1.5 w-1.5 shrink-0 rounded-full"></span>
               <span
-                class="text-[10px] font-semibold tracking-[0.08em] uppercase"
+                class="text-[0.6875rem] leading-none font-semibold tracking-wide uppercase"
                 style="color: var(--color-muted-fg);"
               >
-                autoconso
+                {#if !anker.connected}Hors ligne{:else if batChargeA > 1}Charge{:else if batDischargeA > 1}Décharge{:else}Repos{/if}
               </span>
-            </span>
-            <span
-              class="text-[12px] font-medium"
-              style="color: {isExporting
-                ? 'var(--color-solar)'
-                : isImporting
-                  ? 'var(--color-grid-energy)'
-                  : 'var(--color-muted-fg)'};"
-            >
-              {#if isExporting}↑ {fmtW(gridA)} W injectés{:else if isImporting}↓ {fmtW(gridA)} W soutirés{:else}Réseau
-                à l'équilibre{/if}
-            </span>
+            </div>
           </div>
-          <span
-            class="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em] uppercase"
-            style="background: {anker.connected
-              ? 'var(--color-battery-muted)'
-              : 'var(--color-warning) / 0.15'}; color: {anker.connected
-              ? 'var(--color-battery)'
-              : 'var(--color-warning)'};"
-          >
-            <span
-              class="h-1.5 w-1.5 rounded-full"
-              style="background: {anker.connected
-                ? 'var(--color-battery)'
-                : 'var(--color-warning)'};"
-            ></span>
-            {anker.connected ? 'Anker' : 'Démo'}
-          </span>
+
+          <!-- Centre : jauge segmentée + borne -->
+          <div class="flex min-w-0 flex-1 items-center gap-1.5">
+            <div
+              class="bat-cells flex h-9 min-w-0 flex-1 items-stretch gap-[3px] rounded-md p-[3px]"
+            >
+              {#each Array.from({ length: 10 }) as _, i}
+                {@const lo = i * 10}
+                {@const lvl = anker.connected ? Math.max(0, Math.min(100, socA)) : 0}
+                {@const fill = Math.max(0, Math.min(1, (lvl - lo) / 10))}
+                {@const active = lvl > lo + 0.5}
+                {@const isEdge = active && lvl <= lo + 10.5}
+                <div class="bat-cell" class:is-active={active} class:is-edge={isEdge}>
+                  <div class="bat-cell-fill" style="transform: scaleX({fill});"></div>
+                </div>
+              {/each}
+            </div>
+            <span class="bat-nub h-3.5 w-[3px] shrink-0 rounded-r-sm"></span>
+          </div>
+
+          <!-- Droite : flux (W) + énergie stockée -->
+          <div class="flex shrink-0 flex-col items-end">
+            <span class="bat-flow text-sm leading-none font-semibold tabular-nums">
+              {#if anker.connected && batChargeA > 1}+{fmtW(batChargeA)} W{:else if anker.connected && batDischargeA > 1}−{fmtW(
+                  batDischargeA
+                )} W{:else}—{/if}
+            </span>
+            {#if anker.connected && storedKwh > 0}
+              <span
+                class="mt-1.5 text-[0.6875rem] leading-none font-medium tabular-nums"
+                style="color: var(--color-muted-fg);">{storedKwh.toFixed(1)} kWh</span
+              >
+            {/if}
+          </div>
         </div>
 
         <!-- ═══ KPI lifetime (vraies données Anker) ═══ -->
@@ -303,3 +318,135 @@
     </div>
   </div>
 </div>
+
+<style>
+  /* ═══ Carte Batterie : jauge segmentée OVNI (conçue via workflow + juge) ═══ */
+  /* Rail des cellules : léger creux en verre (relief inversé, cohérent HG/BD). */
+  .bat-cells {
+    background: var(--color-battery-muted);
+    box-shadow:
+      inset 1px 1px 2px oklch(0.3 0.03 286 / 0.18),
+      inset -1px -1px 1px oklch(0.985 0.01 149 / 0.12);
+  }
+  /* Une cellule = case vide en verre. */
+  .bat-cell {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--color-bg);
+    box-shadow: inset 0 0 0 1px var(--color-border);
+  }
+  /* Remplissage vert, transition douce, ancré à gauche. */
+  .bat-cell-fill {
+    position: absolute;
+    inset: 0;
+    transform-origin: left center;
+    transform: scaleX(0);
+    border-radius: 2px;
+    background: linear-gradient(
+      180deg,
+      oklch(0.85 0.17 152) 0%,
+      oklch(0.76 0.19 152) 55%,
+      oklch(0.66 0.2 152) 100%
+    );
+    transition:
+      transform 700ms cubic-bezier(0.22, 1, 0.36, 1),
+      background 300ms ease;
+  }
+  .bat-cell.is-active .bat-cell-fill {
+    box-shadow: inset 0 1px 2px oklch(0.95 0.08 149 / 0.45);
+  }
+  /* Borne (+) en bout de batterie. */
+  .bat-nub {
+    background: var(--color-border-strong);
+  }
+  .bat-dot {
+    background: var(--color-muted-fg);
+    transition: background-color 300ms ease;
+  }
+  .bat-flow {
+    color: var(--color-muted-fg);
+  }
+  /* ── CHARGE : vert, la cellule de front pulse ── */
+  .bat-card.is-charging .bat-dot {
+    background: var(--color-battery);
+    box-shadow: 0 0 6px var(--color-battery);
+  }
+  .bat-card.is-charging .bat-flow {
+    color: var(--color-battery);
+  }
+  .bat-card.is-charging .bat-cell.is-edge .bat-cell-fill {
+    animation: batPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes batPulse {
+    0%,
+    100% {
+      box-shadow: inset 0 0 4px oklch(0.95 0.1 149 / 0.4);
+      filter: brightness(1);
+    }
+    50% {
+      box-shadow: inset 0 0 9px oklch(0.97 0.12 149 / 0.85);
+      filter: brightness(1.18);
+    }
+  }
+  /* ── DÉCHARGE : seuls le point + le flux passent orange. La JAUGE reste
+     verte = elle indique le NIVEAU de charge, pas le sens du flux (sinon une
+     batterie à 95 % en micro-décharge paraîtrait « faible »). ── */
+  .bat-card.is-discharging .bat-dot {
+    background: var(--color-solar);
+    box-shadow: 0 0 6px var(--color-solar);
+  }
+  .bat-card.is-discharging .bat-flow {
+    color: var(--color-solar);
+  }
+  /* ── NIVEAU BAS (≤ 20 %) : la jauge vire ambre = vrai avertissement ── */
+  .bat-card.is-low .bat-cell-fill {
+    background: linear-gradient(
+      180deg,
+      oklch(0.82 0.16 70) 0%,
+      var(--color-solar) 55%,
+      oklch(0.62 0.17 55) 100%
+    );
+  }
+  .bat-card.is-low .bat-dot {
+    background: var(--color-solar);
+  }
+  /* ── HORS LIGNE : neutralise et désature ── */
+  .bat-card.is-offline .bat-cells {
+    opacity: 0.45;
+    filter: grayscale(0.6);
+  }
+  .bat-card.is-offline .bat-soc {
+    opacity: 0.6;
+  }
+  /* iPhone compact. */
+  @media (max-width: 380px) {
+    .bat-soc {
+      font-size: 1.625rem;
+    }
+    .bat-cells {
+      height: 2rem;
+      gap: 2px;
+    }
+  }
+  /* Accessibilité : pas d'animation si refusée. */
+  @media (prefers-reduced-motion: reduce) {
+    .bat-card.is-charging .bat-cell.is-edge .bat-cell-fill {
+      animation: none;
+    }
+    .bat-cell-fill {
+      transition: none;
+    }
+  }
+  /* Repli sans transparence (réglage iOS global). */
+  @media (prefers-reduced-transparency: reduce) {
+    .bat-cells {
+      background: var(--color-battery-muted);
+    }
+    .bat-cell {
+      background: var(--color-muted);
+    }
+  }
+</style>
