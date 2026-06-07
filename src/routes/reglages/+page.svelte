@@ -25,12 +25,14 @@
     weather.connect();
     zigbee.connect();
     forecast.connect();
+    cumulus.connectRelay(); // relais Shelly cumulus → ligne « Connexions »
   });
   onDestroy(() => {
     daikin.disconnect();
     weather.disconnect();
     zigbee.disconnect();
     forecast.disconnect();
+    cumulus.disconnectRelay();
   });
 
   // ─── Section 1 : Connexions ────────────────────────────────────────
@@ -94,6 +96,12 @@
       mode: zigbee.connectionStatus,
       lastUpdate: null,
       devices: zigbee.devices.length
+    },
+    {
+      name: 'Shelly Pro 1 · cumulus',
+      connected: cumulus.relayConnected,
+      mode: cumulus.relayConnected ? 'direct' : 'disconnected',
+      lastUpdate: cumulus.relayConnected ? cumulus.lastUpdate : null
     }
   ]);
 

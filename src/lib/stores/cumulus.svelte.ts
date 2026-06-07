@@ -48,6 +48,16 @@ class CumulusState {
   /** Date du prochain cycle anti-légionellose obligatoire. */
   nextLegionnellaCycle = $state<Date>(new Date(Date.now() + 4 * 24 * 3600 * 1000));
 
+  // ─── Relais Shelly Pro 1 (RÉEL, via /api/cumulus/relay) ──────────
+  /** État du relais cumulus : true = chauffe, false = arrêté, null = inconnu. */
+  relayOn = $state<boolean | null>(null);
+  /** Le boîtier Shelly répond-il ? (alimente la section Connexions). */
+  relayConnected = $state(false);
+  /** Température interne du boîtier (°C) — diagnostic. */
+  relayTempC = $state<number | null>(null);
+  #relayTimer: ReturnType<typeof setInterval> | null = null;
+  #relayVis: (() => void) | null = null;
+
   // ─── Configuration (modifiable via /reglages) ────
   /** Seuil surplus PV pour ON (W). */
   surplusOnThreshold = $state(1500);
@@ -112,6 +122,64 @@ class CumulusState {
 
   setMode(mode: CumulusMode) {
     this.currentMode = mode;
+  }
+
+  // ─── Relais réel (Shelly Pro 1) ─────────────────
+  /** Lecture de l'état du relais. Marque relayConnected selon la réponse. */
+  async refreshRelay() {
+    try {
+      const res = await fetch('/api/cumulus/relay', { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      this.relayOn = typeof d.on === 'boolean' ? d.on : null;
+      this.relayTempC = typeof d.tC === 'number' ? d.tC : null;
+      this.relayConnected = true;
+      this.lastUpdate = new Date();
+    } catch {
+      this.relayConnected = false;
+    }
+  }
+
+  /** Démarre le polling du relais (10 s, visibility-aware). Idempotent. */
+  connectRelay() {
+    if (this.#relayTimer || typeof document === 'undefined') return;
+    this.refreshRelay();
+    this.#relayTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') this.refreshRelay();
+    }, 10_000);
+    this.#relayVis = () => {
+      if (document.visibilityState === 'visible') this.refreshRelay();
+    };
+    document.addEventListener('visibilitychange', this.#relayVis);
+  }
+
+  disconnectRelay() {
+    if (this.#relayTimer) {
+      clearInterval(this.#relayTimer);
+      this.#relayTimer = null;
+    }
+    if (this.#relayVis) {
+      document.removeEventListener('visibilitychange', this.#relayVis);
+      this.#relayVis = null;
+    }
+  }
+
+  /** Allume/éteint le cumulus (Shelly). Optimiste, puis confirmé par relecture. */
+  async setRelay(on: boolean) {
+    this.relayOn = on; // reflet optimiste immédiat
+    try {
+      const res = await fetch('/api/cumulus/relay', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ on })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      this.relayOn = typeof d.on === 'boolean' ? d.on : on;
+      this.relayConnected = true;
+    } catch {
+      this.refreshRelay(); // resync sur échec
+    }
   }
 }
 

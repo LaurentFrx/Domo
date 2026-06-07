@@ -8,6 +8,7 @@
   import { savings } from '$stores/savings.svelte';
   import { settings } from '$stores/settings.svelte';
   import { energyMonthly } from '$stores/energyMonthly.svelte';
+  import { cumulus } from '$stores/cumulus.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { formatPower, formatCurrency } from '$utils/format';
   import {
@@ -37,12 +38,15 @@
     // Ventilation mensuelle (tableau + KPI). savings est déjà connecté app-wide
     // par +layout.svelte (utilisé pour le ROI annuel) → pas besoin ici.
     energyMonthly.connect();
+    // Relais cumulus RÉEL (Shelly Pro 1) — état + on/off dans CumulusCard.
+    cumulus.connectRelay();
   });
   onDestroy(() => {
     zigbee.disconnect();
     forecast.disconnect();
     productionHistory.disconnect();
     energyMonthly.disconnect();
+    cumulus.disconnectRelay();
     // Pas de anker.disconnect() ni apsystems.disconnect() : leur cycle de vie
     // appartient au layout racine (utilisés app-wide, notamment par le dashboard).
   });

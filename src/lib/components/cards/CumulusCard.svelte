@@ -5,18 +5,10 @@
    * lit le store `cumulus` (qui dérive lui-même de la sonde Zigbee thermo_cumulus).
    * Extraite de /climat pour pouvoir vivre aussi sur /energie (sous l'électroménager).
    */
-  import type { CumulusMode } from '$theme/tokens';
   import { cumulus } from '$stores/cumulus.svelte';
   import { daysUntil } from '$utils/mock-curves';
   import { haptic } from '$utils/haptic';
   import Sparkline from '$components/ui/Sparkline.svelte';
-
-  const modes: { id: CumulusMode; label: string; domain: string }[] = [
-    { id: 'OFF', label: 'Off', domain: 'grid' },
-    { id: 'PV', label: 'Surplus PV', domain: 'solar' },
-    { id: 'HC', label: 'HC', domain: 'hc' },
-    { id: 'FORCE', label: 'Forçage', domain: 'alert' }
-  ];
 
   // Jauge arc 270° — rayon 80, centre 90,90 dans un viewBox 180×180.
   const ARC_RADIUS = 80;
@@ -40,9 +32,11 @@
   );
   const legionnellaDays = $derived(daysUntil(cumulus.nextLegionnellaCycle));
 
-  function tapCumulusMode(mode: CumulusMode) {
+  // Bascule du relais réel (Shelly Pro 1). Confirmation par la relecture serveur.
+  function toggleRelay() {
+    if (!cumulus.relayConnected) return;
     haptic('medium');
-    cumulus.setMode(mode);
+    cumulus.setRelay(!(cumulus.relayOn === true));
   }
 </script>
 
@@ -76,25 +70,37 @@
       </div>
     </div>
 
-    <!-- Sélecteur mode -->
-    <div class="flex gap-2">
-      {#each modes as m (m.id)}
-        {@const active = cumulus.currentMode === m.id}
-        <button
-          type="button"
-          data-no-haptic
-          onclick={() => tapCumulusMode(m.id)}
-          class="flex-1 rounded-full border py-2 text-[11px] font-semibold tracking-[0.04em] transition-colors"
-          style="
-            border-color: {active ? `var(--color-${m.domain})` : 'var(--color-border)'};
-            background: {active ? `var(--color-${m.domain}-muted)` : 'transparent'};
-            color: {active ? `var(--color-${m.domain})` : 'var(--color-muted-fg)'};
-          "
-          aria-pressed={active}
-        >
-          {m.label}
-        </button>
-      {/each}
+    <!-- Relais cumulus RÉEL (Shelly Pro 1) : état + interrupteur on/off -->
+    <div
+      class="cum-relay flex items-center justify-between gap-3 rounded-[var(--radius-lg)] border px-3 py-2.5"
+      class:is-on={cumulus.relayConnected && cumulus.relayOn === true}
+      class:is-offline={!cumulus.relayConnected}
+      style="background: var(--color-muted); border-color: var(--color-border);"
+    >
+      <div class="flex items-center gap-2">
+        <span class="cum-dot h-2 w-2 shrink-0 rounded-full"></span>
+        <div class="flex flex-col">
+          <span class="text-[13px] leading-tight font-semibold" style="color: var(--color-fg);">
+            {#if !cumulus.relayConnected}Boîtier hors ligne{:else if cumulus.relayOn === true}Chauffe{:else if cumulus.relayOn === false}Arrêté{:else}…{/if}
+          </span>
+          <span class="text-[10px] leading-tight" style="color: var(--color-muted-fg);">
+            Relais Shelly · 1850 W
+          </span>
+        </div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={cumulus.relayOn === true}
+        aria-label="Allumer ou éteindre le cumulus"
+        data-no-haptic
+        class="cum-toggle"
+        class:on={cumulus.relayOn === true}
+        disabled={!cumulus.relayConnected}
+        onclick={toggleRelay}
+      >
+        <span class="cum-knob"></span>
+      </button>
     </div>
 
     <!-- Barre progression énergie -->
@@ -210,3 +216,59 @@
     </div>
   </div>
 </section>
+
+<style>
+  /* Pastille d'état du relais */
+  .cum-dot {
+    background: var(--color-muted-fg);
+    transition:
+      background 200ms ease,
+      box-shadow 200ms ease;
+  }
+  .cum-relay.is-on .cum-dot {
+    background: var(--color-solar);
+    box-shadow: 0 0 7px var(--color-solar);
+  }
+
+  /* Interrupteur on/off — forme pilule, dans l'esprit des toggles de l'app */
+  .cum-toggle {
+    position: relative;
+    width: 3rem;
+    height: 1.625rem;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border);
+    background: var(--color-border-strong);
+    cursor: pointer;
+    transition: background 220ms ease;
+  }
+  .cum-toggle.on {
+    background: var(--color-solar);
+  }
+  .cum-toggle:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+  .cum-knob {
+    position: absolute;
+    top: 50%;
+    left: 0.1875rem;
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: 9999px;
+    background: oklch(0.98 0 0);
+    transform: translateY(-50%);
+    box-shadow: 0 1px 3px oklch(0 0 0 / 0.3);
+    transition: left 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .cum-toggle.on .cum-knob {
+    left: calc(100% - 1.4375rem);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cum-dot,
+    .cum-toggle,
+    .cum-knob {
+      transition: none;
+    }
+  }
+</style>
