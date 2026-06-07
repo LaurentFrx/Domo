@@ -20,7 +20,7 @@
   import { onMount, onDestroy } from 'svelte';
   import KpiCard from '$components/cards/KpiCard.svelte';
   import ChartHoverLayer from '$components/charts/ChartHoverLayer.svelte';
-  import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
+  import ApplianceCard from '$components/tiles/ApplianceCard.svelte';
   import CumulusCard from '$components/cards/CumulusCard.svelte';
 
   onMount(() => {
@@ -677,7 +677,7 @@
       </h2>
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
         {#each appliancePlugs as device (device.ieee)}
-          <ZigbeePlugTile {device} />
+          <ApplianceCard {device} />
         {/each}
       </div>
     </section>
