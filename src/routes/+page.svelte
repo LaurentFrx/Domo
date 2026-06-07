@@ -139,8 +139,87 @@
     class="stagger-enter relative flex flex-col gap-3.5 py-3 sm:gap-5 sm:py-4"
     style="z-index: 1;"
   >
+    <!-- Carte Batterie définie en snippet → rendue à 2 endroits : au-dessus du
+         Sankey sur mobile, dans la colonne stats droite dès lg. -->
+    {#snippet batteryCard()}
+      <!-- ═══ Batterie — charge (SOC) + jauge segmentée OVNI (workflow + juge) ═══ -->
+      <div
+        class="bat-card flex items-center gap-3 rounded-[var(--radius-xl)] border px-4 py-3"
+        class:is-charging={anker.connected && batChargeA > 1}
+        class:is-discharging={anker.connected && batDischargeA > 1}
+        class:is-low={anker.connected && socA <= 20}
+        class:is-offline={!anker.connected}
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <!-- Gauche : SOC numérique + état -->
+        <div class="flex shrink-0 flex-col">
+          <div class="flex items-baseline gap-1">
+            {#if anker.connected}
+              <span
+                class="bat-soc text-3xl leading-none font-bold tabular-nums"
+                style="color: var(--color-fg);">{Math.round(Math.max(0, Math.min(100, socA)))}</span
+              >
+              <span
+                class="text-base leading-none font-semibold"
+                style="color: var(--color-muted-fg);">%</span
+              >
+            {:else}
+              <span
+                class="bat-soc text-3xl leading-none font-bold"
+                style="color: var(--color-muted-fg);">—</span
+              >
+            {/if}
+          </div>
+          <div class="mt-1.5 flex items-center gap-1.5">
+            <span class="bat-dot h-1.5 w-1.5 shrink-0 rounded-full"></span>
+            <span
+              class="text-[0.6875rem] leading-none font-semibold tracking-wide uppercase"
+              style="color: var(--color-muted-fg);"
+            >
+              {#if !anker.connected}Hors ligne{:else if batChargeA > 1}Charge{:else if batDischargeA > 1}Décharge{:else}Repos{/if}
+            </span>
+          </div>
+        </div>
+
+        <!-- Centre : jauge segmentée + borne -->
+        <div class="flex min-w-0 flex-1 items-center gap-1.5">
+          <div class="bat-cells flex h-9 min-w-0 flex-1 items-stretch gap-[3px] rounded-md p-[3px]">
+            {#each Array.from({ length: 10 }) as _, i}
+              {@const lo = i * 10}
+              {@const lvl = anker.connected ? Math.max(0, Math.min(100, socA)) : 0}
+              {@const fill = Math.max(0, Math.min(1, (lvl - lo) / 10))}
+              {@const active = lvl > lo + 0.5}
+              {@const isEdge = active && lvl <= lo + 10.5}
+              <div class="bat-cell" class:is-active={active} class:is-edge={isEdge}>
+                <div class="bat-cell-fill" style="transform: scaleX({fill});"></div>
+              </div>
+            {/each}
+          </div>
+          <span class="bat-nub h-3.5 w-[3px] shrink-0 rounded-r-sm"></span>
+        </div>
+
+        <!-- Droite : flux (W) + énergie stockée -->
+        <div class="flex shrink-0 flex-col items-end">
+          <span class="bat-flow text-sm leading-none font-semibold tabular-nums">
+            {#if anker.connected && batChargeA > 1}+{fmtW(batChargeA)} W{:else if anker.connected && batDischargeA > 1}−{fmtW(
+                batDischargeA
+              )} W{:else}—{/if}
+          </span>
+          {#if anker.connected && storedKwh > 0}
+            <span
+              class="mt-1.5 text-[0.6875rem] leading-none font-medium tabular-nums"
+              style="color: var(--color-muted-fg);">{storedKwh.toFixed(1)} kWh</span
+            >
+          {/if}
+        </div>
+      </div>
+    {/snippet}
+
     <!-- ═══ Économies solaires — carte héro en première position ═══ -->
     <SavingsCard />
+
+    <!-- Batterie EN PREMIER sur mobile (au-dessus du Sankey) ; masquée dès lg. -->
+    <div class="lg:hidden">{@render batteryCard()}</div>
 
     <!-- ═══ Paysage (iPad/desktop) : Sankey | stats côte à côte ; mobile : empilé ═══ -->
     <!-- items-stretch : la colonne stats remplit la hauteur du Sankey carré (sinon
@@ -162,83 +241,9 @@
 
       <!-- Colonne stats : remplit la hauteur du Sankey (justify-between) ─────── -->
       <div class="flex flex-col gap-4 lg:justify-between">
-        <!-- ═══ Batterie — charge (SOC) + jauge segmentée OVNI ═══ -->
-        <!-- Conçue via workflow (3 variantes + juge) : jauge 10 cellules qui se
-             remplit au SOC, gros % à gauche, flux+kWh à droite ; vert charge /
-             orange décharge ; cellule de front pulse en charge. Cf. <style>. -->
-        <div
-          class="bat-card flex items-center gap-3 rounded-[var(--radius-xl)] border px-4 py-3"
-          class:is-charging={anker.connected && batChargeA > 1}
-          class:is-discharging={anker.connected && batDischargeA > 1}
-          class:is-low={anker.connected && socA <= 20}
-          class:is-offline={!anker.connected}
-          style="background: var(--color-card); border-color: var(--color-border);"
-        >
-          <!-- Gauche : SOC numérique + état -->
-          <div class="flex shrink-0 flex-col">
-            <div class="flex items-baseline gap-1">
-              {#if anker.connected}
-                <span
-                  class="bat-soc text-3xl leading-none font-bold tabular-nums"
-                  style="color: var(--color-fg);"
-                  >{Math.round(Math.max(0, Math.min(100, socA)))}</span
-                >
-                <span
-                  class="text-base leading-none font-semibold"
-                  style="color: var(--color-muted-fg);">%</span
-                >
-              {:else}
-                <span
-                  class="bat-soc text-3xl leading-none font-bold"
-                  style="color: var(--color-muted-fg);">—</span
-                >
-              {/if}
-            </div>
-            <div class="mt-1.5 flex items-center gap-1.5">
-              <span class="bat-dot h-1.5 w-1.5 shrink-0 rounded-full"></span>
-              <span
-                class="text-[0.6875rem] leading-none font-semibold tracking-wide uppercase"
-                style="color: var(--color-muted-fg);"
-              >
-                {#if !anker.connected}Hors ligne{:else if batChargeA > 1}Charge{:else if batDischargeA > 1}Décharge{:else}Repos{/if}
-              </span>
-            </div>
-          </div>
-
-          <!-- Centre : jauge segmentée + borne -->
-          <div class="flex min-w-0 flex-1 items-center gap-1.5">
-            <div
-              class="bat-cells flex h-9 min-w-0 flex-1 items-stretch gap-[3px] rounded-md p-[3px]"
-            >
-              {#each Array.from({ length: 10 }) as _, i}
-                {@const lo = i * 10}
-                {@const lvl = anker.connected ? Math.max(0, Math.min(100, socA)) : 0}
-                {@const fill = Math.max(0, Math.min(1, (lvl - lo) / 10))}
-                {@const active = lvl > lo + 0.5}
-                {@const isEdge = active && lvl <= lo + 10.5}
-                <div class="bat-cell" class:is-active={active} class:is-edge={isEdge}>
-                  <div class="bat-cell-fill" style="transform: scaleX({fill});"></div>
-                </div>
-              {/each}
-            </div>
-            <span class="bat-nub h-3.5 w-[3px] shrink-0 rounded-r-sm"></span>
-          </div>
-
-          <!-- Droite : flux (W) + énergie stockée -->
-          <div class="flex shrink-0 flex-col items-end">
-            <span class="bat-flow text-sm leading-none font-semibold tabular-nums">
-              {#if anker.connected && batChargeA > 1}+{fmtW(batChargeA)} W{:else if anker.connected && batDischargeA > 1}−{fmtW(
-                  batDischargeA
-                )} W{:else}—{/if}
-            </span>
-            {#if anker.connected && storedKwh > 0}
-              <span
-                class="mt-1.5 text-[0.6875rem] leading-none font-medium tabular-nums"
-                style="color: var(--color-muted-fg);">{storedKwh.toFixed(1)} kWh</span
-              >
-            {/if}
-          </div>
-        </div>
+        <!-- Batterie : colonne droite dès lg (sur mobile elle passe au-dessus du
+             Sankey, cf. snippet batteryCard rendu plus haut). -->
+        <div class="hidden lg:block">{@render batteryCard()}</div>
 
         <!-- ═══ KPI lifetime (vraies données Anker) ═══ -->
         {#if hasLifetime}
