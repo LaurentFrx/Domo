@@ -141,7 +141,7 @@
   >
     <!-- ═══ En-tête : bannière aurore « dôme OVNI » ═══ -->
     <img
-      src="/header-accueil.webp?v=3"
+      src="/header-accueil.webp?v=4"
       alt=""
       aria-hidden="true"
       class="w-full rounded-[var(--radius-2xl)]"
