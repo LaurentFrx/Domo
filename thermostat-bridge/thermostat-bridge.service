@@ -1,0 +1,16 @@
+[Unit]
+Description=Domo thermostat-bridge (regulation seche-serviette SdB)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adapter user/chemins au RPi4 (ex. pi).
+WorkingDirectory=/home/pi/thermostat-bridge
+EnvironmentFile=/home/pi/thermostat-bridge/.env
+ExecStart=/home/pi/thermostat-bridge/.venv/bin/python thermostat_bridge.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

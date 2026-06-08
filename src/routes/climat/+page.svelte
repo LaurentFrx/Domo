@@ -10,18 +10,22 @@
   import Sparkline from '$components/ui/Sparkline.svelte';
   import TempGauge from '$components/ui/TempGauge.svelte';
   import ZigbeeSensorTile from '$components/tiles/ZigbeeSensorTile.svelte';
+  import ThermostatCard from '$components/cards/ThermostatCard.svelte';
+  import { thermostat } from '$stores/thermostat.svelte';
 
   onMount(() => {
     zigbee.connect();
     daikin.connect();
     airzone.connect();
     weather.connect();
+    thermostat.connect();
   });
   onDestroy(() => {
     zigbee.disconnect();
     daikin.disconnect();
     airzone.disconnect();
     weather.disconnect();
+    thermostat.disconnect();
   });
 
   // ─── Airzone (gainable) : libellés + couleurs de mode ────────────────
@@ -639,6 +643,9 @@
       {/each}
     </div>
   </section>
+
+  <!-- ═══ Sèche-serviette (thermostat SdB) ═══ -->
+  <ThermostatCard />
 
   <!-- ═══ Thermomètres Zigbee (déplacés depuis /pieces) ═══ -->
   {#if thermoSensors.length > 0}

@@ -42,3 +42,8 @@ test-results/
 # Docker
 .dockerignore
 data/
+
+# thermostat-bridge — artefacts runtime (le daemon tourne sur le RPi4)
+thermostat-bridge/state.json
+thermostat-bridge/__pycache__/
+thermostat-bridge/.venv/

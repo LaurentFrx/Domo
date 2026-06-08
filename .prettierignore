@@ -7,3 +7,4 @@ package
 .env.*
 !.env.example
 pnpm-lock.yaml
+thermostat-bridge

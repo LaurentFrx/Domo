@@ -9,6 +9,7 @@
   import { cumulus } from '$stores/cumulus.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { settings } from '$stores/settings.svelte';
+  import { thermostat } from '$stores/thermostat.svelte';
   import { haptic } from '$utils/haptic';
 
   const APP_VERSION = '0.2.0';
@@ -26,6 +27,7 @@
     zigbee.connect();
     forecast.connect();
     cumulus.connectRelay(); // relais Shelly cumulus → ligne « Connexions »
+    thermostat.connect(); // daemon thermostat sèche-serviette → « Connexions »
   });
   onDestroy(() => {
     daikin.disconnect();
@@ -33,6 +35,7 @@
     zigbee.disconnect();
     forecast.disconnect();
     cumulus.disconnectRelay();
+    thermostat.disconnect();
   });
 
   // ─── Section 1 : Connexions ────────────────────────────────────────
@@ -102,6 +105,12 @@
       connected: cumulus.relayConnected,
       mode: cumulus.relayConnected ? 'direct' : 'disconnected',
       lastUpdate: cumulus.relayConnected ? cumulus.lastUpdate : null
+    },
+    {
+      name: 'Thermostat · sèche-serviette',
+      connected: thermostat.connected,
+      mode: thermostat.connected ? 'direct' : 'disconnected',
+      lastUpdate: thermostat.connected ? thermostat.lastUpdate : null
     }
   ]);
 
@@ -112,6 +121,13 @@
     const min = Math.round(sec / 60);
     if (min < 60) return `il y a ${min} min`;
     return `il y a ${Math.round(min / 60)} h`;
+  }
+
+  // Sauvegarde (settings.json) + propagation au daemon de la config thermostat.
+  function saveThermostat() {
+    haptic('success');
+    settings.save();
+    thermostat.pushConfig(settings.thermostat);
   }
 
   // ─── Section 4 : Tarifs (sync serveur via store settings) ────────
@@ -397,6 +413,306 @@
         </span>
       </div>
     </div>
+  </section>
+
+  <!-- ═══ Section 3 bis : Thermostat sèche-serviette ═══ -->
+  <section class="flex flex-col gap-3">
+    <h2
+      class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+      style="color: var(--color-muted-fg);"
+    >
+      Thermostat sèche-serviette
+    </h2>
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <!-- Presets -->
+      <div
+        class="col-span-2 -mb-1 text-[10px] font-semibold tracking-[0.06em] uppercase sm:col-span-4"
+        style="color: var(--color-muted-fg);"
+      >
+        Presets (°C)
+      </div>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Hors-gel
+        </span>
+        <input
+          type="number"
+          step="0.5"
+          bind:value={settings.thermostat.presetTemps.frost}
+          onchange={saveThermostat}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-consumption);"
+        />
+      </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Éco
+        </span>
+        <input
+          type="number"
+          step="0.5"
+          bind:value={settings.thermostat.presetTemps.eco}
+          onchange={saveThermostat}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-success);"
+        />
+      </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Confort
+        </span>
+        <input
+          type="number"
+          step="0.5"
+          bind:value={settings.thermostat.presetTemps.comfort}
+          onchange={saveThermostat}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-hp);"
+        />
+      </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Boost
+        </span>
+        <input
+          type="number"
+          step="0.5"
+          bind:value={settings.thermostat.presetTemps.boost}
+          onchange={saveThermostat}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-primary);"
+        />
+      </label>
+
+      <!-- Régulation TPI -->
+      <div
+        class="col-span-2 -mb-1 text-[10px] font-semibold tracking-[0.06em] uppercase sm:col-span-4"
+        style="color: var(--color-muted-fg);"
+      >
+        Régulation TPI
+      </div>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Coef. int
+        </span>
+        <input
+          type="number"
+          step="0.05"
+          bind:value={settings.thermostat.coefInt}
+          onchange={saveThermostat}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-fg);"
+        />
+      </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Coef. ext
+        </span>
+        <input
+          type="number"
+          step="0.005"
+          bind:value={settings.thermostat.coefExt}
+          onchange={saveThermostat}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-fg);"
+        />
+      </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Cycle (s)
+        </span>
+        <input
+          type="number"
+          step="30"
+          bind:value={settings.thermostat.cycleSec}
+          onchange={saveThermostat}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-fg);"
+        />
+      </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Boost (min)
+        </span>
+        <input
+          type="number"
+          step="5"
+          bind:value={settings.thermostat.boostDefaultMin}
+          onchange={saveThermostat}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-fg);"
+        />
+      </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Pré-chauffe (min)
+        </span>
+        <input
+          type="number"
+          step="5"
+          bind:value={settings.thermostat.preheatMin}
+          onchange={saveThermostat}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-fg);"
+        />
+      </label>
+
+      <!-- Sécurité -->
+      <div
+        class="col-span-2 -mb-1 text-[10px] font-semibold tracking-[0.06em] uppercase sm:col-span-4"
+        style="color: var(--color-muted-fg);"
+      >
+        Sécurité
+      </div>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Min (°C)
+        </span>
+        <input
+          type="number"
+          step="0.5"
+          bind:value={settings.thermostat.minTempC}
+          onchange={saveThermostat}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-fg);"
+        />
+      </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Max (°C)
+        </span>
+        <input
+          type="number"
+          step="0.5"
+          bind:value={settings.thermostat.maxTempC}
+          onchange={saveThermostat}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-alert);"
+        />
+      </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Chute fenêtre (°C)
+        </span>
+        <input
+          type="number"
+          step="0.1"
+          bind:value={settings.thermostat.windowDropC}
+          onchange={saveThermostat}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-fg);"
+        />
+      </label>
+      <label
+        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Fenêtre (min)
+        </span>
+        <input
+          type="number"
+          step="1"
+          bind:value={settings.thermostat.windowDropMin}
+          onchange={saveThermostat}
+          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
+          style="color: var(--color-fg);"
+        />
+      </label>
+    </div>
+    <p class="text-[11px]" style="color: var(--color-muted-fg);">
+      Régulation TPI : puissance ON = coef. int × (cible − pièce) + coef. ext × (cible − extérieur),
+      appliquée par cycles. Modifs propagées au daemon en direct.
+    </p>
+    <a
+      href="/reglages/planning"
+      class="flex items-center justify-between rounded-[var(--radius-xl)] border px-4 py-3"
+      style="background: var(--color-card); border-color: var(--color-border); color: var(--color-fg);"
+      data-sveltekit-preload-data
+    >
+      <span class="flex flex-col gap-0.5">
+        <span class="text-[13px] font-semibold">Planning d'Isabelle</span>
+        <span class="text-[11px]" style="color: var(--color-muted-fg);">
+          Créneaux d'occupation hebdomadaires → confort salle de bain
+        </span>
+      </span>
+      <span class="text-[18px]" style="color: var(--color-primary);">→</span>
+    </a>
   </section>
 
   <!-- ═══ Section 4 : Tarifs ═══ -->
