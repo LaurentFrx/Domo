@@ -2,7 +2,6 @@
   import FlowDiagram from '$components/charts/FlowDiagram.svelte';
   import KpiCard from '$components/cards/KpiCard.svelte';
   import SavingsCard from '$components/cards/SavingsCard.svelte';
-  import ConcentricRings from '$components/effects/ConcentricRings.svelte';
   import { anker } from '$stores/anker.svelte';
   import { production } from '$stores/production.svelte';
   import { tariff } from '$stores/tariff.svelte';
@@ -112,13 +111,6 @@
   const nextTariff = $derived(tariff.next.period);
   const nextSwitchAt = $derived(tariff.next.at); // 'HH:MM' local Paris
   const hoursUntilSwitch = $derived(tariff.nextInHours);
-
-  // ─── Réglage LIVE des anneaux qui gravitent (taille + hauteur) ──────
-  // 2 anneaux : cercle extérieur retiré, 2e resserré vers le 1er (560 → 700).
-  // Défauts calés sur le réglage validé par l'utilisateur (144 % / +250 px).
-  let ringsScale = $state(1.44);
-  let ringsOffsetY = $state(250);
-  const ringSizes = $derived([560, 700].map((d) => Math.round(d * ringsScale)));
 </script>
 
 <svelte:head>
@@ -126,24 +118,6 @@
 </svelte:head>
 
 <div class="relative overflow-x-clip">
-  <!-- ═══ Décor de fond (vert OVNI) — anneaux orbitaux + particules ═══ -->
-  <!-- Pausables, derrière le contenu ; ne s'affichent que si Animations activées. -->
-  {#if preferences.animationsEnabled}
-    <div
-      class="pointer-events-none absolute inset-0 overflow-hidden"
-      style="z-index: 0;"
-      aria-hidden="true"
-    >
-      <!-- Anneaux concentriques centrés sur la zone hero/carte -->
-      <div
-        class="absolute inset-x-0 top-0"
-        style="height: 660px; transform: translateY({ringsOffsetY}px);"
-      >
-        <ConcentricRings sizes={ringSizes} />
-      </div>
-    </div>
-  {/if}
-
   <!-- gap/padding plus serrés sur mobile (condensation iPhone vertical) ; généreux dès sm. -->
   <div
     class="stagger-enter relative flex flex-col gap-3.5 py-3 sm:gap-5 sm:py-4"
@@ -235,51 +209,6 @@
 
     <!-- ═══ Économies solaires — carte héro en première position ═══ -->
     <SavingsCard />
-
-    <!-- ═══ Réglages LIVE des anneaux orbitaux (taille + hauteur) ═══ -->
-    <div
-      class="flex flex-col gap-2.5 rounded-[var(--radius-xl)] border px-4 py-3"
-      style="background: var(--color-card); border-color: var(--color-border);"
-    >
-      <span
-        class="text-[11px] font-semibold tracking-[0.08em] uppercase"
-        style="color: var(--color-muted-fg);"
-      >
-        Anneaux orbitaux
-      </span>
-      <label class="flex items-center gap-3 text-[12px]">
-        <span class="w-16 shrink-0" style="color: var(--color-muted-fg);">Taille</span>
-        <input
-          type="range"
-          min="0.4"
-          max="2"
-          step="0.02"
-          bind:value={ringsScale}
-          class="h-2 flex-1 cursor-pointer"
-          style="accent-color: var(--color-glow-bright);"
-          aria-label="Taille des anneaux"
-        />
-        <span class="w-12 shrink-0 text-right tabular-nums" style="color: var(--color-fg);"
-          >{Math.round(ringsScale * 100)} %</span
-        >
-      </label>
-      <label class="flex items-center gap-3 text-[12px]">
-        <span class="w-16 shrink-0" style="color: var(--color-muted-fg);">Hauteur</span>
-        <input
-          type="range"
-          min="-300"
-          max="300"
-          step="5"
-          bind:value={ringsOffsetY}
-          class="h-2 flex-1 cursor-pointer"
-          style="accent-color: var(--color-glow-bright);"
-          aria-label="Hauteur des anneaux"
-        />
-        <span class="w-12 shrink-0 text-right tabular-nums" style="color: var(--color-fg);"
-          >{ringsOffsetY > 0 ? '+' : ''}{ringsOffsetY} px</span
-        >
-      </label>
-    </div>
 
     <!-- Batterie EN PREMIER sur mobile (au-dessus du Sankey) ; masquée dès lg. -->
     <div class="lg:hidden">{@render batteryCard()}</div>
