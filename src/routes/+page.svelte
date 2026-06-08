@@ -42,6 +42,16 @@
   const batteryDischargeW = $derived(
     anker.connected ? anker.batteryDischargeW : dashboard.batteryStatus === 'charge' ? 0 : 600
   );
+  // Charge batterie AC depuis le RÉSEAU (W). Quand les SolarBank se rechargent sur
+  // EDF (ex. batteries pleines tirant un talon, ou charge forcée HC), ce soutirage
+  // ne va PAS à la maison → il doit apparaître côté USAGE (charge batterie), pas
+  // gonfler l'apport réseau→maison. Bornée à l'import net réel : le champ cloud
+  // (paliers ~60 s) peut dépasser le soutirage mesuré → on ne route jamais vers la
+  // batterie plus que ce qui entre par la pince. 0 hors Anker (mock). Cf.
+  // anker.gridToBatteryW + record.py (puissance évitée serveur).
+  const gridToBatteryW = $derived(
+    anker.connected ? Math.min(anker.gridToBatteryW, Math.max(0, gridPowerW)) : 0
+  );
 
   // ─── Transitions d'affichage ─────────────────────────────────────────
   // On interpole les puissances entre deux relevés (Anker rafraîchit ~toutes les
@@ -63,12 +73,14 @@
   const gridTw = new Tween(0, { easing: cubicOut });
   const batChargeTw = new Tween(0, { easing: cubicOut });
   const batDischargeTw = new Tween(0, { easing: cubicOut });
+  const gridToBattTw = new Tween(0, { easing: cubicOut });
   const socTw = new Tween(0, { easing: cubicOut });
   $effect(() => void pvSudTw.set(pvSudW, { duration: animMs, easing: cubicOut }));
   $effect(() => void pvOuestTw.set(pvOuestW, { duration: animMs, easing: cubicOut }));
   $effect(() => void gridTw.set(gridPowerW, { duration: animMs, easing: cubicOut }));
   $effect(() => void batChargeTw.set(batteryChargeW, { duration: animMs, easing: cubicOut }));
   $effect(() => void batDischargeTw.set(batteryDischargeW, { duration: animMs, easing: cubicOut }));
+  $effect(() => void gridToBattTw.set(gridToBatteryW, { duration: animMs, easing: cubicOut }));
   $effect(() => void socTw.set(batterySoc, { duration: animMs, easing: cubicOut }));
 
   // Valeurs ANIMÉES consommées par le Sankey + le hero.
@@ -79,10 +91,19 @@
   const batChargeA = $derived(batChargeTw.current);
   const batDischargeA = $derived(batDischargeTw.current);
   const batA = $derived(batChargeA - batDischargeA); // net (pour le bilan Maison)
+  // Charge batterie depuis le réseau, ré-bornée à l'import animé (les deux tweens
+  // peuvent diverger en vol → on garantit g2batt ≤ import à chaque frame).
+  const g2battA = $derived(Math.max(0, Math.min(gridToBattTw.current, Math.max(0, gridA))));
+  // Charge batterie TOTALE (W) montrée côté USAGE : solaire (DC) + réseau (AC).
+  // batA (DC) et g2battA (AC réseau) sont disjoints côté bridge → pas de double
+  // comptage (vérifié sur l'historique recorder).
+  const batChargeTotalA = $derived(batChargeA + g2battA);
   const socA = $derived(socTw.current);
-  // Maison = PV + import réseau − charge batterie (équilibre instantané ; pertes
-  // de conversion < 5 % ignorées).
-  const homeA = $derived(Math.max(0, Math.round(pvA + gridA - batA)));
+  // Maison = PV + import réseau − charge batterie (solaire) − charge batterie
+  // (réseau). Sans le terme g2battA, le soutirage qui RECHARGE les SolarBank serait
+  // crédité à la maison → import « fantôme » + conso gonflée (le cas signalé).
+  // Équilibre instantané ; pertes de conversion < 5 % ignorées.
+  const homeA = $derived(Math.max(0, Math.round(pvA + gridA - batA - g2battA)));
 
   // ─── Énergie stockée en batterie (kWh) — pour la carte Batterie ───────
   const storedKwh = $derived(anker.totalBatteryEnergyWh / 1000);
@@ -222,7 +243,7 @@
         pvSudW={pvSudA}
         pvOuestW={pvOuestA}
         homePowerW={homeA}
-        batteryChargeW={batChargeA}
+        batteryChargeW={batChargeTotalA}
         batteryDischargeW={batDischargeA}
         batterySoc={socA}
         gridPowerW={gridA}

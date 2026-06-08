@@ -74,6 +74,7 @@ type ApiPayload = {
   co2_saved_kg?: number;
   battery_charge_power_w?: number;
   battery_discharge_power_w?: number;
+  grid_to_battery_power_w?: number;
   sb_output_power_w?: number;
   batteries: {
     id: string;
@@ -130,6 +131,22 @@ class AnkerState {
   batteryDischargeW = $state(0);
   /** Sortie AC SolarBank → maison (W), agrégat fiable. */
   sbOutputW = $state(0);
+  /**
+   * Charge batterie AC depuis le RÉSEAU (W, ≥ 0). Le cloud Solix l'expose via
+   * solarbank_info.grid_to_battery_power.
+   *
+   * ⚠️ Cette énergie est STOCKÉE dans la SolarBank, PAS consommée par la maison.
+   * La compter comme « réseau → maison » gonfle à tort l'import ET la conso (cas
+   * vécu : 2× SolarBank pleines qui se rechargent sur EDF → ~400 W d'« apport
+   * réseau » fantôme sur le Sankey). Même grandeur que le recorder serveur
+   * retranche de la puissance évitée (record.py : power_saved = aps + sb_ac_out
+   * − export − grid_to_battery).
+   *
+   * Valeur cloud par PALIERS (cache ~60 s) et parfois SUPÉRIEURE à l'import net
+   * (observé : g2batt 441 W pour un net de 246 W) → l'appelant la BORNE à
+   * l'import réseau réel avant de l'utiliser dans un bilan (cf. +page.svelte).
+   */
+  gridToBatteryW = $state(0);
 
   batteries = $state<AnkerBattery[]>([]);
   smartMeter = $state<AnkerSmartMeter | null>(null);
@@ -334,6 +351,7 @@ class AnkerState {
     this.lifetimeSavingsEur = p.lifetime_savings_eur ?? 0;
     this.batteryChargeW = p.battery_charge_power_w ?? 0;
     this.batteryDischargeW = p.battery_discharge_power_w ?? 0;
+    this.gridToBatteryW = Math.max(0, p.grid_to_battery_power_w ?? 0);
     this.sbOutputW = p.sb_output_power_w ?? 0;
 
     this.batteries = (p.batteries ?? []).map((b) => ({
