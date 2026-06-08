@@ -74,7 +74,6 @@ type ApiPayload = {
   co2_saved_kg?: number;
   battery_charge_power_w?: number;
   battery_discharge_power_w?: number;
-  grid_to_battery_power_w?: number;
   sb_output_power_w?: number;
   batteries: {
     id: string;
@@ -102,6 +101,10 @@ type ApiPayload = {
     status?: string;
   } | null;
   sites: { id: string; name: string }[];
+  /** Cumul JOUR import réseau (kWh) = compteur Linky via cloud (grid_to_home_total). FIABLE. */
+  grid_import_today_kwh?: number | null;
+  /** Cumul JOUR export réseau (kWh) = compteur Linky via cloud (solar_to_grid_total). FIABLE. */
+  grid_export_today_kwh?: number | null;
 };
 
 class AnkerState {
@@ -110,15 +113,23 @@ class AnkerState {
   /** Puissance réseau BRUTE (net pince) : + soutirage, − injection. Watts. */
   gridPowerW = $state(0);
   /**
-   * Puissance réseau FILTRÉE anti-transitoire : + soutirage / − injection (W).
-   * Le bridge ressert un CACHE cloud ~60 s ; un transitoire réel de ~3 s (charge
-   * qui démarre, batterie qui prend le relais) reste figé jusqu'à 60 s et apparaît
-   * sinon comme un soutirage/injection « fantôme » soutenu. On ne retient donc
-   * l'import/export que CONFIRMÉ sur 2 snapshots cloud FRAIS consécutifs (via
-   * last_update) — même logique que le recorder des économies. À privilégier
-   * partout pour l'affichage temps réel (Sankey, surplus, libellés réseau).
+   * Réseau FIABLE — dérivé du compteur LINKY, PAS du smart-meter instantané.
+   *
+   * Le `grid_power_w` instantané du cloud Solix est INEXPLOITABLE : valeurs figées
+   * par paliers (246 W bloqué 36 min observé), signe instable, aveugle à l'APS →
+   * imports/exports « fantômes » de centaines de W (sur une journée, l'intégrale
+   * dépassait 22× la vérité Linky : 2,85 kWh « vus » contre 0,13 réels). On
+   * l'IGNORE pour l'affichage.
+   *
+   * Seule vérité réseau : les cumuls d'énergie du Linky (grid_import/export_today_kwh,
+   * via energy_analysis côté bridge), dont on dérive une puissance MOYENNE (ΔWh/Δt).
+   * Fiable, au prix d'une granularité ~5 min (cadence du compteur cloud) — sans
+   * impact ici, le réseau réel étant quasi nul.
    */
-  gridFilteredW = $state(0);
+  gridImportW = $state(0);
+  gridExportW = $state(0);
+  /** Réseau net FIABLE : + soutirage / − injection (W). À utiliser PARTOUT (Sankey, surplus). */
+  gridReliableW = $derived(this.gridImportW - this.gridExportW);
   /** Horodatage (s) du snapshot cloud courant (= last_update du bridge), ou null. */
   snapshotTs = $state<number | null>(null);
 
@@ -131,22 +142,6 @@ class AnkerState {
   batteryDischargeW = $state(0);
   /** Sortie AC SolarBank → maison (W), agrégat fiable. */
   sbOutputW = $state(0);
-  /**
-   * Charge batterie AC depuis le RÉSEAU (W, ≥ 0). Le cloud Solix l'expose via
-   * solarbank_info.grid_to_battery_power.
-   *
-   * ⚠️ Cette énergie est STOCKÉE dans la SolarBank, PAS consommée par la maison.
-   * La compter comme « réseau → maison » gonfle à tort l'import ET la conso (cas
-   * vécu : 2× SolarBank pleines qui se rechargent sur EDF → ~400 W d'« apport
-   * réseau » fantôme sur le Sankey). Même grandeur que le recorder serveur
-   * retranche de la puissance évitée (record.py : power_saved = aps + sb_ac_out
-   * − export − grid_to_battery).
-   *
-   * Valeur cloud par PALIERS (cache ~60 s) et parfois SUPÉRIEURE à l'import net
-   * (observé : g2batt 441 W pour un net de 246 W) → l'appelant la BORNE à
-   * l'import réseau réel avant de l'utiliser dans un bilan (cf. +page.svelte).
-   */
-  gridToBatteryW = $state(0);
 
   batteries = $state<AnkerBattery[]>([]);
   smartMeter = $state<AnkerSmartMeter | null>(null);
@@ -235,34 +230,51 @@ class AnkerState {
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private visibilityHandler: (() => void) | null = null;
 
-  // ─── État interne du filtre réseau anti-transitoire (non réactif) ──────
-  private lastSnapTs: number | null = null;
-  private gridHist: number[] = [];
+  // ─── Dérivation réseau depuis les cumuls LINKY (état interne non réactif) ──
+  // Le compteur ne fournit qu'un cumul journalier (kWh) rafraîchi ~5 min côté
+  // cloud. On en dérive une puissance MOYENNE : ΔWh / Δt entre deux variations du
+  // cumul. C'est la SEULE donnée réseau fiable (cf. gridImportW/gridReliableW).
+  #imp: { kwh: number | null; ts: number; w: number } = { kwh: null, ts: 0, w: 0 };
+  #exp: { kwh: number | null; ts: number; w: number } = { kwh: null, ts: 0, w: 0 };
+  // Au-delà de ce délai sans variation du cumul, le flux est considéré arrêté
+  // (cadence cloud ~5 min → marge avant de retomber à 0).
+  private static readonly GRID_HOLD_MS = 7 * 60_000;
 
-  /**
-   * Met à jour gridFilteredW (réseau affiché) à partir du net signé (+ soutirage /
-   * − injection) + de l'horodatage cloud. On n'agit QUE sur un snapshot RÉELLEMENT
-   * nouveau (last_update changé).
-   *
-   * Filtre = MÉDIANE des 3 derniers snapshots frais :
-   *   • un pic transitoire présent dans UN seul snapshot (cache Solix figé ~60 s,
-   *     puis saut) est rejeté par la médiane ;
-   *   • un import/export SOUTENU passe (médiane = sa valeur) — y compris l'EXPORT
-   *     RÉSIDUEL de l'APS quand la batterie est pleine (talon couvert, surplus vers
-   *     EDF) et les inversions de sens.
-   *
-   * Remplace l'ancien min(import,prev)/min(export,prev) qui tombait à 0 dès que le
-   * sens s'inversait ou fluctuait autour de 0 → le diagramme paraissait « au repos »
-   * alors que l'APS exporte en continu. Snapshot resservi → on garde la dernière.
-   */
-  private applyGridFilter(gridRaw: number, ts: number | null) {
-    const fresh = ts !== null && ts !== this.lastSnapTs;
-    if (!fresh) return;
-    this.lastSnapTs = ts;
-    this.gridHist.push(gridRaw);
-    if (this.gridHist.length > 3) this.gridHist.shift();
-    const sorted = [...this.gridHist].sort((a, b) => a - b);
-    this.gridFilteredW = sorted[Math.floor(sorted.length / 2)];
+  /** Puissance (W) dérivée d'un cumul d'énergie croissant ; mute `acc` en place. */
+  private static rateFrom(
+    acc: { kwh: number | null; ts: number; w: number },
+    kwh: number | null,
+    now: number
+  ): number {
+    if (kwh == null || !Number.isFinite(kwh)) return acc.w;
+    if (acc.kwh === null || kwh < acc.kwh - 1e-4) {
+      // 1er point, ou reset minuit (cumul reparti à 0) → ancrer, flux nul.
+      acc.kwh = kwh;
+      acc.ts = now;
+      acc.w = 0;
+      return 0;
+    }
+    if (kwh > acc.kwh + 1e-9) {
+      const dtS = Math.max(1, (now - acc.ts) / 1000);
+      acc.w = ((kwh - acc.kwh) * 3_600_000) / dtS; // kWh → Wh → W
+      acc.kwh = kwh;
+      acc.ts = now;
+      return acc.w;
+    }
+    // Cumul plat : on maintient la dernière puissance tant que c'est récent,
+    // sinon le flux est réputé arrêté et on ré-ancre la fenêtre.
+    if (now - acc.ts > AnkerState.GRID_HOLD_MS) {
+      acc.ts = now;
+      acc.w = 0;
+    }
+    return acc.w;
+  }
+
+  /** Recalcule gridImportW/gridExportW depuis les cumuls Linky du snapshot. */
+  private deriveGridFromLinky(importKwh: number | null, exportKwh: number | null) {
+    const now = Date.now();
+    this.gridImportW = Math.round(AnkerState.rateFrom(this.#imp, importKwh, now));
+    this.gridExportW = Math.round(AnkerState.rateFrom(this.#exp, exportKwh, now));
   }
 
   connect() {
@@ -340,9 +352,11 @@ class AnkerState {
 
   private applySnapshot(p: ApiPayload) {
     this.solarPowerW = p.solar_power_w ?? 0;
+    // Brut conservé pour debug uniquement — NE PAS l'afficher (cf. gridReliableW).
     this.gridPowerW = p.grid_power_w ?? 0;
     this.snapshotTs = p.last_update ?? null;
-    this.applyGridFilter(this.gridPowerW, this.snapshotTs);
+    // Réseau affiché = dérivé des cumuls Linky (seule source fiable).
+    this.deriveGridFromLinky(p.grid_import_today_kwh ?? null, p.grid_export_today_kwh ?? null);
     this.dailyProductionWh = p.daily_production_wh ?? 0;
     this.dailyConsumptionWh = p.daily_consumption_wh ?? 0;
     this.selfConsumptionRate = p.self_consumption_rate;
@@ -351,7 +365,6 @@ class AnkerState {
     this.lifetimeSavingsEur = p.lifetime_savings_eur ?? 0;
     this.batteryChargeW = p.battery_charge_power_w ?? 0;
     this.batteryDischargeW = p.battery_discharge_power_w ?? 0;
-    this.gridToBatteryW = Math.max(0, p.grid_to_battery_power_w ?? 0);
     this.sbOutputW = p.sb_output_power_w ?? 0;
 
     this.batteries = (p.batteries ?? []).map((b) => ({

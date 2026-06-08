@@ -89,9 +89,9 @@
       const soc = anker.averageSoc;
       if (soc !== null) dashboard.batteryLevel = soc;
       dashboard.batteryStatus = anker.batteryStatus;
-      // Surplus = injection réseau, depuis le NET FILTRÉ (pas le brut : un pic figé
-      // ~60 s par le cache cloud ne doit pas faire clignoter un faux surplus).
-      dashboard.solarSurplus = Math.max(0, -anker.gridFilteredW);
+      // Surplus = injection réseau, depuis le réseau FIABLE dérivé du Linky (le brut
+      // instantané du cloud est figé/fantôme → faux surplus). Cf. anker.gridReliableW.
+      dashboard.solarSurplus = Math.max(0, -anker.gridReliableW);
       // Compteur jour du bridge parfois figé (≈ lifetime) → on n'écrase que si fiable.
       if (anker.dailyProductionReliable) dashboard.solarTotal24h = anker.dailyProductionWh / 1000;
       if (anker.selfConsumptionRate !== null) {
