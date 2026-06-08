@@ -240,14 +240,14 @@
 </script>
 
 <div class="relative mx-auto w-full" style="max-width: 520px;">
-  <!-- Lueurs « OVNI » : deux sources lumineuses intenses de part et d'autre, à
-       cheval sur les bords de la carte (technique du hero Yeldra, recréée en CSS). -->
-  <div class="flow-lueur flow-lueur-left" aria-hidden="true"></div>
-  <div class="flow-lueur flow-lueur-right" aria-hidden="true"></div>
   <div
     class="flow-card relative z-[1] overflow-hidden rounded-[var(--radius-3xl)] border"
     style="background: var(--color-card); aspect-ratio: {VB_W / VB_H};"
   >
+    <!-- Lueurs vertes (image) DANS la carte → clipées par overflow-hidden, donc
+         collées aux bords SANS déborder du cadre. -->
+    <div class="flow-lueur flow-lueur-left" aria-hidden="true"></div>
+    <div class="flow-lueur flow-lueur-right" aria-hidden="true"></div>
     <svg
       viewBox="0 0 {VB_W} {VB_H}"
       preserveAspectRatio="xMidYMid meet"
@@ -385,11 +385,11 @@
   /* Source plaquée au bord de la carte → la lueur colle au flanc. */
   .flow-lueur-left {
     left: 0;
-    transform: translate(-12%, -50%);
+    transform: translate(-3%, -50%);
   }
   .flow-lueur-right {
     right: 0;
-    transform: translate(12%, -50%) scaleX(-1);
+    transform: translate(3%, -50%) scaleX(-1);
   }
 
   .flow-core {
