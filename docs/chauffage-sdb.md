@@ -138,10 +138,51 @@ Combine, par tranche horaire, → **preset cible** :
   toggle manuel `/pieces`** (le router via le daemon en override pour éviter que la
   régulation l'écrase).
 
+## Refonte « Mes matins » — planning v2 (2026‑06‑08)
+
+La 1re page de planning parlait « créneaux d'occupation HH:MM » — du jargon pour
+Isabelle (prof d'espagnol, non technicienne) : elle ne l'aurait pas utilisée.
+Refonte centrée persona (cf. passe de conception multi‑agents).
+
+**Principe** : Isabelle ne saisit QUE l'heure de son premier cours par jour. Le
+système déduit tout le reste — **réveil = 1er cours − 1h30**, puis chauffe ~30 min
+avant pour que la SdB soit chaude au réveil. Elle ne voit jamais d'heure de chauffe.
+
+**Recadrage de la dérivation** (bug corrigé) : son emploi du temps = quand elle est
+**absente**. On chauffe donc **avant** le 1er cours (fenêtre de préparation), plus
+**pendant** les cours comme le faisait la v1.
+
+**Modèle v2** (`src/lib/utils/planning-derive.ts`, miroir Python dans le daemon) :
+
+- `defaultStart` : rythme habituel (un seul chiffre).
+- **Semaine A / B** (`abEnabled`) avec **ancre de parité ré‑ancrable** d'un tap
+  (`abAnchorMonday`/`abAnchorIsA`) — robuste aux vacances qui « sautent » l'alternance
+  (pas de parité ISO calculée seule).
+- `weekA`/`weekB` : 7 jours, chacun un **état** `inherit` (comme d'habitude) /
+  `start` (+ option demi‑groupe) / `afternoon` (pas le matin) / `rest` (repos).
+- `exceptions` datées (journées spéciales) avec `affectsMorning` : matin (décale/annule
+  le réveil) vs soir (réunion/conseil — neutre côté chauffe).
+- `eveningShower` : douche du soir optionnelle (heure cible + jours).
+- `comfort` : `wakeBeforeFirstMin` (90) / `departBeforeFirstMin` (15) **réglables**.
+- `assistantPeriods` : pense‑bête, neutre côté chauffe.
+
+**Dérivation (daemon)** : fenêtre matin = `[1er cours − wakeBefore − preheat … 1er cours
+− departBefore]` ; fenêtre soir symétrique ; **garde‑fou** : si le réveil tombe
+l'après‑midi → pas de chauffe matin. Migration **v1→v2** automatique (jour → heure la
+plus tôt). **Sync** : chaque `PUT /api/planning` pousse le planning au daemon
+(`/command {planning}`, best‑effort) — le chaînon planning→daemon qui manquait.
+
+**UI** : page `/reglages/planning` refondue (« Mes matins »), saisie par **feuilles**
+(`src/lib/components/ui/BottomSheet.svelte`, iOS‑safe), pastilles‑jours à état lisible,
+microcopie chaleureuse sans jargon, « Enregistré ✓ » visible, sauvegarde **debouncée**.
+
+**Reste** : déploiement du daemon (RPi4) ; intégration Google (phases 4/5) qui
+enrichira la dérivation via `calendar_overrides()` (scolaire zone A / fériés / agenda).
+
 ## Points à vérifier / décisions ouvertes
 
 - [x] Nature du sèche-serviette : **thermostat intégré** → le régler au max (sinon il « fighte » le PWM). _(confirmé 2026‑06‑08)_
-- [ ] Langage du daemon (Python recommandé) — à confirmer.
-- [ ] Modèle de données du planning : semaine type + exceptions ponctuelles (proposé).
+- [x] Daemon en **Python** (asyncio + paho-mqtt + websockets + aiohttp). _(2026‑06‑08)_
+- [x] Modèle de planning **v2 « Mes matins »** (heure du 1er cours, semaine A/B, dérivation matin). _(2026‑06‑08)_
 - [ ] Valeurs des presets SdB (confort plus élevé qu'une pièce de vie).
 - [ ] Stratégie d'anticipation (paramètre fixe d'abord, estimation d'inertie ensuite).

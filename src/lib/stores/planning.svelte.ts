@@ -1,31 +1,29 @@
 /**
- * Planning store — planning d'occupation d'Isabelle, saisi dans Domo.
+ * Planning store — planning d'Isabelle (modèle v2 « langage prof »).
  *
- * Sync cross-device via GET/PUT /api/planning (data/planning.json côté Node).
- * Ce planning alimentera le moteur de créneaux de confort du daemon thermostat
- * (combiné au calendrier scolaire / fériés / agenda via Google côté daemon).
- *
- * Modèle : `week` = 7 jours (0 = lundi … 6 = dimanche), chacun une liste de
- * créneaux d'occupation { start, end } "HH:MM" ; `exceptions` = dates précises
- * qui surchargent la semaine type.
+ * Sync cross-device via GET/PUT /api/planning. À chaque PUT, le serveur pousse
+ * aussi le planning au daemon thermostat (cf. routes/api/planning). Ici : état
+ * réactif + sauvegarde DEBOUNCÉE + mutations. La dérivation de la chauffe (réveil
+ * = 1er cours − 1h30, etc.) se fait côté daemon ; voir $utils/planning-derive pour
+ * les helpers d'affichage en lecture seule.
  */
 
-export type TimeSlot = { start: string; end: string };
-export type PlanningException = { date: string; slots: TimeSlot[] };
-
-export const DAY_LABELS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
-export const DAY_SHORT = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-
-const emptyWeek = (): TimeSlot[][] => [[], [], [], [], [], [], []];
+import {
+  defaultPlanningV2,
+  mondayISO,
+  type PlanningV2,
+  type DayMorning,
+  type PlanningException,
+  type EveningShower,
+  type AssistantPeriod
+} from '$utils/planning-derive';
 
 class PlanningState {
-  /** 7 jours (index 0 = lundi). */
-  week = $state<TimeSlot[][]>(emptyWeek());
-  exceptions = $state<PlanningException[]>([]);
-
+  data = $state<PlanningV2>(defaultPlanningV2());
   hydrating = $state(false);
   saving = $state(false);
   lastError = $state<string | null>(null);
+  #saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   async hydrate() {
     if (typeof window === 'undefined') return;
@@ -33,9 +31,10 @@ class PlanningState {
     try {
       const res = await fetch('/api/planning');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { week?: TimeSlot[][]; exceptions?: PlanningException[] };
-      this.week = Array.isArray(data.week) && data.week.length === 7 ? data.week : emptyWeek();
-      this.exceptions = Array.isArray(data.exceptions) ? data.exceptions : [];
+      const d = (await res.json()) as Partial<PlanningV2>;
+      if (d && d.version === 2 && Array.isArray(d.weekA) && Array.isArray(d.weekB)) {
+        this.data = d as PlanningV2;
+      }
       this.lastError = null;
     } catch (e) {
       this.lastError = (e as Error).message;
@@ -44,18 +43,22 @@ class PlanningState {
     }
   }
 
-  async save() {
-    if (typeof window === 'undefined') return;
+  /** Sauvegarde DEBOUNCÉE (~600 ms) — évite de spammer le PUT (et la sync daemon)
+   *  à chaque tick d'un input type=time. */
+  save() {
     if (this.hydrating) return;
+    if (this.#saveTimer) clearTimeout(this.#saveTimer);
+    this.#saveTimer = setTimeout(() => this.#flush(), 600);
+  }
+
+  async #flush() {
+    if (typeof window === 'undefined') return;
     this.saving = true;
     try {
       const res = await fetch('/api/planning', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          week: $state.snapshot(this.week),
-          exceptions: $state.snapshot(this.exceptions)
-        })
+        body: JSON.stringify($state.snapshot(this.data))
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       this.lastError = null;
@@ -66,43 +69,77 @@ class PlanningState {
     }
   }
 
-  // ─── Semaine type ───
-  addSlot(day: number) {
-    this.week[day] = [...this.week[day], { start: '07:00', end: '08:00' }];
-    this.save();
+  /** Force l'envoi immédiat (ex. avant de quitter la page). */
+  flushNow() {
+    if (this.#saveTimer) clearTimeout(this.#saveTimer);
+    return this.#flush();
   }
-  removeSlot(day: number, idx: number) {
-    this.week[day] = this.week[day].filter((_, i) => i !== idx);
-    this.save();
-  }
-  copyDayToWeekdays(day: number) {
-    const src = this.week[day].map((s) => ({ ...s }));
-    for (let d = 0; d < 5; d++) this.week[d] = src.map((s) => ({ ...s }));
+
+  // ─── Mutations ───
+  setDefaultStart(hhmm: string) {
+    this.data.defaultStart = hhmm;
     this.save();
   }
 
-  // ─── Exceptions ponctuelles ───
-  addException(date: string) {
-    if (!date || this.exceptions.some((e) => e.date === date)) return;
-    this.exceptions = [...this.exceptions, { date, slots: [] }].sort((a, b) =>
-      a.date.localeCompare(b.date)
+  setAbEnabled(on: boolean) {
+    this.data.abEnabled = on;
+    if (on) {
+      // (Re)pose une ancre de parité sur la semaine courante si on active l'A/B.
+      this.data.abAnchorMonday = mondayISO(new Date());
+    }
+    this.save();
+  }
+
+  /** Ré-ancre la parité : « cette semaine, je suis en <letter> » (anti-vacances). */
+  reanchorThisWeek(letter: 'A' | 'B') {
+    this.data.abAnchorMonday = mondayISO(new Date());
+    this.data.abAnchorIsA = letter === 'A';
+    this.save();
+  }
+
+  setDayMorning(week: 'A' | 'B', day: number, morning: DayMorning) {
+    const w = week === 'A' ? this.data.weekA : this.data.weekB;
+    w[day] = morning;
+    this.save();
+  }
+
+  copyAtoB() {
+    this.data.weekB = this.data.weekA.map((d) => ({ ...d }));
+    this.save();
+  }
+
+  setComfort(wakeBeforeFirstMin: number, departBeforeFirstMin: number) {
+    this.data.comfort = { wakeBeforeFirstMin, departBeforeFirstMin };
+    this.save();
+  }
+
+  setEveningShower(es: EveningShower) {
+    this.data.eveningShower = es;
+    this.save();
+  }
+
+  // ─── Exceptions (journées spéciales) ───
+  upsertException(exc: PlanningException) {
+    const others = this.data.exceptions.filter((e) => e.id !== exc.id && e.date !== exc.date);
+    this.data.exceptions = [...others, exc].sort((a, b) => a.date.localeCompare(b.date));
+    this.save();
+  }
+
+  removeException(id: string) {
+    this.data.exceptions = this.data.exceptions.filter((e) => e.id !== id);
+    this.save();
+  }
+
+  // ─── Périodes assistante (pense-bête, neutre côté chauffe) ───
+  addAssistantPeriod(p: AssistantPeriod) {
+    this.data.assistantPeriods = [...this.data.assistantPeriods, p].sort((a, b) =>
+      a.from.localeCompare(b.from)
     );
     this.save();
   }
-  removeException(date: string) {
-    this.exceptions = this.exceptions.filter((e) => e.date !== date);
-    this.save();
-  }
-  addExceptionSlot(date: string) {
-    this.exceptions = this.exceptions.map((e) =>
-      e.date === date ? { ...e, slots: [...e.slots, { start: '07:00', end: '08:00' }] } : e
-    );
-    this.save();
-  }
-  removeExceptionSlot(date: string, idx: number) {
-    this.exceptions = this.exceptions.map((e) =>
-      e.date === date ? { ...e, slots: e.slots.filter((_, i) => i !== idx) } : e
-    );
+
+  removeAssistantPeriod(id: string) {
+    this.data.assistantPeriods = this.data.assistantPeriods.filter((p) => p.id !== id);
     this.save();
   }
 }

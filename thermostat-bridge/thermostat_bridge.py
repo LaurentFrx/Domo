@@ -23,7 +23,8 @@ import contextlib
 import json
 import os
 import time
-from datetime import datetime
+import uuid
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 import paho.mqtt.client as mqtt
@@ -64,37 +65,238 @@ DEFAULT_CONFIG = {
 PRESET_SET = {"frost", "eco", "comfort", "boost", "off"}
 
 
-# ─── Helpers ─────────────────────────────────────────────────────────────
+# ─── Helpers : modèle de planning v2 « langage prof » ────────────────────
+# Voir le miroir TypeScript dans src/lib/utils/planning-derive.ts. On ne stocke
+# QUE l'heure du 1er cours par jour ; la chauffe est dérivée (réveil = 1er − 1h30).
+def _uuid():
+    return uuid.uuid4().hex
+
+
 def _to_min(hhmm):
-    h, m = hhmm.split(":")
-    return int(h) * 60 + int(m)
+    try:
+        h, m = str(hhmm).split(":")
+        return int(h) * 60 + int(m)
+    except Exception:
+        return 0
 
 
-def _valid_slot(s):
-    return (
-        isinstance(s, dict)
-        and isinstance(s.get("start"), str)
-        and isinstance(s.get("end"), str)
-    )
+def _hhmm_ok(s):
+    return isinstance(s, str) and len(s) == 5 and s[2] == ":" and s[:2].isdigit() and s[3:].isdigit()
+
+
+def _iso_ok(s):
+    return isinstance(s, str) and len(s) == 10 and s[4] == "-" and s[7] == "-"
+
+
+def _parse_iso(s):
+    try:
+        y, m, d = str(s).split("-")
+        return date(int(y), int(m), int(d))
+    except Exception:
+        return None
+
+
+def _iso_monday(d):
+    return d - timedelta(days=d.weekday())
+
+
+_TYPES = {"cours", "reunion", "conseil", "aide", "autre"}
+
+
+def _default_week():
+    return [{"kind": "inherit"} for _ in range(5)] + [{"kind": "rest"}, {"kind": "rest"}]
+
+
+def _default_planning():
+    return {
+        "version": 2,
+        "defaultStart": "08:00",
+        "abEnabled": False,
+        "abAnchorMonday": _iso_monday(datetime.now().date()).isoformat(),
+        "abAnchorIsA": True,
+        "weekA": _default_week(),
+        "weekB": _default_week(),
+        "comfort": {"wakeBeforeFirstMin": 90, "departBeforeFirstMin": 15},
+        "eveningShower": {"enabled": False, "targetReady": "19:30", "days": [0, 1, 2, 3, 4]},
+        "exceptions": [],
+        "assistantPeriods": [],
+    }
+
+
+def _norm_day_morning(v):
+    if isinstance(v, dict):
+        k = v.get("kind")
+        if k == "start" and _hhmm_ok(v.get("start")):
+            day = {"kind": "start", "start": v["start"]}
+            if v.get("halfGroup") is True:
+                day["halfGroup"] = True
+            return day
+        if k in ("afternoon", "rest", "inherit"):
+            return {"kind": k}
+    return {"kind": "inherit"}
+
+
+def _norm_week(v):
+    base = _default_week()
+    if isinstance(v, list):
+        for i in range(7):
+            if i < len(v):
+                base[i] = _norm_day_morning(v[i])
+    return base
+
+
+def _norm_exception(e):
+    if not isinstance(e, dict) or not _iso_ok(e.get("date")):
+        return None
+    affects = e.get("affectsMorning") is True
+    out = {
+        "id": e["id"] if isinstance(e.get("id"), str) and e["id"] else _uuid(),
+        "date": e["date"],
+        "type": e["type"] if e.get("type") in _TYPES else "autre",
+        "affectsMorning": affects,
+    }
+    if isinstance(e.get("label"), str) and e["label"]:
+        out["label"] = e["label"]
+    if affects:
+        m = e.get("morning") or {}
+        if m.get("kind") == "start" and _hhmm_ok(m.get("start")):
+            out["morning"] = {"kind": "start", "start": m["start"]}
+        else:
+            out["morning"] = {"kind": "rest"}
+    elif _hhmm_ok(e.get("time")):
+        out["time"] = e["time"]
+    return out
+
+
+def _norm_assistant(a):
+    if not isinstance(a, dict) or not _iso_ok(a.get("from")) or not _iso_ok(a.get("to")):
+        return None
+    out = {
+        "id": a["id"] if isinstance(a.get("id"), str) and a["id"] else _uuid(),
+        "from": a["from"],
+        "to": a["to"],
+    }
+    if isinstance(a.get("label"), str) and a["label"]:
+        out["label"] = a["label"]
+    return out
+
+
+def _migrate_v1(o):
+    """Ancien format {week:[[{start,end}…]×7], exceptions:[{date,slots}]} → v2.
+    Lossy assumé : un jour → heure de début la plus tôt ; jour vide → inherit."""
+    base = _default_planning()
+    week = o.get("week") if isinstance(o.get("week"), list) else []
+    starts = []
+    wk = _default_week()
+    for i in range(7):
+        slots = week[i] if i < len(week) and isinstance(week[i], list) else []
+        valid = sorted(s["start"] for s in slots if isinstance(s, dict) and _hhmm_ok(s.get("start")))
+        if valid:
+            wk[i] = {"kind": "start", "start": valid[0]}
+            starts.append(_to_min(valid[0]))
+    base["weekA"] = wk
+    if starts:
+        mn = min(starts)
+        base["defaultStart"] = f"{mn // 60:02d}:{mn % 60:02d}"
+    out_ex = []
+    for e in o.get("exceptions") if isinstance(o.get("exceptions"), list) else []:
+        if not isinstance(e, dict) or not _iso_ok(e.get("date")):
+            continue
+        slots = e.get("slots") if isinstance(e.get("slots"), list) else []
+        valid = sorted(s["start"] for s in slots if isinstance(s, dict) and _hhmm_ok(s.get("start")))
+        out_ex.append(
+            {
+                "id": _uuid(),
+                "date": e["date"],
+                "type": "autre",
+                "affectsMorning": True,
+                "morning": {"kind": "start", "start": valid[0]} if valid else {"kind": "rest"},
+            }
+        )
+    base["exceptions"] = out_ex
+    return base
 
 
 def _normalize_planning(p):
-    """Garantit la forme {week: 7×[slots], exceptions: [...]} avec créneaux valides."""
-    week_raw = p.get("week") if isinstance(p, dict) else None
-    week = []
-    for i in range(7):
-        day = week_raw[i] if isinstance(week_raw, list) and i < len(week_raw) else []
-        week.append([s for s in day if _valid_slot(s)] if isinstance(day, list) else [])
-    ex_raw = p.get("exceptions") if isinstance(p, dict) else None
-    exceptions = []
-    if isinstance(ex_raw, list):
-        for e in ex_raw:
-            if isinstance(e, dict) and isinstance(e.get("date"), str):
-                slots = e.get("slots") or []
-                exceptions.append(
-                    {"date": e["date"], "slots": [s for s in slots if _valid_slot(s)]}
-                )
-    return {"week": week, "exceptions": exceptions}
+    """Normalise vers le modèle v2 (migre depuis v1 si besoin)."""
+    if not isinstance(p, dict):
+        return _default_planning()
+    if p.get("version") != 2:
+        if isinstance(p.get("week"), list) or isinstance(p.get("exceptions"), list):
+            return _migrate_v1(p)
+        return _default_planning()
+    base = _default_planning()
+    comfort = p.get("comfort") if isinstance(p.get("comfort"), dict) else {}
+    es = p.get("eveningShower") if isinstance(p.get("eveningShower"), dict) else {}
+    days = es.get("days") if isinstance(es.get("days"), list) else [0, 1, 2, 3, 4]
+    return {
+        "version": 2,
+        "defaultStart": p["defaultStart"] if _hhmm_ok(p.get("defaultStart")) else "08:00",
+        "abEnabled": p.get("abEnabled") is True,
+        "abAnchorMonday": p["abAnchorMonday"] if _iso_ok(p.get("abAnchorMonday")) else base["abAnchorMonday"],
+        "abAnchorIsA": p.get("abAnchorIsA") is not False,
+        "weekA": _norm_week(p.get("weekA")),
+        "weekB": _norm_week(p.get("weekB")),
+        "comfort": {
+            "wakeBeforeFirstMin": int(comfort["wakeBeforeFirstMin"])
+            if isinstance(comfort.get("wakeBeforeFirstMin"), (int, float))
+            else 90,
+            "departBeforeFirstMin": int(comfort["departBeforeFirstMin"])
+            if isinstance(comfort.get("departBeforeFirstMin"), (int, float))
+            else 15,
+        },
+        "eveningShower": {
+            "enabled": es.get("enabled") is True,
+            "targetReady": es["targetReady"] if _hhmm_ok(es.get("targetReady")) else "19:30",
+            "days": [d for d in days if isinstance(d, int) and 0 <= d <= 6],
+        },
+        "exceptions": sorted(
+            [x for x in (_norm_exception(e) for e in (p.get("exceptions") or [])) if x],
+            key=lambda e: e["date"],
+        ),
+        "assistantPeriods": [
+            x for x in (_norm_assistant(a) for a in (p.get("assistantPeriods") or [])) if x
+        ],
+    }
+
+
+def _ab_letter_for(date_obj, plan):
+    """Lettre de semaine (A|B) pour une date, d'après l'ancre de parité éditable."""
+    if not plan.get("abEnabled"):
+        return "A"
+    anchor = _parse_iso(plan.get("abAnchorMonday"))
+    if anchor is None:
+        return "A"
+    weeks = round((_iso_monday(date_obj) - _iso_monday(anchor)).days / 7)
+    same_par = (weeks % 2) == 0
+    anchor_is_a = plan.get("abAnchorIsA", True)
+    is_a = anchor_is_a if same_par else not anchor_is_a
+    return "A" if is_a else "B"
+
+
+def _morning_for(date_obj, plan):
+    """Matin effectif d'une date : exception datée > semaine A|B > rythme habituel."""
+    iso = date_obj.isoformat()
+    for exc in plan.get("exceptions", []):
+        if exc.get("date") == iso:
+            if not exc.get("affectsMorning"):
+                return {"kind": "rest"}
+            m = exc.get("morning") or {}
+            if m.get("kind") == "start" and _hhmm_ok(m.get("start")):
+                return {"kind": "start", "start": m["start"]}
+            return {"kind": "rest"}
+    letter = _ab_letter_for(date_obj, plan)
+    week = plan.get("weekA" if letter == "A" else "weekB", [])
+    wd = date_obj.weekday()
+    day = week[wd] if 0 <= wd < len(week) else {"kind": "inherit"}
+    k = day.get("kind")
+    if k == "rest":
+        return {"kind": "rest"}
+    if k == "afternoon":
+        return {"kind": "afternoon"}
+    if k == "start" and _hhmm_ok(day.get("start")):
+        return {"kind": "start", "start": day["start"]}
+    return {"kind": "start", "start": plan.get("defaultStart", "08:00")}
 
 
 # ─── Sondes (MQTT) ───────────────────────────────────────────────────────
@@ -254,7 +456,7 @@ class Controller:
         self.sensors = sensors
         self.matter = matter
         self.config = json.loads(json.dumps(DEFAULT_CONFIG))
-        self.planning = {"week": [[] for _ in range(7)], "exceptions": []}
+        self.planning = _default_planning()
         self.mode = "auto"  # auto | manual
         self.manual_preset = "comfort"
         self.override = None  # {"preset": str, "until": ts|None}
@@ -313,50 +515,70 @@ class Controller:
             if isinstance(c.get(k), (int, float)):
                 self.config[k] = int(c[k])
 
-    # ── Planning ──
-    def _slots_for(self, now_dt):
-        iso = now_dt.strftime("%Y-%m-%d")
-        for exc in self.planning.get("exceptions", []):
-            if exc.get("date") == iso:
-                return exc.get("slots", [])
-        week = self.planning.get("week", [])
-        wd = now_dt.weekday()  # 0 = lundi
-        return week[wd] if 0 <= wd < len(week) else []
+    # ── Planning (dérivation v2 : chauffe AVANT le 1er cours, pas pendant) ──
+    def _morning_window(self, now_dt):
+        """Fenêtre de confort matinale = [réveil, départ] ; réveil = 1er cours − 1h30."""
+        plan = self.planning
+        m = _morning_for(now_dt.date(), plan)
+        if m.get("kind") != "start":
+            return None
+        comfort = plan.get("comfort", {})
+        wake_before = int(comfort.get("wakeBeforeFirstMin", 90))
+        depart_before = int(comfort.get("departBeforeFirstMin", 15))
+        first = _to_min(m["start"])
+        wake = first - wake_before
+        # Garde-fou : si le réveil tombe l'après-midi, ce n'est pas un besoin
+        # matinal (1re activité = rendez-vous du soir mal classé) → pas de chauffe.
+        if wake >= _to_min("12:00"):
+            return None
+        depart = first - depart_before
+        end = depart if depart > wake else wake + 30
+        return (wake, end)
 
-    def _comfort_intervals(self, now_dt):
-        preheat = int(self.config.get("preheat_min", 30))
-        intervals = []
-        for s in self._slots_for(now_dt):
-            try:
-                a = max(0, _to_min(s["start"]) - preheat)
-                b = _to_min(s["end"])
-            except Exception:
-                continue
-            if b > a:
-                intervals.append((a, b))
-        return sorted(intervals)
+    def _evening_window(self, now_dt):
+        """Fenêtre douche du soir = [heure cible, +30 min] (préchauffe ajoutée après)."""
+        es = self.planning.get("eveningShower", {})
+        if not es.get("enabled"):
+            return None
+        if now_dt.weekday() not in (es.get("days") or []):
+            return None
+        ready = _to_min(es.get("targetReady", "19:30"))
+        return (ready, ready + 30)
 
     def calendar_overrides(self, now_dt):
         """TODO Phase 4/5 : déduire du calendrier Google (scolaire/fériés/agenda)
-        un ajustement des créneaux (jour d'école, vacances, événement tôt…).
-        Pour l'instant : aucun ajustement."""
+        un ajustement (jour d'école, vacances, événement tôt…). Pour l'instant : rien."""
         return None
 
     def _planning_decision(self, now_dt):
         minutes = now_dt.hour * 60 + now_dt.minute
-        intervals = self._comfort_intervals(now_dt)
-        in_comfort = any(a <= minutes < b for a, b in intervals)
-        preset = "comfort" if in_comfort else "eco"
+        preheat = int(self.config.get("preheat_min", 30))
+        windows = []
+        wm = self._morning_window(now_dt)
+        if wm:
+            windows.append(("morning", wm))
+        we = self._evening_window(now_dt)
+        if we:
+            windows.append(("evening", we))
+        # Confort effectif = [start − préchauffe, end] (le daemon démarre en avance).
+        intervals = [(max(0, a - preheat), b, tag) for tag, (a, b) in windows]
+        active = next((tag for (a, b, tag) in intervals if a <= minutes < b), None)
+        preset = "comfort" if active else "eco"
+        if active == "morning":
+            reason = "Confort — préparation du matin"
+        elif active == "evening":
+            reason = "Confort — douche du soir"
+        else:
+            reason = "Éco — hors fenêtre de confort"
         bounds = []
-        for a, b in intervals:
+        for a, b, _tag in intervals:
             bounds.append((a, "comfort"))
             bounds.append((b, "eco"))
         nxt = None
-        for m, p in sorted(bounds):
-            if m > minutes:
-                nxt = (m, p)
+        for mn, p in sorted(bounds):
+            if mn > minutes:
+                nxt = (mn, p)
                 break
-        reason = "Confort — occupation prévue" if in_comfort else "Éco — pas d'occupation prévue"
         return preset, reason, nxt
 
     # ── Boucle de régulation ──
