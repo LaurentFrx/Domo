@@ -150,6 +150,15 @@ class AirzoneState {
   zones = $state<AirzoneZone[]>(MOCK_ZONES);
 
   private intervalId: ReturnType<typeof setInterval> | null = null;
+  private reconcileTimers: ReturnType<typeof setTimeout>[] = [];
+
+  // Optimisme « épinglé » : valeurs commandées récemment (par zone), conservées
+  // par-dessus les snapshots tant qu'elles ne sont pas CONFIRMÉES par le bridge
+  // (ou expirées). L'Airzone applique avec un délai — surtout l'extinction du
+  // master qui refroidit — donc une relecture trop précoce ferait « revenir » le
+  // bouton (réaction contradictoire).
+  private pins = new Map<number, { patch: Partial<AirzoneZone>; until: number }>();
+  private readonly PIN_MS = 7000;
 
   /** Mode système (= mode de la zone master). */
   systemMode = $derived.by<AirzoneMode>(() => {
@@ -175,6 +184,9 @@ class AirzoneState {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
+    this.reconcileTimers.forEach((t) => clearTimeout(t));
+    this.reconcileTimers = [];
+    this.pins.clear();
   }
 
   private mapZone(z: ApiZone): AirzoneZone {
@@ -199,9 +211,48 @@ class AirzoneState {
     };
   }
 
+  /**
+   * Mode SYSTÈME global : l'Airzone n'a qu'UN mode pour tout le système, mais le
+   * bridge ne bascule que le champ `mode` de la zone master à la relecture (les
+   * autres zones gardent transitoirement leur ancien mode tant que son poll 15 s
+   * n'a pas propagé). On aligne donc toutes les zones sur le mode de la master →
+   * jamais deux zones avec des modes contradictoires.
+   */
+  private normalizeMode(zones: AirzoneZone[]): AirzoneZone[] {
+    const master = zones.find((z) => z.isMaster) ?? zones[0];
+    const m = master?.mode;
+    if (!m) return zones;
+    return zones.map((z) => (z.mode === m ? z : { ...z, mode: m }));
+  }
+
+  /** Réapplique l'optimisme épinglé par-dessus un snapshot (cf. `pins`). */
+  private applyPins(zones: AirzoneZone[]): AirzoneZone[] {
+    if (this.pins.size === 0) return zones;
+    const now = Date.now();
+    return zones.map((z) => {
+      const p = this.pins.get(z.id);
+      if (!p) return z;
+      if (p.until < now) {
+        this.pins.delete(z.id);
+        return z;
+      }
+      // Confirmé dès que le snapshot reflète déjà toutes les valeurs épinglées.
+      const confirmed = Object.entries(p.patch).every(
+        ([k, v]) => (z as Record<string, unknown>)[k] === v
+      );
+      if (confirmed) {
+        this.pins.delete(z.id);
+        return z;
+      }
+      return { ...z, ...p.patch };
+    });
+  }
+
   private applySnapshot(p: StatusPayload) {
     if (!Array.isArray(p.zones)) return;
-    this.zones = p.zones.map((z) => this.mapZone(z));
+    // applyPins AVANT normalizeMode : si le mode de la master est encore épinglé,
+    // normalizeMode propage la bonne valeur à toutes les zones.
+    this.zones = this.normalizeMode(this.applyPins(p.zones.map((z) => this.mapZone(z))));
     this.systemId = p.system_id ?? this.systemId;
   }
 
@@ -232,6 +283,30 @@ class AirzoneState {
     this.lastUpdate = new Date();
   }
 
+  /** Épingle une valeur optimiste (fusionnée) jusqu'à confirmation/expiration. */
+  private pin(zoneId: number, patch: Partial<AirzoneZone>) {
+    const ex = this.pins.get(zoneId);
+    this.pins.set(zoneId, {
+      patch: { ...ex?.patch, ...patch },
+      until: Date.now() + this.PIN_MS
+    });
+  }
+
+  /**
+   * Re-poll de réconciliation DÉBOUNCÉ. Après une rafale de commandes (l'user
+   * tapote plusieurs zones d'affilée), on ne déclenche qu'UN seul poll, une fois
+   * la rafale retombée. On ne réécrit PLUS l'état depuis la réponse de chaque
+   * commande : ces snapshots complets, résolus dans le désordre, écrasaient
+   * l'optimisme des AUTRES zones → boutons qui « sautent », réactions contradictoires.
+   */
+  private schedulePollSoon() {
+    this.reconcileTimers.forEach((t) => clearTimeout(t));
+    // Deux relectures : 1,5 s (commande appliquée vite, cas courant) puis 4,5 s
+    // (laisse le temps au matériel lent, ex. extinction du master). Les pins
+    // protègent l'optimisme entre les deux si la 1re relecture est encore périmée.
+    this.reconcileTimers = [1500, 4500].map((ms) => setTimeout(() => this.poll(), ms));
+  }
+
   private async sendCommand(zoneId: number, cmd: Command) {
     try {
       const res = await fetch(COMMAND_URL, {
@@ -241,17 +316,19 @@ class AirzoneState {
         signal: AbortSignal.timeout(16_000)
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as { zones?: ApiZone[] };
-      if (Array.isArray(json.zones)) this.zones = json.zones.map((z) => this.mapZone(z));
-      this.lastUpdate = new Date();
+      await res.json().catch(() => ({}));
+      this.lastError = null;
     } catch (e) {
-      // L'optimiste reste affiché ; le prochain poll corrigera (ou 403 si write off).
+      // L'optimiste reste affiché ; le re-poll débouncé corrigera (ou 403 si write off).
       this.lastError = (e as Error).message;
+    } finally {
+      this.schedulePollSoon();
     }
   }
 
   setOn(zoneId: number, on: boolean) {
     this.patchZone(zoneId, { on });
+    this.pin(zoneId, { on });
     this.sendCommand(zoneId, { on });
   }
 
@@ -259,13 +336,15 @@ class AirzoneState {
     const z = this.zones.find((x) => x.id === zoneId);
     const v = z ? clamp(value, z.minTemp, z.maxTemp, z.tempStep) : value;
     this.patchZone(zoneId, { setpoint: v });
+    this.pin(zoneId, { setpoint: v });
     this.sendCommand(zoneId, { setpoint: v });
   }
 
-  /** Mode GLOBAL : optimiste sur toutes les zones, routé vers la master côté bridge. */
+  /** Mode GLOBAL : optimiste sur toutes les zones, routé + épinglé sur la master. */
   setMode(mode: AirzoneMode) {
     const master = this.zones.find((z) => z.isMaster) ?? this.zones[0];
     this.zones = this.zones.map((z) => ({ ...z, mode }));
+    if (master) this.pin(master.id, { mode });
     this.sendCommand(master?.id ?? 1, { mode });
   }
 }
