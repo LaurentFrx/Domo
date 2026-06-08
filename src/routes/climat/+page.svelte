@@ -46,6 +46,10 @@
     return AIRZONE_MODE_META[m] ?? AIRZONE_MODE_META.unknown;
   }
 
+  // Gainable : seuls Arrêt / Chaud / Froid (plus de Ventilation ni Sec). Le mode
+  // est GLOBAL au système, piloté par la zone « directeur » Parents.
+  const GAINABLE_MODES: AirzoneMode[] = ['stop', 'heating', 'cooling'];
+
   // Thermomètres Zigbee (SNZB-02 etc.) — détectés par 'thermo' dans le nom.
   const thermoSensors = $derived(
     zigbee.devices.filter(
@@ -218,7 +222,7 @@
       class="mb-3 text-[14px] font-semibold tracking-[0.04em] uppercase"
       style="color: var(--color-muted-fg);"
     >
-      Climatisation / Chauffage Daikin
+      Climatisation / Chauffage
     </h2>
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       {#each daikin.units as unit (unit.id)}
@@ -477,6 +481,9 @@
           </div>
         </article>
       {/each}
+
+      <!-- Sèche-serviette : remonté à côté du dial Daikin (même grille). -->
+      <ThermostatCard />
     </div>
   </section>
 
@@ -498,9 +505,9 @@
       </span>
     </div>
 
-    <!-- Sélecteur de mode GLOBAL (système → appliqué via la zone master) -->
+    <!-- Sélecteur de mode GLOBAL — Arrêt / Chaud / Froid, piloté par Parents (directeur) -->
     <div class="flex gap-2">
-      {#each airzone.availableModes as m (m)}
+      {#each GAINABLE_MODES as m (m)}
         {@const mm = airzoneModeMeta(m)}
         <button
           type="button"
@@ -522,27 +529,66 @@
 
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
       {#each airzone.zones as zone (zone.id)}
-        {@const meta = airzoneModeMeta(zone.mode)}
+        {@const heat = airzone.systemMode === 'heating'}
+        {@const cool = airzone.systemMode === 'cooling'}
+        {@const accent = heat
+          ? 'var(--color-hp)'
+          : cool
+            ? 'var(--color-consumption)'
+            : 'var(--color-muted-fg)'}
+        {@const iconColor = !zone.on ? 'var(--color-muted-fg)' : accent}
         <article
-          class="flex flex-col gap-2.5 rounded-[var(--radius-xl)] border p-4"
+          class="az-zone relative flex flex-col gap-2.5 overflow-hidden rounded-[var(--radius-xl)] border p-4"
           style="background: var(--color-card); border-color: {zone.on
-            ? meta.color
+            ? accent
             : 'var(--color-border)'};"
         >
-          <!-- header : nom + demande + toggle on/off -->
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-[14px] font-semibold" style="color: var(--color-fg);">
-              {zone.name}
-            </span>
-            <div class="flex items-center gap-2">
-              {#if zone.demand}
-                <span
-                  class="rounded-full px-1.5 py-0.5 text-[8px] font-semibold tracking-[0.06em] uppercase"
-                  style="color: {meta.color}; background: {meta.bg};"
-                >
-                  actif
-                </span>
+          <!-- Icône de fond = fonction qui s'activera à l'allumage (flocon = froid,
+               flamme = chaud) selon le mode système piloté par Parents ; grise en
+               transparence quand la pièce est éteinte, colorée quand elle fonctionne. -->
+          {#if cool || heat}
+            <svg
+              class="az-zone-bg"
+              viewBox="0 0 24 24"
+              fill={heat ? 'currentColor' : 'none'}
+              stroke={heat ? 'none' : 'currentColor'}
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              style="color: {iconColor}; opacity: {zone.on ? 0.5 : 0.12};"
+              aria-hidden="true"
+            >
+              {#if cool}
+                <line x1="2" x2="22" y1="12" y2="12" />
+                <line x1="12" x2="12" y1="2" y2="22" />
+                <path d="m20 16-4-4 4-4" />
+                <path d="m4 8 4 4-4 4" />
+                <path d="m16 4-4 4-4-4" />
+                <path d="m8 20 4-4 4 4" />
+              {:else}
+                <path
+                  d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+                />
               {/if}
+            </svg>
+          {/if}
+
+          <!-- Contenu au-dessus de l'icône -->
+          <div class="relative z-[1] flex flex-col gap-2.5">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <span class="text-[14px] font-semibold" style="color: var(--color-fg);">
+                  {zone.name}
+                </span>
+                {#if zone.demand}
+                  <span
+                    class="rounded-full px-1.5 py-0.5 text-[8px] font-semibold tracking-[0.06em] uppercase"
+                    style="color: {accent}; background: color-mix(in oklab, {accent} 18%, transparent);"
+                  >
+                    actif
+                  </span>
+                {/if}
+              </div>
               <button
                 type="button"
                 data-no-haptic
@@ -559,93 +605,79 @@
                 <span class="toggle-knob"></span>
               </button>
             </div>
-          </div>
 
-          <!-- température ambiante + humidité -->
-          <div class="flex items-baseline gap-2">
-            <div class="flex items-baseline gap-0.5">
-              <span
-                class="text-[32px] leading-none font-bold tabular-nums"
-                style="color: var(--color-fg); letter-spacing: -0.02em;"
-              >
-                {zone.roomTemp !== null ? zone.roomTemp.toFixed(1) : '—'}
-              </span>
-              <span class="text-[14px] font-medium" style="color: var(--color-muted-fg);">°C</span>
-            </div>
-            {#if zone.humidity !== null}
-              <span class="text-[13px] tabular-nums" style="color: var(--color-consumption);">
-                {Math.round(zone.humidity)}%
-              </span>
-            {/if}
-          </div>
-
-          <!-- consigne réglable (− / +) -->
-          <div
-            class="flex items-center justify-between border-t pt-2"
-            style="border-color: var(--color-border);"
-          >
-            <span class="text-[11px]" style="color: var(--color-muted-fg);">Consigne</span>
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                data-no-haptic
-                class="az-step"
-                aria-label="Baisser la consigne {zone.name}"
-                onclick={() => {
-                  haptic('light');
-                  airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) - (zone.tempStep ?? 0.5));
-                }}>−</button
-              >
-              <span
-                class="text-[15px] font-semibold tabular-nums"
-                style="color: var(--color-fg); min-width: 3.5ch; text-align: center;"
-              >
-                {zone.setpoint !== null ? zone.setpoint.toFixed(1) : '—'}°
-              </span>
-              <button
-                type="button"
-                data-no-haptic
-                class="az-step"
-                aria-label="Monter la consigne {zone.name}"
-                onclick={() => {
-                  haptic('light');
-                  airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) + (zone.tempStep ?? 0.5));
-                }}>+</button
-              >
-            </div>
-          </div>
-
-          <!-- mode courant + batterie/couverture (zones radio) -->
-          <div
-            class="flex items-center justify-between text-[10px]"
-            style="color: var(--color-muted-fg);"
-          >
-            <span
-              class="font-semibold"
-              style="color: {zone.on ? meta.color : 'var(--color-muted-fg)'};"
-            >
-              {meta.label}
-            </span>
-            {#if zone.battery !== null}
-              <span class="flex items-center gap-1">
+            <div class="flex items-baseline gap-2">
+              <div class="flex items-baseline gap-0.5">
                 <span
-                  class="h-1 w-1 rounded-full"
-                  style:background-color={zone.battery > 30
-                    ? 'var(--color-battery)'
-                    : 'var(--color-alert)'}
-                ></span>
-                Batt. {zone.battery}%{#if zone.coverage !== null}
-                  · couv. {zone.coverage}%{/if}
-              </span>
+                  class="text-[32px] leading-none font-bold tabular-nums"
+                  style="color: var(--color-fg); letter-spacing: -0.02em;"
+                >
+                  {zone.roomTemp !== null ? zone.roomTemp.toFixed(1) : '—'}
+                </span>
+                <span class="text-[14px] font-medium" style="color: var(--color-muted-fg);">°C</span
+                >
+              </div>
+              {#if zone.humidity !== null}
+                <span class="text-[13px] tabular-nums" style="color: var(--color-consumption);">
+                  {Math.round(zone.humidity)}%
+                </span>
+              {/if}
+            </div>
+
+            <div
+              class="flex items-center justify-between border-t pt-2"
+              style="border-color: var(--color-border);"
+            >
+              <span class="text-[11px]" style="color: var(--color-muted-fg);">Consigne</span>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  data-no-haptic
+                  class="az-step"
+                  aria-label="Baisser la consigne {zone.name}"
+                  onclick={() => {
+                    haptic('light');
+                    airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) - (zone.tempStep ?? 0.5));
+                  }}>−</button
+                >
+                <span
+                  class="text-[15px] font-semibold tabular-nums"
+                  style="color: var(--color-fg); min-width: 3.5ch; text-align: center;"
+                >
+                  {zone.setpoint !== null ? zone.setpoint.toFixed(1) : '—'}°
+                </span>
+                <button
+                  type="button"
+                  data-no-haptic
+                  class="az-step"
+                  aria-label="Monter la consigne {zone.name}"
+                  onclick={() => {
+                    haptic('light');
+                    airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) + (zone.tempStep ?? 0.5));
+                  }}>+</button
+                >
+              </div>
+            </div>
+
+            {#if zone.battery !== null}
+              <div class="flex justify-end text-[10px]" style="color: var(--color-muted-fg);">
+                <span class="flex items-center gap-1">
+                  <span
+                    class="h-1 w-1 rounded-full"
+                    style:background-color={zone.battery > 30
+                      ? 'var(--color-battery)'
+                      : 'var(--color-alert)'}
+                  ></span>
+                  Batt. {zone.battery}%{#if zone.coverage !== null}
+                    · couv. {zone.coverage}%{/if}
+                </span>
+              </div>
             {/if}
           </div>
         </article>
       {/each}
     </div>
   </section>
-
-  <!-- ═══ Sèche-serviette (thermostat SdB) ═══ -->
-  <ThermostatCard />
 
   <!-- ═══ Thermomètres Zigbee (déplacés depuis /pieces) ═══ -->
   {#if thermoSensors.length > 0}
@@ -815,6 +847,25 @@
 </div>
 
 <style>
+  /* ─── Gainable : icône de fond (flocon froid / flamme chaud) par zone ─── */
+  .az-zone-bg {
+    position: absolute;
+    right: -16%;
+    top: 50%;
+    width: 64%;
+    height: auto;
+    transform: translateY(-50%);
+    pointer-events: none;
+    transition:
+      color 280ms ease,
+      opacity 280ms ease;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .az-zone-bg {
+      transition: none;
+    }
+  }
+
   /* ─── Daikin card : design Tesla/Mysa-inspired ─── */
   .daikin-card {
     transition:
