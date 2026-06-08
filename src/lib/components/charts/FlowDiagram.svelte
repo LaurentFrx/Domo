@@ -377,18 +377,19 @@
     transform: translateY(-50%);
     pointer-events: none;
     z-index: 0;
-    background: url('/lueur-verte.webp') no-repeat center / contain;
+    /* cover + position gauche : pas de marge de letterbox, le cœur vert (bord
+       gauche de l'image) est plaqué au bord du div. */
+    background: url('/lueur-verte.webp') no-repeat left center / cover;
     opacity: 0.95;
   }
-  /* Source calée juste à l'extérieur du flanc → la lueur jaillit du bord ;
-     le cœur vert de l'image (bord gauche) est orienté vers la carte. */
+  /* Source plaquée au bord de la carte → la lueur colle au flanc. */
   .flow-lueur-left {
     left: 0;
-    transform: translate(-10%, -50%);
+    transform: translate(-12%, -50%);
   }
   .flow-lueur-right {
     right: 0;
-    transform: translate(10%, -50%) scaleX(-1);
+    transform: translate(12%, -50%) scaleX(-1);
   }
 
   .flow-core {
