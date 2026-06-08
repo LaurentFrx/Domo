@@ -17,8 +17,6 @@
    * apports et usages s'équilibrent par construction.
    */
 
-  import { preferences } from '$stores/preferences.svelte';
-
   interface Props {
     /** Apport solaire pan SUD (onduleur APS + SolarBank 1). W. */
     pvSudW: number;
@@ -232,10 +230,6 @@
     return () => m.removeEventListener('change', handler);
   });
 
-  // Halo vert « Yeldra » : il pulse seulement si les animations sont activées et
-  // que l'OS ne réclame pas de mouvement réduit (sinon nappe statique).
-  const glowAnimated = $derived(preferences.animationsEnabled && !reducedMotion);
-
   // ─── Résumé accessible ──────────────────────────────────────────────────
   const ariaLabel = $derived.by(() => {
     const f = (l: Link) => `${l.name}${l.sub ? ' ' + l.sub : ''} ${fmtW(l.w)} watts`;
@@ -248,16 +242,8 @@
 <div class="relative mx-auto w-full" style="max-width: 520px;">
   <!-- Lueurs « OVNI » : deux sources lumineuses intenses de part et d'autre, à
        cheval sur les bords de la carte (technique du hero Yeldra, recréée en CSS). -->
-  <div
-    class="flow-lueur flow-lueur-left"
-    class:flow-lueur-animated={glowAnimated}
-    aria-hidden="true"
-  ></div>
-  <div
-    class="flow-lueur flow-lueur-right"
-    class:flow-lueur-animated={glowAnimated}
-    aria-hidden="true"
-  ></div>
+  <div class="flow-lueur flow-lueur-left" aria-hidden="true"></div>
+  <div class="flow-lueur flow-lueur-right" aria-hidden="true"></div>
   <div
     class="flow-card relative z-[1] overflow-hidden rounded-[var(--radius-3xl)] border"
     style="background: var(--color-card); aspect-ratio: {VB_W / VB_H};"
@@ -382,52 +368,27 @@
       var(--shadow-md);
   }
 
+  /* Lueur verte STATIQUE = image lueur-verte.webp (remplace le glow respirant). */
   .flow-lueur {
     position: absolute;
     top: 50%;
-    width: 280px;
-    height: 60%;
+    width: 300px;
+    height: 82%;
     transform: translateY(-50%);
     pointer-events: none;
     z-index: 0;
-    /* Cœur blanc-vert incandescent → vert OVNI → transparent (faisceau). */
-    background: radial-gradient(
-      ellipse 50% 50% at center,
-      oklch(0.99 0.05 152) 0%,
-      var(--color-glow-bright) 15%,
-      var(--color-glow) 35%,
-      color-mix(in oklab, var(--color-glow) 28%, transparent) 55%,
-      transparent 75%
-    );
-    filter: blur(10px);
-    opacity: 0.97;
+    background: url('/lueur-verte.webp') no-repeat center / contain;
+    opacity: 0.95;
   }
-  /* Centre du bloom calé juste à l'extérieur du bord → la source « jaillit »
-     du flanc de la carte (la moitié intérieure est masquée par la carte). */
+  /* Source calée juste à l'extérieur du flanc → la lueur jaillit du bord ;
+     le cœur vert de l'image (bord gauche) est orienté vers la carte. */
   .flow-lueur-left {
     left: 0;
-    transform: translate(-52%, -50%);
+    transform: translate(-52%, -50%) scaleX(-1);
   }
   .flow-lueur-right {
     right: 0;
     transform: translate(52%, -50%);
-  }
-  .flow-lueur-animated {
-    animation: flow-lueur-pulse 3.8s var(--ease-default) infinite;
-  }
-  @keyframes flow-lueur-pulse {
-    0%,
-    100% {
-      opacity: 0.78;
-    }
-    50% {
-      opacity: 1;
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .flow-lueur-animated {
-      animation: none;
-    }
   }
 
   .flow-core {
