@@ -384,11 +384,11 @@
      le cœur vert de l'image (bord gauche) est orienté vers la carte. */
   .flow-lueur-left {
     left: 0;
-    transform: translate(-52%, -50%) scaleX(-1);
+    transform: translate(-10%, -50%);
   }
   .flow-lueur-right {
     right: 0;
-    transform: translate(52%, -50%);
+    transform: translate(10%, -50%) scaleX(-1);
   }
 
   .flow-core {
