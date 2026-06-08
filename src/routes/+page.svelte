@@ -113,10 +113,12 @@
   const nextSwitchAt = $derived(tariff.next.at); // 'HH:MM' local Paris
   const hoursUntilSwitch = $derived(tariff.nextInHours);
 
-  // ─── Réglage LIVE des 3 anneaux qui gravitent (taille + hauteur) ──────
-  let ringsScale = $state(1); // facteur d'échelle des diamètres (100 % = défaut)
-  let ringsOffsetY = $state(0); // décalage vertical en px (+ = plus bas)
-  const ringSizes = $derived([560, 880, 1220].map((d) => Math.round(d * ringsScale)));
+  // ─── Réglage LIVE des anneaux qui gravitent (taille + hauteur) ──────
+  // 2 anneaux : cercle extérieur retiré, 2e resserré vers le 1er (560 → 700).
+  // Défauts calés sur le réglage validé par l'utilisateur (144 % / +250 px).
+  let ringsScale = $state(1.44);
+  let ringsOffsetY = $state(250);
+  const ringSizes = $derived([560, 700].map((d) => Math.round(d * ringsScale)));
 </script>
 
 <svelte:head>
