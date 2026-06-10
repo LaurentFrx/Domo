@@ -18,6 +18,7 @@
     flame:
       'M12 2 C12 2 8 6 8 12 C8 16 10 19 12 19 C14 19 16 16 16 12 C16 8 14 6 14 6 C14 8 13 10 12 10 C11 10 12 6 12 2 Z',
     grid: 'M3 3 H10 V10 H3 Z M14 3 H21 V10 H14 Z M3 14 H10 V21 H3 Z M14 14 H21 V21 H14 Z',
+    cube: 'M12 2 L21 7 V17 L12 22 L3 17 V7 Z M3 7 L12 12 L21 7 M12 12 V22',
     settings:
       'M12 8 A4 4 0 1 1 12 16 A4 4 0 1 1 12 8 Z M12 2 V5 M12 19 V22 M2 12 H5 M19 12 H22 M4.5 4.5 L6.5 6.5 M17.5 17.5 L19.5 19.5 M4.5 19.5 L6.5 17.5 M17.5 6.5 L19.5 4.5'
   } as const;
@@ -29,7 +30,8 @@
         { href: '/', label: 'Accueil', icon: ICON.home },
         { href: '/energie', label: 'Énergie', icon: ICON.zap },
         { href: '/climat', label: 'Climat', icon: ICON.flame },
-        { href: '/pieces', label: 'Pièces', icon: ICON.grid }
+        { href: '/pieces', label: 'Pièces', icon: ICON.grid },
+        { href: '/maison', label: 'Maison', icon: ICON.cube }
       ]
     },
     {
