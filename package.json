@@ -24,6 +24,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/d3-shape": "^3.1.8",
     "@types/node": "^22.10.0",
+    "@types/three": "^0.184.1",
     "@vite-pwa/sveltekit": "^1.1.0",
     "prettier": "^3.4.0",
     "prettier-plugin-svelte": "^3.5.0",
@@ -36,11 +37,14 @@
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
+    "@threlte/core": "^8.5.16",
+    "@threlte/extras": "^9.21.0",
     "better-sqlite3": "^12.10.0",
     "d3-scale": "^4.0.0",
     "d3-shape": "^3.2.0",
     "layercake": "^8.4.0",
-    "mqtt": "^5.15.1"
+    "mqtt": "^5.15.1",
+    "three": "^0.184.0"
   },
   "engines": {
     "node": ">=20.0.0"
