@@ -233,7 +233,7 @@
             class="text-[0.625rem] font-semibold tracking-[0.08em] uppercase"
             style="color: var(--color-muted-fg);"
           >
-            Conso du jour
+            Énergie du jour
           </span>
           {#if flowsReady}
             <span
