@@ -421,10 +421,10 @@
     height: 22px;
   }
 
-  /* Barre + pastille */
+  /* Barre + pastille — épaisseur 8px, harmonisée avec les cartes volets (.m-bar). */
   .bar {
     position: relative;
-    height: 14px;
+    height: 8px;
     border-radius: 9999px;
     background: var(--color-muted);
     border: 1px solid var(--color-border);
