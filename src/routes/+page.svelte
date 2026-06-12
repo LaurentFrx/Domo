@@ -4,6 +4,7 @@
   import SavingsCard from '$components/cards/SavingsCard.svelte';
   import { anker } from '$stores/anker.svelte';
   import { production } from '$stores/production.svelte';
+  import { savings } from '$stores/savings.svelte';
   import { settings } from '$stores/settings.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
   import { cumulus } from '$stores/cumulus.svelte';
@@ -87,6 +88,14 @@
 
   // ─── Énergie stockée en batterie (kWh) — pour la carte Batterie ───────
   const storedKwh = $derived(anker.totalBatteryEnergyWh / 1000);
+
+  // ─── Bilan énergie du JOUR (3 cumuls, carte sous la batterie) ─────────
+  // Autoconso = recorder (savings, seule source). Import & surplus = cumuls
+  // Linky du bridge Anker (FIABLE, cohérents entre eux) — le recorder
+  // sous-estime le surplus faible.
+  const solarSelfKwh = $derived(savings.today.kwh); // solaire consommé sur place
+  const gridImportKwh = $derived(anker.gridImportTodayKwh); // soutiré à EDF
+  const gridExportKwh = $derived(anker.gridExportTodayKwh); // surplus injecté
 
   // ─── 3 cards lifetime (depuis Anker, vraies données) ─────────────────
   const hasLifetime = $derived(anker.connected && anker.lifetimeProductionKwh > 0);
@@ -200,11 +209,151 @@
       </div>
     {/snippet}
 
+    <!-- ═══ Bilan du jour — 3 cumuls énergie (sous la batterie) ═══ -->
+    <!-- Autoconso solaire (recorder) · soutirage EDF · surplus injecté (cumuls
+         Linky Anker). Palette charte : solaire=or, réseau=gris, surplus=vert. -->
+    {#snippet flowsCard()}
+      <div
+        class="overflow-hidden rounded-[var(--radius-xl)] border"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        <div
+          class="px-4 pt-2.5 pb-1 text-[0.625rem] font-semibold tracking-[0.08em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Aujourd'hui
+        </div>
+        <div class="grid grid-cols-3 pb-3">
+          <!-- ☀ Solaire autoconsommé -->
+          <div class="flex flex-col items-center gap-1.5 px-1.5 pt-1">
+            <span
+              class="flex h-7 w-7 items-center justify-center rounded-full"
+              style="background: var(--color-solar-muted); color: var(--color-solar);"
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="4" />
+                <path
+                  d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"
+                />
+              </svg>
+            </span>
+            <span class="flex items-baseline gap-0.5">
+              <span
+                class="text-lg leading-none font-bold tabular-nums"
+                style="color: var(--color-fg);">{fmtNumber(solarSelfKwh, 1)}</span
+              >
+              <span class="text-[0.625rem] font-semibold" style="color: var(--color-muted-fg);"
+                >kWh</span
+              >
+            </span>
+            <span
+              class="text-center text-[0.625rem] leading-tight font-semibold tracking-wide uppercase"
+              style="color: var(--color-muted-fg);">Solaire<br />utilisé</span
+            >
+          </div>
+
+          <!-- ↓ Soutiré au réseau EDF (import) -->
+          <div
+            class="flex flex-col items-center gap-1.5 border-l px-1.5 pt-1"
+            style="border-color: var(--color-border);"
+          >
+            <span
+              class="flex h-7 w-7 items-center justify-center rounded-full"
+              style="background: var(--color-grid-energy-muted); color: var(--color-grid-energy);"
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+              </svg>
+            </span>
+            <span class="flex items-baseline gap-0.5">
+              <span
+                class="text-lg leading-none font-bold tabular-nums"
+                style="color: var(--color-fg);"
+                >{anker.connected ? fmtNumber(gridImportKwh, 1) : '—'}</span
+              >
+              {#if anker.connected}
+                <span class="text-[0.625rem] font-semibold" style="color: var(--color-muted-fg);"
+                  >kWh</span
+                >
+              {/if}
+            </span>
+            <span
+              class="text-center text-[0.625rem] leading-tight font-semibold tracking-wide uppercase"
+              style="color: var(--color-muted-fg);">Réseau<br />EDF</span
+            >
+          </div>
+
+          <!-- ↑ Surplus injecté au réseau (export) -->
+          <div
+            class="flex flex-col items-center gap-1.5 border-l px-1.5 pt-1"
+            style="border-color: var(--color-border);"
+          >
+            <span
+              class="flex h-7 w-7 items-center justify-center rounded-full"
+              style="background: var(--color-battery-muted); color: var(--color-battery);"
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 21V9M7 14l5-5 5 5M5 3h14" />
+              </svg>
+            </span>
+            <span class="flex items-baseline gap-0.5">
+              <span
+                class="text-lg leading-none font-bold tabular-nums"
+                style="color: var(--color-fg);"
+                >{anker.connected ? fmtNumber(gridExportKwh, 1) : '—'}</span
+              >
+              {#if anker.connected}
+                <span class="text-[0.625rem] font-semibold" style="color: var(--color-muted-fg);"
+                  >kWh</span
+                >
+              {/if}
+            </span>
+            <span
+              class="text-center text-[0.625rem] leading-tight font-semibold tracking-wide uppercase"
+              style="color: var(--color-muted-fg);">Surplus<br />EDF</span
+            >
+          </div>
+        </div>
+      </div>
+    {/snippet}
+
     <!-- ═══ Économies solaires — carte héro en première position ═══ -->
     <SavingsCard />
 
     <!-- Batterie EN PREMIER sur mobile (au-dessus du Sankey) ; masquée dès lg. -->
     <div class="lg:hidden">{@render batteryCard()}</div>
+    <!-- Bilan du jour juste sous la batterie (mobile). -->
+    <div class="lg:hidden">{@render flowsCard()}</div>
 
     <!-- ═══ Paysage (iPad/desktop) : Sankey | stats côte à côte ; mobile : empilé ═══ -->
     <!-- items-stretch : la colonne stats remplit la hauteur du Sankey carré (sinon
@@ -229,6 +378,8 @@
         <!-- Batterie : colonne droite dès lg (sur mobile elle passe au-dessus du
              Sankey, cf. snippet batteryCard rendu plus haut). -->
         <div class="hidden lg:block">{@render batteryCard()}</div>
+        <!-- Bilan du jour juste sous la batterie (colonne stats, dès lg). -->
+        <div class="hidden lg:block">{@render flowsCard()}</div>
 
         <!-- ═══ KPI lifetime (vraies données Anker) ═══ -->
         {#if hasLifetime}

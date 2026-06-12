@@ -130,6 +130,12 @@ class AnkerState {
   gridExportW = $state(0);
   /** Réseau net FIABLE : + soutirage / − injection (W). À utiliser PARTOUT (Sankey, surplus). */
   gridReliableW = $derived(this.gridImportW - this.gridExportW);
+  /** Cumul JOUR import réseau (kWh) — compteur Linky via cloud (energy_analysis). FIABLE,
+   *  à préférer à l'intégration locale du recorder pour l'affichage du soutirage du jour. */
+  gridImportTodayKwh = $state(0);
+  /** Cumul JOUR export/surplus réseau (kWh) — compteur Linky via cloud. FIABLE (le recorder
+   *  sous-estime le surplus quand il est faible : filtre « fresh » + min()). */
+  gridExportTodayKwh = $state(0);
   /** Horodatage (s) du snapshot cloud courant (= last_update du bridge), ou null. */
   snapshotTs = $state<number | null>(null);
 
@@ -357,6 +363,9 @@ class AnkerState {
     this.snapshotTs = p.last_update ?? null;
     // Réseau affiché = dérivé des cumuls Linky (seule source fiable).
     this.deriveGridFromLinky(p.grid_import_today_kwh ?? null, p.grid_export_today_kwh ?? null);
+    // Cumuls JOUR Linky exposés tels quels (soutirage / surplus du jour).
+    this.gridImportTodayKwh = p.grid_import_today_kwh ?? 0;
+    this.gridExportTodayKwh = p.grid_export_today_kwh ?? 0;
     this.dailyProductionWh = p.daily_production_wh ?? 0;
     this.dailyConsumptionWh = p.daily_consumption_wh ?? 0;
     this.selfConsumptionRate = p.self_consumption_rate;
