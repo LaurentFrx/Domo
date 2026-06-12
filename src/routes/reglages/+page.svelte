@@ -10,9 +10,18 @@
   import { preferences } from '$stores/preferences.svelte';
   import { settings } from '$stores/settings.svelte';
   import { thermostat } from '$stores/thermostat.svelte';
+  import { tariff } from '$stores/tariff.svelte';
   import { haptic } from '$utils/haptic';
 
   const APP_VERSION = '0.2.0';
+
+  // ─── Tarif RÉEL en cours (store tariff, connecté app-wide via le layout) ──
+  const tariffReady = $derived(tariff.status === 'live'); // évite le flash 0,00 avant le 1er fetch
+  const currentTariff = $derived(tariff.period);
+  const currentPrice = $derived(tariff.priceEurKwh); // €/kWh
+  const nextTariff = $derived(tariff.next.period);
+  const nextSwitchAt = $derived(tariff.next.at); // 'HH:MM' local Paris
+  const hoursUntilSwitch = $derived(tariff.nextInHours);
 
   onMount(() => {
     preferences.hydrate();
@@ -723,6 +732,45 @@
     >
       Tarifs EDF
     </h2>
+
+    <!-- ═══ Tarif en cours / prochaine bascule (RÉEL, lecture seule) ═══ -->
+    <!-- Déplacé depuis l'accueil — état HP/HC live et heure de bascule. -->
+    <div
+      class="flex flex-col rounded-[var(--radius-xl)] border"
+      style="background: var(--color-card); border-color: var(--color-border);"
+    >
+      <div class="flex items-center justify-between gap-3 px-4 py-3">
+        <span
+          class="text-[10px] font-semibold tracking-[0.08em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Tarif en cours
+        </span>
+        <span
+          class="text-[14px] font-semibold tabular-nums"
+          style="color: {currentTariff === 'HC' ? 'var(--color-hc)' : 'var(--color-hp)'};"
+        >
+          {#if tariffReady}{currentTariff} · {(currentPrice * 100).toFixed(2)} cts/kWh{:else}—{/if}
+        </span>
+      </div>
+
+      <div
+        class="flex items-center justify-between gap-3 border-t px-4 py-3"
+        style="border-color: var(--color-border);"
+      >
+        <span
+          class="text-[10px] font-semibold tracking-[0.08em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Prochaine bascule
+        </span>
+        <span class="text-[14px] tabular-nums" style="color: var(--color-fg);">
+          {#if tariffReady && nextSwitchAt}{nextTariff} à {nextSwitchAt} · dans {hoursUntilSwitch}
+            h{:else}—{/if}
+        </span>
+      </div>
+    </div>
+
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <label
         class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
@@ -978,7 +1026,7 @@
     height: 18px;
     border-radius: 50%;
     background: #fff;
-    box-shadow: 0 1px 2px oklch(0 0 0 / 0.15);
+    box-shadow: 0 1px 2px oklch(0.1 0.01 286 / 0.15);
     transition: transform var(--duration-normal) var(--ease-spring);
   }
   .toggle-pill input:checked + .toggle-pill-knob {

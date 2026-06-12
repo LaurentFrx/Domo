@@ -4,7 +4,6 @@
   import SavingsCard from '$components/cards/SavingsCard.svelte';
   import { anker } from '$stores/anker.svelte';
   import { production } from '$stores/production.svelte';
-  import { tariff } from '$stores/tariff.svelte';
   import { settings } from '$stores/settings.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
   import { cumulus } from '$stores/cumulus.svelte';
@@ -105,14 +104,6 @@
   function fmtW(w: number): string {
     return Math.round(Math.abs(w)).toLocaleString('fr-FR').replace(/\s/g, ' ');
   }
-
-  // ─── Footer : tarif RÉEL (store tariff, vraie fenêtre HC 00:06–08:06) ──
-  const tariffReady = $derived(tariff.status === 'live'); // évite le flash 0,00 avant le 1er fetch
-  const currentTariff = $derived(tariff.period);
-  const currentPrice = $derived(tariff.priceEurKwh); // €/kWh
-  const nextTariff = $derived(tariff.next.period);
-  const nextSwitchAt = $derived(tariff.next.at); // 'HH:MM' local Paris
-  const hoursUntilSwitch = $derived(tariff.nextInHours);
 </script>
 
 <svelte:head>
@@ -274,45 +265,6 @@
             </p>
           </div>
         {/if}
-
-        <!-- ═══ Tarif & réseau réel — carte verticale (3 lignes) ═══ -->
-        <!-- Réseau = import RÉEL du jour (recorder, pince SmartMeter, filtré
-             transitoires) — fini le mock shelly. -->
-        <div
-          class="flex flex-col rounded-[var(--radius-xl)] border"
-          style="background: var(--color-card); border-color: var(--color-border);"
-        >
-          <div class="flex items-center justify-between gap-3 px-4 py-3">
-            <span
-              class="text-[10px] font-semibold tracking-[0.08em] uppercase"
-              style="color: var(--color-muted-fg);"
-            >
-              Tarif en cours
-            </span>
-            <span
-              class="text-[14px] font-semibold tabular-nums"
-              style="color: {currentTariff === 'HC' ? 'var(--color-hc)' : 'var(--color-hp)'};"
-            >
-              {#if tariffReady}{currentTariff} · {(currentPrice * 100).toFixed(2)} cts/kWh{:else}—{/if}
-            </span>
-          </div>
-
-          <div
-            class="flex items-center justify-between gap-3 border-t px-4 py-3"
-            style="border-color: var(--color-border);"
-          >
-            <span
-              class="text-[10px] font-semibold tracking-[0.08em] uppercase"
-              style="color: var(--color-muted-fg);"
-            >
-              Prochaine bascule
-            </span>
-            <span class="text-[14px] tabular-nums" style="color: var(--color-fg);">
-              {#if tariffReady && nextSwitchAt}{nextTariff} à {nextSwitchAt} · dans {hoursUntilSwitch}
-                h{:else}—{/if}
-            </span>
-          </div>
-        </div>
       </div>
     </div>
   </div>
