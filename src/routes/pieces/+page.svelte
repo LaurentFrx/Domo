@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import ShutterTile from '$components/tiles/ShutterTile.svelte';
-  import StoreTileTouch from '$components/tiles/StoreTileTouch.svelte';
+  import StoreCard from '$components/tiles/StoreCard.svelte';
   import SwitchTile from '$components/tiles/SwitchTile.svelte';
   import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
   import ZigbeeSensorTile from '$components/tiles/ZigbeeSensorTile.svelte';
@@ -213,7 +213,7 @@
     <!-- ═══ Store-banne — commande dédiée, à part des volets roulants ═══ -->
     {#if storeShutter}
       <div class="store-wrap">
-        <StoreTileTouch shutter={storeShutter} />
+        <StoreCard shutter={storeShutter} />
       </div>
     {/if}
 

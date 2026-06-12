@@ -126,7 +126,7 @@ class ZigbeeState {
       .sort((a, b) => b.devices.length - a.devices.length || a.room.localeCompare(b.room, 'fr'));
   });
 
-  /** Devices par catégorie pour une pièce. Pratique pour les RoomSection. */
+  /** Devices d'une pièce — pratique pour regrouper l'affichage par pièce. */
   byRoom(room: string): ZigbeeDevice[] {
     return this.devices.filter((d) => d.room === room);
   }

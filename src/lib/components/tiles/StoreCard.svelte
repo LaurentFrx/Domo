@@ -1,12 +1,11 @@
 <script lang="ts">
   // ════════════════════════════════════════════════════════════════════════
-  //  StoreTileTouch — variante TACTILE de la carte store (prototype comparatif)
-  //  Isolé du ShutterTile en service (cf. règle « ne pas casser les cartes »).
-  //  • en-tête épuré (icône banne + « Store »), pas d'indication d'état ;
-  //  • 3 boutons dont l'icône EST une banne : rentrée / position réelle (stop) /
-  //    déployée — le SVG banne (réutilisé partout via un snippet) reflète l'état
-  //    courant et s'anime naturellement quand le store bouge ;
-  //  • barre de progression avec pastille draggable → commande la position.
+  //  StoreCard — carte de commande du store-banne (vue tactile iPhone-first).
+  //  • titre « Store » + les 3 boutons sur une ligne, barre de progression dessous ;
+  //  • boutons Rentrer / Stop / Déployer : la banne (SVG réutilisable via snippet)
+  //    sert de pictogramme (rentrée / déployée) ; le stop est un carré neutre au
+  //    repos et la banne live (qui suit le déplacement réel) en mouvement ;
+  //  • barre avec pastille draggable → commande la position (goToPosition).
   // ════════════════════════════════════════════════════════════════════════
   import { onDestroy } from 'svelte';
   import { matter } from '$stores/matter.svelte';
