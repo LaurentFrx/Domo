@@ -58,8 +58,16 @@
   const storeStateColor = $derived(
     displayedPosition <= 1 ? 'var(--color-muted-fg)' : 'var(--color-solar)'
   );
-  // Longueur de la banne dessinée (8 = rentrée → ~48 = déployée) pour le SVG du store.
-  const canopyLen = $derived(8 + (displayedPosition / 100) * 40);
+  // État affiché en chiffre intermédiaire (vs mot « Rentré »/« Déployé » aux extrêmes).
+  const isMidPosition = $derived(displayedPosition > 1 && displayedPosition < 99);
+
+  // ─── SVG banne (vue de face) : toile striée à lambrequin festonné ───
+  // La hauteur de toile croît avec le déploiement (3 px rentrée → 30 px déployée) ;
+  // le bord bas est festonné (6 arches). topY = bas du caisson.
+  const SCALLOP =
+    ' q -3.25 6.4 -6.5 0 q -3.25 6.4 -6.5 0 q -3.25 6.4 -6.5 0 q -3.25 6.4 -6.5 0 q -3.25 6.4 -6.5 0 q -3.25 6.4 -6.5 0';
+  const awningH = $derived(3 + (displayedPosition / 100) * 27);
+  const awningPath = $derived(`M12 11.5 L48 11.5 L49.5 ${11.5 + awningH}${SCALLOP} L12 11.5 Z`);
 
   const isMoving = $derived(animPos !== null || shutter.moving);
 
@@ -350,43 +358,60 @@
     <div class="m-store flex flex-col gap-3 p-3.5 sm:hidden">
       <div class="flex items-center gap-3">
         <span class="m-awning shrink-0" aria-hidden="true">
-          <svg width="58" height="38" viewBox="0 0 58 38" fill="none">
-            <!-- soleil -->
-            <circle cx="46" cy="11" r="6.5" fill="currentColor" opacity="0.5" />
-            <!-- mur -->
-            <path
-              d="M7 4 v30"
-              style="stroke: var(--color-muted-fg);"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              opacity="0.5"
+          <svg width="60" height="46" viewBox="0 0 60 46" fill="none">
+            <!-- toile (vue de face), bord bas festonné — découpe pour les rayures -->
+            <clipPath id="awning-clip-{shutter.nodeId}">
+              <path d={awningPath} />
+            </clipPath>
+            <path d={awningPath} fill="currentColor" />
+            <g clip-path="url(#awning-clip-{shutter.nodeId})">
+              {#each [10.5, 23.5, 36.5] as sx}
+                <rect x={sx} y="11.5" width="6.5" height={awningH + 8} fill="#fff" opacity="0.4" />
+              {/each}
+            </g>
+            <!-- caisson métal + filet de lumière -->
+            <rect
+              x="8"
+              y="6"
+              width="44"
+              height="5.6"
+              rx="2.6"
+              style="fill: var(--color-muted-fg);"
+              opacity="0.9"
             />
-            <!-- banne : largeur selon le déploiement -->
-            <path d="M7 12 H{7 + canopyLen} l-5 11 H7 Z" fill="currentColor" />
-            <!-- rayures révélées au fur et à mesure que la banne sort -->
-            {#each [15, 23, 31, 39, 47] as sx}
-              {#if sx < 7 + canopyLen - 3}
-                <path d="M{sx} 12 L{sx - 2.3} 23" stroke="#fff" stroke-width="1.2" opacity="0.5" />
-              {/if}
-            {/each}
+            <rect x="9" y="6.5" width="42" height="1.4" rx="0.7" fill="#fff" opacity="0.22" />
           </svg>
         </span>
         <div class="flex min-w-0 flex-1 flex-col">
-          <span class="text-[14px] leading-tight font-semibold" style="color: var(--color-fg);">
+          <span class="text-[15px] leading-tight font-semibold" style="color: var(--color-fg);">
             Store
           </span>
           <span class="text-[11px]" style="color: var(--color-muted-fg);">banne de terrasse</span>
         </div>
-        <span class="m-store-pct" style:color={storeStateColor}>
-          {displayedPosition}<span class="m-store-pct-u">%</span>
-          {#if isMoving}<span class="moving-dots ml-0.5" style="color: var(--color-solar);"
-              >●●●</span
-            >{/if}
-        </span>
+        <div class="m-state">
+          {#if isMidPosition}
+            <span class="m-state-word" style:color={storeStateColor}
+              >{displayedPosition}&thinsp;%</span
+            >
+            <span class="m-state-cap">
+              {#if isMoving}<span class="moving-dots" style="color: var(--color-solar);">●●●</span
+                >{:else}déployé{/if}
+            </span>
+          {:else}
+            <span class="m-state-word" style:color={storeStateColor}>{positionLabel}</span>
+            {#if isMoving}<span class="m-state-cap"
+                ><span class="moving-dots" style="color: var(--color-solar);">●●●</span></span
+              >{/if}
+          {/if}
+        </div>
       </div>
 
-      <div class="m-bar flex-1" aria-hidden="true">
-        <div class="m-fill m-fill--store" style:width="{displayedPosition}%"></div>
+      <div class="m-track-wrap">
+        <span class="m-track-lab">Rentré</span>
+        <div class="m-bar flex-1" aria-hidden="true">
+          <div class="m-fill m-fill--store" style:width="{displayedPosition}%"></div>
+        </div>
+        <span class="m-track-lab m-track-lab--r">Déployé</span>
       </div>
 
       <div class="flex items-stretch gap-2">
@@ -444,28 +469,27 @@
       </div>
     </div>
   {:else}
-    <!-- Volet roulant : rangée — nom + état (gauche), barre de position, 3 boutons (droite). -->
-    <div class="m-shutter flex items-center gap-2.5 px-3 py-2.5 sm:hidden">
-      <div class="m-row-name flex shrink-0 flex-col gap-0.5">
+    <!-- Volet roulant : nom (L1) ; état + barre (L2) à gauche, 3 boutons à droite. -->
+    <div class="m-shutter flex items-center gap-3 px-3.5 py-2.5 sm:hidden">
+      <div class="m-left flex min-w-0 flex-1 flex-col gap-1.5">
         <span
-          class="m-name text-[12.5px] leading-tight font-semibold"
+          class="m-name text-[14px] leading-tight font-semibold"
           style="color: var(--color-fg);"
         >
           {shutter.name}
         </span>
-        <span
-          class="flex items-center gap-1 text-[10px] tabular-nums"
-          style="color: var(--color-muted-fg);"
-        >
-          {positionLabel}
+        <div class="flex items-center gap-2">
+          <span class="m-status tabular-nums" style="color: var(--color-muted-fg);">
+            {positionLabel}
+          </span>
+          <div class="m-bar flex-1" aria-hidden="true">
+            <div class="m-fill" style:width="{displayedPosition}%"></div>
+          </div>
           {#if isMoving}<span class="moving-dots" style="color: var(--color-primary);">●●●</span
             >{/if}
-        </span>
+        </div>
       </div>
-      <div class="m-bar flex-1" aria-hidden="true">
-        <div class="m-fill" style:width="{displayedPosition}%"></div>
-      </div>
-      <div class="flex shrink-0 items-center gap-1.5">
+      <div class="m-btns flex shrink-0 items-center gap-1.5">
         <button
           type="button"
           class="m-btn m-btn--open"
@@ -734,29 +758,24 @@
       0 0 32px var(--color-primary-glow-soft);
   }
 
-  /* ═══ iPhone — rangée horizontale compacte ═══ */
-  /* Nom + état à gauche (largeur fixe) → la barre prend toute la place restante. */
-  .m-row-name {
-    width: 96px;
-  }
-  /* Nom : 2 lignes max, coupure AUX ESPACES uniquement (jamais dans un mot) —
-     « Salle à manger », « Chambre Parents/Amis » restent lisibles et distincts
-     (vs l'ancien truncate qui rendait les deux chambres identiques « Chambre … »). */
+  /* ═══ iPhone — carte volet : nom (L1) pleine largeur ; état + barre (L2) ═══ */
+  /* Le nom occupe sa propre ligne → plus de troncature « Chambre … ».
+     Ellipsis de sécurité uniquement si un nom dépasse vraiment. */
   .m-name {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
+    white-space: nowrap;
     overflow: hidden;
-    white-space: normal;
-    word-break: keep-all;
-    overflow-wrap: normal;
-    hyphens: none;
+    text-overflow: ellipsis;
   }
-  /* Barre d'ouverture ÉPAISSE, pleine largeur (remplissage = part fermée). */
+  /* Libellé d'état (Ouvert / Fermé / 42 %) : largeur mini → barres alignées entre cartes. */
+  .m-status {
+    flex-shrink: 0;
+    min-width: 40px;
+    font-size: 11px;
+  }
+  /* Barre d'ouverture (remplissage = part fermée). */
   .m-bar {
     position: relative;
-    height: 10px;
+    height: 8px;
     border-radius: 9999px;
     background: var(--color-muted);
     border: 1px solid var(--color-border);
@@ -775,13 +794,13 @@
     background: linear-gradient(to right, var(--color-solar), oklch(0.78 0.16 75));
   }
 
-  /* Boutons volet (mobile) — carrés compacts ▲ ■ ▼ */
+  /* Boutons volet (mobile) — carrés ▲ ■ ▼ ; glyphes généreux (lecture de loin). */
   .m-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 38px;
-    height: 38px;
+    width: 40px;
+    height: 40px;
     border-radius: var(--radius-md);
     background: var(--color-muted);
     border: 1px solid var(--color-border);
@@ -789,12 +808,12 @@
     -webkit-tap-highlight-color: transparent;
   }
   .m-btn svg {
-    width: 42%;
-    height: 42%;
+    width: 52%;
+    height: 52%;
   }
   .m-btn--stop svg {
-    width: 34%;
-    height: 34%;
+    width: 44%;
+    height: 44%;
   }
   .m-btn--open {
     color: var(--color-battery);
@@ -845,18 +864,18 @@
     flex: 1;
     align-items: center;
     justify-content: center;
-    gap: 0.4rem;
-    height: 46px;
+    gap: 0.45rem;
+    height: 48px;
     border-radius: var(--radius-lg);
-    font-size: 13px;
+    font-size: 13.5px;
     font-weight: 700;
     border: 1px solid transparent;
     transition: all var(--duration-fast) var(--ease-default);
     -webkit-tap-highlight-color: transparent;
   }
   .m-sbtn svg {
-    width: 18px;
-    height: 18px;
+    width: 19px;
+    height: 19px;
   }
   /* Boutons teintés (verre) — plus jolis qu'un aplat gris, distincts par couleur. */
   .m-sbtn--retract {
@@ -870,24 +889,46 @@
     border-color: color-mix(in oklch, var(--color-solar) 32%, transparent);
   }
   .m-sbtn--stop {
-    flex: 0 0 46px;
+    flex: 0 0 48px;
     color: var(--color-muted-fg);
     background: var(--color-muted);
     border-color: var(--color-border);
   }
-  .m-store-pct {
+  /* État du store (droite de l'en-tête) : gros mot/chiffre + légende. */
+  .m-state {
     flex-shrink: 0;
-    display: inline-flex;
-    align-items: baseline;
-    font-size: 17px;
+    margin-left: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    line-height: 1;
+    text-align: right;
+  }
+  .m-state-word {
+    font-size: 19px;
     font-weight: 800;
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.01em;
   }
-  .m-store-pct-u {
-    margin-left: 1px;
-    font-size: 11px;
-    font-weight: 700;
+  .m-state-cap {
+    margin-top: 3px;
+    font-size: 10px;
+    color: var(--color-muted-fg);
+  }
+  /* Barre du store légendée Rentré ←→ Déployé (direction sans ambiguïté). */
+  .m-track-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .m-track-lab {
+    flex-shrink: 0;
+    width: 38px;
+    font-size: 9.5px;
+    color: var(--color-muted-fg);
+  }
+  .m-track-lab--r {
+    text-align: right;
   }
   .m-sbtn:active:not(:disabled) {
     transform: scale(0.96);
