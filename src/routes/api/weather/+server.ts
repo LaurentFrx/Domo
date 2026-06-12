@@ -34,11 +34,18 @@ export const GET: RequestHandler = async ({ fetch }) => {
     return json(cache.body as object);
   }
 
+  // best_match (modèle non forcé) : Open-Meteo prend AROME Météo-France (haute
+  // résolution ~1,3 km) pour les variables qu'il produit ET complète avec les
+  // modèles globaux pour celles qu'AROME ne fournit pas (uv_index, proba de
+  // pluie, weather_code). Forcer meteofrance_seamless renverrait null sur ces
+  // variables (testé) → on garde best_match, c'est déjà le mélange optimal.
+  // UV : current.uv_index = indice de l'INSTANT (≈ 0 la nuit), et non plus le
+  // uv_index_max journalier qui affichait l'UV de midi toute la soirée.
   const url =
     'https://api.open-meteo.com/v1/forecast' +
     `?latitude=${LAT}&longitude=${LON}` +
-    '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weather_code' +
-    '&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,uv_index_max' +
+    '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weather_code,uv_index' +
+    '&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max' +
     '&timezone=Europe%2FParis&forecast_days=4&wind_speed_unit=kmh';
 
   try {
@@ -71,7 +78,7 @@ export const GET: RequestHandler = async ({ fetch }) => {
         windSpeedKmh: Math.round(num(c.wind_speed_10m)),
         windDirection: Math.round(num(c.wind_direction_10m)),
         condition: wmoToCondition(num(c.weather_code)),
-        uvIndex: Math.round(num(dy.uv_index_max?.[0]))
+        uvIndex: Math.round(num(c.uv_index)) // indice UV de l'instant (best_match)
       },
       forecast3d
     };
