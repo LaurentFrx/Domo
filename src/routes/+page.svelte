@@ -141,7 +141,7 @@
       src="/header-accueil.webp?v=4"
       alt=""
       aria-hidden="true"
-      class="-mb-3.5 w-full rounded-[var(--radius-2xl)] sm:-mb-5"
+      class="-mb-3.5 h-[52px] w-full rounded-[var(--radius-2xl)] object-cover object-bottom sm:-mb-5 sm:h-[84px]"
     />
 
     <!-- Carte Batterie définie en snippet → rendue à 2 endroits : au-dessus du
