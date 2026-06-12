@@ -110,6 +110,8 @@
   // est trop discret sur un petit segment). Local à cette carte — ne touche pas
   // au token --color-grid-energy (gris voulu ailleurs).
   const EDF_BLUE = 'oklch(0.62 0.19 256)';
+  // Surplus (part renvoyée à EDF) : rouge vif, pastille de légende.
+  const SURPLUS_RED = 'oklch(0.62 0.21 27)';
 
   // ─── 3 cards lifetime (depuis Anker, vraies données) ─────────────────
   const hasLifetime = $derived(anker.connected && anker.lifetimeProductionKwh > 0);
@@ -258,7 +260,7 @@
             ></div>
           </div>
 
-          <!-- Légende -->
+          <!-- Légende : Solaire · Surplus (au milieu) · Réseau EDF -->
           <div
             class="flex items-center justify-between text-[0.6875rem] font-semibold"
             style="color: var(--color-fg);"
@@ -267,37 +269,17 @@
               <span class="h-2 w-2 rounded-full" style="background: var(--color-solar);"></span>
               Solaire {solarPct}%
             </span>
+            {#if anker.connected && gridExportKwh > 0}
+              <span class="flex items-center gap-1.5">
+                <span class="h-2 w-2 rounded-full" style="background: {SURPLUS_RED};"></span>
+                Surplus {fmtNumber(surplusPct, 1)}%
+              </span>
+            {/if}
             <span class="flex items-center gap-1.5">
               <span class="h-2 w-2 rounded-full" style="background: {EDF_BLUE};"></span>
               Réseau EDF {gridPct}%
             </span>
           </div>
-
-          <!-- Surplus renvoyé à EDF (part de la production) -->
-          {#if anker.connected && gridExportKwh > 0}
-            <div
-              class="flex items-center gap-1.5 text-[0.6875rem] font-medium"
-              style="color: var(--color-muted-fg);"
-            >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="var(--color-battery)"
-                stroke-width="2.2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M12 21V9M7 14l5-5 5 5M5 3h14" />
-              </svg>
-              Surplus renvoyé à EDF ·
-              <span class="font-semibold tabular-nums" style="color: var(--color-battery);"
-                >{fmtNumber(surplusPct, 1)} %</span
-              >
-            </div>
-          {/if}
         {:else}
           <p class="text-[13px]" style="color: var(--color-muted-fg);">
             Bilan du jour en cours de mesure…
