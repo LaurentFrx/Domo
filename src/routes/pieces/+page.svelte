@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import ShutterTile from '$components/tiles/ShutterTile.svelte';
+  import StoreTileTouch from '$components/tiles/StoreTileTouch.svelte';
   import SwitchTile from '$components/tiles/SwitchTile.svelte';
   import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
   import ZigbeeSensorTile from '$components/tiles/ZigbeeSensorTile.svelte';
@@ -62,12 +63,6 @@
       ['connected', 'unconfigured'].includes(zigbee.connectionStatus)
   );
 
-  function zigbeeColor(status: string): string {
-    if (status === 'connected') return 'var(--color-battery)';
-    if (status === 'unconfigured') return 'var(--color-muted-fg)';
-    return 'var(--color-warning)';
-  }
-
   // ─── Filtres d'affichage Zigbee sur cette page ─────────────────────────
   // Les thermomètres (Thermo SdB / Salon / Garage / cumulus / ext / velos)
   // sont déplacés sur /climat. Frigo + Lave-linge déplacés sur /energie
@@ -78,7 +73,8 @@
     'ordi moniteur', // remplacé par Matter
     'frigo', // affiché sur /energie
     'lave-linge', // affiché sur /energie
-    'lave_vaisselle' // affiché sur /energie
+    'lave_vaisselle', // affiché sur /energie
+    'prise libre' // sans usage pour l'instant — à remettre au besoin
   ]);
   function isHidden(name: string): boolean {
     return HIDDEN_ZIGBEE.has(name.toLowerCase());
@@ -128,6 +124,10 @@
   const sortedShutters = $derived(
     [...matter.shutters].sort((a, b) => shutterOrderIdx(a.name) - shutterOrderIdx(b.name))
   );
+  // Le store-banne (libellés d'extrêmes Rentré/Déployé) est séparé des volets
+  // roulants : les 6 volets dans une seule carte, le store dans sa carte dédiée.
+  const rollerShutters = $derived(sortedShutters.filter((s) => s.labelMin === undefined));
+  const storeShutter = $derived(sortedShutters.find((s) => s.labelMin !== undefined) ?? null);
 </script>
 
 <svelte:head>
@@ -135,39 +135,8 @@
 </svelte:head>
 
 <div class="flex flex-col gap-4 py-4">
-  <header class="flex flex-wrap items-center justify-between gap-3">
+  <header>
     <h1 class="text-2xl font-semibold tracking-tight">Pièces</h1>
-    <div class="flex flex-wrap items-center gap-2">
-      <!-- Pills sources Matter + Zigbee : toujours visibles, à droite du titre -->
-      <span
-        class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px]"
-        style="
-          border-color: var(--color-border);
-          color: {matterConnected ? 'var(--color-battery)' : 'var(--color-muted-fg)'};
-        "
-      >
-        <span
-          class="h-1.5 w-1.5 rounded-full"
-          style:background-color={matterConnected
-            ? 'var(--color-battery)'
-            : 'var(--color-muted-fg)'}
-        ></span>
-        Matter
-      </span>
-      <span
-        class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px]"
-        style="
-          border-color: var(--color-border);
-          color: {zigbeeColor(zigbee.connectionStatus)};
-        "
-      >
-        <span
-          class="h-1.5 w-1.5 rounded-full"
-          style:background-color={zigbeeColor(zigbee.connectionStatus)}
-        ></span>
-        Zigbee · {zigbee.devices.length}
-      </span>
-    </div>
   </header>
 
   {#if matterDisconnected}
@@ -202,68 +171,85 @@
       <p class="text-sm" style="color: var(--color-muted-fg);">Aucun appareil détecté</p>
     </div>
   {:else}
-    <!-- ═══ Strip 'Tous les volets' — visible partout (3 cols mobile, N sur lg+) ═══ -->
-    {#if matter.shutters.length > 0}
-      <section
-        class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-4"
-        style="background: var(--color-card); border-color: var(--color-border);"
-      >
-        <div class="flex items-center justify-between gap-3">
-          <h2
-            class="text-[11px] font-semibold tracking-[0.08em] uppercase"
-            style="color: var(--color-muted-fg);"
-          >
-            Volets · {matter.shutters.length}
-          </h2>
-          {#if matterConnected && matter.onlineCount > 0}
-            <div class="flex gap-2">
-              <button
-                type="button"
-                class="pill-open"
-                onclick={() => {
-                  haptic('heavy');
-                  matter.openAll();
-                }}
-                aria-label="Ouvrir tous les volets"
-              >
-                <span aria-hidden="true">▲</span> Tout ouvrir
-              </button>
-              <button
-                type="button"
-                class="pill-close"
-                onclick={() => {
-                  haptic('heavy');
-                  matter.closeAll();
-                }}
-                aria-label="Fermer tous les volets"
-              >
-                <span aria-hidden="true">▼</span> Tout fermer
-              </button>
-            </div>
-          {/if}
-        </div>
-        <div class="shutters-strip" style="--shutter-count: {sortedShutters.length};">
-          {#each sortedShutters as shutter (shutter.nodeId)}
+    <!-- ═══ Volets roulants — tuiles posées directement sur la page (pas de carte
+         englobante ni de titre) ; boutons globaux à droite, dès l'iPad. ═══ -->
+    {#if rollerShutters.length > 0}
+      <div class="flex flex-col gap-2">
+        {#if matterConnected && matter.onlineCount > 0}
+          <!-- Boutons globaux masqués sur iPhone (place compacte) — visibles dès iPad. -->
+          <div class="hidden justify-end gap-2 sm:flex">
+            <button
+              type="button"
+              class="pill-open"
+              onclick={() => {
+                haptic('heavy');
+                matter.openAll();
+              }}
+              aria-label="Ouvrir tous les volets"
+            >
+              <span aria-hidden="true">▲</span> Tout ouvrir
+            </button>
+            <button
+              type="button"
+              class="pill-close"
+              onclick={() => {
+                haptic('heavy');
+                matter.closeAll();
+              }}
+              aria-label="Fermer tous les volets"
+            >
+              <span aria-hidden="true">▼</span> Tout fermer
+            </button>
+          </div>
+        {/if}
+        <div class="shutters-strip" style="--shutter-count: {rollerShutters.length};">
+          {#each rollerShutters as shutter (shutter.nodeId)}
             <ShutterTile {shutter} />
           {/each}
         </div>
-      </section>
+      </div>
     {/if}
 
-    <!-- ═══ Grille FLAT switches/zigbee — 1 par ligne sur iPhone, plus dense ailleurs ═══ -->
-    {#if hasFlatDevices || printerPlug}
-      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <!-- ═══ Store-banne — commande dédiée, à part des volets roulants ═══ -->
+    {#if storeShutter}
+      <div class="store-wrap">
+        <ShutterTile shutter={storeShutter} />
+      </div>
+      <!-- Variante tactile (prototype comparatif) — positionnée sous l'existante. -->
+      <div class="store-wrap">
+        <StoreTileTouch shutter={storeShutter} />
+      </div>
+    {/if}
+
+    <!-- ═══ Interrupteurs (switches Matter + portail / lumières Zigbee) — tuiles
+         icône + nom, colorées vives quand ON, sans toggle ; grille 2 col sur iPhone ═══ -->
+    {#if matter.switches.length > 0 || flatZigbeeOthers.length > 0}
+      <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-2 sm:gap-3 lg:grid-cols-3 xl:grid-cols-4">
         {#each matter.switches as sw (sw.nodeId)}
-          <SwitchTile {sw} />
+          {#if sw.nodeId === 1}
+            <!-- Sèche-serviette : doublon avec la carte « Salle de bain » (/climat) +
+                 piloté par le daemon → masqué sur iPhone, gardé sur iPad/desktop. -->
+            <div class="hidden sm:block">
+              <SwitchTile {sw} />
+            </div>
+          {:else}
+            <SwitchTile {sw} />
+          {/if}
         {/each}
+        {#each flatZigbeeOthers as device (device.ieee)}
+          <ZigbeeGenericTile {device} />
+        {/each}
+      </div>
+    {/if}
+
+    <!-- ═══ Prises / capteurs / imprimante Zigbee — pleine largeur sur iPhone ═══ -->
+    {#if printerPlug || flatZigbeePlugs.length + flatZigbeeSensors.length > 0}
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {#if printerPlug}
           <PrinterTile plug={printerPlug} />
         {/if}
         {#each flatZigbeePlugs as device (device.ieee)}
           <ZigbeePlugTile {device} />
-        {/each}
-        {#each flatZigbeeOthers as device (device.ieee)}
-          <ZigbeeGenericTile {device} />
         {/each}
         {#each flatZigbeeSensors as device (device.ieee)}
           <ZigbeeSensorTile {device} />
@@ -312,12 +298,13 @@
     transform: scale(0.97);
   }
 
-  /* Strip 'Volets' : 3 cols sur mobile (= 3 + 3 sur 2 lignes pour 6 volets),
-     auto-fit en sm-lg (peut wrap), force N cols sur lg+ (1 seule ligne sur iPad+). */
+  /* Volets : tuiles-cartes posées directement sur la page (pas de conteneur).
+     iPhone : 1 colonne de rangées horizontales (chaque volet = sa propre carte) ;
+     iPad+ : grille (auto-fit, puis N colonnes pleine ligne dès lg). */
   .shutters-strip {
     display: grid;
     gap: 0.5rem;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
   @media (min-width: 640px) {
     .shutters-strip {
@@ -327,6 +314,13 @@
   @media (min-width: 1024px) {
     .shutters-strip {
       grid-template-columns: repeat(var(--shutter-count, 6), minmax(0, 1fr));
+    }
+  }
+
+  /* Carte store : pleine largeur sur iPhone (design banne), compacte sur iPad+. */
+  @media (min-width: 640px) {
+    .store-wrap {
+      max-width: 220px;
     }
   }
 </style>
