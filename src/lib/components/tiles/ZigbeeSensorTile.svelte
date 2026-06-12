@@ -3,9 +3,15 @@
 
   interface Props {
     device: ZigbeeDevice;
+    /** Nom d'affichage override (sinon le friendlyName Zigbee du device). */
+    name?: string;
+    /** Compact : masque ZB / batterie / LQI en vue iPhone (réapparaissent dès sm). */
+    compact?: boolean;
   }
 
-  let { device }: Props = $props();
+  let { device, name, compact = false }: Props = $props();
+
+  const displayName = $derived(name ?? device.friendlyName);
 
   // Number.isFinite (et non typeof === 'number') : un NaN/Infinity remonté par MQTT
   // passerait le test typeof et s'afficherait « NaN ». On le ramène à null.
@@ -40,10 +46,12 @@
 >
   <div class="flex items-start justify-between gap-2">
     <span class="truncate text-[12px] leading-tight font-semibold" style="color: var(--color-fg);">
-      {device.friendlyName}
+      {displayName}
     </span>
     <span
-      class="shrink-0 text-[9px] font-semibold tracking-[0.04em]"
+      class="shrink-0 text-[9px] font-semibold tracking-[0.04em] {compact
+        ? 'hidden sm:inline'
+        : ''}"
       style="color: var(--color-muted-fg);"
     >
       ZB
@@ -75,7 +83,10 @@
     {/if}
   </div>
 
-  <div class="flex items-center justify-between text-[10px]" style="color: var(--color-muted-fg);">
+  <div
+    class="flex items-center justify-between text-[10px] {compact ? 'hidden sm:flex' : ''}"
+    style="color: var(--color-muted-fg);"
+  >
     {#if battery !== null}
       <span class="flex items-center gap-1">
         <span class="h-1 w-1 rounded-full" style:background-color={batteryColor}></span>
