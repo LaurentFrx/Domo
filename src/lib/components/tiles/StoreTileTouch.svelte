@@ -272,9 +272,10 @@
           <!-- En mouvement : banne live (= 1ʳᵉ carte), s'anime avec le déplacement réel. -->
           {@render awningGlyph(headPath, headH, `s2-stop-${shutter.nodeId}`, 42, 32)}
         {:else}
-          <!-- Au repos : pictogramme « stop » neutre, distinct des bannes voisines. -->
-          <svg class="stop-glyph" viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" />
+          <!-- Au repos : pictogramme « stop » neutre, distinct des bannes voisines.
+               viewBox serrée → la taille CSS de .stop-glyph = la taille réelle du carré. -->
+          <svg class="stop-glyph" viewBox="0 0 16 16" aria-hidden="true">
+            <rect width="16" height="16" rx="3.5" fill="currentColor" />
           </svg>
         {/if}
       </button>
@@ -436,9 +437,10 @@
     border-color: var(--color-solar);
     box-shadow: 0 0 12px var(--color-solar-glow);
   }
-  .stop-glyph {
-    width: 16px;
-    height: 16px;
+  /* Sélecteur assez spécifique pour battre `.abtn svg` (sinon la taille est ignorée). */
+  .abtn--stop .stop-glyph {
+    width: 13px;
+    height: 13px;
   }
 
   /* Barre + pastille — épaisseur 8px, harmonisée avec les cartes volets (.m-bar). */
