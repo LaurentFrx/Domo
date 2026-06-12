@@ -393,7 +393,7 @@
   .abtn--retract svg,
   .abtn--deploy svg {
     width: 100%;
-    max-width: 88px;
+    max-width: 110px;
   }
   /* Mêmes teintes que la 1ʳᵉ carte : Rentrer indigo, Déployer ambre. */
   .abtn--retract {
@@ -425,8 +425,10 @@
     color: var(--color-primary-fg);
     box-shadow: 0 0 12px var(--color-solar-glow);
   }
-  /* Bouton stop : pictogramme neutre au repos (≠ bannes ambre), glow ambre en mouvement. */
+  /* Bouton stop : carré (≠ Rentrer/Déployer qui s'élargissent), pictogramme
+     neutre au repos (≠ bannes ambre), glow ambre en mouvement. */
   .abtn--stop {
+    flex: 0 0 54px;
     color: var(--color-muted-fg);
   }
   .abtn--stop.moving {
