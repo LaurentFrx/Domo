@@ -89,29 +89,24 @@
   // ─── Énergie stockée en batterie (kWh) — pour la carte Batterie ───────
   const storedKwh = $derived(anker.totalBatteryEnergyWh / 1000);
 
-  // ─── Bilan énergie du JOUR — couverture solaire (carte sous la batterie) ──
-  // Couverture = part de la conso maison d'origine solaire vs réseau EDF
-  // (recorder/savings, cohérent entre eux). Surplus = part de la prod renvoyée
-  // à EDF (export Linky du bridge Anker ; le recorder sous-estime le surplus).
+  // ─── Bilan énergie du JOUR — répartition de toute l'énergie brassée ──────
+  // 3 parts d'un même total (= 100 %) : solaire autoconsommé + surplus renvoyé
+  // à EDF (production) + soutirage réseau (import). Le surplus EST de l'énergie
+  // produite → il compte dans le pourcentage.
+  // Sources : auto & import = recorder (savings) ; surplus = cumul Linky du
+  // bridge Anker (le recorder sous-estime le surplus faible).
   const solarSelfKwh = $derived(savings.today.kwh); // solaire consommé sur place
   const gridImportKwh = $derived(savings.today.import_kwh); // soutiré à EDF (recorder)
-  const homeConsoKwh = $derived(solarSelfKwh + gridImportKwh); // conso maison du jour
   const gridExportKwh = $derived(anker.gridExportTodayKwh); // surplus injecté (Linky)
-  const flowsReady = $derived(homeConsoKwh > 0.05); // au moins un peu de conso mesurée
-  const solarCoverage = $derived(
-    flowsReady ? Math.max(0, Math.min(100, savings.today.coverage_pct)) : 0
-  );
-  const solarPct = $derived(Math.round(solarCoverage)); // % solaire (libellé)
-  const gridPct = $derived(100 - solarPct); // % réseau (somme = 100)
-  const surplusPct = $derived(
-    gridExportKwh > 0 ? (gridExportKwh / (solarSelfKwh + gridExportKwh)) * 100 : 0
-  ); // part de la production solaire renvoyée à EDF
-  // Part EDF de la barre de couverture : bleu vif (le gris « réseau » du Sankey
-  // est trop discret sur un petit segment). Local à cette carte — ne touche pas
-  // au token --color-grid-energy (gris voulu ailleurs).
-  const EDF_BLUE = 'oklch(0.62 0.19 256)';
-  // Surplus (part renvoyée à EDF) : rouge vif, pastille de légende.
-  const SURPLUS_RED = 'oklch(0.62 0.21 27)';
+  const energyTotalKwh = $derived(solarSelfKwh + gridImportKwh + gridExportKwh);
+  const flowsReady = $derived(energyTotalKwh > 0.05);
+  const solarSharePct = $derived(flowsReady ? (solarSelfKwh / energyTotalKwh) * 100 : 0);
+  const surplusSharePct = $derived(flowsReady ? (gridExportKwh / energyTotalKwh) * 100 : 0);
+  const gridSharePct = $derived(flowsReady ? (gridImportKwh / energyTotalKwh) * 100 : 0);
+  // Couleurs vives locales (les tokens gris/vert seraient trop discrets sur de
+  // petits segments). Ne touchent pas aux tokens globaux (Sankey).
+  const EDF_BLUE = 'oklch(0.62 0.19 256)'; // réseau EDF (import)
+  const SURPLUS_RED = 'oklch(0.62 0.21 27)'; // surplus renvoyé
 
   // ─── 3 cards lifetime (depuis Anker, vraies données) ─────────────────
   const hasLifetime = $derived(anker.connected && anker.lifetimeProductionKwh > 0);
@@ -243,20 +238,28 @@
           {#if flowsReady}
             <span
               class="text-[0.8125rem] font-semibold tabular-nums"
-              style="color: var(--color-fg);">{fmtNumber(homeConsoKwh, 1)} kWh</span
+              style="color: var(--color-fg);">{fmtNumber(energyTotalKwh, 1)} kWh</span
             >
           {/if}
         </div>
 
         {#if flowsReady}
-          <!-- Barre empilée solaire | réseau EDF (recessed glass) -->
+          <!-- Barre empilée : Solaire | Surplus | Réseau EDF (3 parts = 100 %) -->
           <div
-            class="relative h-7 overflow-hidden rounded-md"
-            style="background: {EDF_BLUE}; box-shadow: inset 1px 1px 2px oklch(0.3 0.03 286 / 0.2), inset -1px -1px 1px oklch(0.99 0.01 149 / 0.1);"
+            class="flex h-7 overflow-hidden rounded-md"
+            style="box-shadow: inset 1px 1px 2px oklch(0.3 0.03 286 / 0.2), inset -1px -1px 1px oklch(0.99 0.01 149 / 0.1);"
           >
             <div
-              class="absolute inset-y-0 left-0 transition-[width] duration-700"
-              style="width: {solarCoverage}%; background: var(--color-solar);"
+              class="h-full transition-[width] duration-700"
+              style="width: {solarSharePct}%; background: var(--color-solar);"
+            ></div>
+            <div
+              class="h-full transition-[width] duration-700"
+              style="width: {surplusSharePct}%; background: {SURPLUS_RED};"
+            ></div>
+            <div
+              class="h-full transition-[width] duration-700"
+              style="width: {gridSharePct}%; background: {EDF_BLUE};"
             ></div>
           </div>
 
@@ -267,17 +270,15 @@
           >
             <span class="flex items-center gap-1.5">
               <span class="h-2 w-2 rounded-full" style="background: var(--color-solar);"></span>
-              Solaire {solarPct}%
+              Solaire {fmtNumber(solarSharePct, 1)}%
             </span>
-            {#if anker.connected && gridExportKwh > 0}
-              <span class="flex items-center gap-1.5">
-                <span class="h-2 w-2 rounded-full" style="background: {SURPLUS_RED};"></span>
-                Surplus {fmtNumber(surplusPct, 1)}%
-              </span>
-            {/if}
+            <span class="flex items-center gap-1.5">
+              <span class="h-2 w-2 rounded-full" style="background: {SURPLUS_RED};"></span>
+              Surplus {fmtNumber(surplusSharePct, 1)}%
+            </span>
             <span class="flex items-center gap-1.5">
               <span class="h-2 w-2 rounded-full" style="background: {EDF_BLUE};"></span>
-              Réseau EDF {gridPct}%
+              Réseau EDF {fmtNumber(gridSharePct, 1)}%
             </span>
           </div>
         {:else}
