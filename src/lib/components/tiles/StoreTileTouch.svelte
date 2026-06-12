@@ -18,7 +18,7 @@
   }
   let { shutter }: Props = $props();
 
-  // shutter.position = % de fermeture (0 = rentré, 100 = déployé)
+  // shutter.position = % de déploiement AFFICHÉ (0 = rentré, 100 = déployé)
   let dragging = $state(false);
   let dragPos = $state(0);
   let barEl = $state<HTMLDivElement | null>(null);
@@ -139,7 +139,7 @@
   function posFromX(clientX: number): number {
     if (!barEl) return shutter.position;
     const r = barEl.getBoundingClientRect();
-    const usable = r.width - THUMB;
+    const usable = Math.max(1, r.width - THUMB); // garde anti-NaN si barre non mesurée
     const x = clientX - r.left - THUMB / 2;
     return clamp(Math.round((x / usable) * 100));
   }
@@ -164,13 +164,16 @@
     if (!dragging) return;
     const final = posFromX(e.clientX);
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    dragging = false;
+    // Relâché sur la position courante (simple tap, aucun déplacement) → pas de
+    // commande moteur ni de glow directionnel.
+    if (final === shutter.position) return;
     matter.goToPosition(shutter.nodeId, final);
     movingDirection = final < shutter.position ? 'open' : 'close';
     haptic('light');
     animPos = final;
     animTarget = final;
     scheduleFailsafe();
-    dragging = false;
   }
 
   function onRetract() {
@@ -252,11 +255,20 @@
     <button
       type="button"
       class="abtn abtn--stop"
+      class:moving={isMoving}
       disabled={!shutter.available}
       onclick={onStop}
       aria-label="Arrêter le store"
     >
-      {@render awningGlyph(headPath, headH, `s2-stop-${shutter.nodeId}`, 42, 32)}
+      {#if isMoving}
+        <!-- En mouvement : banne live (= 1ʳᵉ carte), s'anime avec le déplacement réel. -->
+        {@render awningGlyph(headPath, headH, `s2-stop-${shutter.nodeId}`, 42, 32)}
+      {:else}
+        <!-- Au repos : pictogramme « stop » neutre, distinct des bannes voisines. -->
+        <svg class="stop-glyph" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" />
+        </svg>
+      {/if}
     </button>
     <button
       type="button"
@@ -280,7 +292,7 @@
     aria-label="Position du store"
     aria-valuemin="0"
     aria-valuemax="100"
-    aria-valuenow={shutter.position}
+    aria-valuenow={displayedPosition}
     aria-valuetext={positionLabel}
     onpointerdown={onDown}
     onpointermove={onMove}
@@ -372,6 +384,19 @@
     border-color: var(--color-solar);
     box-shadow: 0 0 12px var(--color-solar-glow);
   }
+  /* Bouton stop : pictogramme neutre au repos (≠ bannes ambre), glow ambre en mouvement. */
+  .abtn--stop {
+    color: var(--color-muted-fg);
+  }
+  .abtn--stop.moving {
+    color: var(--color-solar);
+    border-color: var(--color-solar);
+    box-shadow: 0 0 12px var(--color-solar-glow);
+  }
+  .stop-glyph {
+    width: 22px;
+    height: 22px;
+  }
 
   /* Barre + pastille */
   .bar {
@@ -395,7 +420,7 @@
     bottom: 0;
     left: 0;
     border-radius: 9999px;
-    background: linear-gradient(to right, oklch(0.7 0.16 84.4), var(--color-solar));
+    background: linear-gradient(to right, var(--color-solar), oklch(0.78 0.16 75));
     transition: width 120ms linear;
     pointer-events: none;
   }
