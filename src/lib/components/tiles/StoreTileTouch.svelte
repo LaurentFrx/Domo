@@ -3,13 +3,14 @@
   //  StoreTileTouch — variante TACTILE de la carte store (prototype comparatif)
   //  Isolé du ShutterTile en service (cf. règle « ne pas casser les cartes »).
   //  • en-tête épuré (icône banne + « Store »), pas d'indication d'état ;
-  //  • 3 boutons dont l'icône EST une banne : rentrée / animée (stop) / déployée ;
+  //  • 3 boutons dont l'icône EST une banne : rentrée / position réelle (stop) /
+  //    déployée — le SVG banne (réutilisé partout via un snippet) reflète l'état
+  //    courant et s'anime naturellement quand le store bouge ;
   //  • barre de progression avec pastille draggable → commande la position.
   // ════════════════════════════════════════════════════════════════════════
   import { onDestroy } from 'svelte';
   import { matter } from '$stores/matter.svelte';
   import type { Shutter } from '$stores/matter.svelte';
-  import { preferences } from '$stores/preferences.svelte';
   import { haptic } from '$utils/haptic';
 
   interface Props {
@@ -49,21 +50,9 @@
   const awningPath = (pos: number) =>
     `M12 11.5 L48 11.5 L49.5 ${11.5 + awningH(pos)}${SCALLOP} L12 11.5 Z`;
   const PATH_RETRACTED = awningPath(0);
-  const PATH_MID = awningPath(50);
   const PATH_DEPLOYED = awningPath(100);
   const headPath = $derived(awningPath(displayedPosition));
   const headH = $derived(awningH(displayedPosition));
-
-  // ─── Animations gatées (préférence + reduced-motion) ───
-  let reducedMotion = $state(false);
-  $effect(() => {
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    reducedMotion = mq.matches;
-    const on = (e: MediaQueryListEvent) => (reducedMotion = e.matches);
-    mq.addEventListener('change', on);
-    return () => mq.removeEventListener('change', on);
-  });
-  const animated = $derived(preferences.animationsEnabled && !reducedMotion);
 
   // ─── Animation visuelle de la position (rAF), calée sur travelMs ───
   function cancelRaf() {
@@ -208,6 +197,30 @@
   }
 </script>
 
+<!-- SVG banne réutilisable (le MÊME que la 1ʳᵉ carte) : toile striée à festons.
+     d = path de la toile, h = hauteur de toile (rayures), id = clip unique. -->
+{#snippet awningGlyph(d: string, h: number, id: string, w: number, ht: number)}
+  <svg width={w} height={ht} viewBox="0 0 60 46" fill="none">
+    <clipPath {id}><path {d} /></clipPath>
+    <path {d} fill="currentColor" />
+    <g clip-path="url(#{id})">
+      {#each [10.5, 23.5, 36.5] as sx}
+        <rect x={sx} y="11.5" width="6.5" height={h + 8} fill="#fff" opacity="0.4" />
+      {/each}
+    </g>
+    <rect
+      x="8"
+      y="6"
+      width="44"
+      height="5.6"
+      rx="2.6"
+      style="fill: var(--color-muted-fg);"
+      opacity="0.9"
+    />
+    <rect x="9" y="6.5" width="42" height="1.4" rx="0.7" fill="#fff" opacity="0.22" />
+  </svg>
+{/snippet}
+
 <div
   class="store2 rounded-[var(--radius-xl)] border"
   class:opacity-50={!shutter.available}
@@ -217,31 +230,14 @@
   <!-- En-tête épuré : icône banne (état réel) + « Store » -->
   <div class="head">
     <span class="awning" aria-hidden="true">
-      <svg width="56" height="43" viewBox="0 0 60 46" fill="none">
-        <clipPath id="s2-head-{shutter.nodeId}"><path d={headPath} /></clipPath>
-        <path d={headPath} fill="currentColor" />
-        <g clip-path="url(#s2-head-{shutter.nodeId})">
-          {#each [10.5, 23.5, 36.5] as sx}
-            <rect x={sx} y="11.5" width="6.5" height={headH + 8} fill="#fff" opacity="0.4" />
-          {/each}
-        </g>
-        <rect
-          x="8"
-          y="6"
-          width="44"
-          height="5.6"
-          rx="2.6"
-          style="fill: var(--color-muted-fg);"
-          opacity="0.9"
-        />
-        <rect x="9" y="6.5" width="42" height="1.4" rx="0.7" fill="#fff" opacity="0.22" />
-      </svg>
+      {@render awningGlyph(headPath, headH, `s2-head-${shutter.nodeId}`, 56, 43)}
     </span>
     <span class="title">Store</span>
     {#if isMoving}<span class="dots" aria-hidden="true">●●●</span>{/if}
   </div>
 
-  <!-- Boutons : l'icône banne EST le pictogramme (rentrée / animée / déployée) -->
+  <!-- Boutons : la banne EST le pictogramme — rentrée / position réelle (stop) /
+       déployée. Le bouton stop réutilise le SVG de l'état courant (= en-tête). -->
   <div class="btns">
     <button
       type="button"
@@ -251,18 +247,7 @@
       onclick={onRetract}
       aria-label="Rentrer le store"
     >
-      <svg viewBox="0 0 60 46" fill="none">
-        <path d={PATH_RETRACTED} fill="currentColor" />
-        <rect
-          x="8"
-          y="6"
-          width="44"
-          height="5.6"
-          rx="2.6"
-          style="fill: var(--color-muted-fg);"
-          opacity="0.9"
-        />
-      </svg>
+      {@render awningGlyph(PATH_RETRACTED, awningH(0), `s2-ret-${shutter.nodeId}`, 42, 32)}
     </button>
     <button
       type="button"
@@ -271,27 +256,7 @@
       onclick={onStop}
       aria-label="Arrêter le store"
     >
-      <svg viewBox="0 0 60 46" fill="none">
-        <path d={PATH_MID} fill="currentColor">
-          {#if animated}
-            <animate
-              attributeName="d"
-              dur="2.4s"
-              repeatCount="indefinite"
-              values="{PATH_RETRACTED};{PATH_DEPLOYED};{PATH_RETRACTED}"
-            />
-          {/if}
-        </path>
-        <rect
-          x="8"
-          y="6"
-          width="44"
-          height="5.6"
-          rx="2.6"
-          style="fill: var(--color-muted-fg);"
-          opacity="0.9"
-        />
-      </svg>
+      {@render awningGlyph(headPath, headH, `s2-stop-${shutter.nodeId}`, 42, 32)}
     </button>
     <button
       type="button"
@@ -301,18 +266,7 @@
       onclick={onDeploy}
       aria-label="Déployer le store"
     >
-      <svg viewBox="0 0 60 46" fill="none">
-        <path d={PATH_DEPLOYED} fill="currentColor" />
-        <rect
-          x="8"
-          y="6"
-          width="44"
-          height="5.6"
-          rx="2.6"
-          style="fill: var(--color-muted-fg);"
-          opacity="0.9"
-        />
-      </svg>
+      {@render awningGlyph(PATH_DEPLOYED, awningH(100), `s2-dep-${shutter.nodeId}`, 42, 32)}
     </button>
   </div>
 
