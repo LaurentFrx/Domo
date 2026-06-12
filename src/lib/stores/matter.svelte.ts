@@ -30,6 +30,8 @@ export interface Switch {
   available: boolean;
   /** true = on, false = off */
   isOn: boolean;
+  /** Puissance active mesurée (W) si la prise expose le cluster 144 ; sinon absent. */
+  powerW?: number;
 }
 
 export interface DeviceGroup {
@@ -155,13 +157,23 @@ function parseSwitch(node: Record<string, unknown>): Switch | null {
     room: 'Autre'
   };
 
-  return { nodeId, name: meta.name, room: meta.room, available, isOn };
+  // Puissance active : cluster 144 (ElectricalPowerMeasurement) attr 8 = ActivePower
+  // en milliwatts ; absent si la prise ne mesure pas.
+  const rawP = attrs['1/144/8'];
+  const powerW = typeof rawP === 'number' ? rawP / 1000 : undefined;
+
+  return { nodeId, name: meta.name, room: meta.room, available, isOn, powerW };
 }
 
 class MatterState {
   shutters = $state<Shutter[]>([]);
   switches = $state<Switch[]>([]);
   connectionStatus = $state<'connected' | 'connecting' | 'disconnected'>('disconnected');
+  /** Une connexion a-t-elle déjà abouti depuis le dernier connect() ? Sert à
+   *  distinguer « pas encore connecté » (état initial, normal) d'une vraie
+   *  « connexion perdue » (déconnexion APRÈS un succès) → évite le faux message
+   *  d'erreur qui flashait au montage de la page. */
+  everConnected = $state(false);
   private client: MatterClient | null = null;
 
   rooms = $derived.by<DeviceGroup[]>(() => {
@@ -216,6 +228,7 @@ class MatterState {
 
     this.client.setOnStatusChange((status) => {
       this.connectionStatus = status as typeof this.connectionStatus;
+      if (status === 'connected') this.everConnected = true;
     });
 
     this.client.connect();
@@ -224,6 +237,9 @@ class MatterState {
   disconnect() {
     this.client?.disconnect();
     this.client = null;
+    // Déconnexion volontaire (départ de la page) : on repart « neuf » au prochain
+    // montage → pas de message « perdue » au retour sur la page.
+    this.everConnected = false;
   }
 
   async open(nodeId: number) {

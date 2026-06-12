@@ -56,7 +56,14 @@
 
   const hasShutters = $derived(matter.shutters.length > 0);
   const matterConnected = $derived(matter.connectionStatus === 'connected');
-  const matterDisconnected = $derived(matter.connectionStatus === 'disconnected');
+  // « Connexion perdue » = déconnecté APRÈS avoir été connecté (vraie coupure).
+  // Tant qu'on n'a jamais abouti (état initial, montage), c'est « en cours », pas
+  // une erreur → supprime le flash du message au chargement de la page.
+  const matterLost = $derived(matter.connectionStatus === 'disconnected' && matter.everConnected);
+  const matterPending = $derived(
+    matter.connectionStatus === 'connecting' ||
+      (matter.connectionStatus === 'disconnected' && !matter.everConnected)
+  );
   const isEmpty = $derived(
     mergedRooms.length === 0 &&
       matterConnected &&
@@ -139,7 +146,7 @@
     <h1 class="text-2xl font-semibold tracking-tight">Pièces</h1>
   </header>
 
-  {#if matterDisconnected}
+  {#if matterLost}
     <div
       class="rounded-[var(--radius-2xl)] border p-6 text-center"
       style="background: var(--color-card); border-color: var(--color-border);"
@@ -156,7 +163,7 @@
         Reconnecter
       </button>
     </div>
-  {:else if matter.connectionStatus === 'connecting' && mergedRooms.length === 0}
+  {:else if matterPending && mergedRooms.length === 0}
     <div
       class="rounded-[var(--radius-2xl)] border p-6 text-center"
       style="background: var(--color-card); border-color: var(--color-border);"
