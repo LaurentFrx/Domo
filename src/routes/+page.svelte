@@ -133,7 +133,7 @@
 <div class="relative overflow-x-clip">
   <!-- gap/padding plus serrés sur mobile (condensation iPhone vertical) ; généreux dès sm. -->
   <div
-    class="stagger-enter relative flex flex-col gap-3.5 py-3 sm:gap-5 sm:py-4"
+    class="stagger-enter relative flex flex-col gap-3.5 pb-3 sm:gap-5 sm:pb-4"
     style="z-index: 1;"
   >
     <!-- ═══ En-tête : bannière aurore « dôme OVNI » ═══ -->
