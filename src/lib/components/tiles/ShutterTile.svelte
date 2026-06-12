@@ -382,11 +382,10 @@
             <rect x="9" y="6.5" width="42" height="1.4" rx="0.7" fill="#fff" opacity="0.22" />
           </svg>
         </span>
-        <div class="flex min-w-0 flex-1 flex-col">
-          <span class="text-[15px] leading-tight font-semibold" style="color: var(--color-fg);">
+        <div class="min-w-0 flex-1">
+          <span class="text-[16px] leading-tight font-semibold" style="color: var(--color-fg);">
             Store
           </span>
-          <span class="text-[11px]" style="color: var(--color-muted-fg);">banne de terrasse</span>
         </div>
         <div class="m-state">
           {#if isMidPosition}
@@ -404,14 +403,6 @@
               >{/if}
           {/if}
         </div>
-      </div>
-
-      <div class="m-track-wrap">
-        <span class="m-track-lab">Rentré</span>
-        <div class="m-bar flex-1" aria-hidden="true">
-          <div class="m-fill m-fill--store" style:width="{displayedPosition}%"></div>
-        </div>
-        <span class="m-track-lab m-track-lab--r">Déployé</span>
       </div>
 
       <div class="flex items-stretch gap-2">
@@ -466,6 +457,11 @@
             />
           </svg>
         </button>
+      </div>
+
+      <!-- Barre de visualisation sous les commandes (remplissage = déploiement). -->
+      <div class="m-bar" aria-hidden="true">
+        <div class="m-fill m-fill--store" style:width="{displayedPosition}%"></div>
       </div>
     </div>
   {:else}
@@ -914,21 +910,6 @@
     margin-top: 3px;
     font-size: 10px;
     color: var(--color-muted-fg);
-  }
-  /* Barre du store légendée Rentré ←→ Déployé (direction sans ambiguïté). */
-  .m-track-wrap {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .m-track-lab {
-    flex-shrink: 0;
-    width: 38px;
-    font-size: 9.5px;
-    color: var(--color-muted-fg);
-  }
-  .m-track-lab--r {
-    text-align: right;
   }
   .m-sbtn:active:not(:disabled) {
     transform: scale(0.96);
