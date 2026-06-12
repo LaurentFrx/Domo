@@ -213,10 +213,6 @@
     <!-- ═══ Store-banne — commande dédiée, à part des volets roulants ═══ -->
     {#if storeShutter}
       <div class="store-wrap">
-        <ShutterTile shutter={storeShutter} />
-      </div>
-      <!-- Variante tactile (prototype comparatif) — positionnée sous l'existante. -->
-      <div class="store-wrap">
         <StoreTileTouch shutter={storeShutter} />
       </div>
     {/if}
