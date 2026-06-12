@@ -437,8 +437,8 @@
     box-shadow: 0 0 12px var(--color-solar-glow);
   }
   .stop-glyph {
-    width: 22px;
-    height: 22px;
+    width: 18px;
+    height: 18px;
   }
 
   /* Barre + pastille — épaisseur 8px, harmonisée avec les cartes volets (.m-bar). */
