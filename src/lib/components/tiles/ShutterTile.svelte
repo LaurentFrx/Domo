@@ -52,6 +52,15 @@
         : `${displayedPosition}%`
   );
 
+  // Store-banne (node 25) : porte des libellés d'extrêmes (Rentré/Déployé).
+  // → bascule sur le design « store » dédié en vue iPhone (déploiement explicite).
+  const isStore = $derived(shutter.labelMin !== undefined);
+  const storeStateColor = $derived(
+    displayedPosition <= 1 ? 'var(--color-muted-fg)' : 'var(--color-solar)'
+  );
+  // Longueur de la banne dessinée (8 = rentrée → ~48 = déployée) pour le SVG du store.
+  const canopyLen = $derived(8 + (displayedPosition / 100) * 40);
+
   const isMoving = $derived(animPos !== null || shutter.moving);
 
   // Dimensions proportionnelles via container queries (cqw). Pour les calculs
@@ -245,92 +254,259 @@
 </script>
 
 <div
-  class="shutter-tile flex flex-col gap-2 rounded-[var(--radius-xl)] border p-3"
+  class="shutter-tile rounded-[var(--radius-xl)] border"
   class:opacity-50={!shutter.available}
   style="background: var(--color-card); border-color: var(--color-border);"
   aria-label="{shutter.name} — {positionLabel}"
 >
-  <!-- Nom de la pièce (statut implicite via la position du thumb).
-       Le wrap est autorisé pour les noms longs sur iPhone (Salle à manger…). -->
-  <span
-    class="shutter-name text-center leading-tight font-semibold"
-    style="color: var(--color-fg);"
-  >
-    {shutter.name}
-    {#if isMoving}
-      <span class="moving-dots ml-1" style="color: var(--color-primary);">●●●</span>
-    {/if}
-  </span>
+  <!-- ═══ Desktop / iPad : slider vertical draggable (INCHANGÉ) — masqué sur iPhone ═══ -->
+  <div class="hidden flex-col gap-2 p-3 sm:flex">
+    <!-- Nom de la pièce (statut implicite via la position du thumb). -->
+    <span
+      class="shutter-name text-center leading-tight font-semibold"
+      style="color: var(--color-fg);"
+    >
+      {shutter.name}
+      {#if isMoving}
+        <span class="moving-dots ml-1" style="color: var(--color-primary);">●●●</span>
+      {/if}
+    </span>
 
-  <!-- Corps centré : slider fin (24px) + gap + colonne actions carrées (60px). Body 210px = 3×60 + 2×15 gap. -->
-  <div class="shutter-body flex items-stretch justify-center gap-3">
-    <div bind:this={trackEl} class="slider-track" class:dragging>
-      <div class="slider-fill" style:height="{displayedPosition}%"></div>
-      <!-- Le thumb (rond blanc) seul est draggable ET porte la sémantique slider
+    <!-- Corps centré : slider fin (24px) + gap + colonne actions carrées (60px). Body 210px = 3×60 + 2×15 gap. -->
+    <div class="shutter-body flex items-stretch justify-center gap-3">
+      <div bind:this={trackEl} class="slider-track" class:dragging>
+        <div class="slider-fill" style:height="{displayedPosition}%"></div>
+        <!-- Le thumb (rond blanc) seul est draggable ET porte la sémantique slider
            (role + aria + focus), puisque c'est lui qui reçoit les gestes. Le reste
            du track laisse passer le scroll de l'iPhone (touch-action: pan-y). -->
-      <div
-        class="slider-thumb"
-        role="slider"
-        tabindex={shutter.available ? 0 : -1}
-        aria-label="Position {shutter.name}"
-        aria-valuemin="0"
-        aria-valuemax="100"
-        aria-valuenow={shutter.position}
-        aria-valuetext={positionLabel}
-        style:bottom="calc((100% - var(--ssize)) * {(100 - displayedPosition) / 100})"
-        onpointerdown={onPointerDown}
-        onpointermove={onPointerMove}
-        onpointerup={onPointerUp}
-        onpointercancel={onPointerUp}
-      >
-        {#if displayedPosition > 1 && displayedPosition < 99}
-          <span class="thumb-pct">{displayedPosition}</span>
-        {/if}
+        <div
+          class="slider-thumb"
+          role="slider"
+          tabindex={shutter.available ? 0 : -1}
+          aria-label="Position {shutter.name}"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow={shutter.position}
+          aria-valuetext={positionLabel}
+          style:bottom="calc((100% - var(--ssize)) * {(100 - displayedPosition) / 100})"
+          onpointerdown={onPointerDown}
+          onpointermove={onPointerMove}
+          onpointerup={onPointerUp}
+          onpointercancel={onPointerUp}
+        >
+          {#if displayedPosition > 1 && displayedPosition < 99}
+            <span class="thumb-pct">{displayedPosition}</span>
+          {/if}
+        </div>
+      </div>
+
+      <div class="actions-col flex flex-col justify-between">
+        <button
+          type="button"
+          class="action-btn action-btn--open"
+          class:action-active={activeAction === 'open'}
+          class:action-moving={movingDirection === 'open'}
+          disabled={!shutter.available}
+          onclick={onOpenClick}
+          aria-label="Ouvrir {shutter.name}"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 5 L20 18 L4 18 Z" fill="currentColor" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="action-btn action-btn--stop"
+          class:action-active={activeAction === 'stop'}
+          disabled={!shutter.available}
+          onclick={onStopClick}
+          aria-label="Arrêter {shutter.name}"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <rect x="6" y="6" width="12" height="12" rx="2" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="action-btn action-btn--close"
+          class:action-active={activeAction === 'close'}
+          class:action-moving={movingDirection === 'close'}
+          disabled={!shutter.available}
+          onclick={onCloseClick}
+          aria-label="Fermer {shutter.name}"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 19 L4 6 L20 6 Z" fill="currentColor" />
+          </svg>
+        </button>
       </div>
     </div>
-
-    <div class="actions-col flex flex-col justify-between">
-      <button
-        type="button"
-        class="action-btn action-btn--open"
-        class:action-active={activeAction === 'open'}
-        class:action-moving={movingDirection === 'open'}
-        disabled={!shutter.available}
-        onclick={onOpenClick}
-        aria-label="Ouvrir {shutter.name}"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 5 L20 18 L4 18 Z" fill="currentColor" />
-        </svg>
-      </button>
-      <button
-        type="button"
-        class="action-btn action-btn--stop"
-        class:action-active={activeAction === 'stop'}
-        disabled={!shutter.available}
-        onclick={onStopClick}
-        aria-label="Arrêter {shutter.name}"
-      >
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <rect x="6" y="6" width="12" height="12" rx="2" />
-        </svg>
-      </button>
-      <button
-        type="button"
-        class="action-btn action-btn--close"
-        class:action-active={activeAction === 'close'}
-        class:action-moving={movingDirection === 'close'}
-        disabled={!shutter.available}
-        onclick={onCloseClick}
-        aria-label="Fermer {shutter.name}"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 19 L4 6 L20 6 Z" fill="currentColor" />
-        </svg>
-      </button>
-    </div>
   </div>
+
+  <!-- ═══ iPhone : rangée horizontale compacte (le slider vertical ci-dessus est masqué) ═══ -->
+  {#if isStore}
+    <!-- Store-banne : design dédié — Rentrer / Déployer explicites, barre légendée
+         Rentré ←→ Déployé. Aucune confusion possible avec un volet roulant. -->
+    <div class="m-store flex flex-col gap-3 p-3.5 sm:hidden">
+      <div class="flex items-center gap-3">
+        <span class="m-awning shrink-0" aria-hidden="true">
+          <svg width="58" height="38" viewBox="0 0 58 38" fill="none">
+            <!-- soleil -->
+            <circle cx="46" cy="11" r="6.5" fill="currentColor" opacity="0.5" />
+            <!-- mur -->
+            <path
+              d="M7 4 v30"
+              style="stroke: var(--color-muted-fg);"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              opacity="0.5"
+            />
+            <!-- banne : largeur selon le déploiement -->
+            <path d="M7 12 H{7 + canopyLen} l-5 11 H7 Z" fill="currentColor" />
+            <!-- rayures révélées au fur et à mesure que la banne sort -->
+            {#each [15, 23, 31, 39, 47] as sx}
+              {#if sx < 7 + canopyLen - 3}
+                <path d="M{sx} 12 L{sx - 2.3} 23" stroke="#fff" stroke-width="1.2" opacity="0.5" />
+              {/if}
+            {/each}
+          </svg>
+        </span>
+        <div class="flex min-w-0 flex-1 flex-col">
+          <span class="text-[14px] leading-tight font-semibold" style="color: var(--color-fg);">
+            Store
+          </span>
+          <span class="text-[11px]" style="color: var(--color-muted-fg);">banne de terrasse</span>
+        </div>
+        <span class="m-store-pct" style:color={storeStateColor}>
+          {displayedPosition}<span class="m-store-pct-u">%</span>
+          {#if isMoving}<span class="moving-dots ml-0.5" style="color: var(--color-solar);"
+              >●●●</span
+            >{/if}
+        </span>
+      </div>
+
+      <div class="m-bar flex-1" aria-hidden="true">
+        <div class="m-fill m-fill--store" style:width="{displayedPosition}%"></div>
+      </div>
+
+      <div class="flex items-stretch gap-2">
+        <button
+          type="button"
+          class="m-sbtn m-sbtn--retract"
+          class:m-on={movingDirection === 'open'}
+          disabled={!shutter.available}
+          onclick={onOpenClick}
+          aria-label="Rentrer le store"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M11 7 L6 12 L11 17 M6 12 H18"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          Rentrer
+        </button>
+        <button
+          type="button"
+          class="m-sbtn m-sbtn--stop shrink-0"
+          disabled={!shutter.available}
+          onclick={onStopClick}
+          aria-label="Arrêter le store"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <rect x="7" y="7" width="10" height="10" rx="2" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="m-sbtn m-sbtn--deploy"
+          class:m-on={movingDirection === 'close'}
+          disabled={!shutter.available}
+          onclick={onCloseClick}
+          aria-label="Déployer le store"
+        >
+          Déployer
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M13 7 L18 12 L13 17 M18 12 H6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
+    </div>
+  {:else}
+    <!-- Volet roulant : rangée — nom + état (gauche), barre de position, 3 boutons (droite). -->
+    <div class="m-shutter flex items-center gap-2.5 px-3 py-2.5 sm:hidden">
+      <div class="m-row-name flex shrink-0 flex-col gap-0.5">
+        <span
+          class="m-name text-[12.5px] leading-tight font-semibold"
+          style="color: var(--color-fg);"
+        >
+          {shutter.name}
+        </span>
+        <span
+          class="flex items-center gap-1 text-[10px] tabular-nums"
+          style="color: var(--color-muted-fg);"
+        >
+          {positionLabel}
+          {#if isMoving}<span class="moving-dots" style="color: var(--color-primary);">●●●</span
+            >{/if}
+        </span>
+      </div>
+      <div class="m-bar flex-1" aria-hidden="true">
+        <div class="m-fill" style:width="{displayedPosition}%"></div>
+      </div>
+      <div class="flex shrink-0 items-center gap-1.5">
+        <button
+          type="button"
+          class="m-btn m-btn--open"
+          class:m-active={activeAction === 'open'}
+          class:m-on={movingDirection === 'open'}
+          disabled={!shutter.available}
+          onclick={onOpenClick}
+          aria-label="Ouvrir {shutter.name}"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 5 L20 18 L4 18 Z" fill="currentColor" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="m-btn m-btn--stop"
+          class:m-active={activeAction === 'stop'}
+          disabled={!shutter.available}
+          onclick={onStopClick}
+          aria-label="Arrêter {shutter.name}"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <rect x="6" y="6" width="12" height="12" rx="2" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="m-btn m-btn--close"
+          class:m-active={activeAction === 'close'}
+          class:m-on={movingDirection === 'close'}
+          disabled={!shutter.available}
+          onclick={onCloseClick}
+          aria-label="Fermer {shutter.name}"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 19 L4 6 L20 6 Z" fill="currentColor" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -437,10 +613,10 @@
     width: var(--ssize);
     height: var(--ssize);
     border-radius: 50%;
-    background: #ffffff;
+    background: oklch(0.99 0.005 286);
     box-shadow:
-      0 2px 6px oklch(0 0 0 / 0.18),
-      0 1px 2px oklch(0 0 0 / 0.1);
+      0 2px 6px oklch(0.1 0.01 286 / 0.18),
+      0 1px 2px oklch(0.1 0.01 286 / 0.1);
     pointer-events: auto;
     cursor: grab;
     /* drag : empêche le browser de consumer le geste vertical */
@@ -473,7 +649,7 @@
   .slider-track.dragging .slider-thumb {
     transition: none;
     box-shadow:
-      0 3px 10px oklch(0 0 0 / 0.25),
+      0 3px 10px oklch(0.1 0.01 286 / 0.25),
       0 0 0 3px var(--color-primary-muted);
   }
 
@@ -548,13 +724,187 @@
   .action-btn--open.action-moving {
     border-color: var(--color-battery);
     box-shadow:
-      0 0 14px color-mix(in oklch, var(--color-battery) 50%, transparent),
-      0 0 32px color-mix(in oklch, var(--color-battery) 22%, transparent);
+      0 0 14px var(--color-battery-glow),
+      0 0 32px var(--color-battery-glow-soft);
   }
   .action-btn--close.action-moving {
     border-color: var(--color-primary);
     box-shadow:
-      0 0 14px color-mix(in oklch, var(--color-primary) 50%, transparent),
-      0 0 32px color-mix(in oklch, var(--color-primary) 22%, transparent);
+      0 0 14px var(--color-primary-glow),
+      0 0 32px var(--color-primary-glow-soft);
+  }
+
+  /* ═══ iPhone — rangée horizontale compacte ═══ */
+  /* Nom + état à gauche (largeur fixe) → la barre prend toute la place restante. */
+  .m-row-name {
+    width: 96px;
+  }
+  /* Nom : 2 lignes max, coupure AUX ESPACES uniquement (jamais dans un mot) —
+     « Salle à manger », « Chambre Parents/Amis » restent lisibles et distincts
+     (vs l'ancien truncate qui rendait les deux chambres identiques « Chambre … »). */
+  .m-name {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: normal;
+    word-break: keep-all;
+    overflow-wrap: normal;
+    hyphens: none;
+  }
+  /* Barre d'ouverture ÉPAISSE, pleine largeur (remplissage = part fermée). */
+  .m-bar {
+    position: relative;
+    height: 10px;
+    border-radius: 9999px;
+    background: var(--color-muted);
+    border: 1px solid var(--color-border);
+    overflow: hidden;
+  }
+  .m-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    border-radius: 9999px;
+    background: linear-gradient(to right, var(--color-primary), oklch(0.48 0.26 293));
+    transition: width 160ms linear;
+  }
+  .m-fill--store {
+    background: linear-gradient(to right, var(--color-solar), oklch(0.78 0.16 75));
+  }
+
+  /* Boutons volet (mobile) — carrés compacts ▲ ■ ▼ */
+  .m-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: var(--radius-md);
+    background: var(--color-muted);
+    border: 1px solid var(--color-border);
+    transition: all var(--duration-fast) var(--ease-default);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .m-btn svg {
+    width: 42%;
+    height: 42%;
+  }
+  .m-btn--stop svg {
+    width: 34%;
+    height: 34%;
+  }
+  .m-btn--open {
+    color: var(--color-battery);
+  }
+  .m-btn--close {
+    color: var(--color-primary);
+  }
+  .m-btn--stop {
+    color: var(--color-warning);
+  }
+  .m-btn:active:not(:disabled) {
+    transform: scale(0.92);
+  }
+  .m-btn:disabled {
+    opacity: 0.4;
+  }
+  .m-active.m-btn--open {
+    background: var(--color-battery);
+    border-color: var(--color-battery);
+    color: var(--color-primary-fg);
+  }
+  .m-active.m-btn--close {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-primary-fg);
+  }
+  .m-active.m-btn--stop {
+    background: var(--color-warning);
+    border-color: var(--color-warning);
+    color: var(--color-primary-fg);
+  }
+  .m-btn--open.m-on {
+    border-color: var(--color-battery);
+    box-shadow: 0 0 10px var(--color-battery-glow);
+  }
+  .m-btn--close.m-on {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 10px var(--color-primary-glow);
+  }
+
+  /* Store-banne (mobile) — boutons texte explicites Rentrer / Déployer */
+  .m-awning {
+    display: inline-flex;
+    color: var(--color-solar);
+  }
+  .m-sbtn {
+    display: inline-flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    height: 46px;
+    border-radius: var(--radius-lg);
+    font-size: 13px;
+    font-weight: 700;
+    border: 1px solid transparent;
+    transition: all var(--duration-fast) var(--ease-default);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .m-sbtn svg {
+    width: 18px;
+    height: 18px;
+  }
+  /* Boutons teintés (verre) — plus jolis qu'un aplat gris, distincts par couleur. */
+  .m-sbtn--retract {
+    color: var(--color-primary);
+    background: var(--color-primary-muted);
+    border-color: color-mix(in oklch, var(--color-primary) 30%, transparent);
+  }
+  .m-sbtn--deploy {
+    color: var(--color-solar);
+    background: var(--color-solar-muted);
+    border-color: color-mix(in oklch, var(--color-solar) 32%, transparent);
+  }
+  .m-sbtn--stop {
+    flex: 0 0 46px;
+    color: var(--color-muted-fg);
+    background: var(--color-muted);
+    border-color: var(--color-border);
+  }
+  .m-store-pct {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: baseline;
+    font-size: 17px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .m-store-pct-u {
+    margin-left: 1px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .m-sbtn:active:not(:disabled) {
+    transform: scale(0.96);
+  }
+  .m-sbtn:disabled {
+    opacity: 0.4;
+  }
+  .m-sbtn--retract.m-on {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-primary-fg);
+    box-shadow: 0 0 12px var(--color-primary-glow);
+  }
+  .m-sbtn--deploy.m-on {
+    background: var(--color-solar);
+    border-color: var(--color-solar);
+    color: var(--color-primary-fg);
+    box-shadow: 0 0 12px var(--color-solar-glow);
   }
 </style>
