@@ -202,8 +202,15 @@
 
 <!-- SVG banne réutilisable (le MÊME que la 1ʳᵉ carte) : toile striée à festons.
      d = path de la toile, h = hauteur de toile (rayures), id = clip unique. -->
-{#snippet awningGlyph(d: string, h: number, id: string, w: number, ht: number)}
-  <svg width={w} height={ht} viewBox="0 0 60 46" fill="none">
+{#snippet awningGlyph(
+  d: string,
+  h: number,
+  id: string,
+  w: number,
+  ht: number,
+  par = 'xMidYMid meet'
+)}
+  <svg width={w} height={ht} viewBox="0 0 60 46" preserveAspectRatio={par} fill="none">
     <clipPath {id}><path {d} /></clipPath>
     <path {d} fill="currentColor" />
     <g clip-path="url(#{id})">
@@ -230,11 +237,8 @@
   style="background: var(--color-card); border-color: var(--color-border);"
   aria-label="Store — {positionLabel}"
 >
-  <!-- En-tête épuré : icône banne (état réel) + « Store » -->
+  <!-- En-tête : titre seul (l'icône banne d'en-tête a été retirée). -->
   <div class="head">
-    <span class="awning" aria-hidden="true">
-      {@render awningGlyph(headPath, headH, `s2-head-${shutter.nodeId}`, 56, 43)}
-    </span>
     <span class="title">Store</span>
     {#if isMoving}<span class="dots" aria-hidden="true">●●●</span>{/if}
   </div>
@@ -244,13 +248,13 @@
   <div class="btns">
     <button
       type="button"
-      class="abtn"
+      class="abtn abtn--retract"
       class:on={movingDirection === 'open'}
       disabled={!shutter.available}
       onclick={onRetract}
       aria-label="Rentrer le store"
     >
-      {@render awningGlyph(PATH_RETRACTED, awningH(0), `s2-ret-${shutter.nodeId}`, 42, 32)}
+      {@render awningGlyph(PATH_RETRACTED, awningH(0), `s2-ret-${shutter.nodeId}`, 84, 32, 'none')}
     </button>
     <button
       type="button"
@@ -272,13 +276,13 @@
     </button>
     <button
       type="button"
-      class="abtn"
+      class="abtn abtn--deploy"
       class:on={movingDirection === 'close'}
       disabled={!shutter.available}
       onclick={onDeploy}
       aria-label="Déployer le store"
     >
-      {@render awningGlyph(PATH_DEPLOYED, awningH(100), `s2-dep-${shutter.nodeId}`, 42, 32)}
+      {@render awningGlyph(PATH_DEPLOYED, awningH(100), `s2-dep-${shutter.nodeId}`, 84, 32, 'none')}
     </button>
   </div>
 
@@ -324,11 +328,6 @@
     align-items: center;
     gap: 12px;
   }
-  .awning {
-    display: inline-flex;
-    color: var(--color-solar);
-    flex-shrink: 0;
-  }
   .title {
     font-size: 16px;
     font-weight: 600;
@@ -351,7 +350,7 @@
     }
   }
 
-  /* Boutons : icône banne ambre sur fond verre neutre */
+  /* Boutons : fonds teintés repris des boutons Rentrer/Déployer de la 1ʳᵉ carte. */
   .btns {
     display: flex;
     align-items: stretch;
@@ -366,7 +365,6 @@
     border-radius: var(--radius-lg);
     background: var(--color-muted);
     border: 1px solid var(--color-border);
-    color: var(--color-solar);
     transition: all var(--duration-fast) var(--ease-default);
     -webkit-tap-highlight-color: transparent;
   }
@@ -374,14 +372,39 @@
     width: 42px;
     height: 32px;
   }
+  /* Bannes Rentrer/Déployer élargies ×2 (étirées horizontalement). */
+  .abtn--retract svg,
+  .abtn--deploy svg {
+    width: 84px;
+  }
+  /* Mêmes teintes que la 1ʳᵉ carte : Rentrer indigo, Déployer ambre. */
+  .abtn--retract {
+    color: var(--color-primary);
+    background: var(--color-primary-muted);
+    border-color: color-mix(in oklch, var(--color-primary) 30%, transparent);
+  }
+  .abtn--deploy {
+    color: var(--color-solar);
+    background: var(--color-solar-muted);
+    border-color: color-mix(in oklch, var(--color-solar) 32%, transparent);
+  }
   .abtn:active:not(:disabled) {
     transform: scale(0.96);
   }
   .abtn:disabled {
     opacity: 0.4;
   }
-  .abtn.on {
+  /* En mouvement : bouton concerné « plein » (comme la 1ʳᵉ carte). */
+  .abtn--retract.on {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-primary-fg);
+    box-shadow: 0 0 12px var(--color-primary-glow);
+  }
+  .abtn--deploy.on {
+    background: var(--color-solar);
     border-color: var(--color-solar);
+    color: var(--color-primary-fg);
     box-shadow: 0 0 12px var(--color-solar-glow);
   }
   /* Bouton stop : pictogramme neutre au repos (≠ bannes ambre), glow ambre en mouvement. */
