@@ -237,53 +237,65 @@
   style="background: var(--color-card); border-color: var(--color-border);"
   aria-label="Store — {positionLabel}"
 >
-  <!-- En-tête : titre seul (l'icône banne d'en-tête a été retirée). -->
-  <div class="head">
+  <!-- Titre + 3 boutons sur une seule ligne (banne = pictogramme :
+       rentrée / position réelle au stop / déployée). -->
+  <div class="toprow">
     <span class="title">Store</span>
     {#if isMoving}<span class="dots" aria-hidden="true">●●●</span>{/if}
-  </div>
-
-  <!-- Boutons : la banne EST le pictogramme — rentrée / position réelle (stop) /
-       déployée. Le bouton stop réutilise le SVG de l'état courant (= en-tête). -->
-  <div class="btns">
-    <button
-      type="button"
-      class="abtn abtn--retract"
-      class:on={movingDirection === 'open'}
-      disabled={!shutter.available}
-      onclick={onRetract}
-      aria-label="Rentrer le store"
-    >
-      {@render awningGlyph(PATH_RETRACTED, awningH(0), `s2-ret-${shutter.nodeId}`, 84, 32, 'none')}
-    </button>
-    <button
-      type="button"
-      class="abtn abtn--stop"
-      class:moving={isMoving}
-      disabled={!shutter.available}
-      onclick={onStop}
-      aria-label="Arrêter le store"
-    >
-      {#if isMoving}
-        <!-- En mouvement : banne live (= 1ʳᵉ carte), s'anime avec le déplacement réel. -->
-        {@render awningGlyph(headPath, headH, `s2-stop-${shutter.nodeId}`, 42, 32)}
-      {:else}
-        <!-- Au repos : pictogramme « stop » neutre, distinct des bannes voisines. -->
-        <svg class="stop-glyph" viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" />
-        </svg>
-      {/if}
-    </button>
-    <button
-      type="button"
-      class="abtn abtn--deploy"
-      class:on={movingDirection === 'close'}
-      disabled={!shutter.available}
-      onclick={onDeploy}
-      aria-label="Déployer le store"
-    >
-      {@render awningGlyph(PATH_DEPLOYED, awningH(100), `s2-dep-${shutter.nodeId}`, 84, 32, 'none')}
-    </button>
+    <div class="btns">
+      <button
+        type="button"
+        class="abtn abtn--retract"
+        class:on={movingDirection === 'open'}
+        disabled={!shutter.available}
+        onclick={onRetract}
+        aria-label="Rentrer le store"
+      >
+        {@render awningGlyph(
+          PATH_RETRACTED,
+          awningH(0),
+          `s2-ret-${shutter.nodeId}`,
+          84,
+          32,
+          'none'
+        )}
+      </button>
+      <button
+        type="button"
+        class="abtn abtn--stop"
+        class:moving={isMoving}
+        disabled={!shutter.available}
+        onclick={onStop}
+        aria-label="Arrêter le store"
+      >
+        {#if isMoving}
+          <!-- En mouvement : banne live (= 1ʳᵉ carte), s'anime avec le déplacement réel. -->
+          {@render awningGlyph(headPath, headH, `s2-stop-${shutter.nodeId}`, 42, 32)}
+        {:else}
+          <!-- Au repos : pictogramme « stop » neutre, distinct des bannes voisines. -->
+          <svg class="stop-glyph" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" />
+          </svg>
+        {/if}
+      </button>
+      <button
+        type="button"
+        class="abtn abtn--deploy"
+        class:on={movingDirection === 'close'}
+        disabled={!shutter.available}
+        onclick={onDeploy}
+        aria-label="Déployer le store"
+      >
+        {@render awningGlyph(
+          PATH_DEPLOYED,
+          awningH(100),
+          `s2-dep-${shutter.nodeId}`,
+          84,
+          32,
+          'none'
+        )}
+      </button>
+    </div>
   </div>
 
   <!-- Barre de progression + pastille draggable (commande la position) -->
@@ -319,22 +331,25 @@
   .store2 {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 14px;
+    gap: 10px;
+    padding: 10px 14px 14px;
     transition: border-color var(--duration-normal) var(--ease-default);
   }
-  .head {
+  /* Titre + boutons sur une ligne ; les boutons occupent la place restante. */
+  .toprow {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
   }
   .title {
-    font-size: 16px;
+    flex-shrink: 0;
+    font-size: 14px;
     font-weight: 600;
+    line-height: 1.15;
     color: var(--color-fg);
   }
   .dots {
-    margin-left: auto;
+    flex-shrink: 0;
     font-size: 9px;
     letter-spacing: -2px;
     color: var(--color-solar);
@@ -353,6 +368,7 @@
   /* Boutons : fonds teintés repris des boutons Rentrer/Déployer de la 1ʳᵉ carte. */
   .btns {
     display: flex;
+    flex: 1;
     align-items: stretch;
     gap: 8px;
   }
@@ -372,10 +388,12 @@
     width: 42px;
     height: 32px;
   }
-  /* Bannes Rentrer/Déployer élargies ×2 (étirées horizontalement). */
+  /* Bannes Rentrer/Déployer élargies : remplissent le bouton (étirées
+     horizontalement) — robuste quelle que soit la largeur du bouton. */
   .abtn--retract svg,
   .abtn--deploy svg {
-    width: 84px;
+    width: 100%;
+    max-width: 88px;
   }
   /* Mêmes teintes que la 1ʳᵉ carte : Rentrer indigo, Déployer ambre. */
   .abtn--retract {
