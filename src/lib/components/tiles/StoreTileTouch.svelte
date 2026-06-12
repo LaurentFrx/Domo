@@ -395,9 +395,9 @@
     width: 100%;
     max-width: 110px;
   }
-  /* Mêmes teintes que la 1ʳᵉ carte : Rentrer indigo, Déployer ambre. */
+  /* Fond indigo (Rentrer) / ambre (Déployer), mais banne TOUJOURS ambre. */
   .abtn--retract {
-    color: var(--color-primary);
+    color: var(--color-solar);
     background: var(--color-primary-muted);
     border-color: color-mix(in oklch, var(--color-primary) 30%, transparent);
   }
