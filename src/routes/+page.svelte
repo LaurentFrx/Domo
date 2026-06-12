@@ -89,13 +89,23 @@
   // ─── Énergie stockée en batterie (kWh) — pour la carte Batterie ───────
   const storedKwh = $derived(anker.totalBatteryEnergyWh / 1000);
 
-  // ─── Bilan énergie du JOUR (3 cumuls, carte sous la batterie) ─────────
-  // Autoconso = recorder (savings, seule source). Import & surplus = cumuls
-  // Linky du bridge Anker (FIABLE, cohérents entre eux) — le recorder
-  // sous-estime le surplus faible.
+  // ─── Bilan énergie du JOUR — couverture solaire (carte sous la batterie) ──
+  // Couverture = part de la conso maison d'origine solaire vs réseau EDF
+  // (recorder/savings, cohérent entre eux). Surplus = part de la prod renvoyée
+  // à EDF (export Linky du bridge Anker ; le recorder sous-estime le surplus).
   const solarSelfKwh = $derived(savings.today.kwh); // solaire consommé sur place
-  const gridImportKwh = $derived(anker.gridImportTodayKwh); // soutiré à EDF
-  const gridExportKwh = $derived(anker.gridExportTodayKwh); // surplus injecté
+  const gridImportKwh = $derived(savings.today.import_kwh); // soutiré à EDF (recorder)
+  const homeConsoKwh = $derived(solarSelfKwh + gridImportKwh); // conso maison du jour
+  const gridExportKwh = $derived(anker.gridExportTodayKwh); // surplus injecté (Linky)
+  const flowsReady = $derived(homeConsoKwh > 0.05); // au moins un peu de conso mesurée
+  const solarCoverage = $derived(
+    flowsReady ? Math.max(0, Math.min(100, savings.today.coverage_pct)) : 0
+  );
+  const solarPct = $derived(Math.round(solarCoverage)); // % solaire (libellé)
+  const gridPct = $derived(100 - solarPct); // % réseau (somme = 100)
+  const surplusPct = $derived(
+    gridExportKwh > 0 ? (gridExportKwh / (solarSelfKwh + gridExportKwh)) * 100 : 0
+  ); // part de la production solaire renvoyée à EDF
 
   // ─── 3 cards lifetime (depuis Anker, vraies données) ─────────────────
   const hasLifetime = $derived(anker.connected && anker.lifetimeProductionKwh > 0);
@@ -209,33 +219,31 @@
       </div>
     {/snippet}
 
-    <!-- ═══ Bilan du jour — 3 cumuls énergie (sous la batterie) ═══ -->
-    <!-- Autoconso solaire (recorder) · soutirage EDF · surplus injecté (cumuls
-         Linky Anker). Palette charte : solaire=or, réseau=gris, surplus=vert. -->
+    <!-- ═══ Bilan du jour — couverture solaire (sous la batterie) ═══ -->
+    <!-- Barre empilée Solaire | Réseau EDF (part de la conso d'origine solaire,
+         recorder) + surplus renvoyé en plus petit (export Linky). -->
     {#snippet flowsCard()}
       <div
-        class="overflow-hidden rounded-[var(--radius-xl)] border"
+        class="flex flex-col gap-2.5 rounded-[var(--radius-xl)] border px-4 py-3"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
         <div
-          class="px-4 pt-2.5 pb-1 text-[0.625rem] font-semibold tracking-[0.08em] uppercase"
+          class="text-[0.625rem] font-semibold tracking-[0.08em] uppercase"
           style="color: var(--color-muted-fg);"
         >
-          Aujourd'hui
+          Aujourd'hui · couverture solaire
         </div>
-        <div class="grid grid-cols-3 pb-3">
-          <!-- ☀ Solaire autoconsommé -->
-          <div class="flex flex-col items-center gap-1.5 px-1.5 pt-1">
-            <span
-              class="flex h-7 w-7 items-center justify-center rounded-full"
-              style="background: var(--color-solar-muted); color: var(--color-solar);"
-            >
+
+        {#if flowsReady}
+          <!-- Gros % de couverture + échelle de conso -->
+          <div class="flex items-end justify-between gap-2">
+            <span class="flex items-center gap-2">
               <svg
-                width="15"
-                height="15"
+                width="18"
+                height="18"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="currentColor"
+                stroke="var(--color-solar)"
                 stroke-width="2"
                 stroke-linecap="round"
                 stroke-linejoin="round"
@@ -246,104 +254,78 @@
                   d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"
                 />
               </svg>
-            </span>
-            <span class="flex items-baseline gap-0.5">
               <span
-                class="text-lg leading-none font-bold tabular-nums"
-                style="color: var(--color-fg);">{fmtNumber(solarSelfKwh, 1)}</span
-              >
-              <span class="text-[0.625rem] font-semibold" style="color: var(--color-muted-fg);"
-                >kWh</span
-              >
-            </span>
-            <span
-              class="text-center text-[0.625rem] leading-tight font-semibold tracking-wide uppercase"
-              style="color: var(--color-muted-fg);">Solaire<br />utilisé</span
-            >
-          </div>
-
-          <!-- ↓ Soutiré au réseau EDF (import) -->
-          <div
-            class="flex flex-col items-center gap-1.5 border-l px-1.5 pt-1"
-            style="border-color: var(--color-border);"
-          >
-            <span
-              class="flex h-7 w-7 items-center justify-center rounded-full"
-              style="background: var(--color-grid-energy-muted); color: var(--color-grid-energy);"
-            >
-              <svg
-                width="15"
-                height="15"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
-              </svg>
-            </span>
-            <span class="flex items-baseline gap-0.5">
-              <span
-                class="text-lg leading-none font-bold tabular-nums"
+                class="text-[2rem] leading-none font-bold tabular-nums"
                 style="color: var(--color-fg);"
-                >{anker.connected ? fmtNumber(gridImportKwh, 1) : '—'}</span
+                >{solarPct}<span class="text-lg font-semibold" style="color: var(--color-muted-fg);"
+                  >%</span
+                ></span
               >
-              {#if anker.connected}
-                <span class="text-[0.625rem] font-semibold" style="color: var(--color-muted-fg);"
-                  >kWh</span
-                >
-              {/if}
             </span>
             <span
-              class="text-center text-[0.625rem] leading-tight font-semibold tracking-wide uppercase"
-              style="color: var(--color-muted-fg);">Réseau<br />EDF</span
+              class="text-right text-[0.6875rem] leading-tight font-medium"
+              style="color: var(--color-muted-fg);"
+              >sur {fmtNumber(homeConsoKwh, 1)} kWh<br />consommés</span
             >
           </div>
 
-          <!-- ↑ Surplus injecté au réseau (export) -->
+          <!-- Barre empilée solaire | réseau (recessed glass) -->
           <div
-            class="flex flex-col items-center gap-1.5 border-l px-1.5 pt-1"
-            style="border-color: var(--color-border);"
+            class="relative h-7 overflow-hidden rounded-full"
+            style="background: var(--color-grid-energy); box-shadow: inset 1px 1px 2px oklch(0.3 0.03 286 / 0.2), inset -1px -1px 1px oklch(0.99 0.01 149 / 0.1);"
           >
-            <span
-              class="flex h-7 w-7 items-center justify-center rounded-full"
-              style="background: var(--color-battery-muted); color: var(--color-battery);"
+            <div
+              class="absolute inset-y-0 left-0 rounded-l-full transition-[width] duration-700"
+              style="width: {solarCoverage}%; background: var(--color-solar);"
+            ></div>
+          </div>
+
+          <!-- Légende -->
+          <div
+            class="flex items-center justify-between text-[0.6875rem] font-semibold"
+            style="color: var(--color-fg);"
+          >
+            <span class="flex items-center gap-1.5">
+              <span class="h-2 w-2 rounded-full" style="background: var(--color-solar);"></span>
+              Solaire {solarPct}%
+            </span>
+            <span class="flex items-center gap-1.5">
+              <span class="h-2 w-2 rounded-full" style="background: var(--color-grid-energy);"
+              ></span>
+              Réseau EDF {gridPct}%
+            </span>
+          </div>
+
+          <!-- Surplus renvoyé à EDF (part de la production) -->
+          {#if anker.connected && gridExportKwh > 0}
+            <div
+              class="flex items-center gap-1.5 text-[0.6875rem] font-medium"
+              style="color: var(--color-muted-fg);"
             >
               <svg
-                width="15"
-                height="15"
+                width="13"
+                height="13"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="currentColor"
-                stroke-width="2"
+                stroke="var(--color-battery)"
+                stroke-width="2.2"
                 stroke-linecap="round"
                 stroke-linejoin="round"
                 aria-hidden="true"
               >
                 <path d="M12 21V9M7 14l5-5 5 5M5 3h14" />
               </svg>
-            </span>
-            <span class="flex items-baseline gap-0.5">
-              <span
-                class="text-lg leading-none font-bold tabular-nums"
-                style="color: var(--color-fg);"
-                >{anker.connected ? fmtNumber(gridExportKwh, 1) : '—'}</span
+              Surplus renvoyé à EDF ·
+              <span class="font-semibold tabular-nums" style="color: var(--color-battery);"
+                >{fmtNumber(surplusPct, 1)} %</span
               >
-              {#if anker.connected}
-                <span class="text-[0.625rem] font-semibold" style="color: var(--color-muted-fg);"
-                  >kWh</span
-                >
-              {/if}
-            </span>
-            <span
-              class="text-center text-[0.625rem] leading-tight font-semibold tracking-wide uppercase"
-              style="color: var(--color-muted-fg);">Surplus<br />EDF</span
-            >
-          </div>
-        </div>
+            </div>
+          {/if}
+        {:else}
+          <p class="text-[13px]" style="color: var(--color-muted-fg);">
+            Bilan du jour en cours de mesure…
+          </p>
+        {/if}
       </div>
     {/snippet}
 
