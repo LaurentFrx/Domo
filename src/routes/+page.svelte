@@ -106,6 +106,10 @@
   const surplusPct = $derived(
     gridExportKwh > 0 ? (gridExportKwh / (solarSelfKwh + gridExportKwh)) * 100 : 0
   ); // part de la production solaire renvoyée à EDF
+  // Part EDF de la barre de couverture : bleu vif (le gris « réseau » du Sankey
+  // est trop discret sur un petit segment). Local à cette carte — ne touche pas
+  // au token --color-grid-energy (gris voulu ailleurs).
+  const EDF_BLUE = 'oklch(0.62 0.19 256)';
 
   // ─── 3 cards lifetime (depuis Anker, vraies données) ─────────────────
   const hasLifetime = $derived(anker.connected && anker.lifetimeProductionKwh > 0);
@@ -269,13 +273,13 @@
             >
           </div>
 
-          <!-- Barre empilée solaire | réseau (recessed glass) -->
+          <!-- Barre empilée solaire | réseau EDF (recessed glass) -->
           <div
-            class="relative h-7 overflow-hidden rounded-full"
-            style="background: var(--color-grid-energy); box-shadow: inset 1px 1px 2px oklch(0.3 0.03 286 / 0.2), inset -1px -1px 1px oklch(0.99 0.01 149 / 0.1);"
+            class="relative h-7 overflow-hidden rounded-md"
+            style="background: {EDF_BLUE}; box-shadow: inset 1px 1px 2px oklch(0.3 0.03 286 / 0.2), inset -1px -1px 1px oklch(0.99 0.01 149 / 0.1);"
           >
             <div
-              class="absolute inset-y-0 left-0 rounded-l-full transition-[width] duration-700"
+              class="absolute inset-y-0 left-0 transition-[width] duration-700"
               style="width: {solarCoverage}%; background: var(--color-solar);"
             ></div>
           </div>
@@ -290,8 +294,7 @@
               Solaire {solarPct}%
             </span>
             <span class="flex items-center gap-1.5">
-              <span class="h-2 w-2 rounded-full" style="background: var(--color-grid-energy);"
-              ></span>
+              <span class="h-2 w-2 rounded-full" style="background: {EDF_BLUE};"></span>
               Réseau EDF {gridPct}%
             </span>
           </div>
