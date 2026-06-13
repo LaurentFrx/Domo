@@ -7,6 +7,7 @@
   import { startDemoTicker, stopDemoTicker } from '$stores/demo-ticker.svelte';
   import { anker } from '$stores/anker.svelte';
   import { apsystems } from '$stores/apsystems.svelte';
+  import { em50 } from '$stores/em50.svelte';
   import { production } from '$stores/production.svelte';
   import { savings } from '$stores/savings.svelte';
   import { tariff } from '$stores/tariff.svelte';
@@ -66,6 +67,14 @@
   $effect(() => {
     apsystems.connect();
     return () => apsystems.disconnect();
+  });
+
+  // ─── Compteur Shelly Pro EM-50 (réseau EDF + conso cumulus, mesure locale) ──
+  // App-wide : alimente la carte « Compteur » (page Énergie) ET la sous-conso
+  // cumulus du Sankey de l'accueil. Poll 10 s, visibility-aware, idempotent.
+  $effect(() => {
+    em50.connect();
+    return () => em50.disconnect();
   });
 
   // ─── Économies d'autoconsommation (route locale, base recorder) ────────

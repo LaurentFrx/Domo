@@ -7,6 +7,7 @@
   import { savings } from '$stores/savings.svelte';
   import { settings } from '$stores/settings.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
+  import { em50 } from '$stores/em50.svelte';
   import { shelly } from '$stores/shelly.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { Tween } from 'svelte/motion';
@@ -309,6 +310,7 @@
         batteryDischargeW={batDischargeA}
         batterySoc={socA}
         gridPowerW={gridA}
+        cumulusW={em50.cumulusPowerW}
       />
 
       <!-- Colonne stats : remplit la hauteur du Sankey (justify-between) ─────── -->

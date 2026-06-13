@@ -31,6 +31,9 @@
     batterySoc: number;
     /** + import, - export. */
     gridPowerW: number;
+    /** Conso cumulus (W, mesure EM-50) — sous-conso de la Maison, affichée à part
+     *  quand il chauffe. 0 ⇒ pas de nœud Cumulus (rendu inchangé). */
+    cumulusW?: number;
   }
 
   // Le Sankey utilise les puissances du bilan AC (+ le SoC pour l'état repos).
@@ -41,7 +44,8 @@
     batteryChargeW,
     batteryDischargeW,
     batterySoc,
-    gridPowerW
+    gridPowerW,
+    cumulusW = 0
   }: Props = $props();
 
   /** Format Watts (séparateur de milliers, espace fine). */
@@ -56,6 +60,7 @@
   const BAT = 'var(--color-battery)';
   const HOME = 'var(--color-consumption)';
   const GRID = 'var(--color-grid-energy)';
+  const CUMULUS = 'var(--color-hp)'; // chauffe-eau : teinte chaude, distincte de la Maison
 
   // ─── Géométrie du Sankey (viewBox 400 × 320) ────────────────────────────
   const VB_W = 400;
@@ -198,7 +203,18 @@
       sources.push({ key: 'gridi', name: 'Réseau', sub: 'import', color: GRID, w: gridPowerW });
 
     const sinks: Item[] = [];
-    if (homePowerW > 1) sinks.push({ key: 'home', name: 'Maison', color: HOME, w: homePowerW });
+    // Cumulus (EM-50) = sous-conso de la Maison : on le SÉPARE visuellement quand
+    // il chauffe (> 50 W), sans double-compter (Maison = home − cumulus). Le split
+    // n'a lieu que si la Maison reste positive → sinon Maison entière (rendu
+    // identique à l'absence de mesure, ex. cumulus à l'arrêt en été).
+    const cumW = cumulusW > 50 ? cumulusW : 0;
+    const homeRest = homePowerW - cumW;
+    if (cumW > 0 && homeRest > 50) {
+      sinks.push({ key: 'home', name: 'Maison', color: HOME, w: homeRest });
+      sinks.push({ key: 'cumulus', name: 'Cumulus', sub: 'eau chaude', color: CUMULUS, w: cumW });
+    } else if (homePowerW > 1) {
+      sinks.push({ key: 'home', name: 'Maison', color: HOME, w: homePowerW });
+    }
     if (batteryChargeW > 1)
       sinks.push({ key: 'batc', name: 'Batterie', sub: 'charge', color: BAT, w: batteryChargeW });
     if (gridPowerW < -1)
