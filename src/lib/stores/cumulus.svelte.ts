@@ -19,6 +19,56 @@ import type { CumulusMode } from '$theme/tokens';
 import { hourOfDay, cumulusTemp } from '$utils/mock-curves';
 import { zigbee } from './zigbee.svelte';
 
+/** Miroir client de la config serveur (src/lib/server/cumulus/types.ts). */
+export interface CumulusConfigClient {
+  profile: 'solar_first' | 'balanced' | 'comfort_first';
+  tminConfortC: number;
+  tmaxSondeC: number;
+  comfortHysteresisC: number;
+  rechargeHysteresisC: number;
+  tempOffsetC: number;
+  surplusOnW: number;
+  surplusOffW: number;
+  surplusOffGraceSec: number;
+  minOnSec: number;
+  minOffSec: number;
+  antiCyclingSec: number;
+  forecastFaibleKwh: number;
+  autoOffDelaySec: number;
+  tempStaleSec: number;
+  tankFullPowerW: number;
+  tankFullConfirmSec: number;
+  faultConfirmSec: number;
+}
+
+export type CumulusAutoMode = 'auto' | 'manual' | 'off';
+
+/** Libellés FR des raisons de décision (affichage carte). */
+export const CUMULUS_REASON_LABELS: Record<string, string> = {
+  cold_start: 'Initialisation',
+  manual_on: 'Marche manuelle',
+  manual_off: 'Arrêt manuel',
+  vacation_off: 'Vacances',
+  safety_high: 'Sécurité — eau très chaude',
+  comfort_min: 'Confort garanti',
+  legionella: 'Cycle anti-légionellose',
+  solar: 'Surplus solaire',
+  offpeak: 'Heures creuses',
+  offpeak_boost: 'Heures creuses (renfort)',
+  tank_full: 'Ballon plein',
+  idle: 'En veille',
+  anticycle_hold: 'Maintien (anti-cycle)'
+};
+
+/** Libellés FR des anomalies (bandeau d'alerte). '' = rien à signaler. */
+export const CUMULUS_ANOMALY_LABELS: Record<string, string> = {
+  none: '',
+  relay_unreachable: 'Boîtier cumulus injoignable',
+  sensor_stale: 'Sonde de température silencieuse',
+  desync: 'Relais désynchronisé',
+  heater_fault: 'Aucune chauffe détectée (résistance ?)'
+};
+
 class CumulusState {
   mode = $state<'mock' | 'proxy' | 'direct'>('mock');
   connected = $state(true);
@@ -57,6 +107,28 @@ class CumulusState {
   relayTempC = $state<number | null>(null);
   #relayTimer: ReturnType<typeof setInterval> | null = null;
   #relayVis: (() => void) | null = null;
+
+  // ─── Orchestrateur (RÉEL, via /api/cumulus/orchestrator) ─────────
+  /** L'orchestrateur (moteur serveur) a-t-il répondu ? */
+  orchestratorConnected = $state(false);
+  /** Mode de pilotage : auto / manuel / vacances. */
+  autoMode = $state<CumulusAutoMode>('auto');
+  /** Raison brute de la décision courante (clé de CUMULUS_REASON_LABELS). */
+  decisionReason = $state<string>('idle');
+  /** Sous-mode (couleur) : OFF / PV / HC / FORCE. */
+  decisionSubMode = $state<CumulusMode>('OFF');
+  /** Anomalie courante (clé de CUMULUS_ANOMALY_LABELS). */
+  anomaly = $state<string>('none');
+  /** Horodatage du dernier tick (heartbeat — détecte un moteur muet). */
+  lastTickTs = $state<number | null>(null);
+  /** Ballon considéré plein (coupure thermostat mécanique détectée). */
+  ballonCharged = $state(false);
+  /** Horodatage de la dernière désinfection (ballon ≥60°C), null si jamais. */
+  disinfectLastTs = $state<number | null>(null);
+  /** Config effective du moteur (cibles/seuils) — null avant le 1er poll. */
+  config = $state<CumulusConfigClient | null>(null);
+  #orchTimer: ReturnType<typeof setInterval> | null = null;
+  #orchVis: (() => void) | null = null;
 
   // ─── Configuration (modifiable via /reglages) ────
   /** Seuil surplus PV pour ON (W). */
@@ -187,6 +259,103 @@ class CumulusState {
       this.relayConnected = true;
     } catch {
       this.refreshRelay(); // resync sur échec
+    }
+  }
+
+  // ─── Orchestrateur : lecture de l'état + commandes ──────────────
+  /** Lecture de l'état du moteur (mode, raison, énergie réelle, anomalie, config). */
+  async refreshOrchestrator() {
+    try {
+      const res = await fetch('/api/cumulus/orchestrator', { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      const s = d?.state;
+      if (s) {
+        if (s.autoMode === 'auto' || s.autoMode === 'manual' || s.autoMode === 'off')
+          this.autoMode = s.autoMode;
+        if (typeof s.lastReason === 'string') this.decisionReason = s.lastReason;
+        if (typeof s.lastSubMode === 'string') this.decisionSubMode = s.lastSubMode;
+        if (typeof s.anomaly === 'string') this.anomaly = s.anomaly;
+        this.lastTickTs = typeof s.lastTickTs === 'number' ? s.lastTickTs : null;
+        this.ballonCharged = !!s.ballonCharged;
+        this.disinfectLastTs = typeof s.lastDisinfectTs === 'number' ? s.lastDisinfectTs : null;
+        // L'énergie réelle (delta compteur EM-50) remplace le mock.
+        if (typeof s.energyTodayKwh === 'number')
+          this.energyTodayKwh = +s.energyTodayKwh.toFixed(2);
+      }
+      if (d?.config) this.config = d.config as CumulusConfigClient;
+      this.orchestratorConnected = true;
+      this.lastUpdate = new Date();
+    } catch {
+      this.orchestratorConnected = false;
+    }
+  }
+
+  /** Démarre le polling de l'orchestrateur (20 s, visibility-aware). Idempotent. */
+  connectOrchestrator() {
+    if (this.#orchTimer || typeof document === 'undefined') return;
+    this.refreshOrchestrator();
+    this.#orchTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') this.refreshOrchestrator();
+    }, 20_000);
+    this.#orchVis = () => {
+      if (document.visibilityState === 'visible') this.refreshOrchestrator();
+    };
+    document.addEventListener('visibilitychange', this.#orchVis);
+  }
+
+  disconnectOrchestrator() {
+    if (this.#orchTimer) {
+      clearInterval(this.#orchTimer);
+      this.#orchTimer = null;
+    }
+    if (this.#orchVis) {
+      document.removeEventListener('visibilitychange', this.#orchVis);
+      this.#orchVis = null;
+    }
+  }
+
+  async #postCommand(body: { autoMode?: CumulusAutoMode; manualRelayOn?: boolean }) {
+    try {
+      const res = await fetch('/api/cumulus/command', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (typeof d.relayOn === 'boolean') this.relayOn = d.relayOn;
+      }
+    } catch {
+      // l'optimisme reste ; le prochain refresh réconcilie
+    }
+    this.refreshOrchestrator();
+  }
+
+  /** Change le mode de pilotage (auto / manuel / vacances). Optimiste. */
+  async setAutoMode(mode: CumulusAutoMode) {
+    this.autoMode = mode;
+    await this.#postCommand({ autoMode: mode });
+  }
+
+  /** Force le relais (bascule implicitement en mode manuel). Optimiste. */
+  async setManualRelay(on: boolean) {
+    this.relayOn = on;
+    this.autoMode = 'manual';
+    await this.#postCommand({ manualRelayOn: on });
+  }
+
+  /** Met à jour la config du moteur (PUT /api/cumulus/config), renvoie la version effective. */
+  async saveConfig(partial: Partial<CumulusConfigClient>) {
+    try {
+      const res = await fetch('/api/cumulus/config', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(partial)
+      });
+      if (res.ok) this.config = (await res.json()) as CumulusConfigClient;
+    } catch {
+      // silencieux : l'UI garde la valeur saisie, le prochain refresh réconcilie
     }
   }
 }

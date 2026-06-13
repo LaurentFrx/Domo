@@ -14,7 +14,8 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "format": "prettier --write .",
-    "lint": "prettier --check ."
+    "lint": "prettier --check .",
+    "test:cumulus": "node --experimental-strip-types --test scripts/cumulus-decide.test.ts"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.0",
