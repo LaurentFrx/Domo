@@ -28,7 +28,7 @@
   onMount(() => {
     settings.hydrate(); // coût installation (ROI) + prix, depuis /api/settings
     zigbee.connect();
-    matter.connect(); // prise « Bureau multimédia » (conso électroménager)
+    matter.connect(); // prises Matter mesurées (Bureau multimédia, Home cinéma) — conso
     forecast.connect();
     // anker ET apsystems sont désormais connectés app-wide par +layout.svelte
     // (leur production entre dans le bilan de l'accueil). connect() est idempotent
@@ -61,8 +61,12 @@
       (d) => d.category === 'plug' && TRACKED_APPLIANCES.has(d.friendlyName.toLowerCase())
     )
   );
-  // Prise Matter « Bureau multimédia » (node 22) — mesure sa puissance (cluster 144).
-  const bureauPlug = $derived(matter.switches.find((s) => s.nodeId === 22) ?? null);
+  // Prises Matter à mesure de puissance suivies dans la conso : node 22 = Bureau
+  // multimédia, node 26 = Home cinéma (cluster 144). Disponibles uniquement.
+  const TRACKED_MATTER_PLUGS = new Set([22, 26]);
+  const matterPlugs = $derived(
+    matter.switches.filter((s) => TRACKED_MATTER_PLUGS.has(s.nodeId) && s.available)
+  );
 
   // ─── Section 1 : production RÉELLE (domo-recorder) ──────────────────
   // Graphe mono-série : la production réelle de /api/production/history.
@@ -676,21 +680,21 @@
   </div>
 
   <!-- ═══ Section 2 : Conso électroménager (Frigo, Lave-linge…) ═══ -->
-  {#if appliancePlugs.length > 0 || bureauPlug}
+  {#if appliancePlugs.length > 0 || matterPlugs.length > 0}
     <section class="flex flex-col gap-3">
       <h2
         class="text-[11px] font-semibold tracking-[0.08em] uppercase"
         style="color: var(--color-muted-fg);"
       >
-        Conso électroménager · {appliancePlugs.length + (bureauPlug ? 1 : 0)}
+        Conso électroménager · {appliancePlugs.length + matterPlugs.length}
       </h2>
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
         {#each appliancePlugs as device (device.ieee)}
           <ApplianceCard {device} />
         {/each}
-        {#if bureauPlug}
-          <ApplianceCard name={bureauPlug.name} power={bureauPlug.powerW ?? 0} />
-        {/if}
+        {#each matterPlugs as p (p.nodeId)}
+          <ApplianceCard name={p.name} power={p.powerW ?? 0} />
+        {/each}
       </div>
     </section>
   {/if}

@@ -56,11 +56,13 @@ const NODE_NAMES: Record<number, { name: string; room: string }> = {
 
 // Sonoff Matter Smart Switch — assignation par date de commissioning.
 // node 1 commissionné le 2026-05-15, node 22 le 2026-05-24, node 24 le
-// 2026-05-27 (commissioning via VPS, network_only mDNS).
+// 2026-05-27, node 26 le 2026-06-13 (tous network_only mDNS via le matter-server).
+// Le node 26 (Sonoff Smart Plug) mesure la conso du home cinéma (cluster 144).
 const SWITCH_NAMES: Record<number, { name: string; room: string }> = {
   1: { name: 'Sèche-serviette', room: 'Salle de bain' },
   22: { name: 'Bureau multimédia', room: 'Bureau' },
-  24: { name: 'Chargeur Lau', room: 'Séjour' }
+  24: { name: 'Chargeur Lau', room: 'Séjour' },
+  26: { name: 'Home cinéma', room: 'Séjour' }
 };
 
 // ─── Stores bridés (sécurité matérielle) ───────────────────────────────
