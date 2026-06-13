@@ -62,6 +62,30 @@
   /* Corps = vert alien saturé ; bright = cœur quasi blanc-vert (électrique). */
   --color-glow: oklch(0.86 0.23 152);
   --color-glow-bright: oklch(0.96 0.13 152);
+  --color-glow-a70: oklch(0.86 0.23 152 / 0.7);
+  --color-glow-a60: oklch(0.86 0.23 152 / 0.6);
+
+  /* ─── Halos box-shadow pré-calculés (oklch DIRECT) ───
+     JAMAIS color-mix() dans une box-shadow via var() : piège Chrome (rendu
+     cassé). Trois paliers par couleur : glow ~50 %, mid ~36 %, soft ~24 %. */
+  --color-primary-glow: oklch(0.541 0.281 293 / 0.5);
+  --color-primary-glow-mid: oklch(0.541 0.281 293 / 0.36);
+  --color-primary-glow-soft: oklch(0.541 0.281 293 / 0.24);
+  --color-battery-glow: oklch(0.627 0.194 149 / 0.5);
+  --color-battery-glow-mid: oklch(0.627 0.194 149 / 0.36);
+  --color-battery-glow-soft: oklch(0.627 0.194 149 / 0.24);
+  --color-solar-glow: oklch(0.795 0.184 86 / 0.5);
+  --color-solar-glow-mid: oklch(0.795 0.184 86 / 0.36);
+  --color-solar-glow-soft: oklch(0.795 0.184 86 / 0.24);
+  --color-consumption-glow: oklch(0.546 0.215 262 / 0.5);
+  --color-consumption-glow-mid: oklch(0.546 0.215 262 / 0.36);
+  --color-consumption-glow-soft: oklch(0.546 0.215 262 / 0.24);
+  --color-grid-energy-glow: oklch(0.708 0.012 280 / 0.5);
+  --color-grid-energy-glow-mid: oklch(0.708 0.012 280 / 0.36);
+  --color-grid-energy-glow-soft: oklch(0.708 0.012 280 / 0.24);
+  --color-hp-glow: oklch(0.6 0.118 25 / 0.5);
+  --color-hp-glow-mid: oklch(0.6 0.118 25 / 0.36);
+  --color-hp-glow-soft: oklch(0.6 0.118 25 / 0.24);
 
   /* ─── PV par orientation (prévision forecast-bridge) ─── */
   --color-sud: oklch(0.7 0.18 52);
@@ -170,6 +194,22 @@
   /* Glow encore plus électrique sur fond sombre (rendu « OVNI » Yeldra) */
   --color-glow: oklch(0.88 0.24 152);
   --color-glow-bright: oklch(0.97 0.12 152);
+  --color-glow-a70: oklch(0.88 0.24 152 / 0.7);
+  --color-glow-a60: oklch(0.88 0.24 152 / 0.6);
+
+  /* Halos box-shadow pré-calculés — variantes dark des tokens qui changent. */
+  --color-battery-glow: oklch(0.7 0.15 149 / 0.5);
+  --color-battery-glow-mid: oklch(0.7 0.15 149 / 0.36);
+  --color-battery-glow-soft: oklch(0.7 0.15 149 / 0.24);
+  --color-solar-glow: oklch(0.828 0.16 84.4 / 0.5);
+  --color-solar-glow-mid: oklch(0.828 0.16 84.4 / 0.36);
+  --color-solar-glow-soft: oklch(0.828 0.16 84.4 / 0.24);
+  --color-consumption-glow: oklch(0.65 0.16 262 / 0.5);
+  --color-consumption-glow-mid: oklch(0.65 0.16 262 / 0.36);
+  --color-consumption-glow-soft: oklch(0.65 0.16 262 / 0.24);
+  --color-grid-energy-glow: oklch(0.55 0.01 280 / 0.5);
+  --color-grid-energy-glow-mid: oklch(0.55 0.01 280 / 0.36);
+  --color-grid-energy-glow-soft: oklch(0.55 0.01 280 / 0.24);
 
   /* Plexiglass — valeurs calées au GlassTuner (dark) : biseau bleu charte (HG),
      ombre VERTE (BD), translucide. */
