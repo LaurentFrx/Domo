@@ -5,12 +5,13 @@
  *   - 'mock'    : valeurs réalistes (fallback tant que le bridge n'est pas
  *                 configuré, ou en cas d'erreur réseau).
  *   - 'direct'  : polling REST du microservice daikin-bridge sur le RPi4
- *                 (OAuth Onecta + cache), proxié en HTTPS via Caddy comme
- *                 l'anker-bridge. Activé dès que PUBLIC_DAIKIN_URL est défini.
+ *                 (OAuth Onecta + cache), via le PROXY AUTHENTIFIÉ de Domo
+ *                 (/api/daikin/* → loopback 8096). Le bridge n'est plus exposé
+ *                 publiquement (Caddy ne laisse passer que le callback OAuth).
  *
- * Contrat JSON du bridge (snake_case) :
- *   GET  {PUBLIC_DAIKIN_URL}/api/status            → StatusPayload | 503 (non configuré)
- *   POST {PUBLIC_DAIKIN_URL}/api/units/{id}/command  body: Command (champs partiels)
+ * Contrat JSON du proxy (snake_case, relayé du bridge) :
+ *   GET  /api/daikin/status              → StatusPayload | 503 (non configuré)
+ *   POST /api/daikin/units/{id}/command    body: Command (champs partiels)
  *
  * ⚠️ Onecta cloud est rate-limité (~200 req/jour). Le BRIDGE met l'état en
  * cache et n'interroge Onecta que toutes les ~10-15 min ; le FRONT poll le
@@ -24,8 +25,6 @@
  *   ailleurs : conso → /energie ; ambiante + humidité → thermo Zigbee
  *              de la pièce (pas l'unité Daikin).
  */
-
-import { env } from '$env/dynamic/public';
 
 export type DaikinOperationMode = 'heating' | 'cooling' | 'off';
 export type FanSpeed = 'auto' | 'quiet' | 'level1' | 'level2' | 'level3' | 'level4' | 'level5';
@@ -85,7 +84,8 @@ type Command = Partial<{
   swing_vertical: SwingMode;
 }>;
 
-const PUBLIC_DAIKIN_URL = env.PUBLIC_DAIKIN_URL || '';
+// Proxy server-side Domo (derrière l'auth cookie) — jamais le bridge en direct.
+const API_BASE = '/api/daikin';
 const POLL_INTERVAL_MS = 30_000;
 
 const TARGET_MIN = 16;
@@ -155,12 +155,6 @@ class DaikinState {
   connect() {
     if (typeof window === 'undefined') return;
     if (this.intervalId !== null) return;
-    if (!PUBLIC_DAIKIN_URL) {
-      // Pas de bridge configuré → on reste en mock, sans polling.
-      this.mode = 'mock';
-      this.status = 'unconfigured';
-      return;
-    }
     this.poll();
     this.intervalId = setInterval(() => this.poll(), POLL_INTERVAL_MS);
   }
@@ -170,13 +164,15 @@ class DaikinState {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
+    // Lâche les verrous optimistes : à la reconnexion, le snapshot fait foi
+    // (évite de garder des locks périmés d'une session de page précédente).
+    this.pending.clear();
   }
 
   private async poll() {
-    if (!PUBLIC_DAIKIN_URL) return;
     this.status = 'polling';
     try {
-      const res = await fetch(`${PUBLIC_DAIKIN_URL}/api/status`, {
+      const res = await fetch(`${API_BASE}/status`, {
         signal: AbortSignal.timeout(15_000)
       });
       if (res.status === 503) {
@@ -267,9 +263,8 @@ class DaikinState {
    * l'état réel. En mode mock (pas de bridge) : mutation locale seulement.
    */
   private async sendCommand(unitId: string, cmd: Command) {
-    if (!PUBLIC_DAIKIN_URL) return;
     try {
-      const res = await fetch(`${PUBLIC_DAIKIN_URL}/api/units/${unitId}/command`, {
+      const res = await fetch(`${API_BASE}/units/${encodeURIComponent(unitId)}/command`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(cmd),
