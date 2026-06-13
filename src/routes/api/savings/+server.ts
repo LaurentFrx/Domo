@@ -140,9 +140,22 @@ export const GET: RequestHandler = async () => {
       }
     }
 
+    // Import réseau du jour : PRÉFÉRER la mesure RÉELLE de l'EM-50 (compteur local
+    // fiable, table em50_daily de la même base) à l'import dérivé du cloud Anker
+    // (sujet aux fantômes figés). Fallback Anker si la table est absente (base
+    // pré-EM-50). Affine du même coup today.import_kwh (lu par le bilan Accueil).
+    let importWhToday = todayAgg.import_wh;
+    try {
+      const em = db.prepare('SELECT import_wh FROM em50_daily WHERE date = ?').get(today) as
+        | { import_wh: number }
+        | undefined;
+      if (em && Number.isFinite(em.import_wh)) importWhToday = em.import_wh;
+    } catch {
+      /* table em50_daily absente (base pré-EM-50) : on conserve l'import Anker */
+    }
     // Couverture solaire du jour : part de la conso couverte par le solaire.
     const kwhToday = (todayAgg.wh_hp + todayAgg.wh_hc) / 1000;
-    const importKwhToday = todayAgg.import_wh / 1000;
+    const importKwhToday = importWhToday / 1000;
     const denom = kwhToday + importKwhToday;
     // Clamp [0,100] : défensif (ex. import inconnu compté 0 quand l'anker tombe
     // mais l'APS produit → la part évitée pourrait dépasser le dénominateur).

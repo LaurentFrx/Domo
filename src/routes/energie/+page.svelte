@@ -10,6 +10,7 @@
   import { energyMonthly } from '$stores/energyMonthly.svelte';
   import { cumulus } from '$stores/cumulus.svelte';
   import { em50 } from '$stores/em50.svelte';
+  import { em50History } from '$stores/em50History.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { matter } from '$stores/matter.svelte';
   import { formatPower, formatCurrency } from '$utils/format';
@@ -26,6 +27,7 @@
   import ApplianceCard from '$components/tiles/ApplianceCard.svelte';
   import CumulusCard from '$components/cards/CumulusCard.svelte';
   import Em50Card from '$components/cards/Em50Card.svelte';
+  import Em50FlowChart from '$components/charts/Em50FlowChart.svelte';
 
   onMount(() => {
     settings.hydrate(); // coût installation (ROI) + prix, depuis /api/settings
@@ -44,8 +46,10 @@
     energyMonthly.connect();
     // Relais cumulus RÉEL (Shelly Pro 1) — état + on/off dans CumulusCard.
     cumulus.connectRelay();
-    // Compteur Shelly Pro EM-50 (réseau EDF + conso cumulus) — carte temps réel.
+    // Compteur Shelly Pro EM-50 : connecté app-wide (layout) ; rappel idempotent.
     em50.connect();
+    // Historique EM-50 (réseau + cumulus 24h, recorder) → graphe « Réseau & cumulus ».
+    em50History.connect();
   });
   onDestroy(() => {
     zigbee.disconnect();
@@ -54,7 +58,9 @@
     productionHistory.disconnect();
     energyMonthly.disconnect();
     cumulus.disconnectRelay();
-    em50.disconnect();
+    em50History.disconnect();
+    // em50 : PAS de disconnect ici — désormais connecté app-wide (layout), comme
+    // anker/apsystems. Le couper ici stopperait son polling sur les autres pages.
     // Pas de anker.disconnect() ni apsystems.disconnect() : leur cycle de vie
     // appartient au layout racine (utilisés app-wide, notamment par le dashboard).
   });
@@ -682,6 +688,9 @@
 
   <!-- ═══ Compteur temps réel — Shelly Pro EM-50 (réseau EDF + cumulus) ═══ -->
   <Em50Card />
+
+  <!-- ═══ Réseau & cumulus 24h — historique EM-50 (mesure locale, recorder) ═══ -->
+  <Em50FlowChart />
 
   <!-- ═══ Section 2 : Conso électroménager (Frigo, Lave-linge…) ═══ -->
   {#if appliancePlugs.length > 0 || bureauPlug}
