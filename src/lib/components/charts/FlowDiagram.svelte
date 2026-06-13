@@ -31,13 +31,9 @@
     batterySoc: number;
     /** + import, - export. */
     gridPowerW: number;
-    cumulusTempC: number;
-    cumulusPowerW: number;
-    cumulusOn: boolean;
   }
 
   // Le Sankey utilise les puissances du bilan AC (+ le SoC pour l'état repos).
-  // Les champs cumulus* restent dans Props pour la compat de l'appelant.
   let {
     pvSudW,
     pvOuestW,
