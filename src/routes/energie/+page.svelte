@@ -9,7 +9,9 @@
   import { settings } from '$stores/settings.svelte';
   import { energyMonthly } from '$stores/energyMonthly.svelte';
   import { cumulus } from '$stores/cumulus.svelte';
+  import { em50 } from '$stores/em50.svelte';
   import { preferences } from '$stores/preferences.svelte';
+  import { matter } from '$stores/matter.svelte';
   import { formatPower, formatCurrency } from '$utils/format';
   import {
     smoothLinePath,
@@ -23,10 +25,12 @@
   import ChartHoverLayer from '$components/charts/ChartHoverLayer.svelte';
   import ApplianceCard from '$components/tiles/ApplianceCard.svelte';
   import CumulusCard from '$components/cards/CumulusCard.svelte';
+  import Em50Card from '$components/cards/Em50Card.svelte';
 
   onMount(() => {
     settings.hydrate(); // coût installation (ROI) + prix, depuis /api/settings
     zigbee.connect();
+    matter.connect(); // prise « Bureau multimédia » (conso électroménager)
     forecast.connect();
     // anker ET apsystems sont désormais connectés app-wide par +layout.svelte
     // (leur production entre dans le bilan de l'accueil). connect() est idempotent
@@ -40,13 +44,17 @@
     energyMonthly.connect();
     // Relais cumulus RÉEL (Shelly Pro 1) — état + on/off dans CumulusCard.
     cumulus.connectRelay();
+    // Compteur Shelly Pro EM-50 (réseau EDF + conso cumulus) — carte temps réel.
+    em50.connect();
   });
   onDestroy(() => {
     zigbee.disconnect();
+    matter.disconnect();
     forecast.disconnect();
     productionHistory.disconnect();
     energyMonthly.disconnect();
     cumulus.disconnectRelay();
+    em50.disconnect();
     // Pas de anker.disconnect() ni apsystems.disconnect() : leur cycle de vie
     // appartient au layout racine (utilisés app-wide, notamment par le dashboard).
   });
@@ -58,6 +66,8 @@
       (d) => d.category === 'plug' && TRACKED_APPLIANCES.has(d.friendlyName.toLowerCase())
     )
   );
+  // Prise Matter « Bureau multimédia » (node 22) — mesure sa puissance (cluster 144).
+  const bureauPlug = $derived(matter.switches.find((s) => s.nodeId === 22) ?? null);
 
   // ─── Section 1 : production RÉELLE (domo-recorder) ──────────────────
   // Graphe mono-série : la production réelle de /api/production/history.
@@ -670,19 +680,25 @@
     </section>
   </div>
 
+  <!-- ═══ Compteur temps réel — Shelly Pro EM-50 (réseau EDF + cumulus) ═══ -->
+  <Em50Card />
+
   <!-- ═══ Section 2 : Conso électroménager (Frigo, Lave-linge…) ═══ -->
-  {#if appliancePlugs.length > 0}
+  {#if appliancePlugs.length > 0 || bureauPlug}
     <section class="flex flex-col gap-3">
       <h2
         class="text-[11px] font-semibold tracking-[0.08em] uppercase"
         style="color: var(--color-muted-fg);"
       >
-        Conso électroménager · {appliancePlugs.length}
+        Conso électroménager · {appliancePlugs.length + (bureauPlug ? 1 : 0)}
       </h2>
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
         {#each appliancePlugs as device (device.ieee)}
           <ApplianceCard {device} />
         {/each}
+        {#if bureauPlug}
+          <ApplianceCard name={bureauPlug.name} power={bureauPlug.powerW ?? 0} />
+        {/if}
       </div>
     </section>
   {/if}
