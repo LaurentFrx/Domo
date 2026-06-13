@@ -44,7 +44,7 @@
       return g;
     };
     for (const s of matter.shutters) ensure(s.room).shutters.push(s);
-    for (const sw of matter.switches) ensure(sw.room).switches.push(sw);
+    for (const sw of matter.commandableSwitches) ensure(sw.room).switches.push(sw);
     for (const d of zigbee.devices) ensure(d.room).zigbeeDevices.push(d);
     return [...map.values()].sort((a, b) => {
       const ca = a.shutters.length + a.switches.length + a.zigbeeDevices.length;
@@ -112,7 +112,7 @@
       (d) => !['sensor', 'plug'].includes(d.category) && !isHidden(d.friendlyName)
     )
   );
-  const hasFlatDevices = $derived(matter.switches.length + zigbee.devices.length > 0);
+  const hasFlatDevices = $derived(matter.commandableSwitches.length + zigbee.devices.length > 0);
 
   // ─── Tri custom des volets (ordre choisi par Laurent) ───
   const SHUTTER_ORDER = [
@@ -226,9 +226,9 @@
 
     <!-- ═══ Interrupteurs (switches Matter + portail / lumières Zigbee) — tuiles
          icône + nom, colorées vives quand ON, sans toggle ; grille 2 col sur iPhone ═══ -->
-    {#if matter.switches.length > 0 || flatZigbeeOthers.length > 0}
+    {#if matter.commandableSwitches.length > 0 || flatZigbeeOthers.length > 0}
       <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-2 sm:gap-3 lg:grid-cols-3 xl:grid-cols-4">
-        {#each matter.switches as sw (sw.nodeId)}
+        {#each matter.commandableSwitches as sw (sw.nodeId)}
           {#if sw.nodeId === 1}
             <!-- Sèche-serviette : doublon avec la carte « Salle de bain » (/climat) +
                  piloté par le daemon → masqué sur iPhone, gardé sur iPad/desktop. -->

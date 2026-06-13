@@ -32,6 +32,9 @@ export interface Switch {
   isOn: boolean;
   /** Puissance active mesurée (W) si la prise expose le cluster 144 ; sinon absent. */
   powerW?: number;
+  /** Alimentation critique : suivie en conso mais JAMAIS commandable (exclue de la
+   *  page Pièces et des actions groupées). Ex. prise du concentrateur Matter. */
+  monitorOnly?: boolean;
 }
 
 export interface DeviceGroup {
@@ -64,6 +67,12 @@ const SWITCH_NAMES: Record<number, { name: string; room: string }> = {
   24: { name: 'Chargeur Lau', room: 'Séjour' },
   26: { name: 'Home cinéma', room: 'Séjour' }
 };
+
+// Prises à ALIMENTATION CRITIQUE : suivies en conso mais JAMAIS commandables
+// (exclues de la page Pièces, des actions groupées, et coupure refusée côté store).
+// node 26 (Home cinéma) alimente l'Apple TV qui sert de CONCENTRATEUR Matter —
+// la couper tuerait tout le réseau Matter.
+const MONITOR_ONLY = new Set<number>([26]);
 
 // ─── Stores bridés (sécurité matérielle) ───────────────────────────────
 // La position du module (rapportée ET commandée via GoToLiftPercentage) va de
@@ -164,7 +173,15 @@ function parseSwitch(node: Record<string, unknown>): Switch | null {
   const rawP = attrs['1/144/8'];
   const powerW = typeof rawP === 'number' ? rawP / 1000 : undefined;
 
-  return { nodeId, name: meta.name, room: meta.room, available, isOn, powerW };
+  return {
+    nodeId,
+    name: meta.name,
+    room: meta.room,
+    available,
+    isOn,
+    powerW,
+    monitorOnly: MONITOR_ONLY.has(nodeId)
+  };
 }
 
 class MatterState {
@@ -178,6 +195,11 @@ class MatterState {
   everConnected = $state(false);
   private client: MatterClient | null = null;
 
+  /** Switches commandables : exclut les monitorOnly (alimentation critique). À
+   *  utiliser pour l'AFFICHAGE et la commande ; `switches` (tout) reste exposé
+   *  pour le suivi conso (page Énergie). */
+  commandableSwitches = $derived(this.switches.filter((s) => !s.monitorOnly));
+
   rooms = $derived.by<DeviceGroup[]>(() => {
     const grouped = new Map<string, DeviceGroup>();
     const ensure = (room: string): DeviceGroup => {
@@ -190,7 +212,8 @@ class MatterState {
     };
 
     for (const s of this.shutters) ensure(s.room).shutters.push(s);
-    for (const sw of this.switches) ensure(sw.room).switches.push(sw);
+    // monitorOnly exclus : aucune tuile commandable pour une alim critique.
+    for (const sw of this.commandableSwitches) ensure(sw.room).switches.push(sw);
 
     return [...grouped.values()].sort((a, b) => {
       const ca = a.shutters.length + a.switches.length;
@@ -284,12 +307,14 @@ class MatterState {
   }
 
   async turnOff(nodeId: number) {
+    // Sécurité : ne JAMAIS couper une prise à alimentation critique (concentrateur Matter).
+    if (this.switches.find((s) => s.nodeId === nodeId)?.monitorOnly) return;
     await this.client?.turnOff(nodeId);
   }
 
   async toggleSwitch(nodeId: number) {
     const sw = this.switches.find((s) => s.nodeId === nodeId);
-    if (!sw) return;
+    if (!sw || sw.monitorOnly) return; // alim critique : non commandable
     if (sw.isOn) {
       await this.client?.turnOff(nodeId);
     } else {
@@ -310,13 +335,18 @@ class MatterState {
   }
 
   async switchesOnInRoom(room: string) {
-    for (const sw of this.switches.filter((s) => s.available && s.room === room)) {
+    for (const sw of this.switches.filter(
+      (s) => s.available && s.room === room && !s.monitorOnly
+    )) {
       await this.client?.turnOn(sw.nodeId);
     }
   }
 
   async switchesOffInRoom(room: string) {
-    for (const sw of this.switches.filter((s) => s.available && s.room === room)) {
+    // !monitorOnly : un « tout éteindre » de pièce ne doit pas couper une alim critique.
+    for (const sw of this.switches.filter(
+      (s) => s.available && s.room === room && !s.monitorOnly
+    )) {
       await this.client?.turnOff(sw.nodeId);
     }
   }
