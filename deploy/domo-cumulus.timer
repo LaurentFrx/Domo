@@ -1,0 +1,15 @@
+# Planifie l'orchestrateur cumulus toutes les 60 s.
+# Installation : voir l'en-tête de domo-cumulus.service.
+
+[Unit]
+Description=Planifie l'orchestrateur cumulus toutes les 60 s
+
+[Timer]
+# Laisse le service Domo démarrer après un boot avant le 1er tick.
+OnBootSec=90s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=domo-cumulus.service
+
+[Install]
+WantedBy=timers.target

@@ -6,7 +6,7 @@
   import { forecast } from '$stores/forecast.svelte';
   import { weather } from '$stores/weather.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
-  import { cumulus } from '$stores/cumulus.svelte';
+  import { cumulus, type CumulusConfigClient } from '$stores/cumulus.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { settings } from '$stores/settings.svelte';
   import { thermostat } from '$stores/thermostat.svelte';
@@ -36,6 +36,7 @@
     zigbee.connect();
     forecast.connect();
     cumulus.connectRelay(); // relais Shelly cumulus → ligne « Connexions »
+    cumulus.refreshOrchestrator(); // config + état du moteur cumulus
     thermostat.connect(); // daemon thermostat sèche-serviette → « Connexions »
   });
   onDestroy(() => {
@@ -46,6 +47,17 @@
     cumulus.disconnectRelay();
     thermostat.disconnect();
   });
+
+  // ─── Config cumulus éditable (orchestrateur) ───────────────────────
+  // Copie locale bindable, seedée une fois la config réelle reçue du serveur ;
+  // chaque modification est persistée (PUT /api/cumulus/config, normalisé serveur).
+  let cumulusCfg = $state<CumulusConfigClient | null>(null);
+  $effect(() => {
+    if (cumulus.config && !cumulusCfg) cumulusCfg = { ...cumulus.config };
+  });
+  function saveCumulusCfg() {
+    if (cumulusCfg) cumulus.saveConfig($state.snapshot(cumulusCfg));
+  }
 
   // ─── Section 1 : Connexions ────────────────────────────────────────
   type ConnEntry = {
@@ -319,8 +331,9 @@
     >
       Cumulus
     </h2>
-    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
-      <div
+    {#if cumulusCfg}
+      <!-- Profil de régulation -->
+      <label
         class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
@@ -328,100 +341,180 @@
           class="text-[10px] font-semibold tracking-[0.04em] uppercase"
           style="color: var(--color-muted-fg);"
         >
-          Seuil surplus ON
+          Profil de régulation
         </span>
-        <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
-          {cumulus.surplusOnThreshold} W
-        </span>
-      </div>
-      <div
-        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
-        style="background: var(--color-card); border-color: var(--color-border);"
-      >
-        <span
-          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-          style="color: var(--color-muted-fg);"
+        <select
+          bind:value={cumulusCfg.profile}
+          onchange={saveCumulusCfg}
+          class="w-full bg-transparent text-[16px] font-semibold outline-none"
+          style="color: var(--color-fg);"
         >
-          Seuil surplus OFF
-        </span>
-        <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
-          {cumulus.surplusOffThreshold} W
-        </span>
-      </div>
-      <div
-        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
-        style="background: var(--color-card); border-color: var(--color-border);"
-      >
-        <span
-          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-          style="color: var(--color-muted-fg);"
+          <option value="solar_first">Solaire d'abord (éco)</option>
+          <option value="balanced">Équilibré</option>
+          <option value="comfort_first">Confort d'abord</option>
+        </select>
+      </label>
+
+      <!-- Températures (°C) -->
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <label
+          class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+          style="background: var(--color-card); border-color: var(--color-border);"
         >
-          Durée ON min.
-        </span>
-        <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
-          {Math.round(cumulus.minOnDurationSec / 60)} min
-        </span>
-      </div>
-      <div
-        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
-        style="background: var(--color-card); border-color: var(--color-border);"
-      >
-        <span
-          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-          style="color: var(--color-muted-fg);"
+          <span
+            class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+            style="color: var(--color-muted-fg);">Confort mini (°C)</span
+          >
+          <input
+            type="number"
+            step="1"
+            bind:value={cumulusCfg.tminConfortC}
+            onchange={saveCumulusCfg}
+            class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
+            style="color: var(--color-fg);"
+          />
+        </label>
+        <label
+          class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+          style="background: var(--color-card); border-color: var(--color-border);"
         >
-          Anti-cycling
-        </span>
-        <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
-          {Math.round(cumulus.antiCyclingSec / 60)} min
-        </span>
-      </div>
-      <div
-        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
-        style="background: var(--color-card); border-color: var(--color-border);"
-      >
-        <span
-          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-          style="color: var(--color-muted-fg);"
+          <span
+            class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+            style="color: var(--color-muted-fg);">Max sécurité (°C)</span
+          >
+          <input
+            type="number"
+            step="1"
+            bind:value={cumulusCfg.tmaxSondeC}
+            onchange={saveCumulusCfg}
+            class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
+            style="color: var(--color-alert);"
+          />
+        </label>
+        <label
+          class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+          style="background: var(--color-card); border-color: var(--color-border);"
         >
-          Cible
-        </span>
-        <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-primary);">
-          {cumulus.targetTempC}°C
-        </span>
+          <span
+            class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+            style="color: var(--color-muted-fg);">Calibration sonde (°C)</span
+          >
+          <input
+            type="number"
+            step="0.5"
+            bind:value={cumulusCfg.tempOffsetC}
+            onchange={saveCumulusCfg}
+            class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
+            style="color: var(--color-fg);"
+          />
+        </label>
       </div>
-      <div
-        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
-        style="background: var(--color-card); border-color: var(--color-border);"
-      >
-        <span
-          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-          style="color: var(--color-muted-fg);"
+
+      <!-- Surplus, durées, prévision -->
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <label
+          class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+          style="background: var(--color-card); border-color: var(--color-border);"
         >
-          Max sécurité
-        </span>
-        <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-alert);">
-          {cumulus.maxTempC}°C
-        </span>
-      </div>
-      <div
-        class="col-span-2 flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3 sm:col-span-3"
-        style="background: var(--color-card); border-color: var(--color-border);"
-      >
-        <span
-          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-          style="color: var(--color-muted-fg);"
+          <span
+            class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+            style="color: var(--color-muted-fg);">Surplus ON (W)</span
+          >
+          <input
+            type="number"
+            step="100"
+            bind:value={cumulusCfg.surplusOnW}
+            onchange={saveCumulusCfg}
+            class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
+            style="color: var(--color-primary);"
+          />
+        </label>
+        <label
+          class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+          style="background: var(--color-card); border-color: var(--color-border);"
         >
-          Plage HC
-        </span>
-        <span class="text-[20px] font-bold tabular-nums" style="color: var(--color-hc);">
-          {cumulus.hcStartHour}h – {cumulus.hcEndHour}h
-        </span>
-        <span class="text-[11px]" style="color: var(--color-muted-fg);">
-          Anti-légionellose ANSES ≥60°C tous les 7 jours · jamais désactivable
-        </span>
+          <span
+            class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+            style="color: var(--color-muted-fg);">Surplus OFF (W)</span
+          >
+          <input
+            type="number"
+            step="100"
+            bind:value={cumulusCfg.surplusOffW}
+            onchange={saveCumulusCfg}
+            class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
+            style="color: var(--color-primary);"
+          />
+        </label>
+        <label
+          class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+          style="background: var(--color-card); border-color: var(--color-border);"
+        >
+          <span
+            class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+            style="color: var(--color-muted-fg);">Peu de soleil si &lt; (kWh)</span
+          >
+          <input
+            type="number"
+            step="1"
+            bind:value={cumulusCfg.forecastFaibleKwh}
+            onchange={saveCumulusCfg}
+            class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
+            style="color: var(--color-solar);"
+          />
+        </label>
+        <label
+          class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+          style="background: var(--color-card); border-color: var(--color-border);"
+        >
+          <span
+            class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+            style="color: var(--color-muted-fg);">Durée ON min (s)</span
+          >
+          <input
+            type="number"
+            step="30"
+            bind:value={cumulusCfg.minOnSec}
+            onchange={saveCumulusCfg}
+            class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
+            style="color: var(--color-fg);"
+          />
+        </label>
+        <label
+          class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
+          style="background: var(--color-card); border-color: var(--color-border);"
+        >
+          <span
+            class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+            style="color: var(--color-muted-fg);">Anti-cycling (s)</span
+          >
+          <input
+            type="number"
+            step="30"
+            bind:value={cumulusCfg.antiCyclingSec}
+            onchange={saveCumulusCfg}
+            class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
+            style="color: var(--color-fg);"
+          />
+        </label>
       </div>
-    </div>
+
+      <p class="text-[11px] leading-relaxed" style="color: var(--color-muted-fg);">
+        Le moteur décide QUAND chauffer ; c'est le CUMULUS (sa molette) qui décide la fin : il coupe
+        l'alimentation quand l'eau est à sa consigne, et le moteur le détecte (conso → 0). Aucune
+        cible de température. « Solaire d'abord » : ouvre le relais dès qu'il y a du surplus PV, et
+        laisse le cumulus chauffer à fond (gratuit + désinfecté ≥60°C). La nuit (heures creuses
+        00:06–08:06), il ne chauffe QUE si peu de soleil est prévu demain (sous {cumulusCfg.forecastFaibleKwh}
+        kWh) — sinon rien. On ne relance une chauffe que lorsque l'eau a rebaissé de {cumulusCfg.rechargeHysteresisC}°C
+        sous la dernière charge. Confort mini {cumulusCfg.tminConfortC}°C toujours garanti ·
+        sécurité
+        {cumulusCfg.tmaxSondeC}°C · watchdog auto-off {Math.round(cumulusCfg.autoOffDelaySec / 60)} min.
+      </p>
+    {:else}
+      <p class="text-[12px]" style="color: var(--color-muted-fg);">
+        Chargement de la configuration…
+      </p>
+    {/if}
   </section>
 
   <!-- ═══ Section 3 bis : Thermostat sèche-serviette ═══ -->

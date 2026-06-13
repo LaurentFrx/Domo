@@ -42,6 +42,8 @@
     energyMonthly.connect();
     // Relais cumulus RÉEL (Shelly Pro 1) — état + on/off dans CumulusCard.
     cumulus.connectRelay();
+    // Orchestrateur (mode, raison de décision, énergie réelle, anomalie).
+    cumulus.connectOrchestrator();
   });
   onDestroy(() => {
     zigbee.disconnect();
@@ -50,6 +52,7 @@
     productionHistory.disconnect();
     energyMonthly.disconnect();
     cumulus.disconnectRelay();
+    cumulus.disconnectOrchestrator();
     // Pas de anker.disconnect() ni apsystems.disconnect() : leur cycle de vie
     // appartient au layout racine (utilisés app-wide, notamment par le dashboard).
   });

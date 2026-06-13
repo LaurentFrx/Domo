@@ -1,0 +1,28 @@
+# Orchestrateur cumulus — un « tick » du moteur de chauffe.
+#
+# Déclenché toutes les 60 s par domo-cumulus.timer : appelle l'endpoint interne
+# /api/cumulus/tick (auth Bearer, bypass cookie en match exact dans hooks.server.ts).
+# Le moteur lit capteurs/tarif/prévision/relais, décide, et pilote le Shelly
+# (watchdog auto-off armé à chaque ON).
+#
+# ⚠ NON géré par le CI/CD (comme domo-recorder) — installation MANUELLE sur le VPS :
+#   sudo cp deploy/domo-cumulus.service deploy/domo-cumulus.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now domo-cumulus.timer
+#   journalctl -u domo-cumulus -f         # suivre les ticks
+# Pré-requis : CUMULUS_TICK_TOKEN défini dans /home/laurent/domo/.env.
+
+[Unit]
+Description=Domo — orchestrateur cumulus (un tick du moteur de chauffe)
+Documentation=file:/home/laurent/domo/src/lib/server/cumulus/engine.ts
+After=network-online.target domo.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=laurent
+Group=laurent
+EnvironmentFile=-/home/laurent/domo/.env
+# -f : échoue (visible dans journalctl) si l'endpoint renvoie une erreur HTTP.
+# -m 50 : borne sous l'intervalle du timer (60 s).
+ExecStart=/usr/bin/curl -fsS -m 50 -X POST -H "Authorization: Bearer ${CUMULUS_TICK_TOKEN}" http://127.0.0.1:3000/api/cumulus/tick

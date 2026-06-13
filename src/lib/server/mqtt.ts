@@ -50,6 +50,15 @@ function getClient(): MqttClient {
   return client;
 }
 
+/**
+ * Expose le client singleton pour les souscriptions serveur (ex. lecture
+ * permanente de la sonde température cumulus). Réutilise la MÊME connexion que
+ * pulsePortail() — un seul client MQTT par process.
+ */
+export function getMqttClient(): MqttClient {
+  return getClient();
+}
+
 /** Résout quand le client est connecté, rejette au-delà de `timeoutMs`. */
 function waitConnected(c: MqttClient, timeoutMs: number): Promise<void> {
   if (c.connected) return Promise.resolve();

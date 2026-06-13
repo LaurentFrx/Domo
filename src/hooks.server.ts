@@ -41,6 +41,13 @@ export const handle: Handle = async ({ event, resolve }) => {
     return withApiCacheControl(pathname, await resolve(event));
   }
 
+  // Endpoint tick de l'orchestrateur cumulus : appelé par le timer systemd en
+  // localhost, sans cookie. Auth par token (Bearer) appliquée dans la route.
+  // Match EXACT — ne PAS élargir aux autres routes /api/cumulus.
+  if (pathname === '/api/cumulus/tick') {
+    return withApiCacheControl(pathname, await resolve(event));
+  }
+
   if (isAsset(pathname) || isPublic(pathname)) {
     return resolve(event);
   }

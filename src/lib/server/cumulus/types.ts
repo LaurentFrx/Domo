@@ -1,0 +1,185 @@
+/**
+ * Orchestrateur cumulus — types partagés (moteur, état, config).
+ *
+ * Le moteur est scindé en deux :
+ *   - `decide(inputs, config, state)` : PUR (aucune I/O), testable — voir decide.ts
+ *   - `tick()` : impur (collecte des entrées, application relais, persistance) — engine.ts
+ *
+ * Toutes les entrées du moteur (y compris `isHC`, la date Paris, les délais de
+ * bascule tarifaire) sont pré-calculées dans `inputs.ts` et passées à `decide()`
+ * pour que celui-ci reste une fonction pure de ses arguments.
+ */
+
+import type { CumulusMode } from '$theme/tokens';
+
+/** Mode de pilotage choisi par l'utilisateur (persistant). */
+export type AutoMode = 'auto' | 'manual' | 'off';
+
+/** Raison de la décision courante — pilote l'affichage et la couleur UI. */
+export type DecisionReason =
+  | 'cold_start' // entrées insuffisantes (boot) → aucun ordre
+  | 'manual_on' // mode manuel, relais forcé ON
+  | 'manual_off' // mode manuel, relais forcé OFF
+  | 'vacation_off' // mode off (vacances) → OFF
+  | 'safety_high' // T ≥ Tmax (sonde) → OFF impératif
+  | 'comfort_min' // T < Tmin → ON garanti (filet famille)
+  | 'legionella' // cycle anti-légionellose → ON
+  | 'solar' // surplus PV → ON
+  | 'offpeak' // heures creuses (cible de base) → ON
+  | 'offpeak_boost' // heures creuses (cible renfort, peu de soleil demain) → ON
+  | 'tank_full' // coupure mécanique détectée (ballon plein) → OFF
+  | 'idle' // veille : ni surplus, ni HC → OFF
+  | 'anticycle_hold'; // transition bloquée par l'anti-court-cycle → maintien
+
+/** Anomalie détectée (visible dans l'UI, non bloquante sauf heater_fault). */
+export type Anomaly =
+  | 'none'
+  | 'relay_unreachable' // le Shelly ne répond pas
+  | 'sensor_stale' // la sonde de température est périmée/absente
+  | 'desync' // état logique ≠ état physique lu
+  | 'heater_fault'; // commandé ON depuis longtemps, aucune conso, eau froide
+
+/**
+ * Entrées d'un tick — toutes pré-calculées et « pures » pour `decide()`.
+ * Chaque source porte sa disponibilité/fraîcheur pour un repli prudent.
+ */
+export interface CumulusInputs {
+  /** Horodatage du tick (epoch ms). */
+  now: number;
+  /** Date locale Paris 'YYYY-MM-DD' (clé du compteur d'énergie du jour). */
+  todayParis: string;
+
+  // ── Température eau (sonde Zigbee thermo_cumulus, lue côté serveur) ──
+  /** Température corrigée de l'offset (°C), ou null si inconnue/périmée. */
+  tempC: number | null;
+  /** Âge de la dernière mesure (ms), ou null si jamais reçue. */
+  tempAgeMs: number | null;
+
+  // ── Réseau & conso cumulus (Shelly EM-50) ──
+  em50Available: boolean;
+  /** Puissance réseau signée : + soutirage EDF / − injection PV (W). */
+  gridPowerW: number;
+  /** Conso cumulus mesurée (W, ≥ 0). */
+  cumulusPowerW: number;
+  /** Compteur cumulatif conso cumulus (kWh, monotone). */
+  cumulusKwh: number;
+
+  // ── Tarif HP/HC ──
+  isHC: boolean;
+  /** Minutes avant la fin de la fenêtre HC (si en HC), sinon -1. */
+  minutesToHcEnd: number;
+
+  // ── Prévision PV ──
+  forecastAvailable: boolean;
+  /** Énergie PV prévue sur le prochain créneau diurne à venir (kWh). */
+  solNextDaylightKwh: number;
+
+  // ── Relais (état physique lu) ──
+  relayAvailable: boolean;
+  relayOn: boolean | null;
+}
+
+/** Configuration (réglages) — persistée dans la section `cumulus` de settings.json. */
+export interface CumulusConfig {
+  /** Profil de régulation (fixe les cibles par défaut, ajustables). */
+  profile: 'solar_first' | 'balanced' | 'comfort_first';
+
+  // Températures (°C, sur la sonde de surface — voir calibration tempOffsetC)
+  tminConfortC: number; // sous ce seuil → chauffe garantie (filet, en tout temps)
+  tmaxSondeC: number; // sécurité anti-emballement, au-dessus de la consigne du cumulus
+  comfortHysteresisC: number; // marge au-dessus de Tmin avant de couper « confort »
+  rechargeHysteresisC: number; // baisse de T requise pour rechauffer après « plein »
+  tempOffsetC: number; // calibration sonde (T_réelle ≈ T_sonde + offset)
+
+  // Surplus PV (W) — décision sur le surplus reconstitué = cumulusPowerW − gridPowerW
+  surplusOnW: number; // seuil d'enclenchement
+  surplusOffW: number; // seuil de maintien (hystérésis)
+  surplusOffGraceSec: number; // tolérance sous le seuil avant coupure (anti-nuage)
+
+  // Anti-court-cycle (s)
+  minOnSec: number;
+  minOffSec: number;
+  antiCyclingSec: number;
+
+  // Prévision
+  forecastFaibleKwh: number; // sous ce seuil → cible HC renfort
+
+  // Sûreté
+  autoOffDelaySec: number; // watchdog Shelly (toggle_after), ré-armé à chaque tick
+  tempStaleSec: number; // au-delà, la sonde est considérée périmée
+
+  // Détection fin de chauffe / panne (via conso EM-50)
+  tankFullPowerW: number; // sous cette conso (relais ON) → résistance coupée
+  tankFullConfirmSec: number; // durée de confirmation « ballon plein »
+  faultConfirmSec: number; // durée ON sans conso + eau froide → panne
+}
+
+/** Une entrée du journal de décisions (ring buffer). */
+export interface DecisionLogEntry {
+  ts: number;
+  reason: DecisionReason;
+  relayDesired: boolean;
+  tempC: number | null;
+  surplusW: number;
+  cumulusPowerW: number;
+  isHC: boolean;
+  anomaly: Anomaly;
+}
+
+/** État runtime persistant (data/cumulus-state.json). */
+export interface CumulusRuntimeState {
+  autoMode: AutoMode;
+  /** État voulu en mode manuel. */
+  manualRelayOn: boolean;
+  /** Dernier ordre émis par le moteur (null avant le 1er). */
+  relayDesired: boolean | null;
+
+  // Anti-court-cycle
+  lastOnTs: number | null;
+  lastOffTs: number | null;
+  lastTransitionTs: number | null;
+
+  // Hystérésis surplus (grâce anti-nuage)
+  surplusBelowSinceTs: number | null;
+
+  // Fin de chauffe / niveau de charge
+  lowPowerSinceTs: number | null;
+  ballonCharged: boolean;
+  chargedAtTempC: number | null;
+
+  /** Depuis quand le relais est physiquement ON en continu. */
+  onSinceTs: number | null;
+
+  // Énergie du jour (delta du compteur cumulatif EM-50)
+  energyDayDate: string;
+  energyTodayKwh: number;
+  lastCumulusKwh: number | null;
+
+  // Désinfection : dernière fois que le ballon a atteint ≥60°C (chauffe complète)
+  lastDisinfectTs: number | null;
+
+  // Heartbeat / UI
+  lastTickTs: number | null;
+  lastReason: DecisionReason;
+  lastSubMode: CumulusMode;
+  anomaly: Anomaly;
+  log: DecisionLogEntry[];
+}
+
+/** Résultat de `decide()` — décision + nouvel état à persister (pattern reducer pur). */
+export interface Decision {
+  /** Relais voulu (ON/OFF). */
+  relayDesired: boolean;
+  reason: DecisionReason;
+  /** Sous-mode pour la couleur/affichage UI. */
+  subMode: CumulusMode;
+  anomaly: Anomaly;
+  /** Surplus PV reconstitué au moment de la décision (W). */
+  surplusW: number;
+  /** Texte court d'explication (ex. « surplus 2100 W »). */
+  note: string;
+  /** Émettre réellement l'ordre ? false en cold-start / relais injoignable. */
+  apply: boolean;
+  /** Nouvel état runtime (à persister par tick()). */
+  nextState: CumulusRuntimeState;
+}
