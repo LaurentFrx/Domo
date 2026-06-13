@@ -40,11 +40,21 @@ export class MatterClient {
   connect() {
     if (this.ws) return;
     this.shouldReconnect = true;
+    // Un reconnect différé peut être en attente : on repart proprement.
+    this._clearReconnectTimer();
     this._connect();
   }
 
   disconnect() {
     this.shouldReconnect = false;
+    // Nettoie les timers en vol (refresh debounce + reconnexion différée) :
+    // sans ça, un getNodes/_connect orphelin peut repartir après destruction.
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    this._clearReconnectTimer();
+    this.reconnectDelay = 1000;
     this.ws?.close();
     this.ws = null;
     this._setStatus('disconnected');
@@ -114,9 +124,20 @@ export class MatterClient {
     this.onStatusChange(s);
   }
 
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private _clearReconnectTimer() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
   private _scheduleReconnect() {
     if (!this.shouldReconnect) return;
-    setTimeout(() => {
+    this._clearReconnectTimer();
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       if (this.shouldReconnect && !this.ws) this._connect();
     }, this.reconnectDelay);
     this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, this.maxReconnectDelay);

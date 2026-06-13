@@ -3,6 +3,7 @@
   import { page } from '$app/state';
   import Sidebar from '$components/layout/Sidebar.svelte';
   import TabBar from '$components/layout/TabBar.svelte';
+  import PullToRefresh from '$components/layout/PullToRefresh.svelte';
   import { startDemoTicker, stopDemoTicker } from '$stores/demo-ticker.svelte';
   import { anker } from '$stores/anker.svelte';
   import { apsystems } from '$stores/apsystems.svelte';
@@ -115,6 +116,9 @@
 >
   <!-- Calque d'ambiance (halos verts/indigo) : matière pour le verre + profondeur -->
   <div class="app-ambient" aria-hidden="true"></div>
+
+  <!-- Tirer-pour-rafraîchir (geste tactile en haut de page) -->
+  <PullToRefresh />
 
   <Sidebar />
 
