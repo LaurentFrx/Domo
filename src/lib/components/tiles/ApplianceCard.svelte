@@ -9,14 +9,30 @@
    */
   import type { ZigbeeDevice } from '$stores/zigbee.svelte';
 
+  // Source = une prise Zigbee (`device`) OU des valeurs directes (name/power/energy,
+  // ex. prise Matter avec mesure). Carte lecture seule, centrée sur « qui consomme ».
   interface Props {
-    device: ZigbeeDevice;
+    device?: ZigbeeDevice;
+    name?: string;
+    power?: number;
+    energy?: number | null;
   }
-  let { device }: Props = $props();
+  let { device, name, power: powerIn, energy: energyIn }: Props = $props();
 
-  const power = $derived(Number.isFinite(device.state.power) ? (device.state.power as number) : 0);
+  const displayName = $derived(device ? device.friendlyName : (name ?? ''));
+  const power = $derived(
+    device
+      ? Number.isFinite(device.state.power)
+        ? (device.state.power as number)
+        : 0
+      : (powerIn ?? 0)
+  );
   const energy = $derived(
-    Number.isFinite(device.state.energy) ? (device.state.energy as number) : null
+    device
+      ? Number.isFinite(device.state.energy)
+        ? (device.state.energy as number)
+        : null
+      : (energyIn ?? null)
   );
 
   // Remplissage en RACINE de la puissance (échelle ~0-2,5 kW) : une racine carrée
@@ -36,7 +52,7 @@
   <!-- Nom + énergie cumulée -->
   <div class="flex items-center justify-between gap-2">
     <span class="truncate text-[12px] leading-tight font-semibold" style="color: var(--color-fg);">
-      {device.friendlyName}
+      {displayName}
     </span>
     {#if energy !== null}
       <span class="shrink-0 text-[10px] tabular-nums" style="color: var(--color-muted-fg);">
@@ -75,7 +91,7 @@
     border-radius: 9999px;
     overflow: hidden;
     background: var(--color-muted);
-    box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.18);
+    box-shadow: inset 0 1px 2px oklch(0.1 0.01 286 / 0.18);
   }
   .appli-fill {
     height: 100%;
