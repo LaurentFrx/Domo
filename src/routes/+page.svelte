@@ -30,10 +30,14 @@
   const pvOuestW = $derived(
     anker.connected ? anker.sb2SolarW : Math.round(dashboard.solarPower * 1000 * 0.4)
   );
-  // Réseau FIABLE — dérivé du compteur Linky (anker.gridReliableW). Le grid_power_w
-  // instantané du cloud est inexploitable (paliers figés, signe instable, aveugle à
-  // l'APS → imports/exports fantômes de plusieurs centaines de W). Mock Shelly hors Anker.
-  const gridPowerW = $derived(anker.connected ? anker.gridReliableW : shelly.gridPowerW);
+  // Réseau FIABLE — PRIORITÉ à l'EM-50 (compteur local Shelly : mesure instantanée
+  // signée, recoupée Anker à ±10 W — la raison d'être de son intégration). Repli sur
+  // le dérivé Linky d'Anker (fiable mais lent, ~5 min) si l'EM-50 est injoignable ; le
+  // grid_power_w INSTANTANÉ du cloud Solix, lui, reste inexploitable (paliers figés,
+  // signe instable, fantômes). Mock Shelly en dernier recours (hors Anker).
+  const gridPowerW = $derived(
+    em50.available ? em50.gridPowerW : anker.connected ? anker.gridReliableW : shelly.gridPowerW
+  );
   const batterySoc = $derived(anker.connected ? (anker.averageSoc ?? 0) : dashboard.batteryLevel);
   // Charge (→ usage) et décharge (→ apport) SÉPARÉES, depuis l'agrégat fiable du
   // bridge. Le Sankey peut ainsi montrer la batterie du bon côté (voire les deux).
