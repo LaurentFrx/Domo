@@ -35,7 +35,7 @@
     class="pointer-events-none absolute size-2 rounded-full"
     style="left: {xPct}%; top: {yPct}%; transform: translate(-50%, -50%);
            background: var(--color-primary);
-           box-shadow: 0 0 0 2px var(--color-card), 0 0 0 3.5px color-mix(in oklab, var(--color-primary) 45%, transparent);
+           box-shadow: 0 0 0 2px var(--color-card), 0 0 0 3.5px var(--color-primary-glow);
            transition: left 0.12s ease, top 0.12s ease;"
   ></div>
 

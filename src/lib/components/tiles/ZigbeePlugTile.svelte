@@ -17,12 +17,29 @@
     Number.isFinite(device.state.energy) ? (device.state.energy as number) : null
   );
   const hasStateControl = $derived(typeof device.state.state === 'string');
+
+  function onToggle() {
+    if (!device.available || !hasStateControl) return;
+    haptic('light');
+    zigbee.toggle(device.friendlyName);
+  }
 </script>
 
-<div
-  class="zigbee-tile relative flex flex-col gap-2 rounded-[var(--radius-xl)] border p-3"
+<!-- Toute la carte fait office d'interrupteur quand le device est pilotable
+     (plus de toggle séparé : la carte EST le bouton). Sinon, simple tuile de
+     mesure (div non interactif). -->
+<svelte:element
+  this={hasStateControl ? 'button' : 'div'}
+  type={hasStateControl ? 'button' : undefined}
+  class="zigbee-tile flex w-full flex-col gap-2 rounded-[var(--radius-xl)] border p-3 text-left"
   class:opacity-50={!device.available}
-  style="background: var(--color-card); border-color: var(--color-border);"
+  class:plug-lit={isOn && hasStateControl}
+  style="background: var(--color-card); border-color: var(--color-border); --neon: var(--color-primary);"
+  role={hasStateControl ? 'switch' : undefined}
+  aria-checked={hasStateControl ? isOn : undefined}
+  aria-label={hasStateControl ? `Basculer ${device.friendlyName}` : undefined}
+  disabled={hasStateControl ? !device.available : undefined}
+  onclick={hasStateControl ? onToggle : undefined}
 >
   <div class="flex items-start justify-between gap-2">
     <div class="flex min-w-0 flex-col gap-0.5">
@@ -63,62 +80,52 @@
       {/if}
     </div>
   {/if}
-
-  {#if hasStateControl}
-    <button
-      type="button"
-      class="plug-toggle"
-      class:plug-on={isOn}
-      role="switch"
-      aria-checked={isOn}
-      aria-label="Basculer {device.friendlyName}"
-      onclick={() => {
-        haptic('light');
-        zigbee.toggle(device.friendlyName);
-      }}
-      disabled={!device.available}
-    >
-      <span class="plug-knob"></span>
-    </button>
-  {/if}
-</div>
+</svelte:element>
 
 <style>
-  .plug-toggle {
-    position: relative;
-    width: 46px;
-    height: 24px;
-    border-radius: 9999px;
-    background: var(--color-muted);
-    border: 1px solid var(--color-border);
-    cursor: pointer;
-    padding: 0;
+  .zigbee-tile {
     transition:
-      background-color var(--duration-normal) var(--ease-default),
-      border-color var(--duration-normal) var(--ease-default);
+      border-color var(--duration-normal) var(--ease-default),
+      box-shadow var(--duration-normal) var(--ease-default);
+  }
+  .zigbee-tile[role='switch'] {
+    cursor: pointer;
     -webkit-tap-highlight-color: transparent;
-    align-self: flex-start;
   }
-  .plug-on {
-    background: var(--color-primary);
-    border-color: var(--color-primary);
+  .zigbee-tile[role='switch']:hover:not(:disabled) {
+    border-color: var(--color-border-strong);
   }
-  .plug-toggle:disabled {
+  .zigbee-tile[role='switch']:active:not(:disabled) {
+    transform: scale(0.99);
+  }
+  .zigbee-tile[role='switch']:disabled {
     cursor: not-allowed;
   }
-  .plug-knob {
-    position: absolute;
-    top: 50%;
-    left: 2px;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: #ffffff;
-    box-shadow: 0 1px 3px oklch(0 0 0 / 0.2);
-    transform: translateY(-50%);
-    transition: left var(--duration-normal) var(--ease-spring);
+  .zigbee-tile:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
   }
-  .plug-on .plug-knob {
-    left: calc(100% - 21px);
+
+  /* Allumée : bord néon + halo (toutes tailles) → état visible sans toggle.
+     Halos en tokens pré-calculés (jamais color-mix en box-shadow : piège Chrome). */
+  .zigbee-tile.plug-lit {
+    border-color: var(--neon);
+    box-shadow:
+      0 0 0 1px var(--color-primary-glow-mid),
+      0 6px 16px -6px var(--color-primary-glow-mid);
+  }
+  /* iPhone : relief coloré + léger fond teinté (mesures W / kWh restent lisibles). */
+  @media (max-width: 639px) {
+    .zigbee-tile.plug-lit {
+      background-image: linear-gradient(
+        135deg,
+        color-mix(in oklch, var(--neon) 16%, transparent),
+        transparent 60%
+      ) !important;
+      box-shadow:
+        inset 0 1px 0.5px oklch(1 0 0 / 0.4),
+        0 6px 16px -4px var(--color-primary-glow),
+        0 0 0 1px var(--color-primary-glow-mid);
+    }
   }
 </style>

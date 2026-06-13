@@ -1,29 +1,23 @@
 <script lang="ts">
   /**
-   * Carte « Sèche-serviette » — thermostat de la salle de bain.
+   * Carte « Salle de bain » — thermostat du sèche-serviette (EN SERVICE).
    *
-   * Affiche la température (sonde « Thermo SdB »), le preset actif + sa consigne,
-   * la puissance appelée (duty cycle TPI), et permet de choisir un preset / lancer
-   * un boost / basculer auto↔manuel. La régulation réelle vit dans le daemon
-   * (thermostat-bridge) ; cette carte ne fait qu'AFFICHER + envoyer des consignes
-   * via le store `thermostat`. Auto-suffisante (lit le store).
+   * Harmonisée avec le Daikin : header (point + titre + switch on/off), cadran
+   * héros (température mesurée au centre, consigne en repère), pills de réglage
+   * (Éco / Confort / Boost 1 h), bandeau infos (humidité + extérieur), et en bas
+   * l'indicateur de chauffe effective (résistance grise/rouge) + le forçage.
+   * Pilote le daemon thermostat-bridge via le store `thermostat`.
    */
   import { thermostat, type ThermostatPreset } from '$stores/thermostat.svelte';
+  import { weather } from '$stores/weather.svelte';
+  import { zigbee } from '$stores/zigbee.svelte';
   import { haptic } from '$utils/haptic';
-  import Sparkline from '$components/ui/Sparkline.svelte';
+  import TempGauge from '$components/ui/TempGauge.svelte';
 
-  // Jauge arc 270° — mêmes proportions que CumulusCard (rayon 80, viewBox 180).
-  const ARC_RADIUS = 80;
-  const ARC_CIRCUMFERENCE = 2 * Math.PI * ARC_RADIUS;
-  const ARC_LENGTH = ARC_CIRCUMFERENCE * 0.75;
+  // Échelle du cadran thermomètre (température ambiante d'une SdB).
+  const SCALE_MIN = 10;
+  const SCALE_MAX = 26;
 
-  // Presets affichés (ordre, libellé, couleur token sémantique).
-  const PRESETS: { key: ThermostatPreset; label: string; color: string }[] = [
-    { key: 'frost', label: 'Hors-gel', color: 'var(--color-consumption)' },
-    { key: 'eco', label: 'Éco', color: 'var(--color-success)' },
-    { key: 'comfort', label: 'Confort', color: 'var(--color-hp)' },
-    { key: 'boost', label: 'Boost', color: 'var(--color-primary)' }
-  ];
   const PRESET_LABEL: Record<ThermostatPreset, string> = {
     frost: 'Hors-gel',
     eco: 'Éco',
@@ -32,28 +26,59 @@
     off: 'Arrêt',
     manual: 'Manuel'
   };
+  const PRESET_COLOR: Record<ThermostatPreset, string> = {
+    frost: 'var(--color-consumption)',
+    eco: 'var(--color-success)',
+    comfort: 'var(--color-hp)',
+    boost: 'var(--color-primary)',
+    off: 'var(--color-muted-fg)',
+    manual: 'var(--color-muted-fg)'
+  };
 
-  // Historique glissant de la température SdB (relevés de la session ; on n'ajoute
-  // que les variations réelles > 0,05 °C pour ne pas empiler des doublons).
-  let tempHistory = $state<number[]>(thermostat.roomTempC != null ? [thermostat.roomTempC] : []);
-  $effect(() => {
-    const t = thermostat.roomTempC;
-    const last = tempHistory[tempHistory.length - 1];
-    if (t != null && (last === undefined || Math.abs(t - last) > 0.05)) {
-      tempHistory = [...tempHistory, t].slice(-24);
-    }
-  });
+  // Pills de réglage : Éco / Confort (presets) + Boost 1 h (action dédiée).
+  const PILLS: { key: ThermostatPreset; label: string; color: string; boost?: boolean }[] = [
+    { key: 'eco', label: 'Éco', color: 'var(--color-success)' },
+    { key: 'comfort', label: 'Confort', color: 'var(--color-hp)' },
+    { key: 'boost', label: 'Boost 1 h', color: 'var(--color-primary)', boost: true }
+  ];
 
-  const duty = $derived(thermostat.dutyCycle ?? 0);
-  const dutyPct = $derived(Math.round(duty * 100));
-  const tempLabel = $derived(thermostat.roomTempC != null ? thermostat.roomTempC.toFixed(1) : '—');
-  const activeColor = $derived(
-    PRESETS.find((p) => p.key === thermostat.activePreset)?.color ?? 'var(--color-muted-fg)'
-  );
+  // « Chauffe » = le relais est réellement alimenté (sortie TPI du daemon).
+  const heating = $derived(thermostat.connected && thermostat.switchOn === true);
   const override = $derived(thermostat.override);
   const nextTransition = $derived(thermostat.nextTransition);
   const hasSafetyAlert = $derived(thermostat.windowOpen || thermostat.safety !== 'ok');
+  // Marche/arrêt du thermostat (≠ relais) : « éteint » = preset Arrêt / Hors-gel.
+  const isOff = $derived(thermostat.activePreset === 'off' || thermostat.activePreset === 'frost');
+  const isOn = $derived(thermostat.connected && !isOff);
+  const gaugeColor = $derived(
+    !thermostat.connected || isOff
+      ? 'var(--color-muted-fg)'
+      : heating
+        ? 'var(--color-hp)'
+        : PRESET_COLOR[thermostat.activePreset]
+  );
+  const outdoor = $derived(thermostat.outdoorTempC ?? weather.tempC);
 
+  // T°/HR réelles = capteur Zigbee « Thermo SdB » (le daemon lit le même capteur).
+  const sdbSensor = $derived(
+    zigbee.devices.find((d) => d.friendlyName.toLowerCase() === 'thermo sdb') ?? null
+  );
+  const roomTemp = $derived(
+    typeof sdbSensor?.state.temperature === 'number'
+      ? (sdbSensor.state.temperature as number)
+      : thermostat.roomTempC
+  );
+  const roomHum = $derived(
+    typeof sdbSensor?.state.humidity === 'number'
+      ? (sdbSensor.state.humidity as number)
+      : thermostat.humidity
+  );
+
+  function toggleOnOff() {
+    if (!thermostat.connected) return;
+    haptic('medium');
+    thermostat.setPreset(isOn ? 'off' : 'eco');
+  }
   function pick(preset: ThermostatPreset) {
     if (!thermostat.connected) return;
     haptic('light');
@@ -62,12 +87,7 @@
   function doBoost() {
     if (!thermostat.connected) return;
     haptic('medium');
-    thermostat.boost();
-  }
-  function setMode(mode: 'auto' | 'manual') {
-    if (!thermostat.connected) return;
-    haptic('light');
-    thermostat.setMode(mode);
+    thermostat.boost(60); // Boost 1 h
   }
   function backToPlanning() {
     haptic('light');
@@ -78,302 +98,348 @@
   }
 </script>
 
-<!-- ═══ Sèche-serviette — thermostat SdB ═══ -->
 <section
-  class="grid grid-cols-1 gap-4 rounded-[var(--radius-2xl)] border p-5 sm:grid-cols-[1fr_auto] sm:items-center"
-  style="background: var(--color-card); border-color: var(--color-border);"
+  class="thermo-card relative flex flex-col gap-5 overflow-hidden rounded-[var(--radius-2xl)] border p-5"
+  class:thermo-heating={heating}
+  style="background: var(--color-card); border-color: {heating
+    ? 'var(--color-hp)'
+    : 'var(--color-border)'}; --halo: {gaugeColor};"
 >
-  <div class="flex flex-col gap-3">
-    <!-- Hero : température mesurée -->
-    <div>
-      <span
-        class="text-[11px] font-semibold tracking-[0.08em] uppercase"
-        style="color: var(--color-muted-fg);"
-      >
-        Sèche-serviette · Salle de bain
-      </span>
-      <div class="mt-1 flex items-baseline gap-1.5">
+  <!-- Halo ambient (bas-droite, s'allume quand ça chauffe) -->
+  <div class="ambient-halo" aria-hidden="true"></div>
+
+  <!-- Header : point + titre + switch on/off (comme Daikin) -->
+  <div class="relative z-10">
+    <header class="absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-3">
+      <div class="flex min-w-0 items-center gap-2.5">
         <span
-          class="text-[44px] leading-none font-bold tracking-tight"
-          style="color: var(--color-fg); letter-spacing: -0.02em;"
+          class="h-2 w-2 shrink-0 rounded-full"
+          style:background-color={thermostat.connected
+            ? 'var(--color-battery)'
+            : 'var(--color-alert)'}
+          title={thermostat.connected ? 'En ligne' : 'Hors ligne'}
+          aria-hidden="true"
+        ></span>
+        <span
+          class="truncate text-[15px] leading-tight font-semibold"
+          style="color: var(--color-fg);"
         >
-          {tempLabel}
+          Salle de bain
         </span>
-        <span class="text-[20px] font-medium" style="color: var(--color-muted-fg);">°C</span>
       </div>
-      <div class="mt-1 text-[12px]" style="color: var(--color-muted-fg);">
-        {#if thermostat.targetTempC != null}cible {thermostat.targetTempC}°C ·
-        {/if}
-        {PRESET_LABEL[thermostat.activePreset]}
-        {#if thermostat.humidity != null}
-          · {thermostat.humidity}% HR{/if}
-      </div>
-    </div>
-
-    <!-- État de chauffe (lecture seule, piloté par le daemon) + bascule Auto/Manuel -->
-    <div
-      class="tw-relay flex items-center justify-between gap-3 rounded-[var(--radius-lg)] border px-3 py-2.5"
-      class:is-on={thermostat.connected && thermostat.switchOn === true}
-      class:is-offline={!thermostat.connected}
-      style="background: var(--color-muted); border-color: var(--color-border);"
-    >
-      <div class="flex items-center gap-2">
-        <span class="tw-dot h-2 w-2 shrink-0 rounded-full"></span>
-        <div class="flex flex-col">
-          <span class="text-[13px] leading-tight font-semibold" style="color: var(--color-fg);">
-            {#if !thermostat.connected}Daemon hors ligne{:else if thermostat.switchOn === true}Chauffe{:else}En
-              veille{/if}
-          </span>
-          <span class="text-[10px] leading-tight" style="color: var(--color-muted-fg);">
-            {#if thermostat.connected && thermostat.dutyCycle != null}
-              Puissance appelée {dutyPct}%
-            {:else}
-              Régulation TPI
-            {/if}
-          </span>
-        </div>
-      </div>
-      <div
-        class="tw-seg flex shrink-0 rounded-full p-0.5"
-        style="background: var(--color-border-strong);"
+      <button
+        type="button"
+        data-no-haptic
+        class="toggle-track shrink-0"
+        class:toggle-on={isOn}
+        role="switch"
+        aria-checked={isOn}
+        aria-label="Allumer / éteindre le chauffage salle de bain"
+        onclick={toggleOnOff}
+        disabled={!thermostat.connected}
       >
-        <button
-          type="button"
-          class="tw-seg-btn"
-          class:active={thermostat.mode === 'auto'}
-          data-no-haptic
-          disabled={!thermostat.connected}
-          onclick={() => setMode('auto')}
-        >
-          Auto
-        </button>
-        <button
-          type="button"
-          class="tw-seg-btn"
-          class:active={thermostat.mode === 'manual'}
-          data-no-haptic
-          disabled={!thermostat.connected}
-          onclick={() => setMode('manual')}
-        >
-          Manuel
-        </button>
-      </div>
-    </div>
-
-    <!-- Sélecteur de presets -->
-    <div class="grid grid-cols-4 gap-2">
-      {#each PRESETS as p (p.key)}
-        <button
-          type="button"
-          class="tw-preset"
-          class:active={thermostat.activePreset === p.key}
-          style="--preset-color: {p.color};"
-          data-no-haptic
-          disabled={!thermostat.connected}
-          onclick={() => pick(p.key)}
-        >
-          {p.label}
-        </button>
-      {/each}
-    </div>
-
-    <!-- Boost + retour planning -->
-    <div class="flex flex-wrap items-center gap-2">
-      <button type="button" class="tw-boost" disabled={!thermostat.connected} onclick={doBoost}>
-        ⚡ Boost
+        <span class="toggle-knob"></span>
       </button>
-      {#if override}
-        <span class="text-[11px]" style="color: var(--color-muted-fg);">
-          Forcé : {PRESET_LABEL[override.preset]}{#if override.until}
-            jusqu'à {fmtTime(override.until)}{/if}
-        </span>
-        <button type="button" class="tw-link" onclick={backToPlanning}>Revenir au planning</button>
-      {/if}
+    </header>
+
+    <div class="-mb-10 flex items-center justify-center">
+      <TempGauge
+        value={roomTemp != null ? Math.round(roomTemp * 2) / 2 : SCALE_MIN}
+        currentValue={thermostat.connected ? thermostat.targetTempC : null}
+        min={SCALE_MIN}
+        max={SCALE_MAX}
+        step={0.5}
+        color={gaugeColor}
+        readonly
+        disabled={roomTemp == null}
+        label={thermostat.connected && thermostat.targetTempC != null
+          ? `cible ${thermostat.targetTempC}°`
+          : ''}
+        offLabel="—"
+        offSubLabel="température inconnue"
+        onChange={() => {}}
+      />
     </div>
 
-    <!-- Raison du planning (mode auto) -->
-    {#if thermostat.connected && thermostat.mode === 'auto' && thermostat.reason}
+    <!-- Contexte planning (mode auto sans forçage) -->
+    {#if thermostat.connected && !override && thermostat.mode === 'auto'}
       <div
-        class="rounded-[var(--radius-md)] border-l-2 px-3 py-1.5 text-[12px]"
-        style="background: var(--color-muted); border-color: var(--color-primary); color: var(--color-muted-fg);"
-      >
-        <span style="color: var(--color-fg);">{thermostat.reason}</span>
-        {#if nextTransition}
-          <span> → {PRESET_LABEL[nextTransition.preset]} à {fmtTime(nextTransition.at)}</span>
-        {/if}
-      </div>
-    {/if}
-
-    <!-- Sécurité : fenêtre ouverte / sonde perdue / sécurité haute -->
-    {#if hasSafetyAlert}
-      <div
-        class="flex items-center justify-between rounded-[var(--radius-md)] border-l-2 px-3 py-1.5 text-[12px]"
-        style="background: var(--color-alert-muted); border-color: var(--color-alert); color: var(--color-alert);"
-      >
-        <span class="font-medium">
-          {#if thermostat.windowOpen}Fenêtre ouverte détectée — chauffe suspendue
-          {:else if thermostat.safety === 'sensor_lost'}Sonde « Thermo SdB » injoignable
-          {:else if thermostat.safety === 'over_max'}Sécurité haute atteinte
-          {:else}Anomalie de régulation{/if}
-        </span>
-      </div>
-    {/if}
-
-    <!-- Sparkline 24h -->
-    <div class="flex flex-col gap-1">
-      <span
-        class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+        class="flex items-center justify-center gap-1.5 text-[12px]"
         style="color: var(--color-muted-fg);"
       >
-        Température 24h
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+        <span>
+          Auto{#if nextTransition}
+            · {PRESET_LABEL[nextTransition.preset]} à {fmtTime(nextTransition.at)}{/if}
+        </span>
+      </div>
+    {/if}
+  </div>
+
+  <!-- Réglages : Éco / Confort / Boost 1 h -->
+  <div class="relative z-10 flex gap-2">
+    {#each PILLS as p (p.key)}
+      {@const active = thermostat.connected && thermostat.activePreset === p.key}
+      <button
+        type="button"
+        class="mode-pill flex-1"
+        class:mode-active={active}
+        style="--mp-color: {p.color};"
+        data-no-haptic
+        disabled={!thermostat.connected}
+        aria-pressed={active}
+        onclick={() => (p.boost ? doBoost() : pick(p.key))}
+      >
+        {p.label}
+      </button>
+    {/each}
+  </div>
+
+  <!-- Bandeau infos : humidité + extérieur -->
+  <div
+    class="relative z-10 grid grid-cols-2 gap-3 rounded-[var(--radius-lg)] border p-3"
+    style="border-color: var(--color-border); background: var(--color-muted);"
+  >
+    <div class="flex items-center gap-2">
+      <svg
+        class="shrink-0"
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        style="color: var(--color-consumption);"
+        aria-hidden="true"
+      >
+        <path
+          d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"
+        />
+      </svg>
+      {#if roomHum != null}
+        <span
+          class="text-[17px] font-semibold tabular-nums"
+          style="color: var(--color-fg); letter-spacing: -0.01em;"
+        >
+          {Math.round(roomHum)}%
+        </span>
+      {:else}
+        <span class="text-[17px] font-semibold" style="color: var(--color-muted-fg);">—</span>
+      {/if}
+    </div>
+    <div class="flex items-center justify-end gap-2">
+      <svg
+        class="shrink-0"
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        style="color: var(--color-solar);"
+        aria-hidden="true"
+      >
+        <path d="m2 13 7-5.5 7 5.5" />
+        <path d="M4 11.5V20h10v-8.5" />
+        <circle cx="18.5" cy="5.5" r="2" />
+        <path d="M18.5 1.5v1M18.5 9.5v-1M14.5 5.5h1M22.5 5.5h-1M15.7 2.7l.7.7M21.3 8.3l-.7-.7" />
+      </svg>
+      <span
+        class="text-[17px] font-semibold tabular-nums"
+        style="color: var(--color-fg); letter-spacing: -0.01em;"
+      >
+        {outdoor != null ? `${outdoor.toFixed(1)}°` : '—'}
       </span>
-      <Sparkline data={tempHistory} color="var(--color-hp)" height={28} />
     </div>
   </div>
 
-  <!-- Jauge arc 270° — puissance appelée (duty cycle TPI) -->
-  <div class="flex flex-col items-center justify-center">
-    <svg viewBox="0 0 180 180" class="h-44 w-44 sm:h-52 sm:w-52" aria-hidden="true">
-      <!-- Track -->
-      <circle
-        cx="90"
-        cy="90"
-        r={ARC_RADIUS}
+  <!-- Bas : chauffe effective + forçage, dans des pilules (harmonie avec les pills) -->
+  <div class="relative z-10 flex flex-wrap items-center justify-between gap-2">
+    <span
+      class="info-chip"
+      style="border-color: {heating
+        ? 'var(--color-hp)'
+        : 'var(--color-border)'}; background: {heating
+        ? 'var(--color-hp-muted)'
+        : 'var(--color-muted)'}; color: {heating ? 'var(--color-hp)' : 'var(--color-muted-fg)'};"
+      title={heating ? 'Le sèche-serviette chauffe' : 'Sèche-serviette en veille'}
+    >
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
         fill="none"
-        stroke="var(--color-border)"
-        stroke-width="10"
-        stroke-dasharray="{ARC_LENGTH} {ARC_CIRCUMFERENCE}"
-        stroke-dashoffset={ARC_CIRCUMFERENCE * 0.125}
+        stroke="currentColor"
+        stroke-width="2"
         stroke-linecap="round"
-        transform="rotate(90 90 90)"
-      />
-      <!-- Fill -->
-      <circle
-        cx="90"
-        cy="90"
-        r={ARC_RADIUS}
-        fill="none"
-        stroke={activeColor}
-        stroke-width="10"
-        stroke-dasharray="{ARC_LENGTH * duty} {ARC_CIRCUMFERENCE}"
-        stroke-dashoffset={ARC_CIRCUMFERENCE * 0.125}
-        stroke-linecap="round"
-        transform="rotate(90 90 90)"
-        style="transition: stroke-dasharray 600ms var(--ease-out);"
-      />
-      <text
-        x="90"
-        y="82"
-        text-anchor="middle"
-        font-size="28"
-        font-weight="700"
-        fill="var(--color-fg)"
-        style="font-variant-numeric: tabular-nums; letter-spacing: -0.01em;"
+        stroke-linejoin="round"
+        aria-hidden="true"
       >
-        {dutyPct}%
-      </text>
-      <text
-        x="90"
-        y="102"
-        text-anchor="middle"
-        font-size="11"
-        font-weight="500"
-        fill="var(--color-muted-fg)"
-      >
-        puissance
-      </text>
-    </svg>
-    <div class="mt-2 flex gap-4 text-[11px]" style="color: var(--color-muted-fg);">
-      <span>{PRESET_LABEL[thermostat.activePreset]}</span>
-      {#if thermostat.targetTempC != null}
-        <span class="opacity-50">·</span>
-        <span>cible {thermostat.targetTempC}°C</span>
-      {/if}
-    </div>
+        <!-- Résistance chauffante : ondulations de chaleur montantes -->
+        <path d="M8 19c-1.6-2-1.6-3.5 0-5.5s1.6-3.5 0-5.5" />
+        <path d="M12 19c-1.6-2-1.6-3.5 0-5.5s1.6-3.5 0-5.5" />
+        <path d="M16 19c-1.6-2-1.6-3.5 0-5.5s1.6-3.5 0-5.5" />
+      </svg>
+      {heating ? 'Chauffe' : 'En veille'}
+    </span>
+    {#if thermostat.connected && override}
+      <span class="info-chip" style="color: var(--color-muted-fg);">
+        <span
+          >Forcé{#if override.until}
+            jusqu'à {fmtTime(override.until)}{/if}</span
+        >
+        <button type="button" class="tw-link" onclick={backToPlanning}>Revenir à l'auto</button>
+      </span>
+    {/if}
   </div>
+
+  <!-- Sécurité : fenêtre ouverte / sonde perdue / sécurité haute -->
+  {#if hasSafetyAlert}
+    <div
+      class="relative z-10 rounded-[var(--radius-md)] border-l-2 px-3 py-2 text-[12px]"
+      style="background: var(--color-alert-muted); border-color: var(--color-alert); color: var(--color-alert);"
+    >
+      <span class="font-medium">
+        {#if thermostat.windowOpen}Fenêtre ouverte — chauffe en pause
+        {:else if thermostat.safety === 'sensor_lost'}Thermomètre injoignable
+        {:else if thermostat.safety === 'over_max'}Sécurité haute atteinte
+        {:else}Anomalie de chauffe{/if}
+      </span>
+    </div>
+  {/if}
 </section>
 
 <style>
-  /* Pastille d'état de chauffe */
-  .tw-dot {
-    background: var(--color-muted-fg);
+  .thermo-card {
     transition:
-      background 200ms ease,
-      box-shadow 200ms ease;
+      border-color var(--duration-normal) var(--ease-default),
+      box-shadow var(--duration-normal) var(--ease-default);
   }
-  .tw-relay.is-on .tw-dot {
-    background: var(--color-hp);
-    box-shadow: 0 0 7px var(--color-hp);
+
+  /* Halo ambient — couleur de l'état, en bas-droite, allumé quand ça chauffe */
+  .ambient-halo {
+    position: absolute;
+    right: -40%;
+    bottom: -40%;
+    width: 120%;
+    height: 120%;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle,
+      color-mix(in oklch, var(--halo) 22%, transparent) 0%,
+      transparent 60%
+    );
+    opacity: 0;
+    transition: opacity 800ms var(--ease-out);
+    pointer-events: none;
+    z-index: 0;
   }
-  .tw-relay.is-offline .tw-dot {
-    background: var(--color-muted-fg);
+  .thermo-heating .ambient-halo {
+    opacity: 1;
+  }
+
+  /* Switch on/off — repris à l'identique de la carte Daikin */
+  .toggle-track {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    border-radius: 9999px;
+    background: var(--color-muted);
+    border: 1px solid var(--color-border);
+    cursor: pointer;
+    padding: 0;
+    transition:
+      background-color var(--duration-normal) var(--ease-default),
+      border-color var(--duration-normal) var(--ease-default);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .toggle-on {
+    background: var(--color-consumption);
+    border-color: var(--color-consumption);
+  }
+  .toggle-knob {
+    position: absolute;
+    top: 50%;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 1px 3px oklch(0 0 0 / 0.2);
+    transform: translateY(-50%);
+    transition: left var(--duration-normal) var(--ease-spring);
+  }
+  .toggle-on .toggle-knob {
+    left: calc(100% - 21px);
+  }
+  .toggle-track:disabled {
+    cursor: not-allowed;
     opacity: 0.5;
   }
 
-  /* Segmented Auto / Manuel */
-  .tw-seg-btn {
-    padding: 0.25rem 0.6rem;
+  /* Pills de réglage — mêmes que Chaud/Froid du Daikin */
+  .mode-pill {
+    padding: 0.6rem 0.5rem;
+    border: 1.5px solid var(--color-border);
     border-radius: 9999px;
-    font-size: 11px;
-    font-weight: 600;
+    background: transparent;
     color: var(--color-muted-fg);
-    cursor: pointer;
-    transition:
-      background 180ms ease,
-      color 180ms ease;
-  }
-  .tw-seg-btn.active {
-    background: var(--color-card);
-    color: var(--color-fg);
-  }
-  .tw-seg-btn:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  /* Boutons preset */
-  .tw-preset {
-    padding: 0.5rem 0.25rem;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--color-border);
-    background: var(--color-muted);
-    color: var(--color-fg);
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     cursor: pointer;
-    transition:
-      background 180ms ease,
-      border-color 180ms ease,
-      color 180ms ease;
+    -webkit-tap-highlight-color: transparent;
+    transition: all var(--duration-fast) var(--ease-default);
   }
-  .tw-preset.active {
-    border-color: var(--preset-color);
-    background: color-mix(in oklch, var(--preset-color) 16%, transparent);
-    color: var(--preset-color);
+  .mode-pill:hover:not(:disabled) {
+    color: var(--mp-color);
+    border-color: var(--mp-color);
   }
-  .tw-preset:disabled {
-    opacity: 0.45;
+  .mode-pill:active:not(:disabled) {
+    transform: scale(0.96);
+  }
+  .mode-pill:disabled {
     cursor: not-allowed;
+    opacity: 0.4;
+  }
+  .mode-active {
+    border-color: var(--mp-color);
+    background: color-mix(in oklch, var(--mp-color) 16%, transparent);
+    color: var(--mp-color);
   }
 
-  /* Boost */
-  .tw-boost {
-    padding: 0.4rem 0.85rem;
-    border-radius: var(--radius-pill);
-    border: 1px solid var(--color-border);
+  /* Pilules d'info en bas (chauffe + forçage) — harmonie avec les pills */
+  .info-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.8rem;
+    border-radius: 9999px;
+    border: 1.5px solid var(--color-border);
     background: var(--color-muted);
-    color: var(--color-fg);
     font-size: 12px;
     font-weight: 600;
-    cursor: pointer;
-    transition: background 180ms ease;
-  }
-  .tw-boost:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
+    white-space: nowrap;
   }
 
-  /* Lien « revenir au planning » */
+  /* Lien « revenir à l'auto » */
   .tw-link {
     background: none;
     border: none;
@@ -385,10 +451,10 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .tw-dot,
-    .tw-seg-btn,
-    .tw-preset,
-    .tw-boost {
+    .ambient-halo,
+    .toggle-track,
+    .toggle-knob,
+    .mode-pill {
       transition: none;
     }
   }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import type { ZigbeeDevice } from '$stores/zigbee.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
   import { haptic } from '$utils/haptic';
@@ -27,16 +28,33 @@
   );
 
   // ─── Style sémantique (icône + couleur) selon le nom et la catégorie ───
+  // glow* = halos box-shadow pré-calculés (tokens app.css) — jamais de
+  // color-mix() dans une box-shadow via var() (piège Chrome).
   type Glyph = 'bulb' | 'light-switch' | 'cover' | 'plug';
+  type TileStyle = {
+    glyph: Glyph;
+    color: string;
+    muted: string;
+    glow: string;
+    mid: string;
+    soft: string;
+  };
 
-  const style = $derived.by<{ glyph: Glyph; color: string; muted: string }>(() => {
+  function palette(base: string, glyph: Glyph): TileStyle {
+    return {
+      glyph,
+      color: `var(--color-${base})`,
+      muted: `var(--color-${base}-muted)`,
+      glow: `var(--color-${base}-glow)`,
+      mid: `var(--color-${base}-glow-mid)`,
+      soft: `var(--color-${base}-glow-soft)`
+    };
+  }
+
+  const style = $derived.by<TileStyle>(() => {
     const n = device.friendlyName.toLowerCase();
     if (isCover || n.includes('portail') || n.includes('porte')) {
-      return {
-        glyph: 'cover',
-        color: 'var(--color-grid-energy)',
-        muted: 'var(--color-grid-energy-muted)'
-      };
+      return palette('grid-energy', 'cover');
     }
     if (
       isLight ||
@@ -46,31 +64,32 @@
       n.includes('bulb') ||
       n.includes('lampe')
     ) {
-      return {
-        glyph: 'bulb',
-        color: 'var(--color-solar)',
-        muted: 'var(--color-solar-muted)'
-      };
+      return palette('solar', 'bulb');
     }
     if (isSwitch) {
-      return {
-        glyph: 'light-switch',
-        color: 'var(--color-primary)',
-        muted: 'var(--color-primary-muted)'
-      };
+      return palette('primary', 'light-switch');
     }
-    return {
-      glyph: 'plug',
-      color: 'var(--color-primary)',
-      muted: 'var(--color-primary-muted)'
-    };
+    return palette('primary', 'plug');
   });
 
+  // Impulsion (portail) : le device n'a pas d'état durable → on « allume » la tuile
+  // 3 s en visuel (bouton coloré en relief) puis retour à l'état initial.
+  let pulsing = $state(false);
+  let pulseTimer: ReturnType<typeof setTimeout> | null = null;
   function onPulse() {
     if (!device.available) return;
     haptic('medium');
     zigbee.pulse(device.friendlyName);
+    pulsing = true;
+    if (pulseTimer) clearTimeout(pulseTimer);
+    pulseTimer = setTimeout(() => {
+      pulsing = false;
+      pulseTimer = null;
+    }, 3000);
   }
+  onDestroy(() => {
+    if (pulseTimer) clearTimeout(pulseTimer);
+  });
 
   function onToggle() {
     if (!device.available) return;
@@ -87,15 +106,27 @@
 </script>
 
 {#if isCover}
-  <!-- Cover (Portail) : impulsion via bouton dédié, pas de toggle -->
+  <!-- Cover (Portail) : la carte ENTIÈRE est le bouton d'impulsion ; s'allume 3 s (relief). -->
   <div
-    class="generic-tile flex w-full items-center gap-3 rounded-[var(--radius-xl)] border p-3"
+    class="generic-tile flex w-full flex-col items-center justify-center gap-1.5 rounded-[var(--radius-xl)] border p-3 sm:flex-row sm:justify-start sm:gap-3"
     class:opacity-50={!device.available}
-    style="background: var(--color-card); border-color: var(--color-border);"
+    class:pulsing
+    style="background: var(--color-card); border-color: var(--color-border); --neon: {style.color}; --neon-glow: {style.glow}; --neon-mid: {style.mid}; --neon-soft: {style.soft};"
+    role="button"
+    tabindex={device.available ? 0 : -1}
+    onclick={onPulse}
+    onkeydown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onPulse();
+      }
+    }}
   >
     <span
-      class="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-lg)]"
-      style="background: {style.muted}; color: {style.color};"
+      class="generic-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-lg)]"
+      style="background: {pulsing ? style.color : style.muted}; color: {pulsing
+        ? 'white'
+        : style.color};"
       aria-hidden="true"
     >
       <svg
@@ -114,34 +145,25 @@
         <line x1="4" y1="18" x2="20" y2="18" />
       </svg>
     </span>
-    <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+    <div class="flex min-w-0 flex-col items-center gap-0.5 sm:flex-1 sm:items-start">
       <span
-        class="truncate text-[13px] leading-tight font-semibold"
+        class="generic-name max-w-full truncate text-center text-[11px] leading-tight font-semibold sm:text-left sm:text-[13px]"
         style="color: var(--color-fg);"
       >
         {displayName}
       </span>
-      <span class="truncate text-[10px]" style="color: var(--color-muted-fg);">
+      <span class="hidden truncate text-[10px] sm:block" style="color: var(--color-muted-fg);">
         {device.vendor} · {device.model}
       </span>
     </div>
-    <button
-      type="button"
-      class="cover-btn shrink-0"
-      onclick={onPulse}
-      disabled={!device.available}
-      aria-label="Impulsion {displayName}"
-    >
-      Impulsion
-    </button>
   </div>
 {:else}
-  <!-- Switch / Light : template SwitchTile (icône + toggle + glow ON) -->
+  <!-- Switch / Light : la carte ENTIÈRE bascule l'état (plus de toggle), vive quand ON. -->
   <button
     type="button"
-    class="generic-tile flex w-full items-center gap-3 rounded-[var(--radius-xl)] border p-3 text-left"
+    class="generic-tile flex w-full flex-col items-center justify-center gap-1.5 rounded-[var(--radius-xl)] border p-3 sm:flex-row sm:justify-start sm:gap-3 sm:text-left"
     class:opacity-50={!device.available}
-    style="background: var(--color-card); border-color: var(--color-border); --neon: {style.color};"
+    style="background: var(--color-card); border-color: var(--color-border); --neon: {style.color}; --neon-glow: {style.glow}; --neon-mid: {style.mid}; --neon-soft: {style.soft};"
     role="switch"
     aria-checked={isOn}
     aria-label="Basculer {displayName}"
@@ -213,28 +235,20 @@
       {/if}
     </span>
 
-    <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+    <div class="flex min-w-0 flex-col items-center gap-0.5 sm:flex-1 sm:items-start">
       <span
-        class="truncate text-[13px] leading-tight font-semibold"
+        class="generic-name max-w-full truncate text-center text-[11px] leading-tight font-semibold sm:text-left sm:text-[13px]"
         style="color: var(--color-fg);"
       >
         {displayName}
       </span>
       <span
-        class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+        class="hidden text-[10px] font-semibold tracking-[0.04em] uppercase sm:block"
         style:color={isOn ? style.color : 'var(--color-muted-fg)'}
       >
         {isOn ? 'On' : 'Off'}
       </span>
     </div>
-
-    <span
-      class="toggle-track shrink-0"
-      class:toggle-on={isOn}
-      style:--toggle-on-color={style.color}
-    >
-      <span class="toggle-knob"></span>
-    </span>
   </button>
 
   {#if isLight && brightness !== null}
@@ -245,7 +259,7 @@
       value={brightness}
       oninput={(e) =>
         zigbee.setBrightness(device.friendlyName, +(e.currentTarget as HTMLInputElement).value)}
-      class="brightness-range mt-2"
+      class="brightness-range mt-2 hidden sm:block"
     />
   {/if}
 {/if}
@@ -272,17 +286,17 @@
     cursor: not-allowed;
   }
 
-  /* ─── Lueur néon quand ON (idem SwitchTile) ─── */
-  .generic-tile[aria-checked='true'] {
+  /* ─── Lueur néon quand ON / impulsion portail active (idem SwitchTile) ─── */
+  .generic-tile:is([aria-checked='true'], .pulsing) {
     border-color: var(--neon);
     box-shadow:
-      0 0 14px color-mix(in oklch, var(--neon) 50%, transparent),
-      0 0 32px color-mix(in oklch, var(--neon) 22%, transparent);
+      0 0 14px var(--neon-glow),
+      0 0 32px var(--neon-soft);
   }
-  .generic-tile[aria-checked='true'] .generic-icon {
+  .generic-tile:is([aria-checked='true'], .pulsing) .generic-icon {
     box-shadow:
-      0 0 10px color-mix(in oklch, var(--neon) 55%, transparent),
-      0 0 20px color-mix(in oklch, var(--neon) 30%, transparent);
+      0 0 10px var(--neon-glow),
+      0 0 20px var(--neon-soft);
   }
   .generic-icon {
     transition:
@@ -291,63 +305,36 @@
       box-shadow var(--duration-normal) var(--ease-default);
   }
 
-  /* ─── Toggle ─── */
-  .toggle-track {
-    position: relative;
-    display: inline-block;
-    width: 44px;
-    height: 24px;
-    border-radius: 9999px;
-    background: var(--color-muted);
-    border: 1px solid var(--color-border);
-    transition:
-      background-color var(--duration-normal) var(--ease-default),
-      border-color var(--duration-normal) var(--ease-default);
-  }
-  .toggle-on {
-    background: var(--toggle-on-color, var(--color-primary));
-    border-color: var(--toggle-on-color, var(--color-primary));
-  }
-  .toggle-knob {
-    position: absolute;
-    top: 50%;
-    left: 2px;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: #ffffff;
-    box-shadow: 0 1px 3px oklch(0 0 0 / 0.2);
-    transform: translateY(-50%);
-    transition: left var(--duration-normal) var(--ease-spring);
-  }
-  .toggle-on .toggle-knob {
-    left: calc(100% - 21px);
-  }
-
-  /* ─── Cover impulsion ─── */
-  .cover-btn {
-    display: inline-flex;
-    align-items: center;
-    padding: 0.375rem 0.875rem;
-    border-radius: 9999px;
-    background: var(--color-primary);
-    color: var(--color-primary-fg);
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    transition:
-      background var(--duration-fast) var(--ease-default),
-      transform var(--duration-fast) var(--ease-default);
-  }
-  .cover-btn:hover:not(:disabled) {
-    background: var(--color-primary-hover);
-  }
-  .cover-btn:active:not(:disabled) {
-    transform: scale(0.96);
-  }
-  .cover-btn:disabled {
-    cursor: not-allowed;
-    opacity: 0.4;
+  /* Vue iPhone : tuile ALLUMÉE (ou impulsion portail) = bouton coloré EN RELIEF.
+     Même recette que SwitchTile : sheen haut-gauche, arêtes internes, halo porté. */
+  @media (max-width: 639px) {
+    .generic-tile:is([aria-checked='true'], .pulsing) {
+      border-color: var(--neon);
+      background-color: var(--neon) !important;
+      background-image: linear-gradient(
+        135deg,
+        oklch(1 0 0 / 0.32) 0%,
+        oklch(1 0 0 / 0.08) 30%,
+        transparent 52%,
+        oklch(0.1 0.01 286 / 0.16) 100%
+      ) !important;
+      box-shadow:
+        inset 0 1px 0.5px oklch(1 0 0 / 0.55),
+        inset 1.5px 1.5px 2px oklch(1 0 0 / 0.22),
+        inset -1px -2px 6px oklch(0.1 0.01 286 / 0.2),
+        0 7px 18px -3px var(--neon-glow),
+        0 2px 6px var(--neon-mid);
+    }
+    .generic-tile:is([aria-checked='true'], .pulsing) .generic-icon {
+      background: oklch(1 0 0 / 0.25) !important;
+      color: #fff !important;
+      box-shadow:
+        inset 0 1px 0 oklch(1 0 0 / 0.45),
+        0 2px 4px oklch(0.1 0.01 286 / 0.2) !important;
+    }
+    .generic-tile:is([aria-checked='true'], .pulsing) .generic-name {
+      color: #fff !important;
+    }
   }
 
   /* ─── Brightness range (lights dimmables) ─── */

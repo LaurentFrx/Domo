@@ -56,16 +56,33 @@
   });
 
   // ─── Icône + couleur selon le nom du device ───────────────────────────
+  // glow* = halos box-shadow pré-calculés (tokens app.css) — jamais de
+  // color-mix() dans une box-shadow via var() (piège Chrome).
   type Glyph = 'ev-charger' | 'monitor' | 'towel-heater' | 'plug';
+  type TileStyle = {
+    glyph: Glyph;
+    color: string;
+    muted: string;
+    glow: string;
+    mid: string;
+    soft: string;
+  };
 
-  const style = $derived.by<{ glyph: Glyph; color: string; muted: string }>(() => {
+  function palette(base: string, glyph: Glyph): TileStyle {
+    return {
+      glyph,
+      color: `var(--color-${base})`,
+      muted: `var(--color-${base}-muted)`,
+      glow: `var(--color-${base}-glow)`,
+      mid: `var(--color-${base}-glow-mid)`,
+      soft: `var(--color-${base}-glow-soft)`
+    };
+  }
+
+  const style = $derived.by<TileStyle>(() => {
     const n = sw.name.toLowerCase();
     if (n.includes('chargeur') || n.includes('charger') || n.includes('ev')) {
-      return {
-        glyph: 'ev-charger',
-        color: 'var(--color-solar)',
-        muted: 'var(--color-solar-muted)'
-      };
+      return palette('solar', 'ev-charger');
     }
     if (
       n.includes('multim') ||
@@ -74,11 +91,7 @@
       n.includes('écran') ||
       n.includes('ecran')
     ) {
-      return {
-        glyph: 'monitor',
-        color: 'var(--color-consumption)',
-        muted: 'var(--color-consumption-muted)'
-      };
+      return palette('consumption', 'monitor');
     }
     if (
       n.includes('serviette') ||
@@ -86,25 +99,17 @@
       n.includes('seche') ||
       n.includes('radiateur')
     ) {
-      return {
-        glyph: 'towel-heater',
-        color: 'var(--color-hp)',
-        muted: 'var(--color-hp-muted)'
-      };
+      return palette('hp', 'towel-heater');
     }
-    return {
-      glyph: 'plug',
-      color: 'var(--color-primary)',
-      muted: 'var(--color-primary-muted)'
-    };
+    return palette('primary', 'plug');
   });
 </script>
 
 <button
   type="button"
-  class="switch-tile flex w-full items-center gap-3 rounded-[var(--radius-xl)] border p-3 text-left"
+  class="switch-tile flex w-full flex-col items-center justify-center gap-1 rounded-[var(--radius-xl)] border p-3 sm:flex-row sm:justify-start sm:gap-3 sm:text-left"
   class:opacity-50={!sw.available}
-  style="background: var(--color-card); border-color: var(--color-border); --neon: {style.color};"
+  style="background: var(--color-card); border-color: var(--color-border); --neon: {style.color}; --neon-glow: {style.glow}; --neon-mid: {style.mid}; --neon-soft: {style.soft};"
   role="switch"
   aria-checked={displayedOn}
   aria-label="Basculer {sw.name}"
@@ -187,25 +192,20 @@
     {/if}
   </span>
 
-  <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-    <span class="truncate text-[13px] leading-tight font-semibold" style="color: var(--color-fg);">
+  <div class="flex min-w-0 flex-col items-center gap-0.5 sm:flex-1 sm:items-start">
+    <span
+      class="switch-name max-w-full truncate text-center text-[11px] leading-tight font-semibold sm:text-left sm:text-[13px]"
+      style="color: var(--color-fg);"
+    >
       {sw.name}
     </span>
     <span
-      class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+      class="hidden text-[10px] font-semibold tracking-[0.04em] uppercase sm:block"
       style:color={displayedOn ? style.color : 'var(--color-muted-fg)'}
     >
       {displayedOn ? 'On' : 'Off'}
     </span>
   </div>
-
-  <span
-    class="toggle-track shrink-0"
-    class:toggle-on={displayedOn}
-    style:--toggle-on-color={style.color}
-  >
-    <span class="toggle-knob"></span>
-  </span>
 </button>
 
 <style>
@@ -234,13 +234,13 @@
   .switch-tile[aria-checked='true'] {
     border-color: var(--neon);
     box-shadow:
-      0 0 14px color-mix(in oklch, var(--neon) 50%, transparent),
-      0 0 32px color-mix(in oklch, var(--neon) 22%, transparent);
+      0 0 14px var(--neon-glow),
+      0 0 32px var(--neon-soft);
   }
   .switch-tile[aria-checked='true'] .switch-icon {
     box-shadow:
-      0 0 10px color-mix(in oklch, var(--neon) 55%, transparent),
-      0 0 20px color-mix(in oklch, var(--neon) 30%, transparent);
+      0 0 10px var(--neon-glow),
+      0 0 20px var(--neon-soft);
   }
   .switch-icon {
     transition:
@@ -249,35 +249,36 @@
       box-shadow var(--duration-normal) var(--ease-default);
   }
 
-  .toggle-track {
-    position: relative;
-    display: inline-block;
-    width: 44px;
-    height: 24px;
-    border-radius: 9999px;
-    background: var(--color-muted);
-    border: 1px solid var(--color-border);
-    transition:
-      background-color var(--duration-normal) var(--ease-default),
-      border-color var(--duration-normal) var(--ease-default);
-  }
-  .toggle-on {
-    background: var(--toggle-on-color, var(--color-primary));
-    border-color: var(--toggle-on-color, var(--color-primary));
-  }
-  .toggle-knob {
-    position: absolute;
-    top: 50%;
-    left: 2px;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: #ffffff;
-    box-shadow: 0 1px 3px oklch(0 0 0 / 0.2);
-    transform: translateY(-50%);
-    transition: left var(--duration-normal) var(--ease-spring);
-  }
-  .toggle-on .toggle-knob {
-    left: calc(100% - 21px);
+  /* Vue iPhone : tuile ALLUMÉE = bouton coloré EN RELIEF (verre bombé, lumière haut-gauche).
+     Sheen diagonal (reflet haut-gauche → ombre bas-droite) + arêtes internes + halo coloré
+     porté → effet bouton physique rétro-éclairé, jamais une couleur « plate ». */
+  @media (max-width: 639px) {
+    .switch-tile[aria-checked='true'] {
+      border-color: var(--neon);
+      background-color: var(--neon) !important;
+      background-image: linear-gradient(
+        135deg,
+        oklch(1 0 0 / 0.32) 0%,
+        oklch(1 0 0 / 0.08) 30%,
+        transparent 52%,
+        oklch(0.1 0.01 286 / 0.16) 100%
+      ) !important;
+      box-shadow:
+        inset 0 1px 0.5px oklch(1 0 0 / 0.55),
+        inset 1.5px 1.5px 2px oklch(1 0 0 / 0.22),
+        inset -1px -2px 6px oklch(0.1 0.01 286 / 0.2),
+        0 7px 18px -3px var(--neon-glow),
+        0 2px 6px var(--neon-mid);
+    }
+    .switch-tile[aria-checked='true'] .switch-icon {
+      background: oklch(1 0 0 / 0.25) !important;
+      color: #fff !important;
+      box-shadow:
+        inset 0 1px 0 oklch(1 0 0 / 0.45),
+        0 2px 4px oklch(0.1 0.01 286 / 0.2) !important;
+    }
+    .switch-tile[aria-checked='true'] .switch-name {
+      color: #fff !important;
+    }
   }
 </style>

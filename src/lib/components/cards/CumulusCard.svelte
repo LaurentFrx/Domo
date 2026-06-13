@@ -261,7 +261,7 @@
     border-radius: 9999px;
     background: oklch(0.98 0 0);
     transform: translateY(-50%);
-    box-shadow: 0 1px 3px oklch(0 0 0 / 0.3);
+    box-shadow: 0 1px 3px oklch(0.1 0.01 286 / 0.3);
     transition: left 220ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .cum-toggle.on .cum-knob {

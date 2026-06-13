@@ -33,6 +33,8 @@
     /** Haut du dégradé de fill — la « zone chaude » (défaut: color). */
     colorTo?: string;
     disabled?: boolean;
+    /** Lecture seule : affiche valeur + fill + repère, mais aucun drag ni poignée. */
+    readonly?: boolean;
     /** Sous-label sous le chiffre quand actif (ex: « Cible chaud »). */
     label?: string;
     /** Texte central quand off (ex: « À l'arrêt »). */
@@ -52,6 +54,7 @@
     colorFrom,
     colorTo,
     disabled = false,
+    readonly = false,
     label = '',
     offLabel = "À l'arrêt",
     offSubLabel = '',
@@ -165,7 +168,7 @@
   }
 
   function onPointerDown(ev: PointerEvent) {
-    if (disabled || !svgEl) return;
+    if (disabled || readonly || !svgEl) return;
     ev.preventDefault();
     dragging = true;
     svgEl.setPointerCapture(ev.pointerId);
@@ -206,6 +209,7 @@
     class="gauge-svg block h-full w-full"
     class:dragging
     class:disabled
+    class:readonly
     onpointerdown={onPointerDown}
     onpointermove={onPointerMove}
     onpointerup={onPointerUp}
@@ -214,8 +218,9 @@
     aria-valuemin={min}
     aria-valuemax={max}
     aria-valuenow={shown}
+    aria-readonly={readonly}
     aria-disabled={disabled}
-    tabindex={disabled ? -1 : 0}
+    tabindex={disabled || readonly ? -1 : 0}
   >
     <defs>
       <linearGradient
@@ -287,9 +292,11 @@
         <circle cx={marker.dot.x} cy={marker.dot.y} r="2.6" class="gauge-marker" />
       {/if}
 
-      <circle cx={thumb.x} cy={thumb.y} r="13" class="gauge-thumb-glow" />
-      <circle cx={thumb.x} cy={thumb.y} r="8.5" class="gauge-thumb" />
-      <circle cx={thumb.x} cy={thumb.y} r="3" class="gauge-thumb-core" />
+      {#if !readonly}
+        <circle cx={thumb.x} cy={thumb.y} r="13" class="gauge-thumb-glow" />
+        <circle cx={thumb.x} cy={thumb.y} r="8.5" class="gauge-thumb" />
+        <circle cx={thumb.x} cy={thumb.y} r="3" class="gauge-thumb-core" />
+      {/if}
     {/if}
   </svg>
 
@@ -330,7 +337,8 @@
   .gauge-svg.dragging {
     cursor: grabbing;
   }
-  .gauge-svg.disabled {
+  .gauge-svg.disabled,
+  .gauge-svg.readonly {
     cursor: default;
   }
   .gauge-svg:focus-visible {

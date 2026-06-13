@@ -362,9 +362,11 @@
   /* Liseré vert électrique + bloom doux qui débordent du bord de la carte. */
   .flow-card {
     border-color: color-mix(in oklab, var(--color-glow) 30%, var(--color-border));
+    /* Halos en tokens pré-calculés (--color-glow-a70/a60) : jamais de
+       color-mix() dans une box-shadow via var() (piège Chrome). */
     box-shadow:
-      0 0 0 1px color-mix(in oklab, var(--color-glow) 70%, transparent),
-      0 0 26px -6px color-mix(in oklab, var(--color-glow) 60%, transparent),
+      0 0 0 1px var(--color-glow-a70),
+      0 0 26px -6px var(--color-glow-a60),
       var(--shadow-md);
   }
 

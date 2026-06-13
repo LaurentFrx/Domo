@@ -248,8 +248,8 @@
     font-weight: 700;
     color: #ffffff;
     text-shadow:
-      0 1px 2px oklch(0 0 0 / 0.6),
-      0 0 4px oklch(0 0 0 / 0.4);
+      0 1px 2px oklch(0.1 0.01 286 / 0.6),
+      0 0 4px oklch(0.1 0.01 286 / 0.4);
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.02em;
     line-height: 1;
@@ -300,7 +300,7 @@
     height: 18px;
     border-radius: 50%;
     background: #ffffff;
-    box-shadow: 0 1px 3px oklch(0 0 0 / 0.2);
+    box-shadow: 0 1px 3px oklch(0.1 0.01 286 / 0.2);
     transform: translateY(-50%);
     transition: left var(--duration-normal) var(--ease-spring);
   }
