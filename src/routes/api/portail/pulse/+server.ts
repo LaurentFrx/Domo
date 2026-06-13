@@ -32,12 +32,38 @@ function extractBearer(header: string | null): string | null {
   return m ? m[1].trim() : null;
 }
 
+// ─── Rate-limit en mémoire (anti brute-force du token) ────────────────────
+// Fenêtre glissante par IP. Cet endpoint est le SEUL joignable sans cookie :
+// il mérite sa propre limite. 6/min couvre largement un usage raccourci iPhone.
+const RL_WINDOW_MS = 60_000;
+const RL_MAX_PER_WINDOW = 6;
+const rlHits = new Map<string, number[]>();
+
+function rateLimited(ip: string): boolean {
+  const now = Date.now();
+  const recent = (rlHits.get(ip) ?? []).filter((t) => now - t < RL_WINDOW_MS);
+  recent.push(now);
+  rlHits.set(ip, recent);
+  // GC grossier : purge les IP inactives pour borner la mémoire.
+  if (rlHits.size > 500) {
+    for (const [k, v] of rlHits) {
+      if (v.every((t) => now - t >= RL_WINDOW_MS)) rlHits.delete(k);
+    }
+  }
+  return recent.length > RL_MAX_PER_WINDOW;
+}
+
 export const POST: RequestHandler = async ({ request, getClientAddress }) => {
   let ip = 'unknown';
   try {
     ip = getClientAddress();
   } catch {
     // adresse indisponible (selon le proxy) — non bloquant
+  }
+
+  if (rateLimited(ip)) {
+    console.warn(`[portail] 429 rate-limited (ip=${ip})`);
+    return json({ ok: false, error: 'rate_limited' }, { status: 429 });
   }
 
   const expected = env.PORTAIL_TOKEN;

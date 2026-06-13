@@ -22,6 +22,15 @@ function isAsset(pathname: string): boolean {
   );
 }
 
+/** Données temps réel : jamais de cache navigateur/proxy sur les réponses API
+ *  (sauf si la route fixe elle-même sa politique, ex. Solcast 6 h). */
+function withApiCacheControl(pathname: string, response: Response): Response {
+  if (pathname.startsWith('/api/') && !response.headers.has('cache-control')) {
+    response.headers.set('cache-control', 'no-store');
+  }
+  return response;
+}
+
 export const handle: Handle = async ({ event, resolve }) => {
   const { pathname } = event.url;
 
@@ -29,7 +38,7 @@ export const handle: Handle = async ({ event, resolve }) => {
   // Sa propre auth par token (Authorization: Bearer) est appliquée dans la route.
   // Match EXACT — ne PAS élargir aux autres routes /api.
   if (pathname === '/api/portail/pulse') {
-    return resolve(event);
+    return withApiCacheControl(pathname, await resolve(event));
   }
 
   if (isAsset(pathname) || isPublic(pathname)) {
@@ -40,5 +49,5 @@ export const handle: Handle = async ({ event, resolve }) => {
     throw redirect(303, '/denied');
   }
 
-  return resolve(event);
+  return withApiCacheControl(pathname, await resolve(event));
 };

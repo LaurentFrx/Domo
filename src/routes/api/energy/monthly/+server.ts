@@ -163,11 +163,10 @@ export const GET: RequestHandler = async ({ url }) => {
     const payload: MonthlyPayload = { year, months };
     return json(payload);
   } catch (e) {
+    // Détail en log serveur SEULEMENT (un message SQLite peut exposer un chemin interne).
+    console.error('[energy/monthly] DB error:', e instanceof Error ? e.message : e);
     // DB absente / verrouillée / illisible → 503 + 12 mois ZÉRO, jamais de crash.
-    return json(
-      { year, months: emptyMonths(), error: e instanceof Error ? e.message : 'db error' },
-      { status: 503 }
-    );
+    return json({ year, months: emptyMonths(), error: 'database_unavailable' }, { status: 503 });
   } finally {
     try {
       db?.close();

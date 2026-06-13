@@ -177,11 +177,10 @@ export const GET: RequestHandler = async () => {
     };
     return json(payload);
   } catch (e) {
+    // Détail en log serveur SEULEMENT (un message SQLite peut exposer un chemin interne).
+    console.error('[savings] DB error:', e instanceof Error ? e.message : e);
     // DB absente / verrouillée / illisible → 503 + payload ZÉRO, jamais de crash.
-    return json(
-      { ...emptyPayload(now), error: e instanceof Error ? e.message : 'db error' },
-      { status: 503 }
-    );
+    return json({ ...emptyPayload(now), error: 'database_unavailable' }, { status: 503 });
   } finally {
     try {
       db?.close();

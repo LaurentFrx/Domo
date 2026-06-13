@@ -42,11 +42,10 @@ export const GET: RequestHandler = async ({ url }) => {
     const points = db.prepare(SQL).all(since);
     return json({ points });
   } catch (e) {
+    // Détail en log serveur SEULEMENT (un message SQLite peut exposer un chemin interne).
+    console.error('[history] DB error:', e instanceof Error ? e.message : e);
     // DB absente / verrouillée / illisible → 503 + points vides, jamais de crash.
-    return json(
-      { points: [], error: e instanceof Error ? e.message : 'db error' },
-      { status: 503 }
-    );
+    return json({ points: [], error: 'database_unavailable' }, { status: 503 });
   } finally {
     try {
       db?.close();
