@@ -124,15 +124,62 @@ async function readForecastNextDaylight(now: Date): Promise<{ available: boolean
   }
 }
 
+// ── Anker SolarBank (PV, batterie, réseau) — COLLECTE seule (ÉTAPE 1a) ──
+// Lu mais AUCUNE décision ne s'en sert encore ; posé pour le modèle E_avail (1b).
+const ankerUrl = () => (env.ANKER_URL || 'http://127.0.0.1:8095').replace(/\/+$/, '');
+
+interface AnkerRead {
+  available: boolean;
+  pvPowerW: number;
+  gridPowerW: number;
+  sbOutputPowerW: number;
+  batteryDischargeW: number;
+  socPct: number[];
+}
+
+async function readAnker(): Promise<AnkerRead> {
+  const fail: AnkerRead = {
+    available: false,
+    pvPowerW: 0,
+    gridPowerW: 0,
+    sbOutputPowerW: 0,
+    batteryDischargeW: 0,
+    socPct: []
+  };
+  try {
+    const r = await fetch(`${ankerUrl()}/api/status`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!r.ok) return fail;
+    const d = (await r.json()) as {
+      connected?: boolean;
+      solar_power_w?: number;
+      grid_power_w?: number;
+      sb_output_power_w?: number;
+      battery_discharge_power_w?: number;
+      batteries?: { soc?: number }[];
+    };
+    return {
+      available: d.connected !== false,
+      pvPowerW: Math.round(num(d.solar_power_w)),
+      gridPowerW: Math.round(num(d.grid_power_w)),
+      sbOutputPowerW: Math.round(num(d.sb_output_power_w)),
+      batteryDischargeW: Math.round(num(d.battery_discharge_power_w)),
+      socPct: Array.isArray(d.batteries) ? d.batteries.map((b) => Math.round(num(b?.soc))) : []
+    };
+  } catch {
+    return fail;
+  }
+}
+
 /** Assemble l'instantané d'entrées passé à decide(). */
 export async function collectInputs(config: CumulusConfig): Promise<CumulusInputs> {
   ensureTempSensor();
   const now = new Date();
 
-  const [relay, em50, forecast] = await Promise.all([
+  const [relay, em50, forecast, anker] = await Promise.all([
     readRelay(),
     readEm50(),
-    readForecastNextDaylight(now)
+    readForecastNextDaylight(now),
+    readAnker()
   ]);
 
   const t = getCumulusTemp();
@@ -156,6 +203,12 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     forecastAvailable: forecast.available,
     solNextDaylightKwh: forecast.kwh,
     relayAvailable: relay.available,
-    relayOn: relay.on
+    relayOn: relay.on,
+    ankerAvailable: anker.available,
+    pvPowerW: anker.pvPowerW,
+    ankerGridPowerW: anker.gridPowerW,
+    sbOutputPowerW: anker.sbOutputPowerW,
+    batteryDischargeW: anker.batteryDischargeW,
+    batterySocPct: anker.socPct
   };
 }

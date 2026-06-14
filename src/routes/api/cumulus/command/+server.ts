@@ -22,14 +22,15 @@ export const POST: RequestHandler = async ({ request }) => {
     throw error(400, 'JSON invalide');
   }
 
-  const cmd: { autoMode?: AutoMode; manualRelayOn?: boolean } = {};
+  const cmd: { autoMode?: AutoMode; manualRelayOn?: boolean; boost?: boolean } = {};
   if (typeof body.autoMode === 'string' && MODES.includes(body.autoMode as AutoMode)) {
     cmd.autoMode = body.autoMode as AutoMode;
   }
   if (typeof body.manualRelayOn === 'boolean') cmd.manualRelayOn = body.manualRelayOn;
+  if (typeof body.boost === 'boolean') cmd.boost = body.boost;
 
-  if (cmd.autoMode === undefined && cmd.manualRelayOn === undefined) {
-    throw error(400, 'autoMode ou manualRelayOn requis');
+  if (cmd.autoMode === undefined && cmd.manualRelayOn === undefined && cmd.boost === undefined) {
+    throw error(400, 'autoMode, manualRelayOn ou boost requis');
   }
 
   const result = await applyCommand(cmd);

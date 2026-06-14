@@ -28,6 +28,9 @@ import type {
 
 const SEC = 1000;
 
+/** Branches de chauffe AUTOMATIQUE débrayées en mode observation (manuel/boost exclus). */
+const OBSERVE_NEUTRALISES = new Set<DecisionReason>(['comfort_min', 'solar', 'offpeak_boost']);
+
 /** Sous-mode (couleur UI) déduit de la raison + de l'état du relais. */
 function subModeFor(reason: DecisionReason, on: boolean): CumulusMode {
   switch (reason) {
@@ -39,11 +42,13 @@ function subModeFor(reason: DecisionReason, on: boolean): CumulusMode {
     case 'comfort_min':
     case 'legionella':
     case 'manual_on':
+    case 'boost':
       return 'FORCE';
     case 'safety_high':
     case 'tank_full':
     case 'vacation_off':
     case 'manual_off':
+    case 'observe_only':
     case 'idle':
       return 'OFF';
     default: // cold_start, anticycle_hold
@@ -61,6 +66,7 @@ export function decide(
 
   const T = inputs.tempC; // °C, déjà corrigé de l'offset ; null = inconnue/périmée
   const tKnown = T !== null;
+  next.lastTempC = T; // exposé à l'UI (réserve d'eau chaude), jamais affiché en degrés bruts
 
   // Désinfection : tracée dès que l'eau (point bas, sonde doigt de gant) atteint ≥60°C —
   // ce qu'une chauffe complète garantit (le cumulus coupe à sa consigne >60°C). Pas de cycle.
@@ -97,6 +103,8 @@ export function decide(
       next.chargedAtTempC = null;
     }
   }
+  // Un « Chauffer maintenant » demandé alors que le ballon est déjà plein est sans objet.
+  if (next.boostUntilFull && next.ballonCharged) next.boostUntilFull = false;
 
   // ── Repli : relais injoignable → on ne pilote rien (cold start / panne tunnel) ──
   if (!inputs.relayAvailable) {
@@ -216,6 +224,11 @@ export function decide(
     note = 'ballon plein (le cumulus a coupé)';
     next.ballonCharged = true;
     next.chargedAtTempC = T; // température observée à la coupure du cumulus = sa consigne réelle
+    next.boostUntilFull = false; // chauffe à la demande terminée
+  } else if (next.boostUntilFull && !next.ballonCharged) {
+    desired = true;
+    reason = 'boost';
+    note = 'chauffe lancée à la demande (jusqu’au plein)';
   } else if (comfortWants) {
     desired = true;
     reason = 'comfort_min';
@@ -239,6 +252,17 @@ export function decide(
         ? 'creuses : ballon suffisant'
         : 'creuses : beau temps prévu, pas de chauffe'
       : 'veille (ni surplus ni HC)';
+  }
+
+  // ── Mode observation (ÉTAPE 1a) : neutralise les chauffes AUTOMATIQUES ──
+  // Le moteur ne commande PLUS le relais pour comfort_min / solar / offpeak_boost
+  // (il journalise « aurait chauffé »). Restent intacts : manuel, boost « Chauffer
+  // maintenant », tank_full, sécurité haute, et l'anti-court-cycle ci-dessous.
+  if (config.observationMode && desired && OBSERVE_NEUTRALISES.has(reason)) {
+    note = `observation : aurait chauffé (${reason}) — relais NON commandé`;
+    desired = false;
+    reason = 'observe_only';
+    bypass = false;
   }
 
   // ── Anti-court-cycle (sauf bypass) ──

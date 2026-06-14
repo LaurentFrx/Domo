@@ -41,6 +41,8 @@ function cfg(o: Partial<CumulusConfig> = {}): CumulusConfig {
     tankFullPowerW: 250,
     tankFullConfirmSec: 120,
     faultConfirmSec: 300,
+    observationMode: false,
+    batteryMaxDischargeW: 2400,
     ...o
   };
 }
@@ -49,6 +51,7 @@ function st(o: Partial<CumulusRuntimeState> = {}): CumulusRuntimeState {
   return {
     autoMode: 'auto',
     manualRelayOn: false,
+    boostUntilFull: false,
     relayDesired: null,
     lastOnTs: null,
     lastOffTs: null,
@@ -63,6 +66,7 @@ function st(o: Partial<CumulusRuntimeState> = {}): CumulusRuntimeState {
     lastCumulusKwh: null,
     lastDisinfectTs: NOW,
     lastTickTs: null,
+    lastTempC: 50,
     lastReason: 'idle',
     lastSubMode: 'OFF',
     anomaly: 'none',
@@ -87,6 +91,12 @@ function inp(o: Partial<CumulusInputs> = {}): CumulusInputs {
     solNextDaylightKwh: 20,
     relayAvailable: true,
     relayOn: false,
+    ankerAvailable: true,
+    pvPowerW: 0,
+    ankerGridPowerW: 0,
+    sbOutputPowerW: 0,
+    batteryDischargeW: 0,
+    batterySocPct: [],
     ...o
   };
 }
@@ -305,6 +315,31 @@ test('vacances → OFF forcé', () => {
   assert.equal(d.reason, 'vacation_off');
 });
 
+test('Chauffer maintenant (boost) → ON même sans surplus ni HC', () => {
+  const d = decide(
+    inp({ tempC: 48, isHC: false, relayOn: false }),
+    cfg(),
+    st({ boostUntilFull: true })
+  );
+  assert.equal(d.relayDesired, true);
+  assert.equal(d.reason, 'boost');
+});
+
+test('boost terminé tout seul quand le cumulus a coupé (plein)', () => {
+  const d = decide(
+    inp({ tempC: 62, relayOn: true, cumulusPowerW: 5 }),
+    cfg(),
+    st({
+      boostUntilFull: true,
+      onSinceTs: NOW - min(6),
+      lowPowerSinceTs: NOW - min(6),
+      lastOnTs: NOW - min(6)
+    })
+  );
+  assert.equal(d.reason, 'tank_full');
+  assert.equal(d.nextState.boostUntilFull, false);
+});
+
 // ── Énergie & charge ──
 test('énergie du jour : delta du compteur cumulatif', () => {
   const d = decide(inp({ cumulusKwh: 105 }), cfg(), st({ lastCumulusKwh: 104, energyTodayKwh: 1 }));
@@ -371,4 +406,78 @@ test('aucune branche « légionellose » : beau temps + eau tiède la nuit → v
   );
   assert.equal(d.relayDesired, false);
   assert.equal(d.reason, 'idle');
+});
+
+// ── Mode observation (ÉTAPE 1a) : zéro chauffe AUTOMATIQUE, manuel/boost intacts ──
+test('observation : confort (eau froide) → NE commande PAS le relais (aurait chauffé)', () => {
+  const d = decide(inp({ tempC: 40, relayOn: false }), cfg({ observationMode: true }), st());
+  assert.equal(d.relayDesired, false);
+  assert.equal(d.reason, 'observe_only');
+  assert.match(d.note, /aurait chauffé/);
+});
+
+test('observation : surplus solaire → NE commande PAS le relais', () => {
+  const d = decide(
+    inp({ tempC: 50, gridPowerW: -2500, relayOn: false }),
+    cfg({ observationMode: true }),
+    st()
+  );
+  assert.equal(d.relayDesired, false);
+  assert.equal(d.reason, 'observe_only');
+});
+
+test('observation : HC peu de soleil prévu → NE commande PAS le relais (zéro chauffe nocturne)', () => {
+  const d = decide(
+    inp({ tempC: 52, isHC: true, solNextDaylightKwh: 3 }),
+    cfg({ observationMode: true }),
+    st()
+  );
+  assert.equal(d.relayDesired, false);
+  assert.equal(d.reason, 'observe_only');
+});
+
+test('observation : boost « Chauffer maintenant » commande TOUJOURS le relais', () => {
+  const d = decide(
+    inp({ tempC: 48, relayOn: false }),
+    cfg({ observationMode: true }),
+    st({ boostUntilFull: true })
+  );
+  assert.equal(d.relayDesired, true);
+  assert.equal(d.reason, 'boost');
+});
+
+test('observation : commande MANUELLE reste opérante', () => {
+  const d = decide(
+    inp({ tempC: 50, relayOn: false }),
+    cfg({ observationMode: true }),
+    st({ autoMode: 'manual', manualRelayOn: true })
+  );
+  assert.equal(d.relayDesired, true);
+  assert.equal(d.reason, 'manual_on');
+});
+
+test('observation : sécurité haute coupe toujours', () => {
+  const d = decide(
+    inp({ tempC: 73, relayOn: true }),
+    cfg({ observationMode: true }),
+    st({
+      autoMode: 'manual',
+      manualRelayOn: true,
+      onSinceTs: NOW - min(10),
+      lastOnTs: NOW - min(10)
+    })
+  );
+  assert.equal(d.relayDesired, false);
+  assert.equal(d.reason, 'safety_high');
+});
+
+test('observation : tank_full (le cumulus a coupé) détecté normalement', () => {
+  const d = decide(
+    inp({ tempC: 58, relayOn: true, cumulusPowerW: 5 }),
+    cfg({ observationMode: true }),
+    st({ onSinceTs: NOW - min(6), lowPowerSinceTs: NOW - min(6), lastOnTs: NOW - min(6) })
+  );
+  assert.equal(d.relayDesired, false);
+  assert.equal(d.reason, 'tank_full');
+  assert.equal(d.nextState.ballonCharged, true);
 });

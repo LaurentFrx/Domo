@@ -31,6 +31,7 @@ export function defaultCumulusState(): CumulusRuntimeState {
   return {
     autoMode: 'auto',
     manualRelayOn: false,
+    boostUntilFull: false,
     relayDesired: null,
     lastOnTs: null,
     lastOffTs: null,
@@ -45,6 +46,7 @@ export function defaultCumulusState(): CumulusRuntimeState {
     lastCumulusKwh: null,
     lastDisinfectTs: null,
     lastTickTs: null,
+    lastTempC: null,
     lastReason: 'cold_start',
     lastSubMode: 'OFF',
     anomaly: 'none',
@@ -69,6 +71,7 @@ export function normalizeCumulusState(raw: unknown): CumulusRuntimeState {
   return {
     autoMode: AUTO_MODES.includes(o.autoMode as AutoMode) ? (o.autoMode as AutoMode) : d.autoMode,
     manualRelayOn: boolOr(o.manualRelayOn, d.manualRelayOn),
+    boostUntilFull: boolOr(o.boostUntilFull, d.boostUntilFull),
     relayDesired: typeof o.relayDesired === 'boolean' ? o.relayDesired : null,
     lastOnTs: numOrNull(o.lastOnTs),
     lastOffTs: numOrNull(o.lastOffTs),
@@ -83,6 +86,7 @@ export function normalizeCumulusState(raw: unknown): CumulusRuntimeState {
     lastCumulusKwh: numOrNull(o.lastCumulusKwh),
     lastDisinfectTs: numOrNull(o.lastDisinfectTs),
     lastTickTs: numOrNull(o.lastTickTs),
+    lastTempC: numOrNull(o.lastTempC),
     lastReason: (o.lastReason as DecisionReason) ?? d.lastReason,
     lastSubMode: SUB_MODES.includes(o.lastSubMode as CumulusMode)
       ? (o.lastSubMode as CumulusMode)

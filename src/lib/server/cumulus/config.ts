@@ -38,7 +38,10 @@ export function defaultCumulusConfig(): CumulusConfig {
 
     tankFullPowerW: 250,
     tankFullConfirmSec: 120,
-    faultConfirmSec: 300
+    faultConfirmSec: 300,
+
+    observationMode: true, // ÉTAPE 1a : démarre en observation — zéro chauffe automatique
+    batteryMaxDischargeW: 2400 // réservé (réflexe de délestage à venir) — non utilisé pour l'instant
   };
 }
 
@@ -80,7 +83,10 @@ export function normalizeCumulusConfig(raw: unknown): CumulusConfig {
 
     tankFullPowerW: asNum(o.tankFullPowerW, d.tankFullPowerW, 50, 1000),
     tankFullConfirmSec: asNum(o.tankFullConfirmSec, d.tankFullConfirmSec, 30, 1800),
-    faultConfirmSec: asNum(o.faultConfirmSec, d.faultConfirmSec, 60, 3600)
+    faultConfirmSec: asNum(o.faultConfirmSec, d.faultConfirmSec, 60, 3600),
+
+    observationMode: typeof o.observationMode === 'boolean' ? o.observationMode : d.observationMode,
+    batteryMaxDischargeW: asNum(o.batteryMaxDischargeW, d.batteryMaxDischargeW, 500, 10000)
   };
 }
 

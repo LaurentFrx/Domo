@@ -35,6 +35,14 @@ export interface TickResult {
   anomaly: string;
   surplusW: number;
   note: string;
+  observationMode?: boolean;
+  anker?: {
+    available: boolean;
+    pvPowerW: number;
+    sbOutputPowerW: number;
+    batteryDischargeW: number;
+    socPct: number[];
+  };
 }
 
 let ticking = false;
@@ -95,6 +103,17 @@ async function runTick(apply: boolean): Promise<TickResult> {
     next.relayDesired = state.relayDesired;
   }
 
+  // Journal console à chaque tick (mode observation) — visible dans `journalctl -u domo`.
+  console.log(
+    `[cumulus] ${decision.reason} relais=${relayOn ? 'ON' : 'off'}` +
+      `${config.observationMode ? ' [OBSERVATION]' : ''}` +
+      ` eau=${inputs.tempC ?? '?'}°C surplus=${decision.surplusW}W |` +
+      ` Anker ${inputs.ankerAvailable ? 'ok' : 'injoignable'}` +
+      ` pv=${inputs.pvPowerW}W sbOut=${inputs.sbOutputPowerW}W` +
+      ` décharge=${inputs.batteryDischargeW}W soc=[${inputs.batterySocPct.join('/')}]%` +
+      ` — ${decision.note}`
+  );
+
   next.lastTickTs = now;
   next.log = appendLog(state.log, {
     ts: now,
@@ -117,7 +136,15 @@ async function runTick(apply: boolean): Promise<TickResult> {
     reason: decision.reason,
     anomaly: next.anomaly,
     surplusW: decision.surplusW,
-    note: decision.note
+    note: decision.note,
+    observationMode: config.observationMode,
+    anker: {
+      available: inputs.ankerAvailable,
+      pvPowerW: inputs.pvPowerW,
+      sbOutputPowerW: inputs.sbOutputPowerW,
+      batteryDischargeW: inputs.batteryDischargeW,
+      socPct: inputs.batterySocPct
+    }
   };
 }
 
@@ -155,12 +182,20 @@ export async function tick(apply = true): Promise<TickResult> {
 export async function applyCommand(cmd: {
   autoMode?: AutoMode;
   manualRelayOn?: boolean;
+  boost?: boolean;
 }): Promise<TickResult> {
   const state = await readCumulusState();
-  if (cmd.autoMode) state.autoMode = cmd.autoMode;
+  if (cmd.autoMode) {
+    state.autoMode = cmd.autoMode;
+    if (cmd.autoMode === 'auto') state.boostUntilFull = false; // repasser en auto annule un boost
+  }
   if (typeof cmd.manualRelayOn === 'boolean') {
     state.manualRelayOn = cmd.manualRelayOn;
     if (state.autoMode !== 'off') state.autoMode = 'manual';
+  }
+  if (typeof cmd.boost === 'boolean') {
+    state.boostUntilFull = cmd.boost;
+    if (cmd.boost) state.autoMode = 'auto'; // « Chauffer maintenant » → auto + boost jusqu'au plein
   }
   await writeCumulusState(state);
   return tick(true);

@@ -121,10 +121,14 @@ class CumulusState {
   anomaly = $state<string>('none');
   /** Horodatage du dernier tick (heartbeat — détecte un moteur muet). */
   lastTickTs = $state<number | null>(null);
+  /** Température d'eau vue par le moteur (sert à estimer la RÉSERVE ; jamais affichée en °). */
+  waterTempC = $state<number | null>(null);
   /** Ballon considéré plein (coupure thermostat mécanique détectée). */
   ballonCharged = $state(false);
   /** Horodatage de la dernière désinfection (ballon ≥60°C), null si jamais. */
   disinfectLastTs = $state<number | null>(null);
+  /** Chauffe « à la demande » en cours (bouton Chauffer maintenant). */
+  boostUntilFull = $state(false);
   /** Config effective du moteur (cibles/seuils) — null avant le 1er poll. */
   config = $state<CumulusConfigClient | null>(null);
   #orchTimer: ReturnType<typeof setInterval> | null = null;
@@ -277,7 +281,9 @@ class CumulusState {
         if (typeof s.lastSubMode === 'string') this.decisionSubMode = s.lastSubMode;
         if (typeof s.anomaly === 'string') this.anomaly = s.anomaly;
         this.lastTickTs = typeof s.lastTickTs === 'number' ? s.lastTickTs : null;
+        this.waterTempC = typeof s.lastTempC === 'number' ? s.lastTempC : null;
         this.ballonCharged = !!s.ballonCharged;
+        this.boostUntilFull = !!s.boostUntilFull;
         this.disinfectLastTs = typeof s.lastDisinfectTs === 'number' ? s.lastDisinfectTs : null;
         // L'énergie réelle (delta compteur EM-50) remplace le mock.
         if (typeof s.energyTodayKwh === 'number')
@@ -315,7 +321,11 @@ class CumulusState {
     }
   }
 
-  async #postCommand(body: { autoMode?: CumulusAutoMode; manualRelayOn?: boolean }) {
+  async #postCommand(body: {
+    autoMode?: CumulusAutoMode;
+    manualRelayOn?: boolean;
+    boost?: boolean;
+  }) {
     try {
       const res = await fetch('/api/cumulus/command', {
         method: 'POST',
@@ -343,6 +353,13 @@ class CumulusState {
     this.relayOn = on;
     this.autoMode = 'manual';
     await this.#postCommand({ manualRelayOn: on });
+  }
+
+  /** Lance (ou arrête) une chauffe « à la demande », jusqu'au plein. Optimiste. */
+  async setBoost(on: boolean) {
+    this.boostUntilFull = on;
+    if (on) this.autoMode = 'auto';
+    await this.#postCommand({ boost: on });
   }
 
   /** Met à jour la config du moteur (PUT /api/cumulus/config), renvoie la version effective. */

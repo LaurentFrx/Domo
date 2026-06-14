@@ -23,12 +23,14 @@ export type DecisionReason =
   | 'vacation_off' // mode off (vacances) → OFF
   | 'safety_high' // T ≥ Tmax (sonde) → OFF impératif
   | 'comfort_min' // T < Tmin → ON garanti (filet famille)
+  | 'boost' // chauffe « à la demande » (bouton Chauffer maintenant), jusqu'au plein
   | 'legionella' // cycle anti-légionellose → ON
   | 'solar' // surplus PV → ON
   | 'offpeak' // heures creuses (cible de base) → ON
   | 'offpeak_boost' // heures creuses (cible renfort, peu de soleil demain) → ON
   | 'tank_full' // coupure mécanique détectée (ballon plein) → OFF
   | 'idle' // veille : ni surplus, ni HC → OFF
+  | 'observe_only' // mode observation : chauffe AUTO neutralisée (collecte seule, ÉTAPE 1a)
   | 'anticycle_hold'; // transition bloquée par l'anti-court-cycle → maintien
 
 /** Anomalie détectée (visible dans l'UI, non bloquante sauf heater_fault). */
@@ -77,6 +79,15 @@ export interface CumulusInputs {
   // ── Relais (état physique lu) ──
   relayAvailable: boolean;
   relayOn: boolean | null;
+
+  // ── Système solaire/batterie (Anker SolarBank) — COLLECTE seule (ÉTAPE 1a) ──
+  // Aucune décision ne s'appuie dessus pour l'instant ; journalisées à chaque tick.
+  ankerAvailable: boolean;
+  pvPowerW: number; // production solaire instantanée (solar_power_w)
+  ankerGridPowerW: number; // réseau vu côté Anker, signé (+ soutirage / − injection)
+  sbOutputPowerW: number; // sortie du système SolarBank vers la maison (W)
+  batteryDischargeW: number; // puissance de décharge batterie (W, ≥ 0)
+  batterySocPct: number[]; // niveau de charge de chaque batterie (%)
 }
 
 /** Configuration (réglages) — persistée dans la section `cumulus` de settings.json. */
@@ -112,6 +123,12 @@ export interface CumulusConfig {
   tankFullPowerW: number; // sous cette conso (relais ON) → résistance coupée
   tankFullConfirmSec: number; // durée de confirmation « ballon plein »
   faultConfirmSec: number; // durée ON sans conso + eau froide → panne
+
+  // ── ÉTAPE 1a — sécurité (observation) & réserve pour la reconstruction ──
+  /** true → AUCUNE chauffe AUTOMATIQUE (comfort/solar/HC) ; manuel & boost intacts. */
+  observationMode: boolean;
+  /** P max de décharge batterie (W) — réservé au futur réflexe de délestage (non utilisé). */
+  batteryMaxDischargeW: number;
 }
 
 /** Une entrée du journal de décisions (ring buffer). */
@@ -131,6 +148,8 @@ export interface CumulusRuntimeState {
   autoMode: AutoMode;
   /** État voulu en mode manuel. */
   manualRelayOn: boolean;
+  /** Chauffe « à la demande » en cours, jusqu'au plein (puis retour auto). */
+  boostUntilFull: boolean;
   /** Dernier ordre émis par le moteur (null avant le 1er). */
   relayDesired: boolean | null;
 
@@ -160,6 +179,8 @@ export interface CumulusRuntimeState {
 
   // Heartbeat / UI
   lastTickTs: number | null;
+  /** Dernière température d'eau vue par le moteur (null si sonde périmée). */
+  lastTempC: number | null;
   lastReason: DecisionReason;
   lastSubMode: CumulusMode;
   anomaly: Anomaly;
