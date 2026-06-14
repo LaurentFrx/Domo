@@ -70,7 +70,8 @@ export function defaultEnergyState(): EnergyState {
     injWhDay: 0,
     lossWhDay: 0,
     drawWhDay: 0,
-    drawEvents: 0
+    drawEvents: 0,
+    wasFull: false
   };
 }
 
@@ -98,7 +99,8 @@ function normEnergy(v: unknown): EnergyState {
     injWhDay: numOr(o.injWhDay, d.injWhDay),
     lossWhDay: numOr(o.lossWhDay, d.lossWhDay),
     drawWhDay: numOr(o.drawWhDay, d.drawWhDay),
-    drawEvents: numOr(o.drawEvents, d.drawEvents)
+    drawEvents: numOr(o.drawEvents, d.drawEvents),
+    wasFull: boolOr(o.wasFull, d.wasFull)
   };
 }
 

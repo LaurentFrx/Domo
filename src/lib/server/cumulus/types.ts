@@ -263,6 +263,7 @@ export interface EnergyState {
   lossWhDay: number; // pertes cumulées du jour (Wh)
   drawWhDay: number; // énergie puisée cumulée du jour (Wh)
   drawEvents: number; // nombre d'événements de puisage du jour
+  wasFull: boolean; // ballon plein au tick précédent (front montant de lastAnchorTs)
 }
 
 /** Résultat de `decide()` — décision + nouvel état à persister (pattern reducer pur). */

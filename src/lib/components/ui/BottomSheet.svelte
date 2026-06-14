@@ -64,7 +64,7 @@
       aria-modal="true"
       aria-label={title}
       onclick={(e) => e.stopPropagation()}
-      style="background: var(--color-card); border-color: var(--color-border);"
+      style="background: linear-gradient(var(--color-card), var(--color-card)), var(--color-bg); border-color: var(--color-border);"
     >
       {#if title}
         <div class="bs-header">

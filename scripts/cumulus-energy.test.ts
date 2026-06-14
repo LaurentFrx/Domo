@@ -85,6 +85,7 @@ function energyState(o: Partial<EnergyState> = {}): EnergyState {
     lossWhDay: 0,
     drawWhDay: 0,
     drawEvents: 0,
+    wasFull: false,
     ...o
   };
 }
@@ -211,6 +212,28 @@ test('anchor : sonde chaude au repos (≥ probeFullRestC) → E_avail = E_full',
   );
   assert.equal(energy.eAvailWh, E_FULL);
   assert.equal(result.anchored, true);
+});
+
+test('anchor : « dernier plein » figé tant que le ballon RESTE plein (front montant)', () => {
+  // 1er tick plein → horodatage posé
+  const a = updateEnergyModel(
+    inp({ tempC: 58, relayOn: false }),
+    cfg(),
+    st({ lastUpdateTs: NOW - 60_000, eAvailWh: 3000 }, { ballonCharged: true })
+  );
+  assert.equal(a.energy.lastAnchorTs, NOW);
+  assert.equal(a.energy.wasFull, true);
+  // tick suivant, 1 h plus tard, toujours plein → lastAnchorTs NE bouge PAS
+  const NOW2 = NOW + hours(1);
+  const b = updateEnergyModel(
+    inp({ now: NOW2, tempC: 58, relayOn: false }),
+    cfg(),
+    st(
+      { lastUpdateTs: NOW, eAvailWh: a.energy.eAvailWh, lastAnchorTs: NOW, wasFull: true },
+      { ballonCharged: true }
+    )
+  );
+  assert.equal(b.energy.lastAnchorTs, NOW); // figé au moment où il est devenu plein
 });
 
 // ── Puisage ──

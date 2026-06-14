@@ -174,11 +174,17 @@ export function updateEnergyModel(
   const anchored = state.ballonCharged === true || restHot;
   if (anchored) {
     eAvail = eFull;
-    energy.lastAnchorTs = now;
+    // « Dernier plein » = front montant uniquement : on ne ré-horodate PAS à chaque
+    // tick tant que le ballon reste plein (sinon « il y a 1 min » coincé en permanence).
+    if (!energy.wasFull) energy.lastAnchorTs = now;
+    energy.wasFull = true;
     drawWh = 0; // pas de puisage quand on recale au plein
     drawEvent = null;
-  } else if (!firstTick && !initFromProbe) {
-    eAvail = clamp(0, eFull, eAvail + injWh - lossWh - drawWh);
+  } else {
+    energy.wasFull = false;
+    if (!firstTick && !initFromProbe) {
+      eAvail = clamp(0, eFull, eAvail + injWh - lossWh - drawWh);
+    }
   }
 
   // ── Composantes cumulées du jour (flux réels mesurés) ──
