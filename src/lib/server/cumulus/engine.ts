@@ -20,6 +20,7 @@ import { readCumulusConfig } from './config';
 import { readCumulusState, writeCumulusState } from './state-store';
 import { setRelay } from './relay';
 import { ensureTempSensor } from './temp-sensor';
+import { updateEnergyModel, type EnergyTickResult } from './energy-model';
 import type { AutoMode, DecisionLogEntry } from './types';
 
 const TICK_TIMEOUT_MS = 45_000; // < intervalle timer (60 s)
@@ -43,6 +44,7 @@ export interface TickResult {
     batteryDischargeW: number;
     socPct: number[];
   };
+  energy?: EnergyTickResult;
 }
 
 let ticking = false;
@@ -114,6 +116,19 @@ async function runTick(apply: boolean): Promise<TickResult> {
       ` — ${decision.note}`
   );
 
+  // ── Estimateur d'énergie du ballon (ÉTAPE 1b — observation pure, aucun pilotage) ──
+  const energyTick = updateEnergyModel(inputs, config, next);
+  next.energy = energyTick.energy;
+  const er = energyTick.result;
+  console.log(
+    `[energy] E_avail=${er.eAvailWh} Wh (~${er.showers.toFixed(1)} douches)` +
+      ` inj=${Math.round(er.injWhDay)} loss=${Math.round(er.lossWhDay)} draw=${Math.round(er.drawWhDay)} |` +
+      ` T_tank≈${er.tTankC}°C T_room=${er.tRoomC}°C T_inlet=${er.tInletC}°C ext=${er.outdoorC ?? '?'}°C |` +
+      ` dernier plein ${er.hoursSinceAnchor === null ? 'jamais' : er.hoursSinceAnchor.toFixed(1) + 'h'}` +
+      `${er.anchored ? ' [ANCHOR→plein]' : ''}` +
+      `${er.drawEvent ? ` [PUISAGE drop=${er.drawEvent.dropC}°C −${er.drawEvent.eDrawnWh}Wh]` : ''}`
+  );
+
   next.lastTickTs = now;
   next.log = appendLog(state.log, {
     ts: now,
@@ -144,7 +159,8 @@ async function runTick(apply: boolean): Promise<TickResult> {
       sbOutputPowerW: inputs.sbOutputPowerW,
       batteryDischargeW: inputs.batteryDischargeW,
       socPct: inputs.batterySocPct
-    }
+    },
+    energy: er
   };
 }
 

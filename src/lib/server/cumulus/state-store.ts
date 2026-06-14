@@ -16,7 +16,8 @@ import type {
   AutoMode,
   DecisionReason,
   Anomaly,
-  DecisionLogEntry
+  DecisionLogEntry,
+  EnergyState
 } from './types';
 import type { CumulusMode } from '$theme/tokens';
 
@@ -50,7 +51,24 @@ export function defaultCumulusState(): CumulusRuntimeState {
     lastReason: 'cold_start',
     lastSubMode: 'OFF',
     anomaly: 'none',
+    energy: defaultEnergyState(),
     log: []
+  };
+}
+
+/** État initial de l'estimateur d'énergie ballon (ÉTAPE 1b). */
+export function defaultEnergyState(): EnergyState {
+  return {
+    eAvailWh: 0,
+    lastUpdateTs: null,
+    lastProbeC: null,
+    lastProbeTs: null,
+    lastAnchorTs: null,
+    dayDate: '',
+    injWhDay: 0,
+    lossWhDay: 0,
+    drawWhDay: 0,
+    drawEvents: 0
   };
 }
 
@@ -63,6 +81,23 @@ const boolOr = (v: unknown, d: boolean): boolean => (typeof v === 'boolean' ? v 
 function normLog(v: unknown): DecisionLogEntry[] {
   if (!Array.isArray(v)) return [];
   return v.filter((e): e is DecisionLogEntry => !!e && typeof e === 'object').slice(-LOG_MAX);
+}
+
+function normEnergy(v: unknown): EnergyState {
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  const d = defaultEnergyState();
+  return {
+    eAvailWh: numOr(o.eAvailWh, d.eAvailWh),
+    lastUpdateTs: numOrNull(o.lastUpdateTs),
+    lastProbeC: numOrNull(o.lastProbeC),
+    lastProbeTs: numOrNull(o.lastProbeTs),
+    lastAnchorTs: numOrNull(o.lastAnchorTs),
+    dayDate: typeof o.dayDate === 'string' ? o.dayDate : d.dayDate,
+    injWhDay: numOr(o.injWhDay, d.injWhDay),
+    lossWhDay: numOr(o.lossWhDay, d.lossWhDay),
+    drawWhDay: numOr(o.drawWhDay, d.drawWhDay),
+    drawEvents: numOr(o.drawEvents, d.drawEvents)
+  };
 }
 
 export function normalizeCumulusState(raw: unknown): CumulusRuntimeState {
@@ -92,6 +127,7 @@ export function normalizeCumulusState(raw: unknown): CumulusRuntimeState {
       ? (o.lastSubMode as CumulusMode)
       : d.lastSubMode,
     anomaly: (o.anomaly as Anomaly) ?? d.anomaly,
+    energy: normEnergy(o.energy),
     log: normLog(o.log)
   };
 }

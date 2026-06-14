@@ -10,10 +10,11 @@ import { env } from '$env/dynamic/private';
 import { isHC, nextTariffSwitch, parisDate } from '../tariffs';
 import type { CumulusConfig, CumulusInputs } from './types';
 import { readRelay } from './relay';
-import { ensureTempSensor, getCumulusTemp } from './temp-sensor';
+import { ensureTempSensor, getCumulusTemp, ensureIndoorSensor, getIndoorTemp } from './temp-sensor';
 
 const TIMEOUT_MS = 8_000;
 const FORECAST_TIMEOUT_MS = 12_000;
+const INDOOR_STALE_MS = 3 * 3_600_000; // sonde intérieure périmée au-delà de 3 h
 
 const num = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) ? n : 0);
 
@@ -68,6 +69,7 @@ interface ForecastPoint {
   power_w?: { total?: number };
   total?: number;
   kw?: number;
+  temp?: number; // température extérieure prévue (°C)
 }
 
 function pointPowerW(pt: ForecastPoint): number {
@@ -84,14 +86,16 @@ function pointPowerW(pt: ForecastPoint): number {
  * Comparaison par préfixe de chaîne sur le `time` ISO local (pas de new Date →
  * zéro ambiguïté DST). Repli sur next_24h_kwh si pas de série horaire.
  */
-async function readForecastNextDaylight(now: Date): Promise<{ available: boolean; kwh: number }> {
+async function readForecastNextDaylight(
+  now: Date
+): Promise<{ available: boolean; kwh: number; outdoorC: number | null }> {
   const base = forecastUrl();
-  if (!base) return { available: false, kwh: 0 };
+  if (!base) return { available: false, kwh: 0, outdoorC: null };
   try {
     const r = await fetch(`${base}/api/forecast`, {
       signal: AbortSignal.timeout(FORECAST_TIMEOUT_MS)
     });
-    if (!r.ok) return { available: false, kwh: 0 };
+    if (!r.ok) return { available: false, kwh: 0, outdoorC: null };
     const d = (await r.json()) as {
       hourly?: ForecastPoint[];
       points?: ForecastPoint[];
@@ -103,8 +107,19 @@ async function readForecastNextDaylight(now: Date): Promise<{ available: boolean
         ? d.points
         : [];
     const h = parisHour(now);
-    const targetDay = h < 19 ? parisDate(now) : parisDate(new Date(now.getTime() + 86_400_000));
+    const today = parisDate(now);
+    const targetDay = h < 19 ? today : parisDate(new Date(now.getTime() + 86_400_000));
     const fromHour = h < 19 ? Math.max(h, 7) : 7;
+
+    // Température extérieure : point de l'HEURE COURANTE (aujourd'hui), indépendant
+    // de la fenêtre de production ci-dessous.
+    let outdoorC: number | null = null;
+    for (const pt of arr) {
+      const time = typeof pt.time === 'string' ? pt.time : '';
+      if (time.slice(0, 10) !== today || Number(time.slice(11, 13)) !== h) continue;
+      if (typeof pt.temp === 'number' && Number.isFinite(pt.temp)) outdoorC = pt.temp;
+      break;
+    }
 
     if (arr.length) {
       let wh = 0;
@@ -115,12 +130,13 @@ async function readForecastNextDaylight(now: Date): Promise<{ available: boolean
         if (!Number.isFinite(ph) || ph < fromHour || ph >= 19) continue;
         wh += pointPowerW(pt);
       }
-      return { available: true, kwh: +(wh / 1000).toFixed(2) };
+      return { available: true, kwh: +(wh / 1000).toFixed(2), outdoorC };
     }
-    if (typeof d.next_24h_kwh === 'number') return { available: true, kwh: d.next_24h_kwh };
-    return { available: false, kwh: 0 };
+    if (typeof d.next_24h_kwh === 'number')
+      return { available: true, kwh: d.next_24h_kwh, outdoorC };
+    return { available: false, kwh: 0, outdoorC };
   } catch {
-    return { available: false, kwh: 0 };
+    return { available: false, kwh: 0, outdoorC: null };
   }
 }
 
@@ -173,6 +189,7 @@ async function readAnker(): Promise<AnkerRead> {
 /** Assemble l'instantané d'entrées passé à decide(). */
 export async function collectInputs(config: CumulusConfig): Promise<CumulusInputs> {
   ensureTempSensor();
+  ensureIndoorSensor(config.energyModel.indoorTopic);
   const now = new Date();
 
   const [relay, em50, forecast, anker] = await Promise.all([
@@ -185,6 +202,10 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
   const t = getCumulusTemp();
   const stale = t.tempC === null || t.ageMs === null || t.ageMs > config.tempStaleSec * 1000;
   const tempC = stale ? null : +(t.tempC! + config.tempOffsetC).toFixed(1);
+
+  const ind = getIndoorTemp(config.energyModel.indoorTopic);
+  const indoorStale = ind.tempC === null || ind.ageMs === null || ind.ageMs > INDOOR_STALE_MS;
+  const indoorC = indoorStale ? null : ind.tempC;
 
   const isHCnow = isHC(now);
   const sw = nextTariffSwitch(now);
@@ -209,6 +230,9 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     ankerGridPowerW: anker.gridPowerW,
     sbOutputPowerW: anker.sbOutputPowerW,
     batteryDischargeW: anker.batteryDischargeW,
-    batterySocPct: anker.socPct
+    batterySocPct: anker.socPct,
+    indoorC,
+    indoorAgeMs: ind.ageMs,
+    outdoorC: forecast.outdoorC
   };
 }

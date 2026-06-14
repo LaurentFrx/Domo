@@ -88,6 +88,11 @@ export interface CumulusInputs {
   sbOutputPowerW: number; // sortie du système SolarBank vers la maison (W)
   batteryDischargeW: number; // puissance de décharge batterie (W, ≥ 0)
   batterySocPct: number[]; // niveau de charge de chaque batterie (%)
+
+  // ── Températures ambiantes (modèle d'énergie ballon, ÉTAPE 1b) ──
+  indoorC: number | null; // temp intérieure (sonde MQTT salon/SdB), null si périmée
+  indoorAgeMs: number | null;
+  outdoorC: number | null; // temp extérieure (forecast :8098, heure courante), null si indispo
 }
 
 /** Configuration (réglages) — persistée dans la section `cumulus` de settings.json. */
@@ -129,6 +134,34 @@ export interface CumulusConfig {
   observationMode: boolean;
   /** P max de décharge batterie (W) — réservé au futur réflexe de délestage (non utilisé). */
   batteryMaxDischargeW: number;
+
+  /** ÉTAPE 1b — estimateur d'énergie du ballon (observation, ne pilote rien). */
+  energyModel: EnergyModelConfig;
+}
+
+/**
+ * Paramètres du modèle d'énergie du ballon (ÉTAPE 1b — observation pure).
+ * Valeurs de départ « été », toutes à calibrer. `T_inlet`, `roomOffset` et
+ * `eDouche` sont interpolés entre hiver et été selon la température extérieure.
+ */
+export interface EnergyModelConfig {
+  etaHeat: number; // rendement de chauffe (injecté / consommé)
+  tankWhPerC: number; // capacité thermique du ballon (Wh par °C) — 300 L → ~348
+  setpointC: number; // température de coupure observée du thermostat (= ballon plein)
+  inletSummerC: number; // temp eau froide d'arrivée en été
+  inletWinterC: number; // temp eau froide d'arrivée en hiver
+  outdoorWinterC: number; // borne basse d'interpolation saisonnière (temp ext.)
+  outdoorSummerC: number; // borne haute d'interpolation saisonnière (temp ext.)
+  outdoorFallbackC: number; // temp ext. de repli si forecast indispo
+  roomOffsetSummerC: number; // T_room = T_indoor − offset ; été
+  roomOffsetWinterC: number; // … hiver
+  roomFallbackC: number; // T_room de repli si sonde intérieure indispo
+  lossCoeffWhPerCh: number; // pertes : Wh/h par °C d'écart (T_tank − T_room)
+  eDoucheWhSummer: number; // énergie d'une douche en été (Wh)
+  eDoucheWhWinter: number; // … hiver
+  drawDropThresholdC: number; // chute sonde au-delà des pertes → puisage détecté
+  probeFullRestC: number; // sonde ≥ ce seuil, relais off → ballon considéré plein (anchor)
+  indoorTopic: string; // topic MQTT de la sonde intérieure (T_room)
 }
 
 /** Une entrée du journal de décisions (ring buffer). */
@@ -184,7 +217,24 @@ export interface CumulusRuntimeState {
   lastReason: DecisionReason;
   lastSubMode: CumulusMode;
   anomaly: Anomaly;
+
+  /** ÉTAPE 1b — état de l'estimateur d'énergie du ballon (observation). */
+  energy: EnergyState;
   log: DecisionLogEntry[];
+}
+
+/** État runtime de l'estimateur d'énergie du ballon (persisté dans cumulus-state.json). */
+export interface EnergyState {
+  eAvailWh: number; // énergie chaude estimée disponible (Wh)
+  lastUpdateTs: number | null; // dernier tick traité (base du Δt)
+  lastProbeC: number | null; // dernière valeur DISTINCTE de la sonde eau (point bas)
+  lastProbeTs: number | null; // horodatage de lastProbeC
+  lastAnchorTs: number | null; // dernier recalage « ballon plein » (vérité primaire)
+  dayDate: string; // clé Paris des composantes cumulées du jour
+  injWhDay: number; // énergie injectée cumulée du jour (Wh)
+  lossWhDay: number; // pertes cumulées du jour (Wh)
+  drawWhDay: number; // énergie puisée cumulée du jour (Wh)
+  drawEvents: number; // nombre d'événements de puisage du jour
 }
 
 /** Résultat de `decide()` — décision + nouvel état à persister (pattern reducer pur). */
