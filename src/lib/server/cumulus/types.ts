@@ -238,7 +238,17 @@ export interface CumulusRuntimeState {
 
   /** ÉTAPE 1b — état de l'estimateur d'énergie du ballon (observation). */
   energy: EnergyState;
+  /** Instantané d'affichage du modèle (lecture seule UI ; écrit par engine.ts). */
+  energyView: EnergyView | null;
   log: DecisionLogEntry[];
+}
+
+/** Valeurs dérivées du modèle d'énergie, persistées pour l'UI (carte Cumulus). */
+export interface EnergyView {
+  eAvailWh: number; // énergie chaude disponible (Wh)
+  eFullWh: number; // capacité à plein (Wh)
+  showers: number; // nombre de douches équivalent (eAvail / eDouche)
+  tTankC: number; // température moyenne estimée du ballon (°C)
 }
 
 /** État runtime de l'estimateur d'énergie du ballon (persisté dans cumulus-state.json). */

@@ -17,7 +17,8 @@ import type {
   DecisionReason,
   Anomaly,
   DecisionLogEntry,
-  EnergyState
+  EnergyState,
+  EnergyView
 } from './types';
 import type { CumulusMode } from '$theme/tokens';
 
@@ -52,6 +53,7 @@ export function defaultCumulusState(): CumulusRuntimeState {
     lastSubMode: 'OFF',
     anomaly: 'none',
     energy: defaultEnergyState(),
+    energyView: null,
     log: []
   };
 }
@@ -128,7 +130,19 @@ export function normalizeCumulusState(raw: unknown): CumulusRuntimeState {
       : d.lastSubMode,
     anomaly: (o.anomaly as Anomaly) ?? d.anomaly,
     energy: normEnergy(o.energy),
+    energyView: normEnergyView(o.energyView),
     log: normLog(o.log)
+  };
+}
+
+function normEnergyView(v: unknown): EnergyView | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  return {
+    eAvailWh: numOr(o.eAvailWh, 0),
+    eFullWh: numOr(o.eFullWh, 0),
+    showers: numOr(o.showers, 0),
+    tTankC: numOr(o.tTankC, 0)
   };
 }
 

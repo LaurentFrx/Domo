@@ -129,6 +129,15 @@ class CumulusState {
   disinfectLastTs = $state<number | null>(null);
   /** Chauffe « à la demande » en cours (bouton Chauffer maintenant). */
   boostUntilFull = $state(false);
+  // ── Réserve d'eau (estimateur E_avail, observation — lecture seule UI) ──
+  /** Énergie chaude estimée disponible (Wh), null avant le 1er poll. */
+  eAvailWh = $state<number | null>(null);
+  /** Capacité du ballon à plein (Wh). */
+  eFullWh = $state<number | null>(null);
+  /** Réserve exprimée en nombre de douches équivalent. */
+  showers = $state<number | null>(null);
+  /** Dernier « ballon plein » (epoch ms), null si jamais observé. */
+  lastAnchorTs = $state<number | null>(null);
   /** Config effective du moteur (cibles/seuils) — null avant le 1er poll. */
   config = $state<CumulusConfigClient | null>(null);
   #orchTimer: ReturnType<typeof setInterval> | null = null;
@@ -288,6 +297,13 @@ class CumulusState {
         // L'énergie réelle (delta compteur EM-50) remplace le mock.
         if (typeof s.energyTodayKwh === 'number')
           this.energyTodayKwh = +s.energyTodayKwh.toFixed(2);
+        // Réserve d'eau (E_avail) — lecture seule, observation.
+        const en = s.energy;
+        this.eAvailWh = typeof en?.eAvailWh === 'number' ? en.eAvailWh : null;
+        this.lastAnchorTs = typeof en?.lastAnchorTs === 'number' ? en.lastAnchorTs : null;
+        const ev = s.energyView;
+        this.eFullWh = typeof ev?.eFullWh === 'number' ? ev.eFullWh : null;
+        this.showers = typeof ev?.showers === 'number' ? ev.showers : null;
       }
       if (d?.config) this.config = d.config as CumulusConfigClient;
       this.orchestratorConnected = true;

@@ -1,231 +1,318 @@
 <script lang="ts">
   /**
-   * Carte « Eau chaude » — familiale ET sobre (calée sur la carte sèche-serviette).
+   * Carte « Chauffe-eau » — UI d'OBSERVATION pure.
    *
-   * Répond à « ai-je assez d'eau chaude ? » sans afficher de degrés (jugés
-   * approximatifs). Le cadran fin = RÉSERVE (sa longueur), déduite de la sonde au
-   * point bas du ballon. Interrupteur Auto/Vacances en tête, pill « Chauffer
-   * maintenant » (boost jusqu'au plein puis retour auto). Aucun watt/kWh/courbe.
+   * Ne change RIEN à la logique : decide.ts / relay.ts / energy-model.ts /
+   * observationMode INTACTS. Elle ne fait qu'AFFICHER l'état et conserver le
+   * toggle marche/arrêt MANUEL existant (cumulus.setManualRelay).
+   *
+   * - Voyant 3 états calé sur la PUISSANCE réelle (EM-50 voie cumulus) :
+   *     P > seuil → rouge (chauffe) · relais ON → vert clignotant (alimenté,
+   *     température atteinte) · sinon → éteint.
+   * - Réserve d'eau chaude estimée (E_avail → « ≈ N douches » + barre).
+   * - Stats : température ballon, dernier plein, conso du jour.
+   * - Pop-up pédagogique « Comment ça marche ? ».
+   *
+   * Mobile-first iOS PWA (~380px), skin Yeldra (violet #6E45FF, mint #3DFD98).
    */
+  import { onMount } from 'svelte';
   import { cumulus } from '$stores/cumulus.svelte';
+  import { em50 } from '$stores/em50.svelte';
   import { haptic } from '$utils/haptic';
+  import BottomSheet from '$lib/components/ui/BottomSheet.svelte';
 
-  const ARC_R = 80;
-  const ARC_C = 2 * Math.PI * ARC_R;
-  const ARC_LEN = ARC_C * 0.75; // 270°
+  const HEATING_W = 500; // au-dessus → le cumulus chauffe (à comparer au voyant du capot)
 
-  const ready = $derived(cumulus.relayConnected || cumulus.orchestratorConnected);
   const online = $derived(cumulus.relayConnected);
-  const isVacances = $derived(cumulus.autoMode === 'off');
-  const isHeating = $derived(cumulus.relayOn === true);
-  const isBoost = $derived(cumulus.boostUntilFull);
+  const relayOn = $derived(cumulus.relayOn === true);
+  const cumulusW = $derived(em50.cumulusPowerW);
 
-  // Réserve (fraction 0–1 pour le cadran + libellé en mots, sans degrés affichés).
-  const reserveFrac = $derived.by(() => {
-    const t = cumulus.waterTempC;
-    if (t === null) return 0;
-    return Math.max(0.04, Math.min(1, (t - 18) / (58 - 18)));
+  // ── Voyant : priorité à la PUISSANCE mesurée ──
+  type Voyant = 'heating' | 'supplied' | 'off' | 'offline';
+  const voyant = $derived.by((): Voyant => {
+    if (!online) return 'offline';
+    if (cumulusW > HEATING_W) return 'heating';
+    if (relayOn) return 'supplied';
+    return 'off';
   });
-  const reserveLabel = $derived.by(() => {
-    const t = cumulus.waterTempC;
-    if (t === null) return 'Réserve inconnue';
-    if (t >= 50) return 'Eau chaude à volonté';
-    if (t >= 43) return 'De quoi vous doucher';
-    if (t >= 36) return 'Réserve qui baisse';
-    return 'Bientôt à court';
+  const voyantColor = $derived(
+    voyant === 'heating'
+      ? 'var(--color-hp)'
+      : voyant === 'supplied'
+        ? 'var(--color-success)'
+        : 'var(--color-muted-fg)'
+  );
+  const statusLine = $derived.by(() => {
+    if (voyant === 'offline') return 'Boîtier injoignable';
+    if (voyant === 'heating') return `En chauffe · ${(cumulusW / 1000).toFixed(1)} kW`;
+    if (voyant === 'supplied') return 'Alimenté · température atteinte';
+    return 'Éteint';
   });
-  const isLow = $derived(cumulus.waterTempC !== null && cumulus.waterTempC < 36);
 
-  // État + couleur d'accent (sobres).
-  const headline = $derived.by(() => {
-    if (!ready) return 'Chargement…';
-    if (!online) return 'Hors ligne';
-    if (isVacances) return 'Mode vacances';
-    if (isHeating) return 'En chauffe';
-    return reserveLabel;
+  // ── Réserve d'eau chaude (E_avail, observation) ──
+  const nDouches = $derived(
+    cumulus.showers !== null ? Math.max(0, Math.round(cumulus.showers)) : null
+  );
+  const fillPct = $derived.by(() => {
+    const a = cumulus.eAvailWh;
+    const f = cumulus.eFullWh;
+    if (a === null || f === null || f <= 0) return null;
+    return Math.max(0, Math.min(100, Math.round((a / f) * 100)));
   });
-  const accent = $derived.by(() => {
-    if (!online || isVacances || !ready) return 'var(--color-muted-fg)';
-    if (isHeating) return 'var(--color-hp)';
-    if (isLow) return 'var(--color-alert)';
-    return 'var(--color-success)';
-  });
-  const arcFrac = $derived(isVacances || !online || !ready ? 0 : reserveFrac);
+  const reserveKnown = $derived(nDouches !== null && fillPct !== null);
 
-  const context = $derived.by(() => {
-    if (!ready) return '';
-    if (!online) return 'Le boîtier ne répond pas';
-    if (isVacances) return 'Chauffe suspendue jusqu’à votre retour';
-    if (isHeating) {
-      switch (cumulus.decisionReason) {
-        case 'solar':
-          return 'Le soleil chauffe l’eau';
-        case 'offpeak_boost':
-          return 'Chauffe de nuit, électricité moins chère';
-        case 'boost':
-          return 'Chauffe lancée à la demande';
-        case 'comfort_min':
-          return 'L’eau était trop froide';
-        default:
-          return 'Chauffe en cours';
-      }
+  // ── Stats ──
+  const ballonTemp = $derived(
+    cumulus.waterTempC !== null ? `${cumulus.waterTempC.toFixed(0)} °C` : '—'
+  );
+  const consoToday = $derived(`${cumulus.energyTodayKwh.toFixed(2)} kWh`);
+  function fmtSince(ts: number | null): string {
+    if (ts === null) return 'jamais';
+    const h = (Date.now() - ts) / 3_600_000;
+    if (h < 1) return `il y a ${Math.max(1, Math.round(h * 60))} min`;
+    if (h < 48) return `il y a ${Math.round(h)} h`;
+    return `il y a ${Math.round(h / 24)} j`;
+  }
+  const lastFull = $derived(fmtSince(cumulus.lastAnchorTs));
+
+  // ── Toggle marche/arrêt MANUEL (commande existante, passe par le moteur) ──
+  function toggleHeater() {
+    if (!online) return;
+    haptic('medium');
+    cumulus.setManualRelay(!relayOn);
+  }
+
+  // ── Pop-up « Comment ça marche ? » ──
+  let helpOpen = $state(false);
+  const STEPS = [
+    {
+      t: 'Observer et se calibrer',
+      d: 'Domo mesure comment le ballon chauffe, refroidit, et comment on consomme l’eau.',
+      current: true
+    },
+    {
+      t: 'Sécurité',
+      d: 'Ne jamais lancer la chauffe quand un gros appareil tourne déjà (four, plaques, lave-linge).',
+      current: false
+    },
+    {
+      t: 'Chauffe au soleil',
+      d: 'Utiliser le surplus solaire de la journée plutôt que de le revendre à perte.',
+      current: false
+    },
+    {
+      t: 'Appoint la nuit',
+      d: 'S’il manque de l’eau chaude, compléter en heures creuses, au dernier moment et en une fois.',
+      current: false
+    },
+    {
+      t: 'Automatique',
+      d: 'Une fois calibré, Domo gère tout seul en garantissant l’eau chaude.',
+      current: false
     }
-    return 'Le chauffe-eau se gère tout seul';
-  });
+  ];
 
-  function toggleVacances() {
-    if (!online) return;
-    haptic('medium');
-    cumulus.setAutoMode(isVacances ? 'auto' : 'off');
-  }
-  function toggleBoost() {
-    if (!online) return;
-    haptic('medium');
-    cumulus.setBoost(!isBoost);
-  }
+  onMount(() => {
+    // Idempotent : la page Énergie connecte déjà ces stores ; filet de sûreté
+    // pour que le voyant reste réactif si la carte est placée ailleurs.
+    em50.connect();
+    cumulus.connectRelay();
+    cumulus.connectOrchestrator();
+  });
 </script>
 
 <section
-  class="eau-card relative flex flex-col gap-5 overflow-hidden rounded-[var(--radius-2xl)] border p-5"
-  class:is-heating={isHeating}
-  style="background: var(--color-card); border-color: {isHeating
-    ? 'color-mix(in oklch, var(--color-hp) 45%, var(--color-border))'
-    : 'var(--color-border)'}; --halo: {accent};"
+  class="ce-card relative flex flex-col gap-4 overflow-hidden rounded-[var(--radius-2xl)] border p-5"
+  style="background: var(--color-card); border-color: var(--color-border);"
 >
-  <div class="halo" aria-hidden="true"></div>
-
-  <!-- Header : point + titre + interrupteur Auto/Vacances -->
-  <header class="relative z-10 flex items-center justify-between">
-    <div class="flex items-center gap-2.5">
-      <span
-        class="h-2 w-2 shrink-0 rounded-full"
-        style="background: {online ? 'var(--color-success)' : 'var(--color-alert)'};"
-      ></span>
-      <span class="text-[15px] font-semibold" style="color: var(--color-fg);">Eau chaude</span>
+  <!-- Header : voyant + titre/statut + toggle marche/arrêt -->
+  <header class="flex items-start justify-between gap-3">
+    <div class="flex min-w-0 items-center gap-2.5">
+      <span class="led" class:blink={voyant === 'supplied'} style="--led: {voyantColor};"></span>
+      <div class="min-w-0">
+        <div class="text-[15px] font-semibold" style="color: var(--color-fg);">Chauffe-eau</div>
+        <div class="text-[12.5px] font-medium" style="color: {voyantColor};">{statusLine}</div>
+      </div>
     </div>
     <button
       type="button"
       data-no-haptic
       class="tg-track"
-      class:tg-on={!isVacances && online}
+      class:tg-on={relayOn && online}
       role="switch"
-      aria-checked={!isVacances}
-      aria-label="Activer le chauffage de l’eau, ou passer en vacances"
+      aria-checked={relayOn}
+      aria-label="Allumer ou éteindre le chauffe-eau (manuel)"
       disabled={!online}
-      onclick={toggleVacances}
+      onclick={toggleHeater}
     >
       <span class="tg-knob"></span>
     </button>
   </header>
 
-  <!-- Cadran héros : réserve (longueur de l'arc), goutte au centre, sans chiffre -->
-  <div class="relative z-10 -mb-2 flex items-center justify-center">
-    <svg viewBox="0 0 180 180" class="h-40 w-40" aria-label="Réserve : {headline}">
-      <circle
-        cx="90"
-        cy="90"
-        r={ARC_R}
-        fill="none"
-        stroke="var(--color-border)"
-        stroke-width="9"
-        stroke-dasharray="{ARC_LEN} {ARC_C}"
-        stroke-dashoffset={ARC_C * 0.125}
-        stroke-linecap="round"
-        transform="rotate(90 90 90)"
-      />
-      <circle
-        cx="90"
-        cy="90"
-        r={ARC_R}
-        fill="none"
-        stroke={accent}
-        stroke-width="9"
-        stroke-dasharray="{ARC_LEN * arcFrac} {ARC_C}"
-        stroke-dashoffset={ARC_C * 0.125}
-        stroke-linecap="round"
-        transform="rotate(90 90 90)"
-        style="transition: stroke-dasharray 700ms var(--ease-out), stroke 400ms ease;"
-      />
-      <g transform="translate(90 86)" style="color: {accent}; transition: color 400ms ease;">
-        <path
-          d="M0 -22 C 0 -22 13 -7 13 3 a 13 13 0 0 1 -26 0 c 0 -10 13 -25 13 -25 z"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="3.2"
-          stroke-linejoin="round"
-        />
-      </g>
-    </svg>
-  </div>
-
-  <!-- État + contexte -->
-  <div class="relative z-10 -mt-2 flex flex-col items-center gap-1 text-center">
-    <span class="text-[17px] font-semibold" style="color: var(--color-fg);">{headline}</span>
-    {#if context}
-      <span class="text-[12.5px]" style="color: var(--color-muted-fg);">{context}</span>
+  <!-- Hero : réserve d'eau chaude -->
+  <div class="flex flex-col gap-2">
+    {#if reserveKnown}
+      <div class="flex items-baseline gap-1.5">
+        <span class="text-[14px]" style="color: var(--color-muted-fg);">≈</span>
+        <span class="text-[42px] leading-none font-bold" style="color: var(--color-fg);"
+          >{nDouches}</span
+        >
+        <span class="text-[15px] font-medium" style="color: var(--color-muted-fg);"
+          >{(nDouches ?? 0) > 1 ? 'douches' : 'douche'}</span
+        >
+      </div>
+    {:else}
+      <div class="text-[15px] font-medium" style="color: var(--color-muted-fg);">
+        Estimation en cours…
+      </div>
     {/if}
+    <div class="bar"><div class="bar-fill" style="width: {fillPct ?? 0}%;"></div></div>
+    <div class="text-[12px]" style="color: var(--color-muted-fg);">
+      Réserve d’eau chaude estimée
+    </div>
   </div>
 
-  <!-- Action : Chauffer maintenant -->
-  <div class="relative z-10 flex">
-    <button
-      type="button"
-      class="eau-pill"
-      class:eau-pill-active={isBoost}
-      disabled={!online || isVacances}
-      aria-pressed={isBoost}
-      onclick={toggleBoost}
-    >
-      {isBoost ? 'Arrêter la chauffe' : 'Chauffer maintenant'}
-    </button>
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat"><span>Température du ballon</span><strong>{ballonTemp}</strong></div>
+    <div class="stat"><span>Dernier plein</span><strong>{lastFull}</strong></div>
+    <div class="stat"><span>Consommé aujourd’hui</span><strong>{consoToday}</strong></div>
   </div>
 
-  <!-- Chip bas : chauffe effective -->
-  <div class="relative z-10 flex">
-    <span
-      class="info-chip"
-      style="border-color: {isHeating
-        ? 'color-mix(in oklch, var(--color-hp) 50%, var(--color-border))'
-        : 'var(--color-border)'}; color: {isHeating ? 'var(--color-hp)' : 'var(--color-muted-fg)'};"
+  <!-- Aide -->
+  <button type="button" class="help-btn" onclick={() => (helpOpen = true)}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
     >
-      <span
-        class="dot"
-        style="background: {isHeating ? 'var(--color-hp)' : 'var(--color-muted-fg)'};"
-      ></span>
-      {isHeating ? 'Chauffe en cours' : 'En veille'}
-    </span>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+    Comment ça marche ?
+  </button>
+
+  <!-- Pied : mode de pilotage -->
+  <div class="text-center text-[11.5px]" style="color: var(--color-muted-fg);">
+    Pilotage : manuel (observation)
   </div>
 </section>
 
+<BottomSheet open={helpOpen} title="Le pilotage du chauffe-eau" onClose={() => (helpOpen = false)}>
+  <p class="intro">
+    Domo choisira tout seul les meilleurs moments pour chauffer l’eau : avec le surplus de soleil en
+    journée, ou la nuit quand l’électricité est moins chère — en gardant toujours assez d’eau chaude
+    et sans surcharger le compteur.
+  </p>
+  <ol class="steps">
+    {#each STEPS as s, i (i)}
+      <li class="step" class:current={s.current}>
+        <span class="step-num">{i + 1}</span>
+        <div class="step-body">
+          <div class="step-head">
+            <span class="step-title">{s.t}</span>
+            {#if s.current}<span class="step-badge">en cours</span>{/if}
+          </div>
+          <p class="step-desc">{s.d}</p>
+        </div>
+      </li>
+    {/each}
+  </ol>
+</BottomSheet>
+
 <style>
-  .eau-card {
-    transition: border-color 300ms ease;
+  /* ── Voyant LED (glow Chrome-safe : pas de color-mix en box-shadow) ── */
+  .led {
+    width: 11px;
+    height: 11px;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    background: var(--led);
+    box-shadow: 0 0 8px 0 var(--led);
   }
-  .halo {
-    position: absolute;
-    right: -40%;
-    bottom: -40%;
-    width: 120%;
-    height: 120%;
-    border-radius: 50%;
-    background: radial-gradient(
-      circle,
-      color-mix(in oklch, var(--halo) 18%, transparent) 0%,
-      transparent 60%
-    );
-    opacity: 0;
-    transition: opacity 800ms var(--ease-out);
-    pointer-events: none;
+  .led.blink {
+    animation: led-blink 1.4s ease-in-out infinite;
   }
-  .is-heating .halo {
-    opacity: 1;
+  @keyframes led-blink {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.3;
+    }
   }
 
-  /* Interrupteur (repris de la carte sèche-serviette) */
+  /* ── Barre de réserve (mint) ── */
+  .bar {
+    height: 8px;
+    border-radius: 9999px;
+    background: var(--color-muted);
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 9999px;
+    background: var(--color-success);
+    transition: width 700ms var(--ease-out);
+  }
+
+  /* ── Stats ── */
+  .stats {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--color-border);
+  }
+  .stat {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+  }
+  .stat + .stat {
+    border-top: 1px solid var(--color-border);
+  }
+  .stat span {
+    font-size: 13px;
+    color: var(--color-muted-fg);
+  }
+  .stat strong {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--color-fg);
+  }
+
+  /* ── Bouton aide ── */
+  .help-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    align-self: flex-start;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--color-primary, #6e45ff);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .help-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* ── Interrupteur marche/arrêt (repris carte sèche-serviette) ── */
   .tg-track {
     position: relative;
     width: 44px;
     height: 24px;
+    flex-shrink: 0;
     border-radius: 9999px;
     background: var(--color-muted);
     border: 1px solid var(--color-border);
@@ -259,60 +346,85 @@
     opacity: 0.5;
   }
 
-  /* Pill d'action (style pills sèche-serviette) */
-  .eau-pill {
-    flex: 1;
-    padding: 0.7rem 0.5rem;
-    border: 1.5px solid var(--color-border);
-    border-radius: 9999px;
-    background: transparent;
-    color: var(--color-fg);
+  /* ── Contenu du pop-up ── */
+  .intro {
+    margin: 0;
     font-size: 13.5px;
-    font-weight: 600;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    transition:
-      background 180ms ease,
-      border-color 180ms ease,
-      transform 120ms ease;
+    line-height: 1.5;
+    color: var(--color-muted-fg);
   }
-  .eau-pill:active:not(:disabled) {
-    transform: scale(0.97);
+  .steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
   }
-  .eau-pill:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
+  .step {
+    display: flex;
+    gap: 0.7rem;
+    padding: 0.6rem 0.7rem;
+    border-radius: var(--radius-lg, 0.75rem);
+    border: 1px solid var(--color-border);
   }
-  .eau-pill-active {
-    border-color: color-mix(in oklch, var(--color-hp) 55%, var(--color-border));
-    background: color-mix(in oklch, var(--color-hp) 14%, transparent);
-    color: var(--color-hp);
+  .step.current {
+    border-color: var(--color-success);
+    background: color-mix(in oklch, var(--color-success) 12%, transparent);
   }
-
-  /* Chip info bas */
-  .info-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    padding: 0.4rem 0.85rem;
+  .step-num {
+    display: grid;
+    place-items: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    flex-shrink: 0;
     border-radius: 9999px;
-    border: 1.5px solid var(--color-border);
     background: var(--color-muted);
-    font-size: 12px;
-    font-weight: 600;
+    color: var(--color-muted-fg);
+    font-size: 13px;
+    font-weight: 700;
   }
-  .dot {
-    width: 7px;
-    height: 7px;
+  .step.current .step-num {
+    background: var(--color-success);
+    color: oklch(0.2 0.05 152);
+  }
+  .step-body {
+    min-width: 0;
+  }
+  .step-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .step-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--color-fg);
+  }
+  .step-badge {
+    flex-shrink: 0;
+    padding: 0.08rem 0.4rem;
     border-radius: 9999px;
+    background: var(--color-success);
+    color: oklch(0.2 0.05 152);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .step-desc {
+    margin: 0.2rem 0 0;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--color-muted-fg);
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .eau-card,
-    .halo,
-    .tg-track,
-    .tg-knob,
-    .eau-pill {
+    .led.blink {
+      animation: none;
+    }
+    .bar-fill,
+    .tg-knob {
       transition: none;
     }
   }

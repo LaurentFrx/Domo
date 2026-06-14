@@ -120,6 +120,13 @@ async function runTick(apply: boolean): Promise<TickResult> {
   const energyTick = updateEnergyModel(inputs, config, next);
   next.energy = energyTick.energy;
   const er = energyTick.result;
+  // Instantané d'affichage pour l'UI (lecture seule ; aucune influence sur la décision).
+  next.energyView = {
+    eAvailWh: er.eAvailWh,
+    eFullWh: er.eFullWh,
+    showers: +er.showers.toFixed(2),
+    tTankC: er.tTankC
+  };
   const fmtSrc = (s: { name: string; tempC: number }[]) =>
     s.length ? s.map((x) => `${x.name} ${x.tempC}`).join(' + ') : 'repli';
   console.log(
