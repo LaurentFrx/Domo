@@ -26,6 +26,12 @@ const MAX_DRAW_INTERVAL_H = 2; // borne l'intervalle de pertes attendues (sonde 
 
 const clamp = (lo: number, hi: number, x: number): number => Math.max(lo, Math.min(hi, x));
 
+/** Moyenne (arrondie 0,1 °C) des sources de température disponibles, ou null si aucune. */
+export function averageTemp(sources: { tempC: number }[]): number | null {
+  if (!sources.length) return null;
+  return +(sources.reduce((s, x) => s + x.tempC, 0) / sources.length).toFixed(1);
+}
+
 /** Interpolation linéaire hiver→été bornée selon la température extérieure. */
 function lerpSeason(
   outdoorC: number,

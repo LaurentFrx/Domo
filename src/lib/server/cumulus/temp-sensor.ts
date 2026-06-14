@@ -85,13 +85,13 @@ export function getCumulusTemp(): { tempC: number | null; ageMs: number | null }
   return read(CUMULUS_TOPIC);
 }
 
-/** Démarre la souscription de la sonde intérieure (T_room) — idempotent. */
-export function ensureIndoorSensor(topic: string): void {
+/** Démarre la souscription d'un topic de température arbitraire — idempotent. */
+export function ensureTempTopic(topic: string): void {
   if (topic) subscribeTopic(topic);
 }
 
-/** Dernière température intérieure reçue + âge (ms) pour le topic donné. */
-export function getIndoorTemp(topic: string): { tempC: number | null; ageMs: number | null } {
+/** Dernière température reçue + âge (ms) pour un topic arbitraire. */
+export function getTempTopic(topic: string): { tempC: number | null; ageMs: number | null } {
   if (!topic) return { tempC: null, ageMs: null };
   subscribeTopic(topic);
   return read(topic);

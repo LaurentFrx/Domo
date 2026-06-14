@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { updateEnergyModel } from '../src/lib/server/cumulus/energy-model.ts';
+import { updateEnergyModel, averageTemp } from '../src/lib/server/cumulus/energy-model.ts';
 import type {
   CumulusInputs,
   CumulusConfig,
@@ -40,7 +40,8 @@ function energyModel(o: Partial<EnergyModelConfig> = {}): EnergyModelConfig {
     eDoucheWhWinter: 2800,
     drawDropThresholdC: 1.5,
     probeFullRestC: 55,
-    indoorTopic: 'zigbee2mqtt/Thermo SdB',
+    indoorTopics: ['zigbee2mqtt/Thermo SdB', 'zigbee2mqtt/Thermo Salon'],
+    outdoorSources: { daikin: true, thermoExtTopic: 'zigbee2mqtt/Thermo_ext', forecast: true },
     ...o
   };
 }
@@ -143,8 +144,9 @@ function inp(o: Partial<CumulusInputs> = {}): CumulusInputs {
     batteryDischargeW: 0,
     batterySocPct: [],
     indoorC: 23,
-    indoorAgeMs: 60_000,
     outdoorC: 25, // été plein → tInlet = inletSummer (15), eFull = 348*44 = 15312
+    indoorSources: [{ name: 'SdB', tempC: 23 }],
+    outdoorSources: [{ name: 'météo', tempC: 25 }],
     ...o
   };
 }
@@ -335,4 +337,34 @@ test('init différée : sonde null au 1er tick → demi-plein, puis RÉ-INIT au 
   const b = updateEnergyModel(inp({ tempC: 51 }), cfg(), st(a.energy));
   assert.equal(b.energy.eAvailWh, 348 * (51 - 15)); // 12528 — pas resté coincé à 7656
   assert.equal(b.energy.lastProbeC, 51);
+});
+
+// ── Moyenne multi-sources des températures de référence (patch 1b+) ──
+test('averageTemp : moyenne de 2 sondes intérieures', () => {
+  assert.equal(
+    averageTemp([
+      { name: 'SdB', tempC: 23.4 },
+      { name: 'séjour', tempC: 22.4 }
+    ]),
+    22.9
+  );
+});
+
+test('averageTemp : 3 sources extérieures (daikin + terrasse + météo)', () => {
+  assert.equal(
+    averageTemp([
+      { name: 'daikin', tempC: 31 },
+      { name: 'ext', tempC: 31.3 },
+      { name: 'météo', tempC: 30.2 }
+    ]),
+    30.8
+  );
+});
+
+test('averageTemp : une seule source dispo → sa valeur (cas dégradé)', () => {
+  assert.equal(averageTemp([{ name: 'météo', tempC: 30.2 }]), 30.2);
+});
+
+test('averageTemp : aucune source → null (repli sur la constante saisonnière)', () => {
+  assert.equal(averageTemp([]), null);
 });

@@ -8,9 +8,10 @@
 
 import { env } from '$env/dynamic/private';
 import { isHC, nextTariffSwitch, parisDate } from '../tariffs';
-import type { CumulusConfig, CumulusInputs } from './types';
+import type { CumulusConfig, CumulusInputs, TempSource } from './types';
 import { readRelay } from './relay';
-import { ensureTempSensor, getCumulusTemp, ensureIndoorSensor, getIndoorTemp } from './temp-sensor';
+import { averageTemp } from './energy-model';
+import { ensureTempSensor, getCumulusTemp, ensureTempTopic, getTempTopic } from './temp-sensor';
 
 const TIMEOUT_MS = 8_000;
 const FORECAST_TIMEOUT_MS = 12_000;
@@ -186,26 +187,79 @@ async function readAnker(): Promise<AnkerRead> {
   }
 }
 
+// ── Température extérieure Daikin (bridge Onecta :8096) ──
+const daikinUrl = () => (env.DAIKIN_BRIDGE_URL || 'http://127.0.0.1:8096').replace(/\/+$/, '');
+
+async function readDaikinOutdoor(): Promise<number | null> {
+  try {
+    const r = await fetch(`${daikinUrl()}/api/status`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!r.ok) return null;
+    const d = (await r.json()) as { units?: { outdoor_temp_c?: number }[] };
+    if (!Array.isArray(d.units)) return null;
+    for (const u of d.units) {
+      if (typeof u.outdoor_temp_c === 'number' && Number.isFinite(u.outdoor_temp_c)) {
+        return u.outdoor_temp_c;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Nom court d'un topic de sonde pour le log : 'zigbee2mqtt/Thermo SdB' → 'SdB'. */
+const topicLabel = (t: string): string =>
+  t.replace(/^zigbee2mqtt\//, '').replace(/^[Tt]hermo[_ ]?/, '') || t;
+
 /** Assemble l'instantané d'entrées passé à decide(). */
 export async function collectInputs(config: CumulusConfig): Promise<CumulusInputs> {
+  const em = config.energyModel;
   ensureTempSensor();
-  ensureIndoorSensor(config.energyModel.indoorTopic);
+  em.indoorTopics.forEach((topic) => ensureTempTopic(topic));
+  if (em.outdoorSources.thermoExtTopic) ensureTempTopic(em.outdoorSources.thermoExtTopic);
   const now = new Date();
 
-  const [relay, em50, forecast, anker] = await Promise.all([
+  const [relay, em50, forecast, anker, daikinOut] = await Promise.all([
     readRelay(),
     readEm50(),
     readForecastNextDaylight(now),
-    readAnker()
+    readAnker(),
+    em.outdoorSources.daikin ? readDaikinOutdoor() : Promise.resolve(null)
   ]);
 
   const t = getCumulusTemp();
   const stale = t.tempC === null || t.ageMs === null || t.ageMs > config.tempStaleSec * 1000;
   const tempC = stale ? null : +(t.tempC! + config.tempOffsetC).toFixed(1);
 
-  const ind = getIndoorTemp(config.energyModel.indoorTopic);
-  const indoorStale = ind.tempC === null || ind.ageMs === null || ind.ageMs > INDOOR_STALE_MS;
-  const indoorC = indoorStale ? null : ind.tempC;
+  // Lit une sonde MQTT seulement si fraîche (≤ INDOOR_STALE_MS) → valeur ou null.
+  const freshTopic = (topic: string): number | null => {
+    const r = getTempTopic(topic);
+    return r.tempC !== null && r.ageMs !== null && r.ageMs <= INDOOR_STALE_MS ? r.tempC : null;
+  };
+
+  // ── Température INTÉRIEURE de référence = moyenne des sondes disponibles ──
+  const indoorSources: TempSource[] = [];
+  for (const topic of em.indoorTopics) {
+    const v = freshTopic(topic);
+    if (v !== null) indoorSources.push({ name: topicLabel(topic), tempC: v });
+  }
+  const indoorC = averageTemp(indoorSources);
+
+  // ── Température EXTÉRIEURE de référence = moyenne (daikin + terrasse + météo) ──
+  const outdoorSources: TempSource[] = [];
+  if (em.outdoorSources.daikin && daikinOut !== null) {
+    outdoorSources.push({ name: 'daikin', tempC: daikinOut });
+  }
+  if (em.outdoorSources.thermoExtTopic) {
+    const v = freshTopic(em.outdoorSources.thermoExtTopic);
+    if (v !== null) {
+      outdoorSources.push({ name: topicLabel(em.outdoorSources.thermoExtTopic), tempC: v });
+    }
+  }
+  if (em.outdoorSources.forecast && forecast.outdoorC !== null) {
+    outdoorSources.push({ name: 'météo', tempC: forecast.outdoorC });
+  }
+  const outdoorC = averageTemp(outdoorSources);
 
   const isHCnow = isHC(now);
   const sw = nextTariffSwitch(now);
@@ -232,7 +286,8 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     batteryDischargeW: anker.batteryDischargeW,
     batterySocPct: anker.socPct,
     indoorC,
-    indoorAgeMs: ind.ageMs,
-    outdoorC: forecast.outdoorC
+    outdoorC,
+    indoorSources,
+    outdoorSources
   };
 }

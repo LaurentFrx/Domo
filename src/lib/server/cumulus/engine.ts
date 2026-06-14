@@ -120,10 +120,14 @@ async function runTick(apply: boolean): Promise<TickResult> {
   const energyTick = updateEnergyModel(inputs, config, next);
   next.energy = energyTick.energy;
   const er = energyTick.result;
+  const fmtSrc = (s: { name: string; tempC: number }[]) =>
+    s.length ? s.map((x) => `${x.name} ${x.tempC}`).join(' + ') : 'repli';
   console.log(
     `[energy] E_avail=${er.eAvailWh} Wh (~${er.showers.toFixed(1)} douches)` +
       ` inj=${Math.round(er.injWhDay)} loss=${Math.round(er.lossWhDay)} draw=${Math.round(er.drawWhDay)} |` +
-      ` T_tank≈${er.tTankC}°C T_room=${er.tRoomC}°C T_inlet=${er.tInletC}°C ext=${er.outdoorC ?? '?'}°C |` +
+      ` T_tank≈${er.tTankC}°C T_inlet=${er.tInletC}°C |` +
+      ` T_room=${inputs.indoorC ?? '?'}°C (${fmtSrc(inputs.indoorSources)})` +
+      ` ext=${inputs.outdoorC ?? '?'}°C (${fmtSrc(inputs.outdoorSources)}) |` +
       ` dernier plein ${er.hoursSinceAnchor === null ? 'jamais' : er.hoursSinceAnchor.toFixed(1) + 'h'}` +
       `${er.anchored ? ' [ANCHOR→plein]' : ''}` +
       `${er.drawEvent ? ` [PUISAGE drop=${er.drawEvent.dropC}°C −${er.drawEvent.eDrawnWh}Wh]` : ''}`

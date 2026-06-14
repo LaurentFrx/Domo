@@ -7,7 +7,7 @@
  */
 
 import { readSettings, writeSettings } from '../settings-store';
-import type { CumulusConfig, EnergyModelConfig } from './types';
+import type { CumulusConfig, EnergyModelConfig, OutdoorSourcesConfig } from './types';
 
 const PROFILES = ['solar_first', 'balanced', 'comfort_first'] as const;
 type Profile = (typeof PROFILES)[number];
@@ -66,7 +66,12 @@ export function defaultEnergyModel(): EnergyModelConfig {
     eDoucheWhWinter: 2800,
     drawDropThresholdC: 1.5,
     probeFullRestC: 55,
-    indoorTopic: 'zigbee2mqtt/Thermo SdB'
+    indoorTopics: ['zigbee2mqtt/Thermo SdB', 'zigbee2mqtt/Thermo Salon'],
+    outdoorSources: {
+      daikin: true,
+      thermoExtTopic: 'zigbee2mqtt/Thermo_ext',
+      forecast: true
+    }
   };
 }
 
@@ -138,7 +143,27 @@ export function normalizeEnergyModel(raw: unknown): EnergyModelConfig {
     eDoucheWhWinter: asNum(o.eDoucheWhWinter, d.eDoucheWhWinter, 200, 8000),
     drawDropThresholdC: asNum(o.drawDropThresholdC, d.drawDropThresholdC, 0.2, 10),
     probeFullRestC: asNum(o.probeFullRestC, d.probeFullRestC, 40, 70),
-    indoorTopic: typeof o.indoorTopic === 'string' && o.indoorTopic ? o.indoorTopic : d.indoorTopic
+    indoorTopics: normTopics(o.indoorTopics, o.indoorTopic, d.indoorTopics),
+    outdoorSources: normOutdoor(o.outdoorSources, d.outdoorSources)
+  };
+}
+
+/** Liste de topics non vides ; replie sur l'ancien `indoorTopic` (string) puis le défaut. */
+function normTopics(v: unknown, legacy: unknown, dflt: string[]): string[] {
+  if (Array.isArray(v)) {
+    const arr = v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0);
+    if (arr.length) return arr;
+  }
+  if (typeof legacy === 'string' && legacy.trim()) return [legacy];
+  return dflt;
+}
+
+function normOutdoor(v: unknown, d: OutdoorSourcesConfig): OutdoorSourcesConfig {
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  return {
+    daikin: typeof o.daikin === 'boolean' ? o.daikin : d.daikin,
+    thermoExtTopic: typeof o.thermoExtTopic === 'string' ? o.thermoExtTopic : d.thermoExtTopic,
+    forecast: typeof o.forecast === 'boolean' ? o.forecast : d.forecast
   };
 }
 

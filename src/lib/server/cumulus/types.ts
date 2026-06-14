@@ -89,10 +89,18 @@ export interface CumulusInputs {
   batteryDischargeW: number; // puissance de décharge batterie (W, ≥ 0)
   batterySocPct: number[]; // niveau de charge de chaque batterie (%)
 
-  // ── Températures ambiantes (modèle d'énergie ballon, ÉTAPE 1b) ──
-  indoorC: number | null; // temp intérieure (sonde MQTT salon/SdB), null si périmée
-  indoorAgeMs: number | null;
-  outdoorC: number | null; // temp extérieure (forecast :8098, heure courante), null si indispo
+  // ── Températures ambiantes (modèle d'énergie ballon, ÉTAPE 1b+) ──
+  // Moyennes des sources disponibles ; null si aucune source.
+  indoorC: number | null; // moyenne des sondes intérieures (T_room de référence)
+  outdoorC: number | null; // moyenne des sources extérieures
+  indoorSources: TempSource[]; // sondes effectivement retenues dans la moyenne (pour le log)
+  outdoorSources: TempSource[];
+}
+
+/** Une source de température retenue dans une moyenne (nom court + valeur °C). */
+export interface TempSource {
+  name: string;
+  tempC: number;
 }
 
 /** Configuration (réglages) — persistée dans la section `cumulus` de settings.json. */
@@ -161,7 +169,17 @@ export interface EnergyModelConfig {
   eDoucheWhWinter: number; // … hiver
   drawDropThresholdC: number; // chute sonde au-delà des pertes → puisage détecté
   probeFullRestC: number; // sonde ≥ ce seuil, relais off → ballon considéré plein (anchor)
-  indoorTopic: string; // topic MQTT de la sonde intérieure (T_room)
+
+  // Sources de température de référence (moyennées) — configurables.
+  indoorTopics: string[]; // sondes intérieures MQTT (T_room) à moyenner
+  outdoorSources: OutdoorSourcesConfig; // sources de temp extérieure à moyenner
+}
+
+/** Sources de température extérieure (moyennées si disponibles). */
+export interface OutdoorSourcesConfig {
+  daikin: boolean; // temp ext. du bridge Daikin (:8096)
+  thermoExtTopic: string; // sonde MQTT extérieure (terrasse) ; '' pour désactiver
+  forecast: boolean; // temp horaire du provider météo (:8098)
 }
 
 /** Une entrée du journal de décisions (ring buffer). */
