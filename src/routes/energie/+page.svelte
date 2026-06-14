@@ -342,6 +342,9 @@
     </span>
   </header>
 
+  <!-- ═══ Chauffe-eau (ECS) — carte en tête de page ═══ -->
+  <CumulusCard />
+
   <!-- ═══ Paysage (iPad/desktop) : production + prévisions côte à côte ═══ -->
   <div class="grid gap-6 lg:grid-cols-2 lg:items-start">
     <!-- ═══ Section 1 : Stacked area 24h ═══ -->
@@ -701,9 +704,6 @@
       </div>
     </section>
   {/if}
-
-  <!-- ═══ Cumulus ECS — déplacé depuis /climat, sous l'électroménager ═══ -->
-  <CumulusCard />
 
   <!-- ═══ Section 3 : Tableau mensuel ═══ -->
   <section class="overflow-x-auto">
