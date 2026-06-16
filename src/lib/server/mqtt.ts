@@ -9,7 +9,7 @@
  * Connexion : on vise le listener WebSocket LOCAL de mosquitto
  * (ws://127.0.0.1:9001, tunnelisé depuis le RPi4) plutôt que le détour public
  * wss://domo.feroux.fr/mqtt/. URL surchargeable via MQTT_INTERNAL_URL (privé).
- * Identifiants : mêmes que le navigateur (PUBLIC_MQTT_USER / PUBLIC_MQTT_PASSWORD).
+ * Identifiants : MQTT_USER / MQTT_PASSWORD (PRIVÉS, = ha_user — JAMAIS exposés au navigateur).
  *
  * Additif : ne touche pas au chemin navigateur (src/lib/stores/zigbee.svelte.ts).
  */
@@ -17,11 +17,10 @@
 import mqtt from 'mqtt';
 import type { MqttClient } from 'mqtt';
 import { env as privateEnv } from '$env/dynamic/private';
-import { env as publicEnv } from '$env/dynamic/public';
 
 const INTERNAL_URL = privateEnv.MQTT_INTERNAL_URL || 'ws://127.0.0.1:9001';
-const MQTT_USER = publicEnv.PUBLIC_MQTT_USER || '';
-const MQTT_PASSWORD = publicEnv.PUBLIC_MQTT_PASSWORD || '';
+const MQTT_USER = privateEnv.MQTT_USER || '';
+const MQTT_PASSWORD = privateEnv.MQTT_PASSWORD || '';
 
 const PORTAIL_TOPIC = 'zigbee2mqtt/Portail/set';
 const CONNECT_TIMEOUT_MS = 5000; // attente max d'une connexion établie

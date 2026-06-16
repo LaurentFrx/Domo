@@ -79,7 +79,11 @@
   function onPulse() {
     if (!device.available) return;
     haptic('medium');
-    zigbee.pulse(device.friendlyName);
+    if (device.friendlyName === 'Portail') {
+      fetch('/api/portail/pulse', { method: 'POST', headers: { 'x-domo-app': '1' } }).catch((e) =>
+        console.error('Portail pulse error', e)
+      );
+    }
     pulsing = true;
     if (pulseTimer) clearTimeout(pulseTimer);
     pulseTimer = setTimeout(() => {

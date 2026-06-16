@@ -16,6 +16,7 @@ import { env } from '$env/dynamic/private';
 import crypto from 'node:crypto';
 import type { RequestHandler } from './$types';
 import { pulsePortail } from '$lib/server/mqtt';
+import { isAuthenticated } from '$lib/server/auth';
 
 function sha256(s: string): Buffer {
   return crypto.createHash('sha256').update(s).digest();
@@ -53,7 +54,7 @@ function rateLimited(ip: string): boolean {
   return recent.length > RL_MAX_PER_WINDOW;
 }
 
-export const POST: RequestHandler = async ({ request, getClientAddress }) => {
+export const POST: RequestHandler = async ({ request, getClientAddress, cookies }) => {
   let ip = 'unknown';
   try {
     ip = getClientAddress();
@@ -66,16 +67,18 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
     return json({ ok: false, error: 'rate_limited' }, { status: 429 });
   }
 
+  // Auth : Bearer <PORTAIL_TOKEN> (raccourci iPhone) OU cookie de session + en-tête
+  // applicatif x-domo-app (anti-CSRF : un site tiers ne peut pas poser cet en-tête
+  // custom en cross-origin sans préflight CORS, non accordé ici ; le bouton /pieces le pose).
   const expected = env.PORTAIL_TOKEN;
-  if (!expected) {
-    console.error(`[portail] PORTAIL_TOKEN non configuré — refus (ip=${ip})`);
-    return json({ ok: false, error: 'unauthorized' }, { status: 401 });
-  }
-
   const provided = extractBearer(request.headers.get('authorization'));
-  if (!provided || !tokenMatches(provided, expected)) {
-    console.warn(`[portail] 401 token absent/invalide (ip=${ip})`);
-    return json({ ok: false, error: 'unauthorized' }, { status: 401 });
+  const okBearer = !!expected && !!provided && tokenMatches(provided, expected);
+  if (!okBearer) {
+    const appHeader = request.headers.get('x-domo-app') === '1';
+    if (!isAuthenticated(cookies) || !appHeader) {
+      console.warn(`[portail] 401 ni bearer valide ni cookie+app (ip=${ip})`);
+      return json({ ok: false, error: 'unauthorized' }, { status: 401 });
+    }
   }
 
   try {

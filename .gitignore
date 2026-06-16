@@ -47,3 +47,6 @@ data/
 thermostat-bridge/state.json
 thermostat-bridge/__pycache__/
 thermostat-bridge/.venv/
+
+# Backups .env (contiennent des secrets)
+.env.bak*
