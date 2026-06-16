@@ -7,21 +7,25 @@
   import ZigbeeSensorTile from '$components/tiles/ZigbeeSensorTile.svelte';
   import ZigbeeGenericTile from '$components/tiles/ZigbeeGenericTile.svelte';
   import PrinterTile from '$components/tiles/PrinterTile.svelte';
+  import FindMyCard from '$components/cards/FindMyCard.svelte';
   import { printer } from '$stores/printer.svelte';
   import { matter } from '$stores/matter.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
+  import { findmy } from '$stores/findmy.svelte';
   import { haptic } from '$utils/haptic';
 
   onMount(() => {
     matter.connect();
     zigbee.connect();
     printer.connect();
+    findmy.connect();
   });
 
   onDestroy(() => {
     matter.disconnect();
     zigbee.disconnect();
     printer.disconnect();
+    findmy.disconnect();
   });
 
   // ─── Fusion Matter + Zigbee par pièce ──────────────────────────────────
@@ -260,6 +264,9 @@
       </div>
     {/if}
   {/if}
+
+  <!-- ═══ Appareils Apple « Localiser » (findmy-bridge → MQTT) — bas de page ═══ -->
+  <FindMyCard />
 </div>
 
 <style>
