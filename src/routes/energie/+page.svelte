@@ -378,19 +378,30 @@
         (365.25 * 24 * 3600 * 1000)
     )
   );
-  const annualSavingsEur = $derived(savedTotalEur / yearsElapsed);
+  // Taux d'économie MOYEN depuis la 1ʳᵉ mise en service (lissé, sert de repli).
+  const avgAnnualEur = $derived(savedTotalEur / yearsElapsed);
+  // Taux RÉCENT : économies de l'année en cours annualisées → reflète la config
+  // actuelle (phases récentes incluses), au lieu de diluer dans tout l'historique.
+  // Repli sur la moyenne en tout début d'année (annualiser < ~1,5 mois = trop bruité).
+  const recentAnnualEur = $derived.by(() => {
+    const now = new Date();
+    const fracYear =
+      (now.getTime() - new Date(now.getFullYear(), 0, 1).getTime()) / (365.25 * 24 * 3600 * 1000);
+    if (fracYear < 0.12 || savings.year.eur <= 0) return avgAnnualEur;
+    return savings.year.eur / fracYear;
+  });
   // ROI restant : durée jusqu'à l'amortissement complet en années/mois/jours, +
-  // mois/année d'amortissement projeté. amortized=true si déjà remboursé.
+  // mois/année d'amortissement projeté, AU TAUX RÉCENT. amortized si remboursé.
   const roiView = $derived.by(() => {
     if (remainingEur <= 0) return { amortized: true, label: '✓', payoff: '' };
-    if (annualSavingsEur <= 0) return { amortized: false, label: '—', payoff: '' };
-    const days = remainingEur / (annualSavingsEur / 365.25);
+    if (recentAnnualEur <= 0) return { amortized: false, label: '—', payoff: '' };
+    const days = remainingEur / (recentAnnualEur / 365.25);
     const now = new Date();
     const payoffDate = new Date(now.getTime() + days * 24 * 3600 * 1000);
     const { y, m, d } = diffYMD(now, payoffDate);
     const parts: string[] = [];
     if (y > 0) parts.push(`${y}a`);
-    if (m > 0) parts.push(`${m}m`);
+    if (y > 0 || m > 0) parts.push(`${m}m`);
     parts.push(`${d}j`);
     return {
       amortized: false,
