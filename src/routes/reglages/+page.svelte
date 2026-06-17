@@ -953,49 +953,108 @@
           style="color: var(--color-fg);"
         />
       </label>
-      <label
-        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
-        style="background: var(--color-card); border-color: var(--color-border);"
-      >
+    </div>
+
+    <!-- ═══ Installation — phases datées (matériel ajouté en plusieurs fois) ═══ -->
+    <div class="mt-3 flex flex-col gap-2">
+      <div class="flex items-center justify-between">
         <span
           class="text-[10px] font-semibold tracking-[0.04em] uppercase"
           style="color: var(--color-muted-fg);"
         >
-          Coût installation (€)
+          Installation · {settings.installationPhases.length} phase{settings.installationPhases
+            .length > 1
+            ? 's'
+            : ''} · {Math.round(settings.installationTotalEur)} €
         </span>
-        <input
-          type="number"
-          step="100"
-          bind:value={settings.installationCostEur}
-          onchange={() => {
+        <button
+          type="button"
+          onclick={() => {
             haptic('success');
-            settings.save();
+            settings.addPhase();
           }}
-          class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
-          style="color: var(--color-fg);"
-        />
-      </label>
-      <label
-        class="flex flex-col gap-1 rounded-[var(--radius-xl)] border p-3"
-        style="background: var(--color-card); border-color: var(--color-border);"
-      >
-        <span
-          class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-          style="color: var(--color-muted-fg);"
+          class="rounded-lg px-2.5 py-1 text-[12px] font-semibold"
+          style="background: var(--color-muted); color: var(--color-fg);"
         >
-          Mise en service
-        </span>
-        <input
-          type="date"
-          bind:value={settings.installationDateISO}
-          onchange={() => {
-            haptic('success');
-            settings.save();
-          }}
-          class="bg-transparent text-[15px] font-semibold tabular-nums focus:outline-none"
-          style="color: var(--color-fg);"
-        />
-      </label>
+          + Phase
+        </button>
+      </div>
+      {#each settings.installationPhases as phase (phase.id)}
+        <div
+          class="flex flex-wrap items-end gap-2 rounded-[var(--radius-xl)] border p-3"
+          style="background: var(--color-card); border-color: var(--color-border);"
+        >
+          <label class="flex min-w-[7rem] flex-1 flex-col gap-1">
+            <span
+              class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+              style="color: var(--color-muted-fg);"
+            >
+              Matériel
+            </span>
+            <input
+              type="text"
+              bind:value={phase.label}
+              onchange={() => {
+                haptic('success');
+                settings.save();
+              }}
+              placeholder="ex. SB3 Pro + panneaux"
+              class="bg-transparent text-[14px] font-semibold focus:outline-none"
+              style="color: var(--color-fg);"
+            />
+          </label>
+          <label class="flex flex-col gap-1">
+            <span
+              class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+              style="color: var(--color-muted-fg);"
+            >
+              Mise en service
+            </span>
+            <input
+              type="date"
+              bind:value={phase.dateISO}
+              onchange={() => {
+                haptic('success');
+                settings.save();
+              }}
+              class="bg-transparent text-[14px] font-semibold tabular-nums focus:outline-none"
+              style="color: var(--color-fg);"
+            />
+          </label>
+          <label class="flex w-[5.5rem] flex-col gap-1">
+            <span
+              class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+              style="color: var(--color-muted-fg);"
+            >
+              Coût €
+            </span>
+            <input
+              type="number"
+              step="10"
+              bind:value={phase.costEur}
+              onchange={() => {
+                haptic('success');
+                settings.save();
+              }}
+              class="bg-transparent text-[14px] font-bold tabular-nums focus:outline-none"
+              style="color: var(--color-fg);"
+            />
+          </label>
+          <button
+            type="button"
+            onclick={() => {
+              haptic('success');
+              settings.removePhase(phase.id);
+            }}
+            aria-label="Supprimer la phase"
+            disabled={settings.installationPhases.length <= 1}
+            class="ml-auto rounded-lg px-2 py-1 text-[14px] disabled:opacity-30"
+            style="color: var(--color-alert); background: var(--color-alert-muted);"
+          >
+            ✕
+          </button>
+        </div>
+      {/each}
     </div>
   </section>
 

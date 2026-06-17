@@ -10,20 +10,50 @@
 
 import { DEFAULT_THERMOSTAT_CONFIG, type ThermostatConfig } from './thermostat.svelte';
 
+/** Une phase d'installation datée (matériel ajouté en plusieurs fois). */
+export type InstallationPhase = {
+  id: string;
+  label: string;
+  dateISO: string; // 'YYYY-MM-DD'
+  costEur: number;
+};
+
+let phaseSeq = 0;
+/** Id stable pour les clés #each (unique dans la session). */
+function genPhaseId(): string {
+  phaseSeq += 1;
+  return `ph_${phaseSeq}`;
+}
+
 type Persisted = {
   priceHc: number;
   priceHp: number;
   priceExport: number;
   subscription: number;
-  /** Coût total de l'installation PV+batterie (€) — sert au calcul du ROI. */
-  installationCostEur: number;
-  /** Date de mise en service 'YYYY-MM-DD' — sert au taux d'économie annuel réalisé. */
-  installationDateISO: string;
+  /**
+   * Phases d'installation datées (le matériel a été ajouté en plusieurs fois).
+   * Coût total ROI = somme des coûts ; le taux d'économie est projeté depuis la
+   * 1ʳᵉ date de mise en service.
+   */
+  installationPhases: InstallationPhase[];
   /** Config de régulation du thermostat sèche-serviette (miroir poussé au daemon). */
   thermostat: ThermostatConfig;
 };
 
 const num = (v: unknown, d: number): number => (typeof v === 'number' && isFinite(v) ? v : d);
+
+/** Normalise une phase issue d'un JSON partiel (id régénéré si absent). */
+function normalizePhase(p: Partial<InstallationPhase> | undefined): InstallationPhase {
+  return {
+    id: typeof p?.id === 'string' && p.id ? p.id : genPhaseId(),
+    label: typeof p?.label === 'string' ? p.label : '',
+    dateISO: typeof p?.dateISO === 'string' ? p.dateISO : '',
+    costEur: Math.max(0, num(p?.costEur, 0))
+  };
+}
+function normalizePhases(arr: unknown): InstallationPhase[] {
+  return Array.isArray(arr) ? arr.map((p) => normalizePhase(p as Partial<InstallationPhase>)) : [];
+}
 
 /**
  * Reconstruit une config thermostat COMPLÈTE depuis un JSON partiel : tout champ
@@ -52,13 +82,16 @@ function mergeThermostat(p: Partial<ThermostatConfig>): ThermostatConfig {
   };
 }
 
+const DEFAULT_PHASES: InstallationPhase[] = [
+  { id: 'ph_init', label: 'Installation', dateISO: '2025-05-05', costEur: 0 }
+];
+
 const DEFAULTS: Persisted = {
   priceHc: 0.1812,
   priceHp: 0.2318,
   priceExport: 0.04,
   subscription: 13.5,
-  installationCostEur: 4500,
-  installationDateISO: '2025-06-01',
+  installationPhases: DEFAULT_PHASES,
   thermostat: DEFAULT_THERMOSTAT_CONFIG
 };
 
@@ -67,8 +100,7 @@ class SettingsState {
   priceHp = $state(DEFAULTS.priceHp);
   priceExport = $state(DEFAULTS.priceExport);
   subscription = $state(DEFAULTS.subscription);
-  installationCostEur = $state(DEFAULTS.installationCostEur);
-  installationDateISO = $state(DEFAULTS.installationDateISO);
+  installationPhases = $state<InstallationPhase[]>(DEFAULT_PHASES.map((p) => ({ ...p })));
   /** Config thermostat — objet réactif profond (bindable champ par champ). */
   thermostat = $state<ThermostatConfig>(mergeThermostat({}));
 
@@ -78,6 +110,37 @@ class SettingsState {
   saving = $state(false);
   /** Dernière erreur réseau (null si OK). */
   lastError = $state<string | null>(null);
+
+  /** Coût total de l'installation = somme des phases (€). */
+  get installationTotalEur(): number {
+    return this.installationPhases.reduce(
+      (s, p) => s + (Number.isFinite(p.costEur) ? p.costEur : 0),
+      0
+    );
+  }
+  /** Date de la 1ʳᵉ mise en service (la plus ancienne) — réf. du taux d'économie. */
+  get firstInstallationDateISO(): string {
+    const ds = this.installationPhases
+      .map((p) => p.dateISO)
+      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+      .sort();
+    return ds[0] ?? DEFAULT_PHASES[0].dateISO;
+  }
+
+  /** Ajoute une phase vierge (datée comme la 1ʳᵉ par défaut) et persiste. */
+  addPhase() {
+    this.installationPhases = [
+      ...this.installationPhases,
+      { id: genPhaseId(), label: '', dateISO: this.firstInstallationDateISO, costEur: 0 }
+    ];
+    this.save();
+  }
+  /** Retire une phase par id et persiste (garde toujours au moins une phase). */
+  removePhase(id: string) {
+    if (this.installationPhases.length <= 1) return;
+    this.installationPhases = this.installationPhases.filter((p) => p.id !== id);
+    this.save();
+  }
 
   async hydrate() {
     if (typeof window === 'undefined') return;
@@ -90,10 +153,24 @@ class SettingsState {
       if (typeof data.priceHp === 'number') this.priceHp = data.priceHp;
       if (typeof data.priceExport === 'number') this.priceExport = data.priceExport;
       if (typeof data.subscription === 'number') this.subscription = data.subscription;
-      if (typeof data.installationCostEur === 'number')
-        this.installationCostEur = data.installationCostEur;
-      if (typeof data.installationDateISO === 'string' && data.installationDateISO)
-        this.installationDateISO = data.installationDateISO;
+      const legacy = data as Partial<Persisted> & {
+        installationCostEur?: number;
+        installationDateISO?: string;
+      };
+      if (Array.isArray(legacy.installationPhases)) {
+        const phases = normalizePhases(legacy.installationPhases);
+        if (phases.length > 0) this.installationPhases = phases;
+      } else if (typeof legacy.installationCostEur === 'number') {
+        // Ancien format (coût + date unique) → migration en une phase.
+        this.installationPhases = [
+          {
+            id: genPhaseId(),
+            label: 'Installation',
+            dateISO: legacy.installationDateISO || DEFAULT_PHASES[0].dateISO,
+            costEur: Math.max(0, legacy.installationCostEur)
+          }
+        ];
+      }
       if (data.thermostat && typeof data.thermostat === 'object')
         this.thermostat = mergeThermostat(data.thermostat as Partial<ThermostatConfig>);
       this.lastError = null;
@@ -117,8 +194,7 @@ class SettingsState {
           priceHp: this.priceHp,
           priceExport: this.priceExport,
           subscription: this.subscription,
-          installationCostEur: this.installationCostEur,
-          installationDateISO: this.installationDateISO,
+          installationPhases: $state.snapshot(this.installationPhases),
           thermostat: $state.snapshot(this.thermostat)
         })
       });

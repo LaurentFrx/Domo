@@ -345,11 +345,27 @@
     const denom = auto + (curMonth?.import_live_kwh ?? 0);
     return denom > 0 ? Math.round((100 * auto) / denom) : 0;
   });
+  // Décompose la durée from→to en années / mois / jours calendaires.
+  function diffYMD(from: Date, to: Date): { y: number; m: number; d: number } {
+    let y = to.getFullYear() - from.getFullYear();
+    let m = to.getMonth() - from.getMonth();
+    let d = to.getDate() - from.getDate();
+    if (d < 0) {
+      m -= 1;
+      d += new Date(to.getFullYear(), to.getMonth(), 0).getDate(); // jours du mois précédent
+    }
+    if (m < 0) {
+      y -= 1;
+      m += 12;
+    }
+    return { y: Math.max(0, y), m: Math.max(0, m), d: Math.max(0, d) };
+  }
+
   // ─── ROI : amortissement RÉEL ───────────────────────────────────────
-  // Coût = réglage (Réglages). On tient compte de la part DÉJÀ AMORTIE par le
-  // total des économies cumulées, et on projette le reste au taux annuel RÉALISÉ
-  // (économies cumulées ÷ années écoulées depuis la mise en service).
-  const installEur = $derived(settings.installationCostEur);
+  // Coût total = somme des phases d'installation (Réglages). On projette le reste
+  // à amortir au taux d'économie RÉALISÉ (économies cumulées ÷ temps écoulé depuis
+  // la 1ʳᵉ mise en service), décomposé en années/mois/jours + date d'amortissement.
+  const installEur = $derived(settings.installationTotalEur);
   const savedTotalEur = $derived(savings.total.eur);
   const amortizedPct = $derived(
     installEur > 0 ? Math.min(100, Math.round((100 * savedTotalEur) / installEur)) : 0
@@ -358,14 +374,30 @@
   const yearsElapsed = $derived(
     Math.max(
       0.1,
-      (Date.now() - new Date(settings.installationDateISO).getTime()) / (365.25 * 24 * 3600 * 1000)
+      (Date.now() - new Date(settings.firstInstallationDateISO).getTime()) /
+        (365.25 * 24 * 3600 * 1000)
     )
   );
   const annualSavingsEur = $derived(savedTotalEur / yearsElapsed);
-  // Années RESTANTES jusqu'à l'amortissement complet (0 si déjà amorti).
-  const roiYears = $derived(
-    remainingEur <= 0 ? 0 : annualSavingsEur > 0 ? Math.round(remainingEur / annualSavingsEur) : 0
-  );
+  // ROI restant : durée jusqu'à l'amortissement complet en années/mois/jours, +
+  // mois/année d'amortissement projeté. amortized=true si déjà remboursé.
+  const roiView = $derived.by(() => {
+    if (remainingEur <= 0) return { amortized: true, label: '✓', payoff: '' };
+    if (annualSavingsEur <= 0) return { amortized: false, label: '—', payoff: '' };
+    const days = remainingEur / (annualSavingsEur / 365.25);
+    const now = new Date();
+    const payoffDate = new Date(now.getTime() + days * 24 * 3600 * 1000);
+    const { y, m, d } = diffYMD(now, payoffDate);
+    const parts: string[] = [];
+    if (y > 0) parts.push(`${y}a`);
+    if (m > 0) parts.push(`${m}m`);
+    parts.push(`${d}j`);
+    return {
+      amortized: false,
+      label: parts.join(' '),
+      payoff: payoffDate.toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })
+    };
+  });
 
   // Rendu d'une cellule : kWh arrondi (≥ 1), € via formatCurrency (≥ 0,005),
   // sinon tiret « — » (mois sans donnée, ou valeur négligeable).
@@ -856,10 +888,12 @@
         domain="hc"
       />
       <KpiCard
-        label="ROI installation"
-        value={roiYears > 0 ? roiYears.toString() : '✓'}
-        unit={roiYears > 0 ? 'ans restants' : 'amorti'}
-        trend={`amorti ${amortizedPct}% · ${Math.round(savedTotalEur)} € / ${Math.round(installEur)} €`}
+        label="ROI restant"
+        value={roiView.amortized ? '✓' : roiView.label}
+        unit={roiView.amortized ? 'amorti' : ''}
+        trend={roiView.amortized
+          ? `${Math.round(savedTotalEur)} € / ${Math.round(installEur)} €`
+          : `amorti ${amortizedPct}% · fin ~${roiView.payoff}`}
         domain="consumption"
       />
     </div>
