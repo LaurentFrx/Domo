@@ -51,6 +51,13 @@ export interface TariffConfig {
   tz: string;
   baseline: TariffBaseline;
   regimes: TariffRegime[];
+  /**
+   * Économies mensuelles déjà RÉALISÉES, importées de l'ancien suivi HA, par mois
+   * `'YYYY-MM' → €`. Même nature que `baseline` (données pré-recorder), mais
+   * ventilées par mois pour alimenter le « Tableau mensuel ». Purement
+   * d'affichage : n'entre PAS dans les totaux (déjà couverts par `baseline`).
+   */
+  monthlySavingsEur: Record<string, number>;
 }
 
 export type TariffPeriod = 'HP' | 'HC';
@@ -79,8 +86,23 @@ const DEFAULT_CONFIG: TariffConfig = {
   baseline: ZERO_BASELINE,
   regimes: [
     { from: '2024-01-01', hp_eur_kwh: 0.2318, hc_eur_kwh: 0.1812, hc_windows: [['00:06', '08:06']] }
-  ]
+  ],
+  monthlySavingsEur: {}
 };
+
+/** Parse la map d'économies mensuelles `'YYYY-MM' → €` : ne garde que les clés au
+ * format mois valide et les montants finis ≥ 0 (jamais NaN/négatif dans l'UI). */
+function normMonthlySavings(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(k)) continue;
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) out[k] = n;
+    }
+  }
+  return out;
+}
 
 // Cache invalidé sur le mtime du fichier : édition à chaud prise en compte au
 // prochain appel sans relire à chaque requête.
@@ -105,7 +127,10 @@ function normalize(raw: unknown): TariffConfig {
     total_eur: n(b.total_eur ?? o.baseline_eur),
     total_kwh: n(b.total_kwh ?? o.baseline_kwh)
   };
-  return { tz: o.tz ?? 'Europe/Paris', baseline, regimes };
+  const monthlySavingsEur = normMonthlySavings(
+    (o as { monthly_savings_eur?: unknown }).monthly_savings_eur
+  );
+  return { tz: o.tz ?? 'Europe/Paris', baseline, regimes, monthlySavingsEur };
 }
 
 function loadConfig(): TariffConfig {
@@ -239,4 +264,14 @@ export function applicableBaseline(t: Date): {
     year: { eur: sameYear ? b.year_eur : 0, kwh: sameYear ? b.year_kwh : 0 },
     total: { eur: b.total_eur, kwh: b.total_kwh }
   };
+}
+
+/**
+ * Économies mensuelles importées de HA (pré-recorder), `'YYYY-MM' → €`. Sert à
+ * remplir le « Tableau mensuel » pour les mois antérieurs au recorder (qui n'a
+ * aucune ligne `savings_daily` avant son ancrage). Affichage seul — déjà comptées
+ * dans les totaux via `baseline`, donc à ne JAMAIS ré-additionner ailleurs.
+ */
+export function monthlySavingsHistory(): Record<string, number> {
+  return loadConfig().monthlySavingsEur;
 }

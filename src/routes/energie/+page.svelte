@@ -7,7 +7,7 @@
   import { productionHistory } from '$stores/productionHistory.svelte';
   import { savings } from '$stores/savings.svelte';
   import { settings } from '$stores/settings.svelte';
-  import { energyMonthly } from '$stores/energyMonthly.svelte';
+  import { energyMonthly, type MonthAgg } from '$stores/energyMonthly.svelte';
   import { cumulus } from '$stores/cumulus.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { matter } from '$stores/matter.svelte';
@@ -257,31 +257,68 @@
     return m.charAt(0).toUpperCase() + m.slice(1);
   })();
 
+  // ─── Sélecteur d'année du tableau ────────────────────────────────────
+  // L'année COURANTE reste pilotée par le store live (son polling alimente aussi
+  // les KPI « Impact ce mois » → on n'y touche pas). Les années PASSÉES sont
+  // figées : fetchées une fois puis mises en cache. La borne basse vient de l'API
+  // (première année avec des données : économies importées de HA ou recorder).
+  const curYear = now.getFullYear();
+  const zeros12 = (): MonthAgg[] =>
+    Array.from({ length: 12 }, () => ({
+      production_kwh: 0,
+      autoconso_kwh: 0,
+      surplus_kwh: 0,
+      import_kwh: 0,
+      savings_eur: 0
+    }));
+  let selectedYear = $state(curYear);
+  let pastMonths = $state<MonthAgg[]>(zeros12());
+  const pastYearsCache = new Map<number, MonthAgg[]>();
+  const isCurrentYear = $derived(selectedYear === curYear);
+  const minSelectableYear = $derived(Math.min(energyMonthly.minYear, curYear));
+
+  $effect(() => {
+    const y = selectedYear;
+    if (y === curYear) return; // année courante → store live (déjà à jour)
+    const cached = pastYearsCache.get(y);
+    if (cached) {
+      pastMonths = cached;
+      return;
+    }
+    energyMonthly.fetchYear(y).then((m) => {
+      pastYearsCache.set(y, m);
+      if (selectedYear === y) pastMonths = m; // garde-fou course (re-clic rapide)
+    });
+  });
+
+  // 12 mois affichés : store live si année courante, sinon l'année passée fetchée.
+  const displayMonths = $derived<MonthAgg[]>(isCurrentYear ? energyMonthly.months : pastMonths);
+
   // Lignes du tableau dérivées des 12 mois agrégés (kWh / €). « — » géré au rendu.
   const rows = $derived<{ label: string; values: number[]; unit: string }[]>([
     {
       label: 'Production PV',
-      values: energyMonthly.months.map((m) => m.production_kwh),
+      values: displayMonths.map((m) => m.production_kwh),
       unit: 'kWh'
     },
     {
       label: 'Autoconsommation',
-      values: energyMonthly.months.map((m) => m.autoconso_kwh),
+      values: displayMonths.map((m) => m.autoconso_kwh),
       unit: 'kWh'
     },
     {
       label: 'Surplus injecté',
-      values: energyMonthly.months.map((m) => m.surplus_kwh),
+      values: displayMonths.map((m) => m.surplus_kwh),
       unit: 'kWh'
     },
     {
       label: 'Import réseau',
-      values: energyMonthly.months.map((m) => m.import_kwh),
+      values: displayMonths.map((m) => m.import_kwh),
       unit: 'kWh'
     },
     {
       label: 'Économies',
-      values: energyMonthly.months.map((m) => m.savings_eur),
+      values: displayMonths.map((m) => m.savings_eur),
       unit: '€'
     }
   ]);
@@ -706,35 +743,80 @@
   {/if}
 
   <!-- ═══ Section 3 : Tableau mensuel ═══ -->
-  <section class="overflow-x-auto">
-    <table class="yeldra-table w-full text-[12px]">
-      <thead>
-        <tr>
-          <th></th>
-          {#each months as m, i (m)}
-            <th class:active={i === currentMonthIdx} class:future={i > currentMonthIdx}>
-              {m}
-            </th>
-          {/each}
-        </tr>
-      </thead>
-      <tbody>
-        {#each rows as row (row.label)}
+  <section class="flex flex-col gap-3">
+    <div class="flex items-center justify-between gap-3">
+      <h2
+        class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+        style="color: var(--color-muted-fg);"
+      >
+        Bilan mensuel
+      </h2>
+      <!-- Sélecteur d'année : ‹ minYear … année courante › (pas de futur). -->
+      <div
+        class="inline-flex items-center gap-0.5 rounded-xl p-0.5"
+        style="background: var(--color-muted); border: 1px solid var(--color-border);"
+      >
+        <button
+          type="button"
+          onclick={() => (selectedYear = Math.max(minSelectableYear, selectedYear - 1))}
+          disabled={selectedYear <= minSelectableYear}
+          aria-label="Année précédente"
+          class="flex h-8 w-8 items-center justify-center rounded-lg text-[17px] leading-none transition-opacity disabled:opacity-25"
+          style="color: var(--color-muted-fg);"
+        >
+          ‹
+        </button>
+        <span
+          class="min-w-[4ch] text-center text-[13px] font-semibold tabular-nums"
+          style="color: var(--color-fg);"
+        >
+          {selectedYear}
+        </span>
+        <button
+          type="button"
+          onclick={() => (selectedYear = Math.min(curYear, selectedYear + 1))}
+          disabled={selectedYear >= curYear}
+          aria-label="Année suivante"
+          class="flex h-8 w-8 items-center justify-center rounded-lg text-[17px] leading-none transition-opacity disabled:opacity-25"
+          style="color: var(--color-muted-fg);"
+        >
+          ›
+        </button>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="yeldra-table w-full text-[12px]">
+        <thead>
           <tr>
-            <td class="row-label">{row.label}</td>
-            {#each row.values as v, i (i)}
-              <td
-                class:active={i === currentMonthIdx}
-                class:future={i > currentMonthIdx}
-                class="numeric"
+            <th></th>
+            {#each months as m, i (m)}
+              <th
+                class:active={isCurrentYear && i === currentMonthIdx}
+                class:future={isCurrentYear && i > currentMonthIdx}
               >
-                {fmtCell(v, row.unit)}
-              </td>
+                {m}
+              </th>
             {/each}
           </tr>
-        {/each}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {#each rows as row (row.label)}
+            <tr>
+              <td class="row-label">{row.label}</td>
+              {#each row.values as v, i (i)}
+                <td
+                  class:active={isCurrentYear && i === currentMonthIdx}
+                  class:future={isCurrentYear && i > currentMonthIdx}
+                  class="numeric"
+                >
+                  {fmtCell(v, row.unit)}
+                </td>
+              {/each}
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <!-- ═══ Section 4 : KPIs humanisés ═══ -->

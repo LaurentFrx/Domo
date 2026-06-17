@@ -24,7 +24,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import Database from 'better-sqlite3';
-import { applicableBaseline, parisDate } from '$lib/server/tariffs';
+import { applicableBaseline, monthlySavingsHistory, parisDate } from '$lib/server/tariffs';
 import type { RequestHandler } from './$types';
 
 interface MonthAgg {
@@ -38,6 +38,7 @@ interface MonthAgg {
 interface MonthlyPayload {
   year: number;
   months: MonthAgg[]; // toujours 12 entrées, index 0 = janvier
+  min_year: number; // première année disposant de données (borne du sélecteur)
 }
 
 function zeroMonth(): MonthAgg {
@@ -158,9 +159,36 @@ export const GET: RequestHandler = async ({ url }) => {
       }
     }
 
+    // ── Économies importées de HA (pré-recorder) ──
+    // Comble savings_eur des mois SANS ligne enregistrée (tous antérieurs à
+    // l'ancrage du recorder → aucun recouvrement). N'affecte que la colonne € ;
+    // les kWh restent à 0 (« — »), ce détail n'a pas été importé. Déjà comptées
+    // dans les totaux via la baseline → purement d'affichage ici.
+    const history = monthlySavingsHistory();
+    for (let i = 0; i < 12; i++) {
+      if (months[i].savings_eur >= 0.005) continue; // donnée enregistrée : on la garde
+      const v = history[`${year}-${String(i + 1).padStart(2, '0')}`];
+      if (typeof v === 'number' && v > 0) months[i].savings_eur = v;
+    }
+
+    // ── Borne basse du sélecteur d'année : première année avec des données ──
+    // (économies importées OU lignes savings_daily). Repli : année courante.
+    let minYear = curYear;
+    for (const k of Object.keys(history)) {
+      const y = Number(k.slice(0, 4));
+      if (Number.isFinite(y) && y >= 2000 && y < minYear) minYear = y;
+    }
+    if (hasSavings) {
+      const r = db.prepare('SELECT MIN(substr(date,1,4)) AS y FROM savings_daily').get() as {
+        y: string | null;
+      };
+      const y = Number(r?.y);
+      if (Number.isFinite(y) && y >= 2000 && y < minYear) minYear = y;
+    }
+
     foldBaseline(months, year, curYear, now);
 
-    const payload: MonthlyPayload = { year, months };
+    const payload: MonthlyPayload = { year, months, min_year: minYear };
     return json(payload);
   } catch (e) {
     // Détail en log serveur SEULEMENT (un message SQLite peut exposer un chemin interne).

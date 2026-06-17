@@ -23,6 +23,7 @@ export interface MonthAgg {
 export interface MonthlyPayload {
   year: number;
   months: MonthAgg[]; // 12 entrées, index 0 = janvier
+  min_year?: number; // première année avec des données (borne du sélecteur)
 }
 
 function zeroMonth(): MonthAgg {
@@ -63,6 +64,7 @@ function normMonths(arr: unknown): MonthAgg[] {
 class EnergyMonthlyState {
   #months = $state<MonthAgg[]>(emptyMonths());
   #year = $state<number>(new Date().getFullYear());
+  #minYear = $state<number>(new Date().getFullYear());
 
   connected = $state(false);
   status = $state<'idle' | 'polling' | 'connected' | 'unconfigured' | 'error'>('idle');
@@ -77,6 +79,10 @@ class EnergyMonthlyState {
   }
   get year(): number {
     return this.#year;
+  }
+  /** Première année disposant de données (borne basse du sélecteur d'année). */
+  get minYear(): number {
+    return this.#minYear;
   }
 
   connect() {
@@ -117,6 +123,25 @@ class EnergyMonthlyState {
     }
   }
 
+  /**
+   * Fetch ponctuel d'une année donnée (années PASSÉES, figées) → 12 mois
+   * normalisés. N'altère pas l'état de polling de l'année courante (qui alimente
+   * les KPI « Impact ce mois »). Échec/503 → 12 mois à zéro (le tableau affiche
+   * « — »). La page met ce résultat en cache : une année passée ne bouge plus.
+   */
+  async fetchYear(year: number): Promise<MonthAgg[]> {
+    try {
+      const res = await fetch(`/api/energy/monthly?year=${year}`, {
+        signal: AbortSignal.timeout(TIMEOUT_MS)
+      });
+      if (!res.ok) return emptyMonths();
+      const p = (await res.json()) as Partial<MonthlyPayload>;
+      return normMonths(p.months);
+    } catch {
+      return emptyMonths();
+    }
+  }
+
   async poll() {
     this.status = 'polling';
     try {
@@ -132,6 +157,7 @@ class EnergyMonthlyState {
       const p = (await res.json()) as Partial<MonthlyPayload>;
       this.#months = normMonths(p.months);
       this.#year = typeof p.year === 'number' ? p.year : new Date().getFullYear();
+      this.#minYear = typeof p.min_year === 'number' ? p.min_year : this.#year;
       this.connected = true;
       this.status = 'connected';
       this.lastError = null;
