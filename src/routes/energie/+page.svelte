@@ -24,6 +24,7 @@
   import ChartHoverLayer from '$components/charts/ChartHoverLayer.svelte';
   import ApplianceCard from '$components/tiles/ApplianceCard.svelte';
   import CumulusCard from '$components/cards/CumulusCard.svelte';
+  import HpHcSplitCard from '$components/cards/HpHcSplitCard.svelte';
 
   onMount(() => {
     settings.hydrate(); // coût installation (ROI) + prix, depuis /api/settings
@@ -269,6 +270,9 @@
       autoconso_kwh: 0,
       surplus_kwh: 0,
       import_kwh: 0,
+      import_hc_kwh: 0,
+      import_hp_kwh: 0,
+      import_live_kwh: 0,
       savings_eur: 0
     }));
   let selectedYear = $state(curYear);
@@ -330,9 +334,14 @@
   // CO2 évité = auto-conso × facteur réseau FRANCE (réglage, défaut ADEME 0,052).
   const co2Saved = $derived((curMonth?.autoconso_kwh ?? 0) * settings.co2FactorKgKwh);
   const evKmEquiv = $derived(co2Saved * 6);
+  // Autosuffisance = autoconso / conso, sur la MÊME période. On prend l'import
+  // MESURÉ par le recorder (import_live_kwh), cohérent en période avec l'autoconso
+  // du mois en cours — PAS le relevé compteur mensuel (import_kwh), qui couvre le
+  // mois entier et fausserait le ratio d'un mois encore partiel (cf. juin : import
+  // live ~4 kWh vs relevé 39 kWh → 97 % au lieu de 81 %).
   const autonomyPct = $derived.by(() => {
     const auto = curMonth?.autoconso_kwh ?? 0;
-    const denom = auto + (curMonth?.import_kwh ?? 0);
+    const denom = auto + (curMonth?.import_live_kwh ?? 0);
     return denom > 0 ? Math.round((100 * auto) / denom) : 0;
   });
   // ─── ROI : amortissement RÉEL ───────────────────────────────────────
@@ -817,6 +826,9 @@
         </tbody>
       </table>
     </div>
+
+    <!-- Répartition HP/HC des imports réseau (suit l'année sélectionnée). -->
+    <HpHcSplitCard data={displayMonths} labels={months} year={selectedYear} />
   </section>
 
   <!-- ═══ Section 4 : KPIs humanisés ═══ -->

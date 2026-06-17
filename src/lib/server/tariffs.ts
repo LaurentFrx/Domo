@@ -58,6 +58,16 @@ export interface TariffConfig {
    * d'affichage : n'entre PAS dans les totaux (déjà couverts par `baseline`).
    */
   monthlySavingsEur: Record<string, number>;
+  /**
+   * Imports réseau mensuels RELEVÉS au compteur (Linky/EDF), pré-recorder,
+   * ventilés Heures Creuses / Heures Pleines, par mois `'YYYY-MM' → kWh`. Source
+   * de vérité de la colonne « Import réseau » du « Tableau mensuel » (total =
+   * HC + HP) ET du graphe de répartition HP/HC. Ces relevés (= facturés) PRIMENT
+   * sur le recorder pour les mois fournis : le recorder ne ventile pas l'import
+   * HP/HC, et ses chiffres du mois courant sont moins fiables (cf. juin 2026).
+   */
+  monthlyImportHcKwh: Record<string, number>;
+  monthlyImportHpKwh: Record<string, number>;
 }
 
 export type TariffPeriod = 'HP' | 'HC';
@@ -87,12 +97,15 @@ const DEFAULT_CONFIG: TariffConfig = {
   regimes: [
     { from: '2024-01-01', hp_eur_kwh: 0.2318, hc_eur_kwh: 0.1812, hc_windows: [['00:06', '08:06']] }
   ],
-  monthlySavingsEur: {}
+  monthlySavingsEur: {},
+  monthlyImportHcKwh: {},
+  monthlyImportHpKwh: {}
 };
 
-/** Parse la map d'économies mensuelles `'YYYY-MM' → €` : ne garde que les clés au
- * format mois valide et les montants finis ≥ 0 (jamais NaN/négatif dans l'UI). */
-function normMonthlySavings(raw: unknown): Record<string, number> {
+/** Parse une map mensuelle `'YYYY-MM' → nombre` : ne garde que les clés au format
+ * mois valide et les valeurs finies ≥ 0 (jamais NaN/négatif dans l'UI). Sert aux
+ * économies (€) ET aux imports réseau (kWh) — même validation. */
+function normMonthlyMap(raw: unknown): Record<string, number> {
   const out: Record<string, number> = {};
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
@@ -127,10 +140,23 @@ function normalize(raw: unknown): TariffConfig {
     total_eur: n(b.total_eur ?? o.baseline_eur),
     total_kwh: n(b.total_kwh ?? o.baseline_kwh)
   };
-  const monthlySavingsEur = normMonthlySavings(
+  const monthlySavingsEur = normMonthlyMap(
     (o as { monthly_savings_eur?: unknown }).monthly_savings_eur
   );
-  return { tz: o.tz ?? 'Europe/Paris', baseline, regimes, monthlySavingsEur };
+  const monthlyImportHcKwh = normMonthlyMap(
+    (o as { monthly_import_hc_kwh?: unknown }).monthly_import_hc_kwh
+  );
+  const monthlyImportHpKwh = normMonthlyMap(
+    (o as { monthly_import_hp_kwh?: unknown }).monthly_import_hp_kwh
+  );
+  return {
+    tz: o.tz ?? 'Europe/Paris',
+    baseline,
+    regimes,
+    monthlySavingsEur,
+    monthlyImportHcKwh,
+    monthlyImportHpKwh
+  };
 }
 
 function loadConfig(): TariffConfig {
@@ -274,4 +300,18 @@ export function applicableBaseline(t: Date): {
  */
 export function monthlySavingsHistory(): Record<string, number> {
   return loadConfig().monthlySavingsEur;
+}
+
+/**
+ * Imports réseau mensuels relevés au compteur, ventilés Heures Creuses / Heures
+ * Pleines, `'YYYY-MM' → kWh`. Alimentent la colonne « Import réseau » (total =
+ * HC + HP) et le graphe de répartition HP/HC. Les relevés fournis PRIMENT sur le
+ * recorder (facturés + ventilation HP/HC absente côté recorder).
+ */
+export function monthlyImportHcHistory(): Record<string, number> {
+  return loadConfig().monthlyImportHcKwh;
+}
+
+export function monthlyImportHpHistory(): Record<string, number> {
+  return loadConfig().monthlyImportHpKwh;
 }

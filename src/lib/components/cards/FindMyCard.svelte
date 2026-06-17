@@ -10,14 +10,85 @@
     return () => clearInterval(id);
   });
 
-  const devices = $derived(findmy.sorted);
-  // Carte masquée tant que MQTT n'est pas câblé et qu'on n'a rien en cache.
-  const visible = $derived(
-    findmy.connectionStatus !== 'unconfigured' &&
-      (devices.length > 0 ||
-        findmy.connectionStatus === 'connecting' ||
-        findmy.connectionStatus === 'connected')
+  // ─── Exclusion : ancien iPad de Laurent (position inconnue, batterie morte).
+  // Filtre sur le topicId UNIQUEMENT — les deux iPad partagent le même `name`,
+  // un filtre par nom supprimerait aussi l'iPad en service (axlejkxg).
+  const EXCLUDED_TOPICS = new Set(['ipad-de-laurent-avm1zspv']);
+
+  // ─── Propriétaire : aucun champ owner dans le payload → inférence sur le nom.
+  function inferOwner(name: string): 'laurent' | 'isabelle' {
+    return /isabelle/i.test(name) ? 'isabelle' : 'laurent';
+  }
+
+  // ─── Nom raccourci : le propriétaire est désormais porté par la figurine
+  // d'en-tête, on retire son nom du libellé. Repli sur le type si reste vide.
+  // « iPhone Laurent »→« iPhone », « AirPods Pro de Laurent »→« AirPods Pro »…
+  function shortName(d: FindMyDevice): string {
+    const stripped = d.name
+      .replace(/\s*(de\s+laurent|laurent|d['’]isabelle|isabelle)\s*/i, '')
+      .trim();
+    return stripped || d.deviceClass || d.name;
+  }
+
+  // ─── Item de rendu : appareil live OU placeholder « en attente de partage ».
+  type LiveItem = { placeholder: false; device: FindMyDevice };
+  type Placeholder = { placeholder: true; name: string; deviceClass: string };
+  type RowItem = LiveItem | Placeholder;
+
+  // Appareils réels, ancien iPad exclu.
+  const liveDevices = $derived(findmy.sorted.filter((d) => !EXCLUDED_TOPICS.has(d.topicId)));
+
+  const laurentItems = $derived(
+    liveDevices
+      .filter((d) => inferOwner(d.name) === 'laurent')
+      .map((d) => ({ placeholder: false as const, device: d }))
   );
+
+  // Placeholders Isabelle (préremplissage) — remplacés par ses vrais appareils
+  // dès qu'elle partagera (fusion par type d'appareil), sans nouvelle modif.
+  const ISABELLE_PLACEHOLDERS: Placeholder[] = [
+    { placeholder: true, name: 'iPhone', deviceClass: 'iPhone' },
+    { placeholder: true, name: 'iPad', deviceClass: 'iPad' },
+    { placeholder: true, name: 'Apple Watch', deviceClass: 'Watch' },
+    { placeholder: true, name: 'AirPods Pro', deviceClass: 'Accessory' }
+  ];
+
+  // Rapproche un type d'appareil live d'un type de placeholder (insensible casse).
+  function classMatches(deviceClass: string | null, target: string): boolean {
+    const a = (deviceClass || '').toLowerCase();
+    if (!a) return false;
+    const b = target.toLowerCase();
+    return a.includes(b) || b.includes(a);
+  }
+
+  const isabelleItems = $derived.by<RowItem[]>(() => {
+    const live = liveDevices.filter((d) => inferOwner(d.name) === 'isabelle');
+    const used = new Set<string>();
+    const items: RowItem[] = ISABELLE_PLACEHOLDERS.map((p) => {
+      const match = live.find(
+        (d) => !used.has(d.topicId) && classMatches(d.deviceClass, p.deviceClass)
+      );
+      if (match) {
+        used.add(match.topicId);
+        return { placeholder: false, device: match };
+      }
+      return p;
+    });
+    // Appareils live d'Isabelle d'un type hors placeholders → ajoutés à la suite.
+    for (const d of live) if (!used.has(d.topicId)) items.push({ placeholder: false, device: d });
+    return items;
+  });
+
+  // Nombre d'appareils réels affichés (placeholders & ancien iPad exclus).
+  const shownCount = $derived(liveDevices.length);
+
+  // Carte masquée seulement si le service n'est pas câblé. Les placeholders
+  // d'Isabelle font que la carte a toujours du contenu une fois configurée.
+  const visible = $derived(findmy.connectionStatus !== 'unconfigured');
+
+  // Fallback figurines : si l'image ne charge pas → cercle initiale au thème.
+  let laurentImgError = $state(false);
+  let isabelleImgError = $state(false);
 
   // ─── État de santé global (chip d'en-tête) ───
   type Health = { label: string; color: string };
@@ -94,13 +165,79 @@
   }
 </script>
 
+<!-- Rangée appareil (live) ou placeholder « en attente de partage ». -->
+{#snippet deviceRow(item: RowItem)}
+  {#if item.placeholder}
+    <article class="fm-row fm-row-ph" aria-label="{item.name} — en attente de partage">
+      <div class="fm-row-top">
+        <span class="fm-chip" aria-hidden="true">{@html iconSvg(item.deviceClass)}</span>
+        <span class="fm-name">{item.name}</span>
+      </div>
+      <span class="fm-ph-badge">Partage en attente</span>
+    </article>
+  {:else}
+    {@const d = item.device}
+    {@const pct = batteryPct(d)}
+    {@const color = batteryColor(d)}
+    <article class="fm-row">
+      <div class="fm-row-top">
+        <span class="fm-chip" aria-hidden="true">{@html iconSvg(d.deviceClass)}</span>
+        <span class="fm-name">{shortName(d)}</span>
+      </div>
+
+      <span class="fm-meta">
+        {#if d.lat != null && d.lon != null}
+          <span class="fm-meta-txt">
+            Localisé{#if d.accuracy != null}&nbsp;· ±{Math.round(d.accuracy)} m{/if}{#if d.fixTs}&nbsp;·
+              {ago(d.fixTs, now)}{/if}
+          </span>
+          <a
+            class="fm-link"
+            href={mapsUrl(d)}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Voir {d.name} sur le plan"
+          >
+            Plan&nbsp;↗
+          </a>
+        {:else}
+          <span class="fm-meta-txt">Position inconnue</span>
+        {/if}
+      </span>
+
+      <div class="fm-batt-line">
+        {#if d.charging}
+          <svg
+            viewBox="0 0 24 24"
+            width="11"
+            height="11"
+            fill="var(--color-battery)"
+            aria-hidden="true"
+          >
+            <path d="M13 2 4 14h6l-1 8 9-12h-6z" />
+          </svg>
+        {/if}
+        <span class="fm-batt-pct" style="color: {color};">
+          {pct == null ? '—' : `${pct} %`}
+        </span>
+        <div class="fm-batt-track" aria-hidden="true">
+          <div
+            class="fm-batt-fill"
+            style="width: {pct == null ? 0 : pct}%; background: {color};"
+          ></div>
+        </div>
+      </div>
+    </article>
+  {/if}
+{/snippet}
+
 {#if visible}
   <section
     class="rounded-[var(--radius-2xl)] border p-4 sm:p-5"
     style="background: var(--color-card); border-color: var(--color-border);"
     aria-label="Appareils Localiser"
   >
-    <!-- ─── En-tête ─── -->
+    <!-- ─── En-tête global ─── -->
     <header class="mb-3 flex items-center justify-between gap-3">
       <div class="flex items-center gap-2">
         <span class="fm-title-icon" aria-hidden="true">
@@ -121,12 +258,12 @@
         <h2 class="text-base font-semibold tracking-tight" style="color: var(--color-fg);">
           Localiser
         </h2>
-        {#if findmy.count > 0}
+        {#if shownCount > 0}
           <span
             class="rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums"
             style="background: var(--color-primary-muted); color: var(--color-primary);"
           >
-            {findmy.count}
+            {shownCount}
           </span>
         {/if}
       </div>
@@ -143,80 +280,50 @@
       {/if}
     </header>
 
-    <!-- ─── Liste des appareils ─── -->
-    {#if devices.length > 0}
-      <div class="grid grid-cols-1 gap-2 lg:grid-cols-2">
-        {#each devices as d (d.topicId)}
-          {@const pct = batteryPct(d)}
-          {@const color = batteryColor(d)}
-          <article class="fm-row flex items-center gap-3 rounded-[var(--radius-xl)] p-2.5">
-            <!-- Pastille icône -->
-            <span class="fm-chip" aria-hidden="true">{@html iconSvg(d.deviceClass)}</span>
-
-            <!-- Nom + localisation -->
-            <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span
-                class="truncate text-[13px] leading-tight font-semibold"
-                style="color: var(--color-fg);"
-              >
-                {d.name}
-              </span>
-              <span class="flex flex-wrap items-center gap-x-1.5 text-[11px] leading-tight">
-                {#if d.lat != null && d.lon != null}
-                  <span style="color: var(--color-muted-fg);">
-                    Localisé{#if d.accuracy != null}&nbsp;· ±{Math.round(d.accuracy)} m{/if}
-                    {#if d.fixTs}&nbsp;· {ago(d.fixTs, now)}{/if}
-                  </span>
-                  <a
-                    class="fm-link"
-                    href={mapsUrl(d)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label="Voir {d.name} sur le plan"
-                  >
-                    Plan&nbsp;↗
-                  </a>
-                {:else}
-                  <span style="color: var(--color-muted-fg);">Position inconnue</span>
-                {/if}
-              </span>
-            </div>
-
-            <!-- Batterie -->
-            <div class="flex shrink-0 flex-col items-end gap-1">
-              <div class="flex items-center gap-1">
-                {#if d.charging}
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="11"
-                    height="11"
-                    fill="var(--color-battery)"
-                    aria-hidden="true"
-                  >
-                    <path d="M13 2 4 14h6l-1 8 9-12h-6z" />
-                  </svg>
-                {/if}
-                <span class="text-[13px] font-bold tabular-nums" style="color: {color};">
-                  {pct == null ? '—' : `${pct} %`}
-                </span>
-              </div>
-              <div class="fm-batt-track" aria-hidden="true">
-                <div
-                  class="fm-batt-fill"
-                  style="width: {pct == null ? 0 : pct}%; background: {color};"
-                ></div>
-              </div>
-            </div>
-          </article>
-        {/each}
+    <!-- ─── Deux colonnes : Laurent | Isabelle (côte à côte, mobile inclus) ─── -->
+    <div class="fm-cols">
+      <!-- Colonne Laurent -->
+      <div class="fm-col">
+        <div class="fm-col-head">
+          {#if !laurentImgError}
+            <img
+              class="fm-avatar"
+              src="/avatars/laurent.jpg"
+              alt="Laurent"
+              onerror={() => (laurentImgError = true)}
+            />
+          {:else}
+            <span class="fm-avatar fm-avatar-fallback" role="img" aria-label="Laurent">L</span>
+          {/if}
+        </div>
+        <div class="fm-col-list">
+          {#each laurentItems as item (item.device.topicId)}
+            {@render deviceRow(item)}
+          {/each}
+        </div>
       </div>
-    {:else}
-      <p class="py-2 text-[12px]" style="color: var(--color-muted-fg);">
-        {findmy.connectionStatus === 'connecting'
-          ? 'Connexion au service Localiser…'
-          : 'Aucun appareil pour le moment.'}
-      </p>
-    {/if}
+
+      <!-- Colonne Isabelle -->
+      <div class="fm-col">
+        <div class="fm-col-head">
+          {#if !isabelleImgError}
+            <img
+              class="fm-avatar"
+              src="/avatars/isabelle.jpg"
+              alt="Isabelle"
+              onerror={() => (isabelleImgError = true)}
+            />
+          {:else}
+            <span class="fm-avatar fm-avatar-fallback" role="img" aria-label="Isabelle">I</span>
+          {/if}
+        </div>
+        <div class="fm-col-list">
+          {#each isabelleItems as item (item.placeholder ? `ph-${item.deviceClass}` : item.device.topicId)}
+            {@render deviceRow(item)}
+          {/each}
+        </div>
+      </div>
+    </div>
   </section>
 {/if}
 
@@ -228,10 +335,65 @@
     color: var(--color-primary);
   }
 
-  /* Rangée appareil : pas de fond « verre » (évite le double backdrop-filter) —
-     juste un liseré discret + survol, l'icône colorée porte le repère visuel. */
+  /* Deux colonnes côte à côte, dès le mobile (demi-largeur chacune). */
+  .fm-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+  @media (min-width: 640px) {
+    .fm-cols {
+      gap: 1rem;
+    }
+  }
+
+  .fm-col {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  /* En-tête de colonne : figurine seule (le nom passe en aria-label). */
+  .fm-col-head {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-bottom: 0.125rem;
+  }
+  .fm-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 9999px;
+    object-fit: cover;
+    background: var(--color-primary-muted);
+    border: 2px solid var(--color-border);
+    box-shadow: 0 0 0 1px var(--color-primary-muted);
+  }
+  .fm-avatar-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--color-primary);
+  }
+
+  .fm-col-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  /* Rangée appareil : empilée (titre / état / batterie) pour tenir en demi-largeur.
+     Pas de fond « verre » (évite le double backdrop-filter) — liseré + survol. */
   .fm-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.55rem;
     border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
     background: transparent;
     transition:
       border-color var(--duration-normal, 200ms),
@@ -240,17 +402,59 @@
   .fm-row:hover {
     border-color: var(--color-border-strong);
   }
+  /* Placeholder « en attente de partage » : grisé, sobre. */
+  .fm-row-ph {
+    opacity: 0.5;
+    border-style: dashed;
+  }
 
+  .fm-row-top {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.5rem;
+  }
   .fm-chip {
     display: inline-flex;
+    width: 1.875rem;
+    height: 1.875rem;
+    flex-shrink: 0;
     align-items: center;
     justify-content: center;
-    width: 2.25rem;
-    height: 2.25rem;
-    flex-shrink: 0;
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-md, 0.5rem);
     background: var(--color-primary-muted);
     color: var(--color-primary);
+  }
+  /* Noms raccourcis : pas de troncature, on autorise le retour à la ligne. */
+  .fm-name {
+    min-width: 0;
+    font-size: 12.5px;
+    line-height: 1.15;
+    font-weight: 600;
+    color: var(--color-fg);
+    overflow-wrap: anywhere;
+  }
+
+  .fm-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.1rem 0.4rem;
+    font-size: 10.5px;
+    line-height: 1.2;
+  }
+  .fm-meta-txt {
+    color: var(--color-muted-fg);
+  }
+
+  .fm-ph-badge {
+    align-self: flex-start;
+    padding: 0.05rem 0.45rem;
+    border: 1px dashed var(--color-border-strong, var(--color-border));
+    border-radius: 9999px;
+    font-size: 9.5px;
+    font-weight: 600;
+    color: var(--color-muted-fg);
   }
 
   .fm-link {
@@ -264,11 +468,22 @@
     opacity: 0.75;
   }
 
+  .fm-batt-line {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .fm-batt-pct {
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
   /* Jauge batterie : piste arrondie + remplissage coloré (pas de box-shadow
      color-mix → conforme au piège Chrome documenté). */
   .fm-batt-track {
-    width: 38px;
+    width: 40px;
     height: 5px;
+    flex-shrink: 0;
     border-radius: 9999px;
     background: var(--color-border);
     overflow: hidden;

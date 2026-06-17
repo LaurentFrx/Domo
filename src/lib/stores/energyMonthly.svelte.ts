@@ -17,6 +17,14 @@ export interface MonthAgg {
   autoconso_kwh: number;
   surplus_kwh: number;
   import_kwh: number;
+  /** Ventilation de l'import : Heures Creuses / Heures Pleines (kWh). 0 si pas de
+   * relevé (le recorder ne ventile pas l'import → split connu seulement via les
+   * relevés compteur). */
+  import_hc_kwh: number;
+  import_hp_kwh: number;
+  /** Import MESURÉ par le recorder ce mois (≠ relevé compteur) — base du KPI
+   * d'autosuffisance, cohérent en période avec autoconso_kwh. */
+  import_live_kwh: number;
   savings_eur: number;
 }
 
@@ -32,6 +40,9 @@ function zeroMonth(): MonthAgg {
     autoconso_kwh: 0,
     surplus_kwh: 0,
     import_kwh: 0,
+    import_hc_kwh: 0,
+    import_hp_kwh: 0,
+    import_live_kwh: 0,
     savings_eur: 0
   };
 }
@@ -51,6 +62,9 @@ function normMonth(m: Partial<MonthAgg> | undefined): MonthAgg {
     autoconso_kwh: num(m?.autoconso_kwh),
     surplus_kwh: num(m?.surplus_kwh),
     import_kwh: num(m?.import_kwh),
+    import_hc_kwh: num(m?.import_hc_kwh),
+    import_hp_kwh: num(m?.import_hp_kwh),
+    import_live_kwh: num(m?.import_live_kwh),
     savings_eur: num(m?.savings_eur)
   };
 }

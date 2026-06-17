@@ -208,12 +208,8 @@
         {/each}
       </div>
 
-      <!-- Pied : couverture · débit live €/h (commun) · ventilation HP/HC -->
+      <!-- Pied : débit live €/h · ventilation HP/HC -->
       <footer class="hero-foot">
-        <span class="cov-badge" class:dim={!hasCoverage}>
-          <span class="cov-dot" aria-hidden="true"></span>
-          {hasCoverage ? `${coverage}% solaire` : `${DASH} solaire`}
-        </span>
         {#if showRate}
           <span class="rate">+{eur(rate)}/h</span>
         {/if}
@@ -431,33 +427,6 @@
     border-top: 1px solid var(--color-border);
     padding-top: 0.85rem;
   }
-  .cov-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.18rem 0.75rem;
-    border-radius: 9999px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    color: var(--color-solar);
-    background: var(--color-solar-muted);
-  }
-  .cov-badge.dim {
-    color: var(--color-muted-fg);
-    background: var(--color-muted);
-  }
-  .cov-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 9999px;
-    background: var(--color-solar);
-    box-shadow: 0 0 7px var(--color-solar);
-  }
-  .cov-badge.dim .cov-dot {
-    background: var(--color-muted-fg);
-    box-shadow: none;
-  }
   .rate {
     display: inline-flex;
     align-items: center;
@@ -479,6 +448,7 @@
     display: inline-flex;
     align-items: center;
     gap: 0.7rem;
+    margin-left: auto; /* ventilation HP/HC alignée à droite, seule (nuit) ou avec le +€/h */
     font-size: 11px;
     font-variant-numeric: tabular-nums;
     color: var(--color-muted-fg);

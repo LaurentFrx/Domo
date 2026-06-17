@@ -24,7 +24,13 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import Database from 'better-sqlite3';
-import { applicableBaseline, monthlySavingsHistory, parisDate } from '$lib/server/tariffs';
+import {
+  applicableBaseline,
+  monthlyImportHcHistory,
+  monthlyImportHpHistory,
+  monthlySavingsHistory,
+  parisDate
+} from '$lib/server/tariffs';
 import type { RequestHandler } from './$types';
 
 interface MonthAgg {
@@ -32,6 +38,13 @@ interface MonthAgg {
   autoconso_kwh: number;
   surplus_kwh: number;
   import_kwh: number;
+  import_hc_kwh: number;
+  import_hp_kwh: number;
+  /** Import RÉELLEMENT MESURÉ ce mois par le recorder (savings_daily), AVANT tout
+   * remplacement par un relevé compteur mensuel. Cohérent en période avec
+   * autoconso_kwh → base du KPI d'autosuffisance (≠ import_kwh, qui privilégie le
+   * relevé facturé pour le tableau). */
+  import_live_kwh: number;
   savings_eur: number;
 }
 
@@ -47,6 +60,9 @@ function zeroMonth(): MonthAgg {
     autoconso_kwh: 0,
     surplus_kwh: 0,
     import_kwh: 0,
+    import_hc_kwh: 0,
+    import_hp_kwh: 0,
+    import_live_kwh: 0,
     savings_eur: 0
   };
 }
@@ -171,10 +187,35 @@ export const GET: RequestHandler = async ({ url }) => {
       if (typeof v === 'number' && v > 0) months[i].savings_eur = v;
     }
 
+    // Import « live » = ce que le recorder a effectivement mesuré ce mois
+    // (savings_daily), AVANT tout remplacement par un relevé compteur mensuel
+    // ci-dessous. Base du KPI d'autosuffisance, cohérent en période avec l'autoconso.
+    for (let i = 0; i < 12; i++) months[i].import_live_kwh = months[i].import_kwh;
+
+    // ── Imports réseau relevés au compteur, ventilés HC / HP (pré-recorder) ──
+    // Relevés Linky/EDF (= facturés) → source de vérité. Quand un mois a un relevé,
+    // il PRIME sur le recorder (≠ logique des économies) : le recorder ne ventile
+    // pas l'import HP/HC, et ses chiffres du mois COURANT sont moins fiables (ex.
+    // juin 2026, données HA erronées). import_kwh = HC + HP. Les mois SANS relevé
+    // gardent le total recorder (sans ventilation → HC/HP restent à 0).
+    const importHc = monthlyImportHcHistory();
+    const importHp = monthlyImportHpHistory();
+    for (let i = 0; i < 12; i++) {
+      const key = `${year}-${String(i + 1).padStart(2, '0')}`;
+      const hc = importHc[key];
+      const hp = importHp[key];
+      const hasHc = typeof hc === 'number' && hc > 0;
+      const hasHp = typeof hp === 'number' && hp > 0;
+      if (!hasHc && !hasHp) continue; // aucun relevé manuel → on garde le recorder
+      months[i].import_hc_kwh = hasHc ? hc : 0;
+      months[i].import_hp_kwh = hasHp ? hp : 0;
+      months[i].import_kwh = months[i].import_hc_kwh + months[i].import_hp_kwh;
+    }
+
     // ── Borne basse du sélecteur d'année : première année avec des données ──
     // (économies importées OU lignes savings_daily). Repli : année courante.
     let minYear = curYear;
-    for (const k of Object.keys(history)) {
+    for (const k of [...Object.keys(history), ...Object.keys(importHc), ...Object.keys(importHp)]) {
       const y = Number(k.slice(0, 4));
       if (Number.isFinite(y) && y >= 2000 && y < minYear) minYear = y;
     }
