@@ -331,9 +331,10 @@
   // Mois courant : auto-conso + import réels (store mensuel). ROI : économies
   // annuelles du store savings (baseline incluse, cohérent avec la SavingsCard).
   const curMonth = $derived(energyMonthly.months[currentMonthIdx] ?? energyMonthly.months[0]);
-  // CO2 évité = auto-conso × facteur réseau FRANCE (réglage, défaut ADEME 0,052).
-  const co2Saved = $derived((curMonth?.autoconso_kwh ?? 0) * settings.co2FactorKgKwh);
-  const evKmEquiv = $derived(co2Saved * 6);
+  // Équivalent VE : l'auto-conso du mois convertie en km qu'une voiture électrique
+  // parcourrait (conso ~16,7 kWh/100 km → 6 km/kWh).
+  const EV_KM_PER_KWH = 6;
+  const evKmEquiv = $derived((curMonth?.autoconso_kwh ?? 0) * EV_KM_PER_KWH);
   // Autosuffisance = autoconso / conso, sur la MÊME période. On prend l'import
   // MESURÉ par le recorder (import_live_kwh), cohérent en période avec l'autoconso
   // du mois en cours — PAS le relevé compteur mensuel (import_kwh), qui couvre le
@@ -839,14 +840,7 @@
     >
       Impact ce mois ({months[currentMonthIdx]})
     </h2>
-    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <KpiCard
-        label="CO₂ évité"
-        value={co2Saved.toFixed(0)}
-        unit="kg"
-        trend={`${(co2Saved * 12).toFixed(0)} kg/an estimé`}
-        domain="battery"
-      />
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
       <KpiCard
         label="Équivalent VE"
         value={evKmEquiv.toFixed(0)}

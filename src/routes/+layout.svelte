@@ -42,8 +42,8 @@
     preferences.hydrate();
   });
 
-  // ─── Réglages métier (prix, coût/date installation, facteur CO2) app-wide ──
-  // Hydratés ici pour que l'accueil (CO2 évité) et l'énergie (ROI) y aient accès.
+  // ─── Réglages métier (prix, coût/date installation) app-wide ──
+  // Hydratés ici pour que l'accueil et l'énergie (ROI) y aient accès.
   $effect(() => {
     settings.hydrate();
   });

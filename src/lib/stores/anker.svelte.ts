@@ -69,9 +69,7 @@ type ApiPayload = {
   daily_consumption_wh: number;
   self_consumption_rate: number | null;
   lifetime_production_kwh?: number;
-  lifetime_co2_saved_kg?: number;
   lifetime_savings_eur?: number;
-  co2_saved_kg?: number;
   battery_charge_power_w?: number;
   battery_discharge_power_w?: number;
   sb_output_power_w?: number;
@@ -172,8 +170,6 @@ class AnkerState {
 
   /** Production cumulée depuis l'installation (kWh). */
   lifetimeProductionKwh = $state(0);
-  /** CO₂ évité depuis l'installation (kg). */
-  lifetimeCo2SavedKg = $state(0);
   /** Économies depuis l'installation (€). */
   lifetimeSavingsEur = $state(0);
 
@@ -370,7 +366,6 @@ class AnkerState {
     this.dailyConsumptionWh = p.daily_consumption_wh ?? 0;
     this.selfConsumptionRate = p.self_consumption_rate;
     this.lifetimeProductionKwh = p.lifetime_production_kwh ?? 0;
-    this.lifetimeCo2SavedKg = p.lifetime_co2_saved_kg ?? 0;
     this.lifetimeSavingsEur = p.lifetime_savings_eur ?? 0;
     this.batteryChargeW = p.battery_charge_power_w ?? 0;
     this.batteryDischargeW = p.battery_discharge_power_w ?? 0;

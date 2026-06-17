@@ -19,13 +19,6 @@ type Persisted = {
   installationCostEur: number;
   /** Date de mise en service 'YYYY-MM-DD' — sert au taux d'économie annuel réalisé. */
   installationDateISO: string;
-  /**
-   * Facteur d'émission CO2 de l'électricité réseau (kgCO2e/kWh) — pour le CO2 évité.
-   * Défaut 0,052 : ADEME Base Empreinte, mix moyen de CONSOMMATION France (pertes
-   * réseau incluses). Bien plus bas que les ~0,5 « génériques » (mix européen) de
-   * l'app Anker, car l'électricité française est très bas carbone (nucléaire).
-   */
-  co2FactorKgKwh: number;
   /** Config de régulation du thermostat sèche-serviette (miroir poussé au daemon). */
   thermostat: ThermostatConfig;
 };
@@ -66,7 +59,6 @@ const DEFAULTS: Persisted = {
   subscription: 13.5,
   installationCostEur: 4500,
   installationDateISO: '2025-06-01',
-  co2FactorKgKwh: 0.052,
   thermostat: DEFAULT_THERMOSTAT_CONFIG
 };
 
@@ -77,7 +69,6 @@ class SettingsState {
   subscription = $state(DEFAULTS.subscription);
   installationCostEur = $state(DEFAULTS.installationCostEur);
   installationDateISO = $state(DEFAULTS.installationDateISO);
-  co2FactorKgKwh = $state(DEFAULTS.co2FactorKgKwh);
   /** Config thermostat — objet réactif profond (bindable champ par champ). */
   thermostat = $state<ThermostatConfig>(mergeThermostat({}));
 
@@ -103,7 +94,6 @@ class SettingsState {
         this.installationCostEur = data.installationCostEur;
       if (typeof data.installationDateISO === 'string' && data.installationDateISO)
         this.installationDateISO = data.installationDateISO;
-      if (typeof data.co2FactorKgKwh === 'number') this.co2FactorKgKwh = data.co2FactorKgKwh;
       if (data.thermostat && typeof data.thermostat === 'object')
         this.thermostat = mergeThermostat(data.thermostat as Partial<ThermostatConfig>);
       this.lastError = null;
@@ -129,7 +119,6 @@ class SettingsState {
           subscription: this.subscription,
           installationCostEur: this.installationCostEur,
           installationDateISO: this.installationDateISO,
-          co2FactorKgKwh: this.co2FactorKgKwh,
           thermostat: $state.snapshot(this.thermostat)
         })
       });
