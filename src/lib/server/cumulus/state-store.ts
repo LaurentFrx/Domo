@@ -71,7 +71,11 @@ export function defaultEnergyState(): EnergyState {
     lossWhDay: 0,
     drawWhDay: 0,
     drawEvents: 0,
-    wasFull: false
+    wasFull: false,
+    drawRefC: null,
+    drawRefTs: null,
+    tRoomC: null,
+    tExtC: null
   };
 }
 
@@ -100,7 +104,11 @@ function normEnergy(v: unknown): EnergyState {
     lossWhDay: numOr(o.lossWhDay, d.lossWhDay),
     drawWhDay: numOr(o.drawWhDay, d.drawWhDay),
     drawEvents: numOr(o.drawEvents, d.drawEvents),
-    wasFull: boolOr(o.wasFull, d.wasFull)
+    wasFull: boolOr(o.wasFull, d.wasFull),
+    drawRefC: numOrNull(o.drawRefC),
+    drawRefTs: numOrNull(o.drawRefTs),
+    tRoomC: numOrNull(o.tRoomC),
+    tExtC: numOrNull(o.tExtC)
   };
 }
 

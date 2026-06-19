@@ -35,10 +35,11 @@ function energyModel(o: Partial<EnergyModelConfig> = {}): EnergyModelConfig {
     roomOffsetSummerC: 1,
     roomOffsetWinterC: -2,
     roomFallbackC: 20,
-    lossCoeffWhPerCh: 1.7,
+    lossCoeffWhPerCh: 2.8,
     eDoucheWhSummer: 2000,
     eDoucheWhWinter: 2800,
-    drawDropThresholdC: 1.5,
+    drawDropThresholdC: 2.0,
+    drawWindowMin: 20,
     probeFullRestC: 55,
     indoorTopics: ['zigbee2mqtt/Thermo SdB', 'zigbee2mqtt/Thermo Salon'],
     outdoorSources: { daikin: true, thermoExtTopic: 'zigbee2mqtt/Thermo_ext', forecast: true },
@@ -86,6 +87,10 @@ function energyState(o: Partial<EnergyState> = {}): EnergyState {
     drawWhDay: 0,
     drawEvents: 0,
     wasFull: false,
+    drawRefC: null,
+    drawRefTs: null,
+    tRoomC: null,
+    tExtC: null,
     ...o
   };
 }
@@ -236,48 +241,103 @@ test('anchor : « dernier plein » figé tant que le ballon RESTE plein (front m
   assert.equal(b.energy.lastAnchorTs, NOW); // figé au moment où il est devenu plein
 });
 
-// ── Puisage ──
-test('puisage : chute sonde au-delà des pertes → événement + E_avail amputée d’une douche', () => {
+// ── Puisage (détection par FENÊTRE GLISSANTE, 1c) ──
+test('puisage : marche −6°C sur la fenêtre → détecté + E_avail décrémenté', () => {
   const { energy, result } = updateEnergyModel(
-    inp({ tempC: 45, relayOn: false }),
+    inp({ tempC: 42, relayOn: false }),
     cfg(),
     st({
       lastUpdateTs: NOW - 60_000,
-      eAvailWh: 8000,
-      lastProbeC: 50, // chute de 5 °C
-      lastProbeTs: NOW - hours(1)
+      eAvailWh: 10000,
+      lastProbeC: 48,
+      lastProbeTs: NOW - 60_000,
+      drawRefC: 48,
+      drawRefTs: NOW - hours(1) // référence d'il y a 1 h (> fenêtre 20 min)
     })
   );
-  assert.ok(result.drawEvent !== null, 'événement puisage attendu');
-  assert.equal(result.drawEvent?.eDrawnWh, 2000); // eDouche été
+  assert.ok(result.drawEvent !== null, 'événement attendu');
+  assert.equal(result.drawEvent?.dropC, 6);
   assert.equal(energy.drawEvents, 1);
-  assert.ok(energy.eAvailWh < 8000 - 1900, `eAvail=${energy.eAvailWh}`); // ~−2000
+  assert.ok(result.drawEvent!.eDrawnWh > 1800, `eDrawn=${result.drawEvent?.eDrawnWh}`);
+  assert.ok(energy.eAvailWh < 8200, `eAvail=${energy.eAvailWh}`); // ~−2000
 });
 
-test('pas de puisage : sonde stable → aucun événement', () => {
+test('déclin lent (pertes seules) sur la fenêtre → AUCUN faux positif', () => {
   const { result } = updateEnergyModel(
-    inp({ tempC: 50, relayOn: false }),
+    inp({ tempC: 49.5, relayOn: false }), // −0,5°C en 2 h = pertes
     cfg(),
-    st({ lastUpdateTs: NOW - 60_000, eAvailWh: 8000, lastProbeC: 50, lastProbeTs: NOW - hours(1) })
+    st({
+      lastUpdateTs: NOW - 60_000,
+      eAvailWh: 10000,
+      lastProbeC: 50,
+      drawRefC: 50,
+      drawRefTs: NOW - hours(2)
+    })
   );
   assert.equal(result.drawEvent, null);
 });
 
-test('puisage ignoré pendant une chauffe (relais ON)', () => {
-  const { result } = updateEnergyModel(
-    inp({ tempC: 45, relayOn: true, cumulusPowerW: 3000 }),
+test('sonde qui remonte → pas de puisage (référence rebasée sur le point haut)', () => {
+  const { result, energy } = updateEnergyModel(
+    inp({ tempC: 52, relayOn: false }),
     cfg(),
-    st({ lastUpdateTs: NOW - 60_000, eAvailWh: 8000, lastProbeC: 50, lastProbeTs: NOW - hours(1) })
+    st({
+      lastUpdateTs: NOW - 60_000,
+      eAvailWh: 9000,
+      lastProbeC: 50,
+      drawRefC: 50,
+      drawRefTs: NOW - hours(1)
+    })
   );
   assert.equal(result.drawEvent, null);
+  assert.equal(energy.drawRefC, 52);
+});
+
+test('garde relais LEVÉ : un tirage est détecté même relais ON', () => {
+  const { result } = updateEnergyModel(
+    inp({ tempC: 42, relayOn: true, cumulusPowerW: 3000 }),
+    cfg(),
+    st({
+      lastUpdateTs: NOW - 60_000,
+      eAvailWh: 10000,
+      lastProbeC: 48,
+      drawRefC: 48,
+      drawRefTs: NOW - hours(1)
+    })
+  );
+  assert.ok(result.drawEvent !== null); // plus de masquage par relayOn
+});
+
+test('masquage anchor LEVÉ : tirage à ≥55°C journalisé, mais E_avail re-ancré à plein', () => {
+  const { energy, result } = updateEnergyModel(
+    inp({ tempC: 56, relayOn: false }), // ≥55 → restHot
+    cfg(),
+    st({
+      lastUpdateTs: NOW - 60_000,
+      eAvailWh: 12000,
+      lastProbeC: 59,
+      drawRefC: 59,
+      drawRefTs: NOW - hours(1)
+    })
+  );
+  assert.ok(result.drawEvent !== null, 'tirage journalisé (masquage levé)');
+  assert.equal(energy.drawEvents, 1);
+  assert.equal(result.anchored, true);
+  assert.equal(energy.eAvailWh, E_FULL); // anchor sur la valeur absolue → plein
 });
 
 // ── Bornes ──
-test('clamp bas : gros puisage sur ballon presque vide → E_avail = 0 (jamais négatif)', () => {
+test('clamp bas : gros tirage sur ballon presque vide → E_avail = 0 (jamais négatif)', () => {
   const { energy } = updateEnergyModel(
     inp({ tempC: 40, relayOn: false }),
     cfg(),
-    st({ lastUpdateTs: NOW - 60_000, eAvailWh: 1000, lastProbeC: 50, lastProbeTs: NOW - hours(1) })
+    st({
+      lastUpdateTs: NOW - 60_000,
+      eAvailWh: 1000,
+      lastProbeC: 50,
+      drawRefC: 50,
+      drawRefTs: NOW - hours(1)
+    })
   );
   assert.equal(energy.eAvailWh, 0);
 });
@@ -332,22 +392,23 @@ test('Δt borné : long trou (Domo redémarré) → pertes plafonnées (pas d’
 });
 
 // ── Interpolation saisonnière ──
-test('saison : hiver (temp ext basse) → eau froide plus froide, douche plus chère', () => {
-  const summer = updateEnergyModel(
-    inp({ outdoorC: 25, tempC: 45, relayOn: false, lastProbeC: 50 } as Partial<CumulusInputs>),
-    cfg(),
-    st({ lastUpdateTs: NOW - 60_000, eAvailWh: 8000, lastProbeC: 50, lastProbeTs: NOW - hours(1) })
-  );
-  const winter = updateEnergyModel(
-    inp({ outdoorC: 5, tempC: 45, relayOn: false } as Partial<CumulusInputs>),
-    cfg(),
-    st({ lastUpdateTs: NOW - 60_000, eAvailWh: 8000, lastProbeC: 50, lastProbeTs: NOW - hours(1) })
-  );
-  // eDouche hiver (2800) > été (2000)
-  assert.equal(summer.result.drawEvent?.eDrawnWh, 2000);
-  assert.equal(winter.result.drawEvent?.eDrawnWh, 2800);
-  // tInlet hiver (9) < été (15) → eFull hiver plus grand
-  assert.ok(winter.result.eFullWh > summer.result.eFullWh);
+test('saison : hiver → eau froide plus froide (eFull ↑) + douche plus chère (moins de douches)', () => {
+  const mk = (oc: number) =>
+    updateEnergyModel(
+      inp({ outdoorC: oc, tempC: 50, relayOn: false }),
+      cfg(),
+      st({
+        lastUpdateTs: NOW - 60_000,
+        eAvailWh: 8000,
+        lastProbeC: 50,
+        drawRefC: 50,
+        drawRefTs: NOW - 60_000
+      })
+    );
+  const summer = mk(25);
+  const winter = mk(5);
+  assert.ok(winter.result.eFullWh > summer.result.eFullWh); // tInlet hiver 9 < été 15
+  assert.ok(winter.result.showers < summer.result.showers); // eDouche hiver 2800 > été 2000
 });
 
 // ── Init différée (sonde absente au redémarrage) ──

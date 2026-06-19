@@ -167,7 +167,8 @@ export interface EnergyModelConfig {
   lossCoeffWhPerCh: number; // pertes : Wh/h par °C d'écart (T_tank − T_room)
   eDoucheWhSummer: number; // énergie d'une douche en été (Wh)
   eDoucheWhWinter: number; // … hiver
-  drawDropThresholdC: number; // chute sonde au-delà des pertes → puisage détecté
+  drawDropThresholdC: number; // chute sonde (au-delà des pertes) sur la fenêtre → puisage
+  drawWindowMin: number; // fenêtre glissante de détection de puisage (minutes, sonde lente)
   probeFullRestC: number; // sonde ≥ ce seuil, relais off → ballon considéré plein (anchor)
 
   // Sources de température de référence (moyennées) — configurables.
@@ -264,6 +265,10 @@ export interface EnergyState {
   drawWhDay: number; // énergie puisée cumulée du jour (Wh)
   drawEvents: number; // nombre d'événements de puisage du jour
   wasFull: boolean; // ballon plein au tick précédent (front montant de lastAnchorTs)
+  drawRefC: number | null; // référence « point haut » de la détection par fenêtre glissante
+  drawRefTs: number | null; // horodatage de drawRefC
+  tRoomC: number | null; // moyenne intérieure du tick (historisée pour calibrer lossCoeff)
+  tExtC: number | null; // moyenne extérieure du tick (historisée)
 }
 
 /** Résultat de `decide()` — décision + nouvel état à persister (pattern reducer pur). */

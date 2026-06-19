@@ -145,41 +145,53 @@ export function updateEnergyModel(
   const injWh = em.etaHeat * cumulusW * dtH;
   const lossWh = em.lossCoeffWhPerCh * Math.max(0, tTank - tRoom) * dtH;
 
-  // ── Détection de puisage (événementielle, sur changement de sonde) ──
-  // La sonde est lente : on ne compare que quand sa valeur CHANGE, et on confronte
-  // la chute observée aux pertes attendues sur l'intervalle depuis le dernier point.
+  // ── Détection de puisage par FENÊTRE GLISSANTE (sonde lente) ──────────────
+  // On compare la sonde à une référence « point haut récent » (au moins
+  // drawWindowMin), au-delà de ce que les pertes expliquent → ÉVÉNEMENT. Fini la
+  // comparaison tick-à-tick (qui étalait la chute sous le seuil) ; plus de garde
+  // relais ni de masquage par l'anchor : un vrai tirage est toujours vu + historisé.
   let drawWh = 0;
   let drawEvent: EnergyTickResult['drawEvent'] = null;
-  const probeChanged =
-    probeC !== null && energy.lastProbeC !== null && probeC !== energy.lastProbeC;
-  if (probeChanged && !relayOn) {
-    const intervalH =
-      energy.lastProbeTs !== null
-        ? Math.min(MAX_DRAW_INTERVAL_H, Math.max(0, (now - energy.lastProbeTs) / MS_PER_H))
-        : 0;
-    const expectedLossDropC =
-      (em.lossCoeffWhPerCh * Math.max(0, tTank - tRoom) * intervalH) / em.tankWhPerC;
-    const dropC = (energy.lastProbeC as number) - (probeC as number); // + = refroidissement
-    if (dropC > expectedLossDropC + em.drawDropThresholdC) {
-      drawWh = eDouche;
-      drawEvent = { ts: now, dropC: +dropC.toFixed(2), eDrawnWh: Math.round(eDouche) };
-      energy.drawEvents += 1;
+  if (probeC !== null) {
+    if (energy.drawRefC === null || firstTick || initFromProbe) {
+      energy.drawRefC = probeC;
+      energy.drawRefTs = now;
+    } else if (probeC >= energy.drawRefC) {
+      // la sonde remonte (chauffe / re-stratification) → nouveau point haut
+      energy.drawRefC = probeC;
+      energy.drawRefTs = now;
+    } else {
+      const intervalH = Math.max(0, (now - (energy.drawRefTs as number)) / MS_PER_H);
+      const capInt = Math.min(MAX_DRAW_INTERVAL_H, intervalH);
+      const expLossC = (em.lossCoeffWhPerCh * Math.max(0, tTank - tRoom) * capInt) / em.tankWhPerC;
+      const dropC = energy.drawRefC - probeC;
+      if (intervalH * 60 >= em.drawWindowMin && dropC > expLossC + em.drawDropThresholdC) {
+        // chute nette au-delà des pertes, sur la fenêtre → PUISAGE. Énergie ≈ (chute
+        // hors pertes) × capacité ; la sonde basse SATURE sur gros tirage → estimateur,
+        // pas débitmètre (clamp ≥ 0 en aval).
+        drawWh = Math.max(0, dropC - expLossC) * em.tankWhPerC;
+        drawEvent = { ts: now, dropC: +dropC.toFixed(2), eDrawnWh: Math.round(drawWh) };
+        energy.drawEvents += 1;
+        energy.drawRefC = probeC; // consommé : nouvelle référence au point bas
+        energy.drawRefTs = now;
+      } else if (intervalH >= MAX_DRAW_INTERVAL_H) {
+        // longue période sans tirage → glissement de la référence (anti-dérive lente)
+        energy.drawRefC = probeC;
+        energy.drawRefTs = now;
+      }
     }
   }
 
-  // ── Recalage = VÉRITÉ PRIMAIRE ──
-  // Ballon connu plein : (a) le cumulus a coupé (ballonCharged posé par decide), ou
-  // (b) sonde chaude au repos (relais off, T ≥ seuil) → E_avail = E_full.
+  // ── Recalage = VÉRITÉ PRIMAIRE (sur la VALEUR ABSOLUE de la sonde) ──────────
+  // Ballon connu plein : cumulus a coupé (ballonCharged) OU sonde ≥ seuil au repos.
+  // L'anchor n'EFFACE PLUS l'événement de puisage (il reste journalisé) ; il ne fait
+  // que recaler E_avail = E_full quand le ballon est réellement chaud.
   const restHot = probeC !== null && !relayOn && probeC >= em.probeFullRestC;
   const anchored = state.ballonCharged === true || restHot;
   if (anchored) {
     eAvail = eFull;
-    // « Dernier plein » = front montant uniquement : on ne ré-horodate PAS à chaque
-    // tick tant que le ballon reste plein (sinon « il y a 1 min » coincé en permanence).
     if (!energy.wasFull) energy.lastAnchorTs = now;
     energy.wasFull = true;
-    drawWh = 0; // pas de puisage quand on recale au plein
-    drawEvent = null;
   } else {
     energy.wasFull = false;
     if (!firstTick && !initFromProbe) {
@@ -198,14 +210,16 @@ export function updateEnergyModel(
     energy.drawWhDay = +(energy.drawWhDay + drawWh).toFixed(1);
   }
 
-  // ── Suivi de la sonde (mémorise la dernière valeur DISTINCTE) ──
-  if (probeC !== null && (energy.lastProbeC === null || probeChanged)) {
+  // ── Suivi de la sonde (dernière valeur DISTINCTE) — journalisée comme probe_c ──
+  if (probeC !== null && probeC !== energy.lastProbeC) {
     energy.lastProbeC = probeC;
     energy.lastProbeTs = now;
   }
 
   energy.eAvailWh = Math.round(eAvail);
   energy.lastUpdateTs = now;
+  energy.tRoomC = inputs.indoorC; // moyennes du tick → historisées (calibration lossCoeff)
+  energy.tExtC = inputs.outdoorC;
 
   tTank = tInlet + eAvail / em.tankWhPerC;
   const showers = eDouche > 0 ? eAvail / eDouche : 0;

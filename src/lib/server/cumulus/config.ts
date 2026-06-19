@@ -61,10 +61,11 @@ export function defaultEnergyModel(): EnergyModelConfig {
     roomOffsetSummerC: 1,
     roomOffsetWinterC: -2,
     roomFallbackC: 20,
-    lossCoeffWhPerCh: 1.7,
+    lossCoeffWhPerCh: 2.8, // recalibré sur les nuits (1c) ; 1,7 sous-estimait ~1,7×
     eDoucheWhSummer: 2000,
     eDoucheWhWinter: 2800,
-    drawDropThresholdC: 1.5,
+    drawDropThresholdC: 2.0,
+    drawWindowMin: 20,
     probeFullRestC: 55,
     indoorTopics: ['zigbee2mqtt/Thermo SdB', 'zigbee2mqtt/Thermo Salon'],
     outdoorSources: {
@@ -142,6 +143,7 @@ export function normalizeEnergyModel(raw: unknown): EnergyModelConfig {
     eDoucheWhSummer: asNum(o.eDoucheWhSummer, d.eDoucheWhSummer, 200, 8000),
     eDoucheWhWinter: asNum(o.eDoucheWhWinter, d.eDoucheWhWinter, 200, 8000),
     drawDropThresholdC: asNum(o.drawDropThresholdC, d.drawDropThresholdC, 0.2, 10),
+    drawWindowMin: asNum(o.drawWindowMin, d.drawWindowMin, 5, 120),
     probeFullRestC: asNum(o.probeFullRestC, d.probeFullRestC, 40, 70),
     indoorTopics: normTopics(o.indoorTopics, o.indoorTopic, d.indoorTopics),
     outdoorSources: normOutdoor(o.outdoorSources, d.outdoorSources)
