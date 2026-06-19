@@ -1,12 +1,12 @@
 <script lang="ts">
   // ════════════════════════════════════════════════════════════════════════
   //  StoreCard — carte de commande du store-banne (vue tactile iPhone-first).
-  //  • une seule ligne : barre de progression draggable à GAUCHE, 3 boutons à DROITE ;
+  //  • titre « Store » au-dessus ; en dessous une ligne : barre de progression
+  //    draggable à GAUCHE, 3 boutons (réduits) à DROITE ;
   //  • boutons Rentrer / Stop / Déployer : la banne (SVG réutilisable via snippet)
   //    sert de pictogramme (rentrée / déployée) ; le stop est un carré neutre au
   //    repos et le témoin 3 points jaunes pulsé en manœuvre ;
-  //  • barre avec pastille draggable → commande la position (goToPosition) ;
-  //    plus de titre « Store » (libellé conservé sur l'aria-label de la carte).
+  //  • barre avec pastille draggable → commande la position (goToPosition).
   // ════════════════════════════════════════════════════════════════════════
   import { onDestroy } from 'svelte';
   import { matter } from '$stores/matter.svelte';
@@ -235,87 +235,117 @@
   style="background: var(--color-card); border-color: var(--color-border);"
   aria-label="Store — {positionLabel}"
 >
-  <!-- Barre de progression + pastille draggable (commande la position) — à GAUCHE. -->
-  <div
-    bind:this={barEl}
-    class="bar"
-    class:dragging
-    role="slider"
-    tabindex={shutter.available ? 0 : -1}
-    aria-label="Position du store"
-    aria-valuemin="0"
-    aria-valuemax="100"
-    aria-valuenow={displayedPosition}
-    aria-valuetext={positionLabel}
-    onpointerdown={onDown}
-    onpointermove={onMove}
-    onpointerup={onUp}
-    onpointercancel={onUp}
-  >
-    <div
-      class="fill"
-      style:width="calc({THUMB / 2}px + (100% - {THUMB}px) * {displayedPosition / 100})"
-    ></div>
-    <div class="thumb" style:left="calc((100% - {THUMB}px) * {displayedPosition / 100})">
-      {#if displayedPosition > 1 && displayedPosition < 99}
-        <span class="thumb-pct">{displayedPosition}</span>
-      {/if}
-    </div>
-  </div>
+  <span class="title">Store</span>
 
-  <!-- 3 boutons à DROITE : Rentrer / Stop / Déployer (banne = pictogramme rentrée /
+  <!-- Titre au-dessus ; en dessous : barre (gauche) + 3 boutons (droite) sur une ligne. -->
+  <div class="controls">
+    <!-- Barre de progression + pastille draggable (commande la position) — à GAUCHE. -->
+    <div
+      bind:this={barEl}
+      class="bar"
+      class:dragging
+      role="slider"
+      tabindex={shutter.available ? 0 : -1}
+      aria-label="Position du store"
+      aria-valuemin="0"
+      aria-valuemax="100"
+      aria-valuenow={displayedPosition}
+      aria-valuetext={positionLabel}
+      onpointerdown={onDown}
+      onpointermove={onMove}
+      onpointerup={onUp}
+      onpointercancel={onUp}
+    >
+      <div
+        class="fill"
+        style:width="calc({THUMB / 2}px + (100% - {THUMB}px) * {displayedPosition / 100})"
+      ></div>
+      <div class="thumb" style:left="calc((100% - {THUMB}px) * {displayedPosition / 100})">
+        {#if displayedPosition > 1 && displayedPosition < 99}
+          <span class="thumb-pct">{displayedPosition}</span>
+        {/if}
+      </div>
+    </div>
+
+    <!-- 3 boutons à DROITE : Rentrer / Stop / Déployer (banne = pictogramme rentrée /
        déployée). En manœuvre, le bouton Stop affiche le témoin 3 points jaunes. -->
-  <div class="btns">
-    <button
-      type="button"
-      class="abtn abtn--retract"
-      class:on={movingDirection === 'open'}
-      disabled={!shutter.available}
-      onclick={onRetract}
-      aria-label="Rentrer le store"
-    >
-      {@render awningGlyph(PATH_RETRACTED, awningH(0), `s2-ret-${shutter.nodeId}`, 84, 32, 'none')}
-    </button>
-    <button
-      type="button"
-      class="abtn abtn--stop"
-      class:moving={isMoving}
-      disabled={!shutter.available}
-      onclick={onStop}
-      aria-label="Arrêter le store"
-    >
-      {#if isMoving}
-        <!-- En manœuvre : témoin 3 points jaunes pulsé (remplace la banne animée). -->
-        <span class="dots" aria-hidden="true">●●●</span>
-      {:else}
-        <!-- Au repos : pictogramme « stop » neutre, distinct des bannes voisines.
+    <div class="btns">
+      <button
+        type="button"
+        class="abtn abtn--retract"
+        class:on={movingDirection === 'open'}
+        disabled={!shutter.available}
+        onclick={onRetract}
+        aria-label="Rentrer le store"
+      >
+        {@render awningGlyph(
+          PATH_RETRACTED,
+          awningH(0),
+          `s2-ret-${shutter.nodeId}`,
+          84,
+          32,
+          'none'
+        )}
+      </button>
+      <button
+        type="button"
+        class="abtn abtn--stop"
+        class:moving={isMoving}
+        disabled={!shutter.available}
+        onclick={onStop}
+        aria-label="Arrêter le store"
+      >
+        {#if isMoving}
+          <!-- En manœuvre : témoin 3 points jaunes pulsé (remplace la banne animée). -->
+          <span class="dots" aria-hidden="true">●●●</span>
+        {:else}
+          <!-- Au repos : pictogramme « stop » neutre, distinct des bannes voisines.
              viewBox serrée → la taille CSS de .stop-glyph = la taille réelle du carré. -->
-        <svg class="stop-glyph" viewBox="0 0 16 16" aria-hidden="true">
-          <rect width="16" height="16" rx="3.5" fill="currentColor" />
-        </svg>
-      {/if}
-    </button>
-    <button
-      type="button"
-      class="abtn abtn--deploy"
-      class:on={movingDirection === 'close'}
-      disabled={!shutter.available}
-      onclick={onDeploy}
-      aria-label="Déployer le store"
-    >
-      {@render awningGlyph(PATH_DEPLOYED, awningH(100), `s2-dep-${shutter.nodeId}`, 84, 32, 'none')}
-    </button>
+          <svg class="stop-glyph" viewBox="0 0 16 16" aria-hidden="true">
+            <rect width="16" height="16" rx="3.5" fill="currentColor" />
+          </svg>
+        {/if}
+      </button>
+      <button
+        type="button"
+        class="abtn abtn--deploy"
+        class:on={movingDirection === 'close'}
+        disabled={!shutter.available}
+        onclick={onDeploy}
+        aria-label="Déployer le store"
+      >
+        {@render awningGlyph(
+          PATH_DEPLOYED,
+          awningH(100),
+          `s2-dep-${shutter.nodeId}`,
+          84,
+          32,
+          'none'
+        )}
+      </button>
+    </div>
   </div>
 </div>
 
 <style>
-  /* Une seule ligne : barre (flexible) à gauche, boutons (largeur fixe) à droite. */
+  /* Titre en haut ; en dessous une ligne : barre (flexible) à gauche, boutons à droite. */
   .store2 {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 14px 12px;
+    transition: border-color var(--duration-normal) var(--ease-default);
+  }
+  .title {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.15;
+    color: var(--color-fg);
+  }
+  .controls {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 12px 14px;
-    transition: border-color var(--duration-normal) var(--ease-default);
   }
   /* Témoin 3 points (dans le bouton Stop, en manœuvre) — repris de l'ancien
      indicateur de titre : même teinte solaire + même pulsation. */
@@ -347,7 +377,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 54px;
+    height: 44px;
     border-radius: var(--radius-lg);
     background: var(--color-muted);
     border: 1px solid var(--color-border);
@@ -356,7 +386,7 @@
   }
   .abtn svg {
     width: 42px;
-    height: 32px;
+    height: 28px;
   }
   /* Bannes Rentrer/Déployer élargies : remplissent le bouton (étirées
      horizontalement) — robuste quelle que soit la largeur du bouton. */
@@ -367,13 +397,13 @@
   }
   /* Fond indigo (Rentrer) / ambre (Déployer), mais banne TOUJOURS ambre. */
   .abtn--retract {
-    flex: 0 0 58px;
+    flex: 0 0 48px;
     color: var(--color-solar);
     background: var(--color-primary-muted);
     border-color: color-mix(in oklch, var(--color-primary) 30%, transparent);
   }
   .abtn--deploy {
-    flex: 0 0 58px;
+    flex: 0 0 48px;
     color: var(--color-solar);
     background: var(--color-solar-muted);
     border-color: color-mix(in oklch, var(--color-solar) 32%, transparent);
@@ -400,7 +430,7 @@
   /* Bouton stop : carré (≠ Rentrer/Déployer qui s'élargissent), pictogramme
      neutre au repos (≠ bannes ambre), glow ambre en mouvement. */
   .abtn--stop {
-    flex: 0 0 54px;
+    flex: 0 0 44px;
     color: var(--color-muted-fg);
   }
   .abtn--stop.moving {
