@@ -118,6 +118,32 @@
   );
   const hasFlatDevices = $derived(matter.commandableSwitches.length + zigbee.devices.length > 0);
 
+  // ─── Vue condensée (Laurent) ───────────────────────────────────────────
+  // Ligne 1 : Bureau / Chargeur / Atelier ; Ligne 2 : Imprimante / Portail.
+  // On extrait ces appareils par nom/catégorie ; le reste retombe dans les
+  // grilles génériques en dessous (sèche-serviette iPad, prises, capteurs…).
+  const bureauSwitch = $derived(
+    matter.commandableSwitches.find((s) => /multim|bureau/i.test(s.name)) ?? null
+  );
+  const chargeurSwitch = $derived(
+    matter.commandableSwitches.find((s) => /chargeur|charger/i.test(s.name)) ?? null
+  );
+  const restSwitches = $derived(
+    matter.commandableSwitches.filter((s) => s !== bureauSwitch && s !== chargeurSwitch)
+  );
+  const atelierDevice = $derived(
+    flatZigbeeOthers.find(
+      (d) => d.category === 'light' || /atelier|lumiere|lumière|lampe/i.test(d.friendlyName)
+    ) ?? null
+  );
+  const portailDevice = $derived(
+    flatZigbeeOthers.find((d) => d.category === 'cover' || /portail|porte/i.test(d.friendlyName)) ??
+      null
+  );
+  const restOthers = $derived(
+    flatZigbeeOthers.filter((d) => d !== atelierDevice && d !== portailDevice)
+  );
+
   // ─── Tri custom des volets (ordre choisi par Laurent) ───
   const SHUTTER_ORDER = [
     'salon',
@@ -228,11 +254,27 @@
       </div>
     {/if}
 
-    <!-- ═══ Interrupteurs (switches Matter + portail / lumières Zigbee) — tuiles
-         icône + nom, colorées vives quand ON, sans toggle ; grille 2 col sur iPhone ═══ -->
-    {#if matter.commandableSwitches.length > 0 || flatZigbeeOthers.length > 0}
-      <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-2 sm:gap-3 lg:grid-cols-3 xl:grid-cols-4">
-        {#each matter.commandableSwitches as sw (sw.nodeId)}
+    <!-- ═══ Vue condensée — Ligne 1 : Bureau / Chargeur / Atelier (3 sur une ligne) ═══ -->
+    {#if bureauSwitch || chargeurSwitch || atelierDevice}
+      <div class="grid grid-cols-3 gap-2.5 sm:gap-3">
+        {#if bureauSwitch}<SwitchTile sw={bureauSwitch} />{/if}
+        {#if chargeurSwitch}<SwitchTile sw={chargeurSwitch} />{/if}
+        {#if atelierDevice}<ZigbeeGenericTile device={atelierDevice} />{/if}
+      </div>
+    {/if}
+
+    <!-- ═══ Ligne 2 : Imprimante / Portail ═══ -->
+    {#if printerPlug || portailDevice}
+      <div class="grid grid-cols-2 gap-2.5 sm:gap-3">
+        {#if printerPlug}<PrinterTile plug={printerPlug} />{/if}
+        {#if portailDevice}<ZigbeeGenericTile device={portailDevice} />{/if}
+      </div>
+    {/if}
+
+    <!-- ═══ Reste : sèche-serviette (iPad), autres switches/lumières Zigbee ═══ -->
+    {#if restSwitches.length > 0 || restOthers.length > 0}
+      <div class="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3 xl:grid-cols-4">
+        {#each restSwitches as sw (sw.nodeId)}
           {#if sw.nodeId === 1}
             <!-- Sèche-serviette : doublon avec la carte « Salle de bain » (/climat) +
                  piloté par le daemon → masqué sur iPhone, gardé sur iPad/desktop. -->
@@ -243,18 +285,15 @@
             <SwitchTile {sw} />
           {/if}
         {/each}
-        {#each flatZigbeeOthers as device (device.ieee)}
+        {#each restOthers as device (device.ieee)}
           <ZigbeeGenericTile {device} />
         {/each}
       </div>
     {/if}
 
-    <!-- ═══ Prises / capteurs / imprimante Zigbee — pleine largeur sur iPhone ═══ -->
-    {#if printerPlug || flatZigbeePlugs.length + flatZigbeeSensors.length > 0}
+    <!-- ═══ Prises / capteurs Zigbee (hors imprimante) — pleine largeur sur iPhone ═══ -->
+    {#if flatZigbeePlugs.length + flatZigbeeSensors.length > 0}
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {#if printerPlug}
-          <PrinterTile plug={printerPlug} />
-        {/if}
         {#each flatZigbeePlugs as device (device.ieee)}
           <ZigbeePlugTile {device} />
         {/each}

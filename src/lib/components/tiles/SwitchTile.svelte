@@ -10,6 +10,13 @@
 
   let { sw }: Props = $props();
 
+  // Renommage d'affichage LOCAL à cette vue (n'affecte pas /energie, qui lit le
+  // nom Matter réel via le store). Ex : « Bureau multimédia » → « Bureau ».
+  const DISPLAY_NAMES: Record<string, string> = {
+    'bureau multimédia': 'Bureau'
+  };
+  const displayName = $derived(DISPLAY_NAMES[sw.name.toLowerCase()] ?? sw.name);
+
   let optimisticOn = $state<boolean | null>(null);
   let optimisticTimer: ReturnType<typeof setTimeout> | null = null;
   let lastServerOn: boolean | null = null;
@@ -120,7 +127,7 @@
   style="background: var(--color-card); border-color: var(--color-border); --neon: {style.color}; --neon-glow: {style.glow}; --neon-mid: {style.mid}; --neon-soft: {style.soft};"
   role="switch"
   aria-checked={displayedOn}
-  aria-label="Basculer {sw.name}"
+  aria-label="Basculer {displayName}"
   onclick={onToggle}
   onkeydown={onKeydown}
   disabled={!sw.available}
@@ -205,7 +212,7 @@
       class="switch-name max-w-full truncate text-center text-[11px] leading-tight font-semibold sm:text-left sm:text-[13px]"
       style="color: var(--color-fg);"
     >
-      {sw.name}
+      {displayName}
     </span>
     <span
       class="hidden text-[10px] font-semibold tracking-[0.04em] uppercase sm:block"
