@@ -38,23 +38,31 @@
     glow: string;
     mid: string;
     soft: string;
+    // Couleur de l'icône à l'état ÉTEINT (défaut = accent ; forcée en bleu
+    // pour certaines tuiles via le 3ᵉ argument de palette()).
+    offColor: string;
+    offMuted: string;
   };
 
-  function palette(base: string, glyph: Glyph): TileStyle {
+  // offBase = couleur de l'icône ÉTEINTE (par défaut identique à l'état allumé).
+  function palette(base: string, glyph: Glyph, offBase: string = base): TileStyle {
     return {
       glyph,
       color: `var(--color-${base})`,
       muted: `var(--color-${base}-muted)`,
       glow: `var(--color-${base}-glow)`,
       mid: `var(--color-${base}-glow-mid)`,
-      soft: `var(--color-${base}-glow-soft)`
+      soft: `var(--color-${base}-glow-soft)`,
+      offColor: `var(--color-${offBase})`,
+      offMuted: `var(--color-${offBase}-muted)`
     };
   }
 
   const style = $derived.by<TileStyle>(() => {
     const n = device.friendlyName.toLowerCase();
     if (isCover || n.includes('portail') || n.includes('porte')) {
-      return palette('grid-energy', 'cover');
+      // Éteint : logo bleu (charte) ; impulsion : couleur d'origine conservée.
+      return palette('grid-energy', 'cover', 'consumption');
     }
     if (
       isLight ||
@@ -64,7 +72,8 @@
       n.includes('bulb') ||
       n.includes('lampe')
     ) {
-      return palette('solar', 'bulb');
+      // Éteint : logo bleu (charte) ; allumé : ambre « solaire » conservé.
+      return palette('solar', 'bulb', 'consumption');
     }
     if (isSwitch) {
       return palette('primary', 'light-switch');
@@ -128,9 +137,9 @@
   >
     <span
       class="generic-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-lg)]"
-      style="background: {pulsing ? style.color : style.muted}; color: {pulsing
+      style="background: {pulsing ? style.color : style.offMuted}; color: {pulsing
         ? 'white'
-        : style.color};"
+        : style.offColor};"
       aria-hidden="true"
     >
       <svg
@@ -177,7 +186,9 @@
   >
     <span
       class="generic-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-lg)]"
-      style="background: {isOn ? style.color : style.muted}; color: {isOn ? 'white' : style.color};"
+      style="background: {isOn ? style.color : style.offMuted}; color: {isOn
+        ? 'white'
+        : style.offColor};"
       aria-hidden="true"
     >
       {#if style.glyph === 'bulb'}
