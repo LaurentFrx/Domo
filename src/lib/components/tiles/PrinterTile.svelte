@@ -55,14 +55,13 @@
 </script>
 
 <article
-  class="printer-tile flex flex-col gap-2 rounded-[var(--radius-xl)] border px-3 py-2"
+  class="printer-tile flex items-center gap-3 rounded-[var(--radius-xl)] border px-3 py-2"
   class:opacity-50={!plug.available}
   class:printer-on={isOn}
   style="background: var(--color-card); border-color: var(--color-border);"
 >
-  <!-- Header : l'ICÔNE EST l'interrupteur (touch = on/off) + nom + état/conso.
-       Plus de toggle séparé → l'icône bleue change d'état comme un bouton. -->
-  <header class="flex items-center gap-2.5">
+  <!-- Icône-interrupteur (touch = on/off) + titre DESSOUS, comme les tuiles du dessus. -->
+  <div class="flex shrink-0 flex-col items-center gap-1">
     <button
       type="button"
       class="printer-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-lg)]"
@@ -91,12 +90,12 @@
       </svg>
     </button>
     <span
-      class="min-w-0 flex-1 truncate text-[13px] leading-tight font-semibold"
+      class="text-center text-[11px] leading-tight font-semibold sm:text-[13px]"
       style="color: var(--color-fg);"
     >
       Imprimante
     </span>
-  </header>
+  </div>
 
   <!-- Niveaux d'encre CMYK : 4 jauges VERTICALES (remplies de bas en haut) + % dessous -->
   {#if printer.inks.length > 0}
@@ -178,9 +177,10 @@
   /* ─── 4 jauges d'encre CMYK VERTICALES (capsules remplies de bas en haut) ─── */
   .ink-pills {
     display: grid;
+    flex: 1;
     grid-template-columns: repeat(4, 22px);
     gap: 10px;
-    justify-content: start;
+    justify-content: center;
   }
   .ink-col {
     display: flex;
@@ -191,7 +191,7 @@
   .ink-pill {
     position: relative;
     width: 100%;
-    height: 56px;
+    height: 40px;
     border-radius: 9999px;
     overflow: hidden;
     background: var(--ink-track);
