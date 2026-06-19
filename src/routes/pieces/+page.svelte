@@ -171,11 +171,7 @@
   <title>Pièces — Domo</title>
 </svelte:head>
 
-<div class="flex flex-col gap-4 py-4">
-  <header>
-    <h1 class="text-2xl font-semibold tracking-tight">Pièces</h1>
-  </header>
-
+<div class="flex flex-col gap-2 py-3">
   {#if matterLost}
     <div
       class="rounded-[var(--radius-2xl)] border p-6 text-center"
@@ -352,7 +348,7 @@
      iPad+ : grille (auto-fit, puis N colonnes pleine ligne dès lg). */
   .shutters-strip {
     display: grid;
-    gap: 0.5rem;
+    gap: 0.375rem;
     grid-template-columns: 1fr;
   }
   @media (min-width: 640px) {
