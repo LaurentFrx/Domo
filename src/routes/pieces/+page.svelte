@@ -327,10 +327,11 @@
     }
   }
 
-  /* Carte store : pleine largeur sur iPhone (design banne), compacte sur iPad+. */
+  /* Carte store : pleine largeur sur iPhone, largeur bornée sur iPad+
+     (barre + 3 boutons sur une ligne → besoin de plus de place qu'avant). */
   @media (min-width: 640px) {
     .store-wrap {
-      max-width: 220px;
+      max-width: 340px;
     }
   }
 </style>
