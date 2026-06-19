@@ -103,16 +103,13 @@
       {#each printer.inks as ink (ink.color)}
         {@const c = INK[ink.color]}
         {@const pct = Math.max(0, Math.min(100, ink.percent))}
-        <div class="ink-col" title="{ink.label} · {ink.percent}%">
-          <div
-            class="ink-pill"
-            style="--ink-base: {c.base}; --ink-light: {c.light}; --ink-track: {c.track}; --ink-glow: {c.glow}; --ink-percent: {pct}%;"
-          >
-            <span class="ink-pill-fill" aria-hidden="true"></span>
-          </div>
-          <span class="ink-pct" class:ink-low={ink.percent < 10}>
-            {ink.percent}<span class="ink-unit">%</span>
-          </span>
+        <div
+          class="ink-pill"
+          style="--ink-base: {c.base}; --ink-light: {c.light}; --ink-track: {c.track}; --ink-glow: {c.glow}; --ink-percent: {pct}%;"
+          title="{ink.label} · {ink.percent}%"
+        >
+          <span class="ink-pill-fill" aria-hidden="true"></span>
+          <span class="ink-pill-pct" class:ink-low={ink.percent < 10}>{ink.percent}</span>
         </div>
       {/each}
     </div>
@@ -182,16 +179,13 @@
     gap: 10px;
     justify-content: center;
   }
-  .ink-col {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-  }
   .ink-pill {
     position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: 100%;
-    height: 40px;
+    height: 56px;
     border-radius: 9999px;
     overflow: hidden;
     background: var(--ink-track);
@@ -220,22 +214,23 @@
     transform: translateY(-1px) scale(1.05);
   }
 
-  .ink-pct {
-    font-size: 11px;
+  /* % inscrit DANS la capsule, au-dessus du fill (blanc + ombre = lisible
+     sur le track dilué comme sur la couleur pleine). */
+  .ink-pill-pct {
+    position: relative;
+    z-index: 1;
+    font-size: 10px;
     font-weight: 700;
-    color: var(--color-fg);
+    color: #fff;
+    text-shadow:
+      0 1px 2px oklch(0.1 0.01 286 / 0.6),
+      0 0 4px oklch(0.1 0.01 286 / 0.4);
     font-variant-numeric: tabular-nums;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.03em;
     line-height: 1;
   }
-  .ink-pct.ink-low {
-    color: oklch(0.7 0.19 30);
-  }
-  .ink-unit {
-    font-size: 8px;
-    font-weight: 600;
-    opacity: 0.7;
-    margin-left: 1px;
+  .ink-pill-pct.ink-low {
+    color: oklch(0.92 0.08 30);
   }
 
   .ink-error-btn {
