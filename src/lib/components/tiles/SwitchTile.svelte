@@ -122,7 +122,7 @@
 
 <button
   type="button"
-  class="switch-tile flex w-full flex-col items-center justify-center gap-1 rounded-[var(--radius-xl)] border p-3 sm:flex-row sm:justify-start sm:gap-3 sm:text-left"
+  class="switch-tile flex w-full flex-col items-center justify-center gap-1 rounded-[var(--radius-xl)] border px-3 py-2 sm:flex-row sm:justify-start sm:gap-3 sm:text-left"
   class:opacity-50={!sw.available}
   style="background: var(--color-card); border-color: var(--color-border); --neon: {style.color}; --neon-glow: {style.glow}; --neon-mid: {style.mid}; --neon-soft: {style.soft};"
   role="switch"

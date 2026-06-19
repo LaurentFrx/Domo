@@ -121,7 +121,7 @@
 {#if isCover}
   <!-- Cover (Portail) : la carte ENTIÈRE est le bouton d'impulsion ; s'allume 3 s (relief). -->
   <div
-    class="generic-tile flex w-full flex-col items-center justify-center gap-1.5 rounded-[var(--radius-xl)] border p-3 sm:flex-row sm:justify-start sm:gap-3"
+    class="generic-tile flex w-full flex-col items-center justify-center gap-1.5 rounded-[var(--radius-xl)] border px-3 py-2 sm:flex-row sm:justify-start sm:gap-3"
     class:opacity-50={!device.available}
     class:pulsing
     style="background: var(--color-card); border-color: var(--color-border); --neon: {style.color}; --neon-glow: {style.glow}; --neon-mid: {style.mid}; --neon-soft: {style.soft};"
@@ -174,7 +174,7 @@
   <!-- Switch / Light : la carte ENTIÈRE bascule l'état (plus de toggle), vive quand ON. -->
   <button
     type="button"
-    class="generic-tile flex w-full flex-col items-center justify-center gap-1.5 rounded-[var(--radius-xl)] border p-3 sm:flex-row sm:justify-start sm:gap-3 sm:text-left"
+    class="generic-tile flex w-full flex-col items-center justify-center gap-1.5 rounded-[var(--radius-xl)] border px-3 py-2 sm:flex-row sm:justify-start sm:gap-3 sm:text-left"
     class:opacity-50={!device.available}
     style="background: var(--color-card); border-color: var(--color-border); --neon: {style.color}; --neon-glow: {style.glow}; --neon-mid: {style.mid}; --neon-soft: {style.soft};"
     role="switch"

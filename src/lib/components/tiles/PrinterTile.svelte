@@ -12,9 +12,6 @@
   let { plug }: Props = $props();
 
   const isOn = $derived(plug.state.state === 'ON');
-  const power = $derived<number | null>(
-    typeof plug.state.power === 'number' ? (plug.state.power as number) : null
-  );
 
   function onTogglePlug() {
     if (!plug.available) return;
@@ -55,22 +52,10 @@
       light: 'oklch(0.95 0.16 95)'
     }
   };
-
-  const lastUpdateLabel = $derived.by(() => {
-    const d = printer.lastUpdate;
-    if (!d) return null;
-    const sec = Math.round((Date.now() - d.getTime()) / 1000);
-    if (sec < 90) return "à l'instant";
-    const min = Math.round(sec / 60);
-    if (min < 60) return `il y a ${min} min`;
-    const h = Math.round(min / 60);
-    if (h < 24) return `il y a ${h} h`;
-    return `il y a ${Math.round(h / 24)} j`;
-  });
 </script>
 
 <article
-  class="printer-tile flex flex-col gap-3 rounded-[var(--radius-xl)] border p-3"
+  class="printer-tile flex flex-col gap-2 rounded-[var(--radius-xl)] border px-3 py-2"
   class:opacity-50={!plug.available}
   class:printer-on={isOn}
   style="background: var(--color-card); border-color: var(--color-border);"
@@ -105,23 +90,12 @@
         <rect x="6" y="14" width="12" height="8" rx="0.5" />
       </svg>
     </button>
-    <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span class="text-[13px] leading-tight font-semibold" style="color: var(--color-fg);">
-        Imprimante
-      </span>
-      <span class="text-[10px] leading-tight" style="color: var(--color-muted-fg);">
-        {#if isOn && power !== null}
-          {power.toFixed(0)} W
-        {:else if isOn}
-          Sous tension
-        {:else}
-          Éteinte
-        {/if}
-        {#if printer.inks.length > 0 && !printer.online && lastUpdateLabel}
-          · niveaux {lastUpdateLabel}
-        {/if}
-      </span>
-    </div>
+    <span
+      class="min-w-0 flex-1 truncate text-[13px] leading-tight font-semibold"
+      style="color: var(--color-fg);"
+    >
+      Imprimante
+    </span>
   </header>
 
   <!-- Niveaux d'encre CMYK : 4 jauges VERTICALES (remplies de bas en haut) + % dessous -->

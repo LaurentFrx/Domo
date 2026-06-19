@@ -265,7 +265,7 @@
 
     <!-- ═══ Ligne 2 : Imprimante / Portail ═══ -->
     {#if printerPlug || portailDevice}
-      <div class="grid grid-cols-2 gap-2.5 sm:gap-3">
+      <div class="grid grid-cols-[2fr_1fr] gap-2.5 sm:gap-3">
         {#if printerPlug}<PrinterTile plug={printerPlug} />{/if}
         {#if portailDevice}<ZigbeeGenericTile device={portailDevice} />{/if}
       </div>
