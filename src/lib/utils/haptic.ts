@@ -1,14 +1,20 @@
 /**
- * Haptic feedback cross-platform — Android + iOS 18+.
+ * Haptic feedback cross-platform — Android + iOS 17.4+.
  *
  * - **Android** : `navigator.vibrate(ms)`.
- * - **iOS 18+** : hack DOM via `<input type="checkbox" switch>` (Apple a
- *   ajouté le retour haptique natif sur cet élément spécifique en iOS 18 ;
- *   tap programmatique → vibration courte).
- * - **iOS < 18 / Safari desktop / Firefox** : no-op silencieux.
+ * - **iOS 17.4+** : hack DOM via `<input type="checkbox" switch>`. Apple émet un
+ *   retour haptique natif quand ce contrôle bascule ; on bascule un switch
+ *   masqué par programme depuis un geste utilisateur.
+ *   ⚠️ Conditions pour que ça VIBRE réellement (sinon no-op invisible) :
+ *     1. iOS ≥ 17.4 et Safari/WebKit (le `switch` n'existe pas avant).
+ *     2. Réglages iOS → Sons et vibrations → **Vibrations système = activé**.
+ *     3. Pas en mode économie d'énergie « extrême ».
+ *   Le switch doit être RENDU (pas `display:none` ni `0×0`/`opacity:0`) : on le
+ *   masque donc en sr-only (1px + clip), et on clique le `<label>` (pas l'input
+ *   directement) — c'est la combinaison qui déclenche le haptique de façon fiable.
+ * - **iOS < 17.4 / Safari desktop / Firefox** : no-op silencieux.
  *
- * Pas de dépendances, pas d'init. À appeler depuis n'importe quel
- * handler de clic.
+ * Pas de dépendances, pas d'init. À appeler depuis n'importe quel handler de geste.
  */
 
 export type HapticStyle = 'light' | 'medium' | 'heavy' | 'success' | 'warning';
@@ -21,24 +27,27 @@ const VIBRATE_MS: Record<HapticStyle, number | number[]> = {
   warning: [20, 40, 20]
 };
 
-let iosSwitchInput: HTMLInputElement | null = null;
+let iosSwitchLabel: HTMLLabelElement | null = null;
 
-function getIosSwitch(): HTMLInputElement | null {
-  if (typeof document === 'undefined') return null;
-  if (iosSwitchInput) return iosSwitchInput;
+/** Crée (une fois) un `<label><input switch></label>` masqué mais RENDU, et le
+ *  renvoie. Cliquer le label bascule le switch → haptique iOS. */
+function getIosSwitch(): HTMLLabelElement | null {
+  if (typeof document === 'undefined' || !document.body) return null;
+  if (iosSwitchLabel) return iosSwitchLabel;
+  const label = document.createElement('label');
+  label.setAttribute('aria-hidden', 'true');
+  // sr-only : hors écran mais TOUJOURS dans l'arbre de rendu (clé du haptique).
+  label.style.cssText =
+    'position:fixed;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;' +
+    'clip:rect(0 0 0 0);white-space:nowrap;border:0;pointer-events:none;';
   const input = document.createElement('input');
   input.type = 'checkbox';
   input.setAttribute('switch', '');
-  input.style.position = 'fixed';
-  input.style.opacity = '0';
-  input.style.pointerEvents = 'none';
-  input.style.width = '0';
-  input.style.height = '0';
-  input.setAttribute('aria-hidden', 'true');
   input.tabIndex = -1;
-  document.body.appendChild(input);
-  iosSwitchInput = input;
-  return input;
+  label.appendChild(input);
+  document.body.appendChild(label);
+  iosSwitchLabel = label;
+  return label;
 }
 
 let cachedPlatform: 'ios' | 'android' | 'other' | null = null;
@@ -88,19 +97,19 @@ export function haptic(style: HapticStyle = 'light'): void {
   }
 
   if (platform === 'ios') {
-    const input = getIosSwitch();
-    if (!input) return;
+    const label = getIosSwitch();
+    if (!label) return;
     try {
-      input.click();
+      label.click();
       // Pour les patterns "success"/"warning"/"heavy" on déclenche plusieurs taps
       // espacés (single tap iOS = retour léger uniforme, on simule de l'intensité
       // par la répétition).
       if (style === 'medium' || style === 'success') {
-        setTimeout(() => input.click(), 60);
+        setTimeout(() => label.click(), 60);
       }
       if (style === 'heavy' || style === 'warning') {
-        setTimeout(() => input.click(), 50);
-        setTimeout(() => input.click(), 110);
+        setTimeout(() => label.click(), 50);
+        setTimeout(() => label.click(), 110);
       }
     } catch {
       // ignore
