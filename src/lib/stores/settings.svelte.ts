@@ -19,10 +19,15 @@ export type InstallationPhase = {
 };
 
 let phaseSeq = 0;
-/** Id stable pour les clés #each (unique dans la session). */
+/** Id stable et UNIQUE pour les clés #each.
+ *  Le compteur seul repartait de 0 à CHAQUE session : il pouvait donc recréer un
+ *  id déjà persisté (ex. « ph_1 »). Résultat : deux phases avec la même clé #each
+ *  dans settings.json → `each_key_duplicate` au rendu CLIENT → la page Réglages
+ *  ne s'affichait plus en navigation interne (seul un reload/SSR la montrait).
+ *  Le suffixe aléatoire garantit l'unicité d'une session à l'autre. */
 function genPhaseId(): string {
   phaseSeq += 1;
-  return `ph_${phaseSeq}`;
+  return `ph_${phaseSeq}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 type Persisted = {
@@ -52,7 +57,19 @@ function normalizePhase(p: Partial<InstallationPhase> | undefined): Installation
   };
 }
 function normalizePhases(arr: unknown): InstallationPhase[] {
-  return Array.isArray(arr) ? arr.map((p) => normalizePhase(p as Partial<InstallationPhase>)) : [];
+  if (!Array.isArray(arr)) return [];
+  // Filet de sécurité : un settings.json déjà corrompu (doublons d'id hérités du
+  // compteur qui repartait de 0) doit quand même produire des clés #each UNIQUES,
+  // sinon /reglages replante au rendu client. On réattribue un id frais à toute
+  // collision (ou id manquant) → la page rend toujours ; le prochain save()
+  // persiste les ids dédupliqués et soigne le fichier.
+  const seen = new Set<string>();
+  return arr.map((p) => {
+    const phase = normalizePhase(p as Partial<InstallationPhase>);
+    while (seen.has(phase.id)) phase.id = genPhaseId();
+    seen.add(phase.id);
+    return phase;
+  });
 }
 
 /**
