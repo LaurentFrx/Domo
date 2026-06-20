@@ -1,14 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { findmy, type FindMyDevice } from '$stores/findmy.svelte';
-
-  // Horloge locale (rafraîchie toutes les 30 s) pour que les « il y a X min »
-  // restent vivants entre deux publications MQTT (cadence bridge = 120 s).
-  let now = $state(Date.now());
-  onMount(() => {
-    const id = setInterval(() => (now = Date.now()), 30_000);
-    return () => clearInterval(id);
-  });
 
   // ─── Exclusion : ancien iPad de Laurent (position inconnue, batterie morte).
   // Filtre sur le topicId UNIQUEMENT — les deux iPad partagent le même `name`,
@@ -16,16 +7,23 @@
   const EXCLUDED_TOPICS = new Set(['ipad-de-laurent-avm1zspv']);
 
   // ─── Propriétaire : aucun champ owner dans le payload → inférence sur le nom.
+  // On détecte LAURENT (tous ses appareils sont nommés « … Laurent » / « de
+  // Laurent ») et on range TOUT le reste chez Isabelle : ses appareils ont des
+  // noms hétérogènes (« iPhone Isa », « Apple Watch d'Isabelle », ou « AirPods
+  // Pro » sans prénom) — chercher « isabelle » en raterait. (Robuste tant que la
+  // convention « … Laurent » tient ; sinon, faire publier `owner` par le bridge.)
   function inferOwner(name: string): 'laurent' | 'isabelle' {
-    return /isabelle/i.test(name) ? 'isabelle' : 'laurent';
+    return /laurent/i.test(name) ? 'laurent' : 'isabelle';
   }
 
-  // ─── Nom raccourci : le propriétaire est désormais porté par la figurine
-  // d'en-tête, on retire son nom du libellé. Repli sur le type si reste vide.
-  // « iPhone Laurent »→« iPhone », « AirPods Pro de Laurent »→« AirPods Pro »…
+  // ─── Nom raccourci : le propriétaire est porté par la figurine d'en-tête, on
+  // retire son prénom EN FIN de libellé (ancre $ → jamais de coupe au milieu).
+  // « iPhone Laurent »/« iPad de Laurent »→« iPhone »/« iPad » ; « iPhone Isa »→
+  // « iPhone » ; « Apple Watch d'Isabelle »→« Apple Watch » ; « AirPods Pro »
+  // (sans prénom) reste tel quel. Repli sur le type si le reste est vide.
   function shortName(d: FindMyDevice): string {
     const stripped = d.name
-      .replace(/\s*(de\s+laurent|laurent|d['’]isabelle|isabelle)\s*/i, '')
+      .replace(/\s*(d['’]\s*isabelle|de\s+laurent|isabelle|laurent|isa)\s*$/i, '')
       .trim();
     return stripped || d.deviceClass || d.name;
   }
@@ -110,15 +108,6 @@
     }
   });
 
-  function ago(epochS: number | null, nowMs: number): string {
-    if (epochS == null) return '';
-    const diff = Math.max(0, nowMs / 1000 - epochS);
-    if (diff < 45) return "à l'instant";
-    if (diff < 5400) return `il y a ${Math.round(diff / 60)} min`;
-    if (diff < 86400) return `il y a ${Math.round(diff / 3600)} h`;
-    return `il y a ${Math.round(diff / 86400)} j`;
-  }
-
   // Batterie fiable seulement si statut ≠ Unknown (AirPods / appareils hors ligne
   // remontent souvent « 0 % / Unknown » → on affiche « — » plutôt qu'un faux 0 %).
   function batteryPct(d: FindMyDevice): number | null {
@@ -132,6 +121,16 @@
     if (p > 50) return 'var(--color-battery)';
     if (p > 20) return 'var(--color-warning)';
     return 'var(--color-alert)';
+  }
+
+  // Les AirPods (Accessory) ne remontent JAMAIS leur batterie au cloud Find My
+  // (seulement leur position) → on masque la ligne batterie pour eux (sinon un
+  // « — » permanent et inutile). Cf. limite Apple confirmée 2026-06-20.
+  function isAirpods(d: FindMyDevice): boolean {
+    const s = (d.deviceClass || '').toLowerCase();
+    return (
+      s.includes('accessory') || s.includes('airpod') || d.name.toLowerCase().includes('airpod')
+    );
   }
 
   function mapsUrl(d: FindMyDevice): string {
@@ -181,52 +180,44 @@
     {@const color = batteryColor(d)}
     <article class="fm-row">
       <div class="fm-row-top">
-        <span class="fm-chip" aria-hidden="true">{@html iconSvg(d.deviceClass)}</span>
-        <span class="fm-name">{shortName(d)}</span>
-      </div>
-
-      <span class="fm-meta">
         {#if d.lat != null && d.lon != null}
-          <span class="fm-meta-txt">
-            Localisé{#if d.accuracy != null}&nbsp;· ±{Math.round(d.accuracy)} m{/if}{#if d.fixTs}&nbsp;·
-              {ago(d.fixTs, now)}{/if}
-          </span>
           <a
-            class="fm-link"
+            class="fm-chip fm-chip-link"
             href={mapsUrl(d)}
             target="_blank"
             rel="noopener noreferrer"
-            aria-label="Voir {d.name} sur le plan"
+            aria-label="Voir {d.name} sur le plan">{@html iconSvg(d.deviceClass)}</a
           >
-            Plan&nbsp;↗
-          </a>
         {:else}
-          <span class="fm-meta-txt">Position inconnue</span>
+          <span class="fm-chip" aria-hidden="true">{@html iconSvg(d.deviceClass)}</span>
         {/if}
-      </span>
-
-      <div class="fm-batt-line">
-        {#if d.charging}
-          <svg
-            viewBox="0 0 24 24"
-            width="11"
-            height="11"
-            fill="var(--color-battery)"
-            aria-hidden="true"
-          >
-            <path d="M13 2 4 14h6l-1 8 9-12h-6z" />
-          </svg>
-        {/if}
-        <span class="fm-batt-pct" style="color: {color};">
-          {pct == null ? '—' : `${pct} %`}
-        </span>
-        <div class="fm-batt-track" aria-hidden="true">
-          <div
-            class="fm-batt-fill"
-            style="width: {pct == null ? 0 : pct}%; background: {color};"
-          ></div>
-        </div>
+        <span class="fm-name">{shortName(d)}</span>
       </div>
+
+      {#if !isAirpods(d)}
+        <div class="fm-batt-line">
+          {#if d.charging}
+            <svg
+              viewBox="0 0 24 24"
+              width="11"
+              height="11"
+              fill="var(--color-battery)"
+              aria-hidden="true"
+            >
+              <path d="M13 2 4 14h6l-1 8 9-12h-6z" />
+            </svg>
+          {/if}
+          <span class="fm-batt-pct" style="color: {color};">
+            {pct == null ? '—' : `${pct} %`}
+          </span>
+          <div class="fm-batt-track" aria-hidden="true">
+            <div
+              class="fm-batt-fill"
+              style="width: {pct == null ? 0 : pct}%; background: {color};"
+            ></div>
+          </div>
+        </div>
+      {/if}
     </article>
   {/if}
 {/snippet}
@@ -425,6 +416,23 @@
     background: var(--color-primary-muted);
     color: var(--color-primary);
   }
+  /* Logo cliquable → ouvre la position de l'appareil dans Plans. */
+  .fm-chip-link {
+    cursor: pointer;
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      background var(--duration-fast, 100ms),
+      color var(--duration-fast, 100ms),
+      transform var(--duration-fast, 100ms);
+  }
+  .fm-chip-link:hover {
+    background: var(--color-primary);
+    color: var(--color-primary-fg);
+  }
+  .fm-chip-link:active {
+    transform: scale(0.92);
+  }
   /* Noms raccourcis : pas de troncature, on autorise le retour à la ligne. */
   .fm-name {
     min-width: 0;
@@ -435,18 +443,6 @@
     overflow-wrap: anywhere;
   }
 
-  .fm-meta {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.1rem 0.4rem;
-    font-size: 10.5px;
-    line-height: 1.2;
-  }
-  .fm-meta-txt {
-    color: var(--color-muted-fg);
-  }
-
   .fm-ph-badge {
     align-self: flex-start;
     padding: 0.05rem 0.45rem;
@@ -455,17 +451,6 @@
     font-size: 9.5px;
     font-weight: 600;
     color: var(--color-muted-fg);
-  }
-
-  .fm-link {
-    font-weight: 600;
-    color: var(--color-primary);
-    white-space: nowrap;
-    transition: opacity var(--duration-fast, 100ms);
-    -webkit-tap-highlight-color: transparent;
-  }
-  .fm-link:hover {
-    opacity: 0.75;
   }
 
   .fm-batt-line {
