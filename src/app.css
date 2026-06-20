@@ -15,6 +15,11 @@
   --color-primary-fg: oklch(0.985 0.01 280);
   --color-primary-hover: oklch(0.48 0.26 293);
   --color-primary-muted: oklch(0.541 0.281 293 / 0.12);
+  /* Accent « actif » du menu de bas de page : par défaut = brand violet ; en dark
+     une variante plus claire (même hue 293) pour passer le contraste AA sur le
+     petit label d'onglet (le violet brand sur fond dark sombre = ~3:1, échec AA).
+     Ne JAMAIS replier ceci sur --color-primary (utilisé partout : halos, HC…). */
+  --color-primary-active: var(--color-primary);
 
   /* ─── Surfaces light (canvas lavande plus teinté + cartes "verre") ─── */
   /* Canvas un cran plus soutenu pour que les cartes ressortent vraiment ;
@@ -167,6 +172,8 @@
      se lit par la clarté de surface, pas par l'obscurité) + translucides (verre). */
   --color-bg: oklch(0.205 0.04 286);
   --color-fg: oklch(0.96 0.013 286);
+  /* Onglet actif lisible sur fond dark (≈6,5:1 vs 3:1 du violet brand). */
+  --color-primary-active: oklch(0.72 0.2 293);
   --color-card: oklch(0.345 0.052 286 / 0.2);
   --color-card-hover: oklch(0.39 0.054 286 / 0.34);
   --color-muted: oklch(0.3 0.045 286);

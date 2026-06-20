@@ -1,53 +1,19 @@
 <script lang="ts">
   import { page } from '$app/state';
-
-  interface Item {
-    href: string;
-    label: string;
-    icon: string;
-  }
+  import { navItems, isActive, type NavItem } from './nav-items';
 
   interface Section {
     title?: string;
-    items: Item[];
+    items: NavItem[];
   }
 
-  const ICON = {
-    home: 'M3 11 L12 3 L21 11 V20 H3 Z',
-    zap: 'M13 2 L4 14 H11 L9 22 L20 8 H13 Z',
-    flame:
-      'M12 2 C12 2 8 6 8 12 C8 16 10 19 12 19 C14 19 16 16 16 12 C16 8 14 6 14 6 C14 8 13 10 12 10 C11 10 12 6 12 2 Z',
-    grid: 'M3 3 H10 V10 H3 Z M14 3 H21 V10 H14 Z M3 14 H10 V21 H3 Z M14 14 H21 V21 H14 Z',
-    cube: 'M12 2 L21 7 V17 L12 22 L3 17 V7 Z M3 7 L12 12 L21 7 M12 12 V22',
-    settings:
-      'M12 8 A4 4 0 1 1 12 16 A4 4 0 1 1 12 8 Z M12 2 V5 M12 19 V22 M2 12 H5 M19 12 H22 M4.5 4.5 L6.5 6.5 M17.5 17.5 L19.5 19.5 M4.5 19.5 L6.5 17.5 M17.5 6.5 L19.5 4.5'
-  } as const;
-
+  // Mêmes entrées que la TabBar (source unique : nav-items.ts), regroupées en
+  // deux sections : les 5 premières = « Pilotage », la dernière (Réglages) =
+  // « Système ». Le découpage suit l'ordre de navItems.
   const sections: Section[] = [
-    {
-      title: 'Pilotage',
-      items: [
-        { href: '/', label: 'Accueil', icon: ICON.home },
-        { href: '/energie', label: 'Énergie', icon: ICON.zap },
-        { href: '/climat', label: 'Climat', icon: ICON.flame },
-        { href: '/pieces', label: 'Pièces', icon: ICON.grid },
-        { href: '/maison', label: 'Maison', icon: ICON.cube }
-      ]
-    },
-    {
-      title: 'Système',
-      items: [{ href: '/reglages', label: 'Réglages', icon: ICON.settings }]
-    }
+    { title: 'Pilotage', items: navItems.slice(0, 5) },
+    { title: 'Système', items: navItems.slice(5) }
   ];
-
-  // Match par SEGMENT (cf. TabBar) : `/maison` ne doit pas s'allumer pour un
-  // hypothétique `/maisonnette`, mais `/reglages` reste actif sur
-  // `/reglages/planning`.
-  function isActive(href: string): boolean {
-    const path = page.url.pathname;
-    if (href === '/') return path === '/';
-    return path === href || path.startsWith(href + '/');
-  }
 </script>
 
 <aside
@@ -80,7 +46,7 @@
           </span>
         {/if}
         {#each section.items as item (item.href)}
-          {@const active = isActive(item.href)}
+          {@const active = isActive(page.url.pathname, item.href)}
           <a
             href={item.href}
             class="sidebar-item relative flex items-center justify-center rounded-md transition-colors lg:justify-start lg:gap-3"
@@ -154,5 +120,10 @@
     background: var(--color-sidebar-active);
     color: var(--color-sidebar-fg);
     font-weight: 600;
+  }
+  /* Focus clavier visible (iPad + clavier Bluetooth) ; n'apparaît qu'au clavier. */
+  .sidebar-item:focus-visible {
+    outline: 2px solid var(--color-sidebar-active-border);
+    outline-offset: 2px;
   }
 </style>

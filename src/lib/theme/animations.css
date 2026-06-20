@@ -111,11 +111,17 @@
   animation: dot-ping 1.4s var(--ease-default) infinite;
 }
 
+/* ─── Transition d'entrée de page (rejouée à chaque navigation d'onglet) ── */
+.page-enter {
+  animation: slide-up-fade 0.25s var(--ease-out);
+}
+
 /* ─── prefers-reduced-motion : désactive toutes les animations ──────── */
 @media (prefers-reduced-motion: reduce) {
   .glow-animated,
   .stagger-enter > *,
-  .dot-ping::after {
+  .dot-ping::after,
+  .page-enter {
     animation: none !important;
   }
   .stagger-enter > * {

@@ -1,46 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
-
-  interface Tab {
-    href: string;
-    label: string;
-    icon: string;
-  }
-
-  const tabs: Tab[] = [
-    { href: '/', label: 'Accueil', icon: 'M3 11 L12 3 L21 11 V20 H3 Z' },
-    { href: '/energie', label: 'Énergie', icon: 'M13 2 L4 14 H11 L9 22 L20 8 H13 Z' },
-    {
-      href: '/climat',
-      label: 'Climat',
-      icon: 'M12 2 C12 2 8 6 8 12 C8 16 10 19 12 19 C14 19 16 16 16 12 C16 8 14 6 14 6 C14 8 13 10 12 10 C11 10 12 6 12 2 Z'
-    },
-    {
-      href: '/pieces',
-      label: 'Pièces',
-      icon: 'M3 3 H10 V10 H3 Z M14 3 H21 V10 H14 Z M3 14 H10 V21 H3 Z M14 14 H21 V21 H14 Z'
-    },
-    {
-      href: '/maison',
-      label: 'Maison',
-      icon: 'M12 2 L21 7 V17 L12 22 L3 17 V7 Z M3 7 L12 12 L21 7 M12 12 V22'
-    },
-    {
-      href: '/reglages',
-      label: 'Réglages',
-      icon: 'M12 8 A4 4 0 1 1 12 16 A4 4 0 1 1 12 8 Z M12 2 V5 M12 19 V22 M2 12 H5 M19 12 H22 M4.5 4.5 L6.5 6.5 M17.5 17.5 L19.5 19.5 M4.5 19.5 L6.5 17.5 M17.5 6.5 L19.5 4.5'
-    }
-  ];
-
-  // Suivi du lien actif — comparaison par SEGMENT et non par simple préfixe de
-  // chaîne : `startsWith('/maison')` allumerait aussi un hypothétique
-  // `/maisonnette`, alors que `/reglages` doit bien rester actif sur
-  // `/reglages/planning`. On exige donc l'égalité OU un préfixe suivi d'un « / ».
-  function isActive(href: string): boolean {
-    const path = page.url.pathname;
-    if (href === '/') return path === '/';
-    return path === href || path.startsWith(href + '/');
-  }
+  import { navItems, isActive } from './nav-items';
 
   // ─── Clavier iOS : garder la barre vraiment collée en bas ──────────────────
   // Une barre `position: fixed` est ancrée au viewport de MISE EN PAGE, pas au
@@ -63,18 +23,38 @@
     }
     return node.isContentEditable;
   }
+  // Le focus seul est une heuristique : il dit qu'un champ-clavier est actif,
+  // pas que le clavier occulte réellement le bas. On arbitre avec visualViewport
+  // (source de vérité) → on ne masque QUE si le clavier rogne vraiment >120px.
+  // Bénéfice cross-plateforme : iOS (clavier en surimpression → gros écart →
+  // masque) vs Android (clavier qui redimensionne le viewport → écart ~0 → la
+  // barre fixed remonte d'elle-même, inutile de masquer). Fallback = focus seul
+  // sur les navigateurs sans visualViewport. Corrige aussi l'iPad « masquer le
+  // clavier » en gardant le focus (resize → la barre réapparaît).
   $effect(() => {
+    let focused = false;
+    const vv = window.visualViewport;
+    const sync = () => {
+      const occluded = vv ? window.innerHeight - vv.height > 120 : true;
+      keyboardOpen = focused && occluded;
+    };
     const onFocusIn = (e: FocusEvent) => {
-      if (opensKeyboard(e.target)) keyboardOpen = true;
+      if (opensKeyboard(e.target)) {
+        focused = true;
+        sync();
+      }
     };
     const onFocusOut = () => {
-      keyboardOpen = false;
+      focused = false;
+      sync();
     };
     document.addEventListener('focusin', onFocusIn);
     document.addEventListener('focusout', onFocusOut);
+    vv?.addEventListener('resize', sync);
     return () => {
       document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('focusout', onFocusOut);
+      vv?.removeEventListener('resize', sync);
     };
   });
 </script>
@@ -89,11 +69,11 @@
     height: calc(60px + env(safe-area-inset-bottom));
   "
   aria-label="Navigation principale"
-  aria-hidden={keyboardOpen}
+  inert={keyboardOpen || null}
 >
   <div class="flex h-[60px] items-center justify-around px-2">
-    {#each tabs as tab (tab.href)}
-      {@const active = isActive(tab.href)}
+    {#each navItems as tab (tab.href)}
+      {@const active = isActive(page.url.pathname, tab.href)}
       <a
         href={tab.href}
         class="tabbar-item flex h-full flex-1 flex-col items-center justify-center gap-1 rounded-lg"
@@ -122,8 +102,8 @@
         </span>
         {#if active}
           <span
-            class="absolute -bottom-0.5 h-[3px] w-1 rounded-full"
-            style="background: var(--color-primary);"
+            class="absolute bottom-1 left-1/2 h-[3px] w-1 -translate-x-1/2 rounded-full"
+            style="background: var(--color-primary-active);"
             aria-hidden="true"
           ></span>
         {/if}
@@ -142,8 +122,9 @@
     transition: transform var(--duration-normal) var(--ease-default);
   }
   .tabbar-hidden {
-    /* Glisse entièrement sous le bord bas (safe-area comprise) pendant la saisie. */
-    transform: translateY(110%);
+    /* Glisse entièrement sous le bord bas (safe-area comprise) pendant la saisie.
+       On conserve translateZ(0) pour garder la couche compositeur pendant la glissade. */
+    transform: translateZ(0) translateY(110%);
   }
   @media (prefers-reduced-motion: reduce) {
     .tabbar {
@@ -164,6 +145,14 @@
     user-select: none;
   }
   .tabbar-item-active {
-    color: var(--color-primary);
+    color: var(--color-primary-active);
+  }
+  /* Focus clavier visible (iPad + clavier Bluetooth) ; offset NÉGATIF car
+     l'onglet touche le bord bas de l'écran. N'apparaît qu'au clavier
+     (:focus-visible) → le polish tactile iOS reste intact. */
+  .tabbar-item:focus-visible {
+    outline: 2px solid var(--color-primary-active);
+    outline-offset: -2px;
+    border-radius: var(--radius-lg);
   }
 </style>

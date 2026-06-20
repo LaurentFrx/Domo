@@ -123,6 +123,15 @@
   style="background: var(--color-bg); color: var(--color-fg);"
   onpointerdown={onRootPointerDown}
 >
+  <!-- Lien d'évitement (WCAG 2.4.1) : premier focalisable, visible seulement au clavier -->
+  <a
+    href="#main"
+    class="sr-only rounded-md px-4 py-2 focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60]"
+    style="background: var(--color-primary); color: var(--color-primary-fg);"
+  >
+    Aller au contenu
+  </a>
+
   <!-- Calque d'ambiance (halos verts/indigo) : matière pour le verre + profondeur -->
   <div class="app-ambient" aria-hidden="true"></div>
 
@@ -132,12 +141,14 @@
   <Sidebar />
 
   <main
+    id="main"
+    tabindex="-1"
     class="safe-top min-h-screen sm:pl-[72px] lg:pl-[280px]"
     style="padding-bottom: calc(60px + env(safe-area-inset-bottom));"
   >
     <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
       {#key page.url.pathname}
-        <div class="animate-[slide-up-fade_0.25s_var(--ease-out)]">
+        <div class="page-enter">
           {@render children()}
         </div>
       {/key}
