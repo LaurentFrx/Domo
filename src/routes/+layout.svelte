@@ -32,13 +32,6 @@
     if (!hit) return;
     if (hit.closest('[data-no-haptic]')) return;
     if (hit.hasAttribute('disabled') || hit.getAttribute('aria-disabled') === 'true') return;
-    // iOS : haptic() déclenche un .click() programmatique sur un <input switch>.
-    // Fait SYNCHRONEMENT dans le pointerdown d'un lien, WebKit annule le « click »
-    // naturel que le geste produit sur touchend → le tap sur un onglet ne navigue
-    // plus (TabBar ET Sidebar). On n'arme donc PAS le haptique global sur les
-    // liens de navigation : le changement de page est déjà un retour visuel
-    // suffisant. Boutons, interrupteurs et sliders gardent leur buzz.
-    if (hit.tagName === 'A') return;
     haptic('light');
   }
 
