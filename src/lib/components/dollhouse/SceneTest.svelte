@@ -1,9 +1,27 @@
 <script lang="ts">
-  import { T } from '@threlte/core';
+  import { onDestroy } from 'svelte';
+  import { T, useThrelte } from '@threlte/core';
   import { OrbitControls, HTML, interactivity, type IntersectionEvent } from '@threlte/extras';
 
   // Raycasting Threlte : active les événements pointeur (onclick…) sur les meshes.
   interactivity();
+
+  // ─── Libération EXPLICITE du contexte WebGL au démontage ───────────────────
+  // Sans ça, chaque visite de /maison crée un nouveau contexte WebGL que ni
+  // Threlte ni three ne rendent au navigateur (renderer.dispose() libère les
+  // ressources GPU mais PAS le contexte lui-même). Ils s'accumulent : ~16 max
+  // sur desktop, ~8 sur iOS → au-delà, Safari tue les plus anciens et la scène
+  // « bloque » / devient noire (bug constaté en naviguant via le footer).
+  // forceContextLoss() (WEBGL_lose_context) rend le contexte immédiatement.
+  const { renderer } = useThrelte();
+  onDestroy(() => {
+    try {
+      renderer?.dispose();
+      renderer?.forceContextLoss();
+    } catch {
+      /* contexte déjà perdu / renderer déjà libéré — sans gravité */
+    }
+  });
 
   // ─── Pièces factices (validation technique, pas la vraie maison) ────────
   // Couleurs de marque en hex : les matériaux three ne lisent pas les
