@@ -845,21 +845,18 @@
       </div>
     </div>
 
-    <!-- ── Prévisions 3 jours ── -->
-    <div
-      class="border-t pt-3 lg:flex-1 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6"
-      style="border-color: var(--color-border);"
-    >
+    <!-- ── Prévisions 3 jours (sans trait de séparation) ── -->
+    <div class="lg:flex-1 lg:pl-6">
       <span
         class="text-[10px] font-semibold tracking-[0.04em] uppercase"
         style="color: var(--color-muted-fg);"
       >
         Prévisions 3 jours
       </span>
-      <div class="mt-2 grid grid-cols-3 gap-2">
+      <div class="mt-1.5 grid grid-cols-3 gap-2">
         {#each weather.forecast3d as day (day.date.toISOString())}
           <div
-            class="flex flex-col items-center gap-1 rounded-[var(--radius-md)] py-1.5"
+            class="flex flex-col items-center gap-1 rounded-[var(--radius-md)] py-1"
             style="background: var(--color-muted);"
           >
             <span class="text-[11px] font-medium capitalize" style="color: var(--color-muted-fg);">

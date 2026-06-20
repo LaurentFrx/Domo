@@ -63,7 +63,7 @@
       width="32"
       height="32"
       class="h-8 w-8 rounded-lg"
-      style="object-fit: cover;"
+      style="object-fit: cover; box-shadow: var(--shadow-md);"
     />
     <span class="hidden text-base font-semibold tracking-tight lg:inline"> Domo </span>
   </div>
