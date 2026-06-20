@@ -40,9 +40,13 @@
     }
   ];
 
+  // Match par SEGMENT (cf. TabBar) : `/maison` ne doit pas s'allumer pour un
+  // hypothétique `/maisonnette`, mais `/reglages` reste actif sur
+  // `/reglages/planning`.
   function isActive(href: string): boolean {
-    if (href === '/') return page.url.pathname === '/';
-    return page.url.pathname.startsWith(href);
+    const path = page.url.pathname;
+    if (href === '/') return path === '/';
+    return path === href || path.startsWith(href + '/');
   }
 </script>
 

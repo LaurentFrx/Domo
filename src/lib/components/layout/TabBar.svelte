@@ -32,14 +32,56 @@
     }
   ];
 
+  // Suivi du lien actif — comparaison par SEGMENT et non par simple préfixe de
+  // chaîne : `startsWith('/maison')` allumerait aussi un hypothétique
+  // `/maisonnette`, alors que `/reglages` doit bien rester actif sur
+  // `/reglages/planning`. On exige donc l'égalité OU un préfixe suivi d'un « / ».
   function isActive(href: string): boolean {
-    if (href === '/') return page.url.pathname === '/';
-    return page.url.pathname.startsWith(href);
+    const path = page.url.pathname;
+    if (href === '/') return path === '/';
+    return path === href || path.startsWith(href + '/');
   }
+
+  // ─── Clavier iOS : garder la barre vraiment collée en bas ──────────────────
+  // Une barre `position: fixed` est ancrée au viewport de MISE EN PAGE, pas au
+  // viewport VISUEL. Quand le clavier iOS s'ouvre (saisie d'un prix dans
+  // Réglages, etc.), il rétrécit le viewport visuel et la barre « flotte »
+  // au-dessus du clavier au milieu de l'écran. On la masque tant qu'un champ
+  // éditable a le focus (le clavier est alors ouvert).
+  let keyboardOpen = $state(false);
+  function opensKeyboard(el: EventTarget | null): boolean {
+    const node = el as HTMLElement | null;
+    if (!node) return false;
+    const tag = node.tagName;
+    if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (tag === 'INPUT') {
+      const type = (node as HTMLInputElement).type;
+      // Ces types n'ouvrent pas de clavier (interrupteurs, curseurs, fichiers…).
+      return !['checkbox', 'radio', 'range', 'button', 'submit', 'reset', 'color', 'file'].includes(
+        type
+      );
+    }
+    return node.isContentEditable;
+  }
+  $effect(() => {
+    const onFocusIn = (e: FocusEvent) => {
+      if (opensKeyboard(e.target)) keyboardOpen = true;
+    };
+    const onFocusOut = () => {
+      keyboardOpen = false;
+    };
+    document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('focusout', onFocusOut);
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('focusout', onFocusOut);
+    };
+  });
 </script>
 
 <nav
-  class="fixed right-0 bottom-0 left-0 z-50 border-t sm:hidden"
+  class="tabbar fixed right-0 bottom-0 left-0 z-50 border-t sm:hidden"
+  class:tabbar-hidden={keyboardOpen}
   style="
     background: var(--color-bg);
     border-color: var(--color-border);
@@ -47,6 +89,7 @@
     height: calc(60px + env(safe-area-inset-bottom));
   "
   aria-label="Navigation principale"
+  aria-hidden={keyboardOpen}
 >
   <div class="flex h-[60px] items-center justify-around px-2">
     {#each tabs as tab (tab.href)}
@@ -90,11 +133,35 @@
 </nav>
 
 <style>
+  /* Promotion sur une couche compositeur dédiée : sans ça, iOS « décroche » les
+     éléments `position: fixed` pendant le scroll inertiel (rubber-band) → la
+     barre tressaute. translateZ(0) la fige proprement. Sert aussi de base au
+     glissement de masquage quand le clavier s'ouvre. */
+  .tabbar {
+    transform: translateZ(0);
+    transition: transform var(--duration-normal) var(--ease-default);
+  }
+  .tabbar-hidden {
+    /* Glisse entièrement sous le bord bas (safe-area comprise) pendant la saisie. */
+    transform: translateY(110%);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tabbar {
+      transition: none;
+    }
+  }
+
   .tabbar-item {
     position: relative;
     color: var(--color-muted-fg);
     min-height: 44px;
     transition: color var(--duration-fast) var(--ease-default);
+    /* Polish tactile iOS : pas de rectangle gris au tap, pas de zoom double-tap,
+       pas de sélection de texte parasite sur un lourd appui. */
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    -webkit-user-select: none;
+    user-select: none;
   }
   .tabbar-item-active {
     color: var(--color-primary);
