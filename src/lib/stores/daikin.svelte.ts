@@ -147,6 +147,14 @@ class DaikinState {
   private pending = new Map<string, { value: unknown; until: number }>();
   private static readonly PROTECT_MS = 12_000;
 
+  // ─── Débounce du +/− de consigne ──────────────────────────────────────
+  // Le +/− applique l'optimiste IMMÉDIATEMENT (mutate) mais coalesce l'envoi :
+  // 1 timer par unité, réarmé à chaque tap → un seul sendCommand à expiration.
+  // Indispensable côté Onecta (rate-limit ~200 req/jour) : un +/− rapide ne
+  // consomme qu'UNE commande cloud, pas une par incrément.
+  private targetDebounce = new Map<string, ReturnType<typeof setTimeout>>();
+  private static readonly TARGET_DEBOUNCE_MS = 700;
+
   private lockKey(unitId: string, field: keyof DaikinUnit) {
     return `${unitId}:${field}`;
   }
@@ -164,6 +172,10 @@ class DaikinState {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
+    // Annule les envois de consigne en attente (débounce) — sinon un timer
+    // d'une session précédente pourrait tirer après reconnexion.
+    for (const t of this.targetDebounce.values()) clearTimeout(t);
+    this.targetDebounce.clear();
     // Lâche les verrous optimistes : à la reconnexion, le snapshot fait foi
     // (évite de garder des locks périmés d'une session de page précédente).
     this.pending.clear();
@@ -282,10 +294,16 @@ class DaikinState {
   }
 
   setOnOff(unitId: string, onOff: boolean) {
+    // Éteindre annule toute consigne débouncée en attente (ne pas écrire un
+    // setpoint sur une unité qu'on vient de couper).
+    if (!onOff) this.cancelTargetDebounce(unitId);
     this.mutate(unitId, { onOff });
     this.sendCommand(unitId, { on_off: onOff });
   }
   setOperationMode(unitId: string, operationMode: DaikinOperationMode) {
+    // Une consigne débouncée en attente visait l'ANCIEN mode → l'annuler, sinon
+    // on enverrait target_heating juste après être passé en froid (et v.v.).
+    this.cancelTargetDebounce(unitId);
     this.mutate(unitId, { operationMode });
     this.sendCommand(unitId, { operation_mode: operationMode });
   }
@@ -298,6 +316,48 @@ class DaikinState {
     const t = clampTarget(v);
     this.mutate(unitId, { targetCooling: t });
     this.sendCommand(unitId, { target_cooling: t });
+  }
+
+  /** Annule un envoi de consigne débouncé en attente (bascule de mode / extinction). */
+  private cancelTargetDebounce(unitId: string) {
+    const pending = this.targetDebounce.get(unitId);
+    if (pending) {
+      clearTimeout(pending);
+      this.targetDebounce.delete(unitId);
+    }
+  }
+
+  /**
+   * Consigne réglée au +/− : optimiste instantané + envoi DÉBOUNCÉ.
+   * Applique immédiatement la valeur (mutate → verrou 12 s, l'écran suit le
+   * doigt) mais ne déclenche qu'UN seul sendCommand ~700 ms après le dernier
+   * tap. Cible le champ du mode actif (heating→target_heating, cooling→
+   * target_cooling) ; ignore si l'unité est à l'arrêt.
+   */
+  setTargetDebounced(unitId: string, v: number) {
+    const unit = this.units.find((u) => u.id === unitId);
+    if (!unit || unit.operationMode === 'off') return;
+    const heating = unit.operationMode === 'heating';
+    const t = clampTarget(v);
+    // Optimiste immédiat sur le champ du mode COURANT (au moment du tap).
+    this.mutate(unitId, heating ? { targetHeating: t } : { targetCooling: t });
+
+    this.cancelTargetDebounce(unitId);
+    this.targetDebounce.set(
+      unitId,
+      setTimeout(() => {
+        this.targetDebounce.delete(unitId);
+        // Relit le mode AU MOMENT DU TIR : si l'unité a basculé chaud/froid ou
+        // s'est éteinte pendant la fenêtre (en plus de la purge faite par
+        // setOperationMode/setOnOff), on n'envoie jamais la consigne au mauvais champ.
+        const u = this.units.find((x) => x.id === unitId);
+        if (!u || u.operationMode === 'off') return;
+        this.sendCommand(
+          unitId,
+          u.operationMode === 'heating' ? { target_heating: t } : { target_cooling: t }
+        );
+      }, DaikinState.TARGET_DEBOUNCE_MS)
+    );
   }
   setFanSpeed(unitId: string, fanSpeed: FanSpeed) {
     this.mutate(unitId, { fanSpeed });

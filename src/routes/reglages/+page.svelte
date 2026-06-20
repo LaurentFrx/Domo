@@ -6,6 +6,7 @@
   import { forecast } from '$stores/forecast.svelte';
   import { weather } from '$stores/weather.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
+  import { airzone } from '$stores/airzone.svelte';
   import { cumulus, type CumulusConfigClient } from '$stores/cumulus.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { settings } from '$stores/settings.svelte';
@@ -34,6 +35,7 @@
     daikin.connect();
     weather.connect();
     zigbee.connect();
+    airzone.connect(); // pour la section « Batteries » (thermostats de zone)
     forecast.connect();
     cumulus.connectRelay(); // relais Shelly cumulus → ligne « Connexions »
     cumulus.refreshOrchestrator(); // config + état du moteur cumulus
@@ -43,10 +45,36 @@
     daikin.disconnect();
     weather.disconnect();
     zigbee.disconnect();
+    airzone.disconnect();
     forecast.disconnect();
     cumulus.disconnectRelay();
     thermostat.disconnect();
   });
+
+  // ─── Batteries regroupées (toute l'app) — hors appareils Apple (cf. FindMyCard) ──
+  // Niveaux des appareils Zigbee (capteurs) + thermostats de zone Airzone, triés du
+  // plus faible au plus fort (le plus urgent en tête).
+  const batteryItems = $derived(
+    [
+      ...zigbee.devices
+        .filter((d) => Number.isFinite(d.state.battery))
+        .map((d) => ({
+          name: d.friendlyName,
+          pct: Math.round(d.state.battery as number),
+          coverage: null as number | null
+        })),
+      ...airzone.zones
+        .filter((z) => z.battery !== null)
+        .map((z) => ({ name: z.name, pct: z.battery as number, coverage: z.coverage }))
+    ].sort((a, b) => a.pct - b.pct)
+  );
+  function batteryColor(pct: number): string {
+    return pct > 50
+      ? 'var(--color-battery)'
+      : pct > 20
+        ? 'var(--color-warning)'
+        : 'var(--color-alert)';
+  }
 
   // ─── Config cumulus éditable (orchestrateur) ───────────────────────
   // Copie locale bindable, seedée une fois la config réelle reçue du serveur ;
@@ -196,6 +224,63 @@
         </div>
       {/each}
     </div>
+  </section>
+
+  <!-- ═══ Section : Batteries (regroupées depuis toute l'app) ═══ -->
+  <section class="flex flex-col gap-3">
+    <h2
+      class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+      style="color: var(--color-muted-fg);"
+    >
+      Batteries
+    </h2>
+    {#if batteryItems.length === 0}
+      <div
+        class="rounded-[var(--radius-xl)] border px-4 py-3 text-[12px]"
+        style="background: var(--color-card); border-color: var(--color-border); color: var(--color-muted-fg);"
+      >
+        Aucun appareil à batterie détecté.
+      </div>
+    {:else}
+      <div
+        class="overflow-hidden rounded-[var(--radius-xl)] border"
+        style="background: var(--color-card); border-color: var(--color-border);"
+      >
+        {#each batteryItems as item, i (item.name)}
+          <div
+            class="flex items-center gap-3 px-4 py-3"
+            style="border-top: {i === 0 ? '0' : '1px solid var(--color-border)'};"
+          >
+            <span
+              class="h-2 w-2 shrink-0 rounded-full"
+              style:background-color={batteryColor(item.pct)}
+            ></span>
+            <span
+              class="min-w-0 flex-1 truncate text-[13px] font-semibold"
+              style="color: var(--color-fg);"
+            >
+              {item.name}
+            </span>
+            <div class="flex shrink-0 items-center gap-2.5">
+              {#if item.coverage !== null}
+                <span class="text-[11px] tabular-nums" style="color: var(--color-muted-fg);">
+                  couv. {item.coverage}%
+                </span>
+              {/if}
+              <span
+                class="text-[13px] font-semibold tabular-nums"
+                style="color: {batteryColor(item.pct)};"
+              >
+                {item.pct}%
+              </span>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
+    <span class="text-[11px]" style="color: var(--color-muted-fg);">
+      Les appareils Apple gardent leur batterie sur leur propre carte (Pièces).
+    </span>
   </section>
 
   <!-- ═══ Section 2 : Préférences ═══ -->

@@ -5,7 +5,7 @@
     device: ZigbeeDevice;
     /** Nom d'affichage override (sinon le friendlyName Zigbee du device). */
     name?: string;
-    /** Compact : masque ZB / batterie / LQI en vue iPhone (réapparaissent dès sm). */
+    /** Compact : masque ZB / LQI en vue iPhone (réapparaissent dès sm). */
     compact?: boolean;
   }
 
@@ -21,21 +21,8 @@
   const humidity = $derived<number | null>(
     Number.isFinite(device.state.humidity) ? (device.state.humidity as number) : null
   );
-  const battery = $derived<number | null>(
-    Number.isFinite(device.state.battery) ? (device.state.battery as number) : null
-  );
   const link = $derived<number | null>(
     Number.isFinite(device.state.linkquality) ? (device.state.linkquality as number) : null
-  );
-
-  const batteryColor = $derived(
-    battery === null
-      ? 'var(--color-muted-fg)'
-      : battery > 50
-        ? 'var(--color-battery)'
-        : battery > 20
-          ? 'var(--color-warning)'
-          : 'var(--color-alert)'
   );
 </script>
 
@@ -83,20 +70,12 @@
     {/if}
   </div>
 
-  <div
-    class="flex items-center justify-between text-[10px] {compact ? 'hidden sm:flex' : ''}"
-    style="color: var(--color-muted-fg);"
-  >
-    {#if battery !== null}
-      <span class="flex items-center gap-1">
-        <span class="h-1 w-1 rounded-full" style:background-color={batteryColor}></span>
-        Batt. {Math.round(battery)}%
-      </span>
-    {:else}
-      <span></span>
-    {/if}
-    {#if link !== null}
+  {#if link !== null}
+    <div
+      class="flex items-center justify-end text-[10px] {compact ? 'hidden sm:flex' : ''}"
+      style="color: var(--color-muted-fg);"
+    >
       <span class="tabular-nums">LQI {link}</span>
-    {/if}
-  </div>
+    </div>
+  {/if}
 </div>
