@@ -455,7 +455,7 @@
       180deg,
       oklch(0.82 0.16 70) 0%,
       var(--color-solar) 55%,
-      oklch(0.62 0.17 55) 100%
+      oklch(0.72 0.18 58) 100%
     );
   }
   .bat-card.is-low .bat-dot {

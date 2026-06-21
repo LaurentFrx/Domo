@@ -50,11 +50,14 @@
   --color-grid-energy: oklch(0.708 0.012 280);
   --color-grid-energy-muted: oklch(0.708 0.012 280 / 0.1);
 
-  --color-hc: oklch(0.541 0.281 293);
-  --color-hc-muted: oklch(0.541 0.281 293 / 0.1);
+  /* Tarifs + sémantique chaud/froid, harmonisés (ex rouge/violet ternes) :
+     HP = corail lumineux (sert AUSSI de « chaud » : chauffage/confort/cumulus) ;
+     HC = cyan (= --color-cyan). */
+  --color-hc: oklch(0.82 0.15 200);
+  --color-hc-muted: oklch(0.82 0.15 200 / 0.1);
 
-  --color-hp: oklch(0.6 0.118 25);
-  --color-hp-muted: oklch(0.6 0.118 25 / 0.1);
+  --color-hp: oklch(0.74 0.19 30);
+  --color-hp-muted: oklch(0.74 0.19 30 / 0.1);
 
   --color-alert: oklch(0.577 0.245 27.3);
   --color-alert-fg: oklch(0.985 0.01 27);
@@ -88,9 +91,9 @@
   --color-grid-energy-glow: oklch(0.708 0.012 280 / 0.5);
   --color-grid-energy-glow-mid: oklch(0.708 0.012 280 / 0.36);
   --color-grid-energy-glow-soft: oklch(0.708 0.012 280 / 0.24);
-  --color-hp-glow: oklch(0.6 0.118 25 / 0.5);
-  --color-hp-glow-mid: oklch(0.6 0.118 25 / 0.36);
-  --color-hp-glow-soft: oklch(0.6 0.118 25 / 0.24);
+  --color-hp-glow: oklch(0.74 0.19 30 / 0.5);
+  --color-hp-glow-mid: oklch(0.74 0.19 30 / 0.36);
+  --color-hp-glow-soft: oklch(0.74 0.19 30 / 0.24);
 
   /* ─── Palette « accents lumineux » (réutilisables dans toute l'app) ─── */
   --color-mandarine: oklch(0.8 0.2 60);

@@ -170,12 +170,12 @@
   function uvInfo(uv: number): { label: string; bg: string; fg: string } {
     if (uv <= 2) return { label: 'Faible', bg: 'oklch(0.68 0.16 145)', fg: 'oklch(0.99 0 0)' };
     if (uv <= 5) return { label: 'Modéré', bg: 'oklch(0.82 0.16 92)', fg: 'oklch(0.32 0.06 92)' };
-    if (uv <= 7) return { label: 'Élevé', bg: 'oklch(0.7 0.18 50)', fg: 'oklch(0.99 0 0)' };
+    if (uv <= 7) return { label: 'Élevé', bg: 'oklch(0.76 0.19 58)', fg: 'oklch(0.99 0 0)' };
     if (uv <= 10) return { label: 'Très élevé', bg: 'oklch(0.62 0.22 27)', fg: 'oklch(0.99 0 0)' };
     return { label: 'Extrême', bg: 'oklch(0.56 0.2 312)', fg: 'oklch(0.99 0 0)' };
   }
   const uvNow = $derived(uvInfo(weather.uvIndex));
-  const TEMP_HOT = 'oklch(0.68 0.16 48)'; // température max — orange chaud
+  const TEMP_HOT = 'oklch(0.76 0.18 55)'; // température max — orange chaud lumineux
   const TEMP_COLD = 'oklch(0.62 0.11 245)'; // température min — bleu froid
   const RAIN_BLUE = 'oklch(0.6 0.13 245)'; // pluie / humidité (icônes)
 </script>

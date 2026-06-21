@@ -214,11 +214,9 @@
           <span class="rate">+{eur(rate)}/h</span>
         {/if}
         <span class="split">
-          <!-- Chaud/froid (cher/pas cher), lumineux sur le fond sombre de la hero :
-               HP corail vif, HC cyan (token palette). Tokens globaux --color-hp/hc
-               inchangés (carte répartition /energie). -->
-          <span style="color: oklch(0.74 0.19 30);">HP {connected ? eur(today.eur_hp) : DASH}</span>
-          <span style="color: var(--color-cyan);">HC {connected ? eur(today.eur_hc) : DASH}</span>
+          <!-- HP/HC via les tokens globaux (désormais corail/cyan, harmonisés partout). -->
+          <span style="color: var(--color-hp);">HP {connected ? eur(today.eur_hp) : DASH}</span>
+          <span style="color: var(--color-hc);">HC {connected ? eur(today.eur_hc) : DASH}</span>
         </span>
       </footer>
     </div>
@@ -263,7 +261,7 @@
     background: linear-gradient(
       96deg,
       oklch(0.88 0.16 84),
-      oklch(0.82 0.15 50) 42%,
+      oklch(0.84 0.19 62) 42%,
       var(--color-primary) 96%
     );
     -webkit-background-clip: text;
