@@ -92,8 +92,16 @@
   --color-hp-glow-mid: oklch(0.6 0.118 25 / 0.36);
   --color-hp-glow-soft: oklch(0.6 0.118 25 / 0.24);
 
+  /* ─── Palette « accents lumineux » (réutilisables dans toute l'app) ─── */
+  --color-mandarine: oklch(0.8 0.2 60);
+  --color-ambre: oklch(0.84 0.18 78);
+  --color-cyan: oklch(0.82 0.15 200);
+  --color-magenta: oklch(0.75 0.23 350);
+  --color-lime: oklch(0.86 0.2 128);
+
   /* ─── PV par orientation (prévision forecast-bridge) ─── */
-  --color-sud: oklch(0.7 0.18 52);
+  /* Sud : ex-terracotta hue 52 (« ocre Anthropic ») → mandarine lumineuse. */
+  --color-sud: var(--color-mandarine);
   --color-ouest: oklch(0.58 0.21 300);
 
   /* ─── Sidebar (immutable dark, indigo Yeldra) ─── */
@@ -195,7 +203,7 @@
   --color-alert: oklch(0.704 0.17 22.2);
   --color-alert-muted: oklch(0.704 0.17 22.2 / 0.12);
 
-  --color-sud: oklch(0.78 0.16 52);
+  --color-sud: var(--color-mandarine);
   --color-ouest: oklch(0.7 0.19 300);
 
   /* Glow encore plus électrique sur fond sombre (rendu « OVNI » Yeldra) */

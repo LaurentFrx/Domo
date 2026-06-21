@@ -214,12 +214,11 @@
           <span class="rate">+{eur(rate)}/h</span>
         {/if}
         <span class="split">
-          <!-- Teintes éclaircies LOCALEMENT (fond hero très sombre) : on garde le
-               rouge HP (hue 25) / violet HC (hue 293) mais en lightness haute pour
-               la lisibilité. Tokens globaux --color-hp/hc inchangés (servent ailleurs). -->
-          <span style="color: oklch(0.72 0.17 25);">HP {connected ? eur(today.eur_hp) : DASH}</span>
-          <span style="color: oklch(0.72 0.19 293);">HC {connected ? eur(today.eur_hc) : DASH}</span
-          >
+          <!-- Chaud/froid (cher/pas cher), lumineux sur le fond sombre de la hero :
+               HP corail vif, HC cyan (token palette). Tokens globaux --color-hp/hc
+               inchangés (carte répartition /energie). -->
+          <span style="color: oklch(0.74 0.19 30);">HP {connected ? eur(today.eur_hp) : DASH}</span>
+          <span style="color: var(--color-cyan);">HC {connected ? eur(today.eur_hc) : DASH}</span>
         </span>
       </footer>
     </div>
