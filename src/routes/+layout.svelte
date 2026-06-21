@@ -18,21 +18,58 @@
 
   let { children } = $props();
 
-  // ─── Retour haptique GLOBAL ────────────────────────────────────────────
-  // Un seul écouteur délégué : tout bouton (ou contrôle interactif) activé dans
-  // l'app vibre, sans câbler haptic() partout. Les handlers qui appellent déjà
-  // haptic() avec une intensité précise ne double-buzzent pas (garde anti-rebond
-  // dans l'utilitaire). Opt-out via [data-no-haptic]. On écoute pointerdown pour
-  // un retour synchrone du geste (et non au click, plus tardif).
+  // ─── Boutons « façon iOS » : pression visuelle + haptique de CONFIRMATION ──
+  // Un seul gestionnaire délégué reproduit le bouton natif iOS, sans câbler
+  // chaque composant :
+  //  • TOUCHER (pointerdown) : l'élément s'enfonce (data-pressed → scale en CSS).
+  //    Aucune action.
+  //  • GLISSÉ hors de l'élément / scroll (pointermove sortant, pointercancel) :
+  //    on relâche la pression — l'action sera annulée (= touchDragExit natif).
+  //  • RELÂCHÉ sur l'élément : le navigateur émet `click` (= touchUpInside) → on
+  //    déclenche le retour haptique de confirmation, puis l'action du composant
+  //    s'exécute. PAS de délai artificiel : la latence perçue = toucher→relâché.
+  // Haptique sur `click` (et non pointerdown) : ça arrive AU moment de l'action,
+  // et les intensités spécifiques (haptic('success') d'un on/off…) gagnent le
+  // dédoublonnage sur le 'light' global au lieu d'être masquées. Opt-out
+  // haptique via [data-no-haptic]. Enfoncement visuel : boutons/liens seulement
+  // (un switch/slider ne « s'enfonce » pas).
+  const PRESS_VISUAL = 'button, [role="button"], a[href], summary';
+  const HAPTIC_TARGET =
+    'button, [role="button"], [role="switch"], [role="slider"], a[href], summary';
+  let pressedEl: HTMLElement | null = null;
+  let pressRect: DOMRect | null = null;
+
+  function releasePress() {
+    pressedEl?.removeAttribute('data-pressed');
+    pressedEl = null;
+    pressRect = null;
+  }
   function onRootPointerDown(ev: PointerEvent) {
-    const el = ev.target as Element | null;
-    const hit = el?.closest?.(
-      'button, [role="button"], [role="switch"], [role="slider"], a[href], summary'
-    );
+    const hit = (ev.target as Element | null)?.closest?.(PRESS_VISUAL) as HTMLElement | null;
+    if (!hit || hit.hasAttribute('disabled') || hit.getAttribute('aria-disabled') === 'true')
+      return;
+    releasePress();
+    pressRect = hit.getBoundingClientRect(); // capturé AVANT le scale
+    pressedEl = hit;
+    hit.setAttribute('data-pressed', '');
+  }
+  function onRootPointerMove(ev: PointerEvent) {
+    if (!pressedEl || !pressRect) return;
+    if (
+      ev.clientX < pressRect.left ||
+      ev.clientX > pressRect.right ||
+      ev.clientY < pressRect.top ||
+      ev.clientY > pressRect.bottom
+    )
+      releasePress();
+  }
+  function onRootClick(ev: MouseEvent) {
+    releasePress();
+    const hit = (ev.target as Element | null)?.closest?.(HAPTIC_TARGET);
     if (!hit) return;
     if (hit.closest('[data-no-haptic]')) return;
     if (hit.hasAttribute('disabled') || hit.getAttribute('aria-disabled') === 'true') return;
-    haptic('light');
+    haptic('light'); // confirme l'action (touchUpInside)
   }
 
   // ─── Hydrater les préférences (theme, animations…) global, dès le mount ─
@@ -114,14 +151,18 @@
   });
 </script>
 
-<!-- Écouteur de délégation PASSIF : déclenche seulement le retour haptique ; les
-     vraies interactions restent sur les boutons enfants (qui ont leur rôle). Un
-     role ARIA ici serait trompeur → on désactive la règle a11y pour ce nœud. -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- Délégation PASSIVE : gère seulement l'enfoncement visuel + le retour haptique
+     de confirmation ; les vraies interactions restent sur les boutons enfants (qui
+     ont leur rôle). Un role ARIA ici serait trompeur → règles a11y désactivées. -->
+<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 <div
   class="min-h-screen"
   style="background: var(--color-bg); color: var(--color-fg);"
   onpointerdown={onRootPointerDown}
+  onpointermove={onRootPointerMove}
+  onpointerup={releasePress}
+  onpointercancel={releasePress}
+  onclick={onRootClick}
 >
   <!-- Lien d'évitement (WCAG 2.4.1) : premier focalisable, visible seulement au clavier -->
   <a

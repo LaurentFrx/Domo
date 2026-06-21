@@ -297,6 +297,60 @@ textarea {
 }
 
 /* ════════════════════════════════════════════════════════════════════════ */
+/*   Comportement « app native » (iOS-first)                                 */
+/* ════════════════════════════════════════════════════════════════════════ */
+
+/* Pas de sélection de texte, de menu contextuel (callout) ni de glisser d'image
+   au long-press : réflexes de page web, pas d'app — et le long-press iOS émet en
+   plus un retour haptique SYSTÈME parasite. On coupe globalement, puis on
+   RÉACTIVE la saisie (et tout .selectable explicite, ex. une valeur à copier). */
+html {
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+img {
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+}
+input,
+textarea,
+[contenteditable],
+[contenteditable] *,
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* Boutons « façon iOS » : supprime le délai de tap (300 ms) et le zoom
+   double-tap, + enfoncement instantané au toucher. L'attribut data-pressed est
+   posé/retiré par le gestionnaire délégué du layout (toucher → enfonce ; glissé
+   dehors / scroll / relâché → relâche). Instantané (pas de transition) : net
+   comme en natif, et n'écrase pas les transitions de couleur des boutons. */
+button,
+[role='button'],
+[role='switch'],
+[role='slider'],
+a[href],
+summary,
+label[for] {
+  touch-action: manipulation;
+}
+[data-pressed] {
+  transform: scale(0.96);
+  opacity: 0.92;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-pressed] {
+    transform: none;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════ */
 /*   Glassmorphism global (iOS-first)                                        */
 /*   Toute carte écrite `background: var(--color-card)` (translucide via les  */
 /*   tokens) reçoit le flou d'arrière-plan → vrai verre dépoli, partout, sans */
