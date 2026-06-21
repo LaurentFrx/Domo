@@ -424,7 +424,6 @@
     align-items: center;
     justify-content: space-between;
     gap: 0.45rem 0.9rem;
-    border-top: 1px solid var(--color-border);
     padding-top: 0.85rem;
   }
   .rate {
