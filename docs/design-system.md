@@ -98,14 +98,33 @@ Toutes les cartes = **verre transparent à bords arrondis, éclairé par une sou
 - **Spacing** : grille 8 pt — gaps `gap-3`/`gap-4`/`gap-5`, padding interne `p-4` (tile) / `p-5` (grosse tile).
 - **Radius** (tokens) : `--radius-2xl` (cards), `--radius-3xl` (grosses cards, signature), `--radius-pill` (boutons pilule).
 
-## 10. Pièges techniques (déjà rencontrés)
+## 10. Interactions tactiles — boutons « façon iOS » (centralisé)
+
+Reproduit le bouton **natif iOS** (validé « sensation d'app pro »). Mécanisme **transverse, centralisé** : gestionnaire délégué unique dans `src/routes/+layout.svelte` (sur le `<div>` racine) + règles dans `src/app.css`. **Aucun câblage par composant** — tout `<button>` / `<a href>` / `[role="button"]` / `summary` en hérite.
+
+- **Enfoncement au toucher** : `pointerdown` pose `data-pressed` sur les boutons/liens → CSS `[data-pressed] { transform: scale(0.96); opacity: 0.92 }`. **Instantané** (pas de `transition` : net comme en natif, et n'écrase pas les transitions de couleur des boutons). Switch/slider : **pas** d'enfoncement (ils basculent, ne s'enfoncent pas) — mais gardent le haptique.
+- **Annulation drag-out** : si le doigt glisse hors du rect capturé au `pointerdown` (ou scroll / `pointercancel`) → on relâche l'enfoncement **et** l'action est annulée (= `touchDragExit` natif ; le `click` ne part que sur un `touchUpInside`).
+- **Haptique de CONFIRMATION** : déclenché sur **`click`** (relâché _sur_ l'élément), donc **au moment de l'action** — pas au `pointerdown`. Bonus : les intensités explicites (`haptic('success')` d'un on/off) gagnent le dédoublonnage sur le `'light'` global au lieu d'être masquées. Opt-out : `data-no-haptic`.
+- **Pas de délai artificiel** : la « latence » perçue = toucher→relâché + l'enfoncement (exactement comme en natif).
+
+**Comportement « app native » (plus de réflexes web)** :
+
+- `user-select: none` (body) + `-webkit-touch-callout: none` (html) + `img { -webkit-user-drag: none }` → supprime la sélection de texte, le menu long-press image/lien **et leur retour haptique SYSTÈME parasite**.
+- **Réactivé** sur `input`, `textarea`, `[contenteditable]` et la classe utilitaire **`.selectable`** (à poser sur une valeur qu'on veut pouvoir copier).
+- `touch-action: manipulation` sur les contrôles → fin du délai de tap 300 ms + zoom double-tap.
+
+**Réglages faciles** : profondeur d'enfoncement = `scale()` de `[data-pressed]` (`app.css`) ; moment du haptique = `click` → `pointerdown` si un jour on le veut dès le toucher. Tout gated `prefers-reduced-motion`.
+
+> Le haptique lui-même : hack `<label><input switch></label>` rendu en **sr-only** (1px + `clip`, mais dans l'arbre de rendu), cliqué via `label.click()` (`src/lib/utils/haptic.ts`). Android : `navigator.vibrate`. Prérequis appareil iOS : ≥ 17.4 + Réglages → Sons et vibrations → **« Vibrations système » activé** (sinon no-op silencieux). Reste un hack non officiel.
+
+## 11. Pièges techniques (déjà rencontrés)
 
 - **`-webkit-backdrop-filter` obligatoire** (Safari/iOS).
 - **`color-mix()` dans une `box-shadow` via `var()` casse le rendu sur Chrome** → interpoler les couleurs en **oklch calculé directement**.
 - Respecter **`prefers-reduced-transparency`** : repli cartes opaques, sans flou.
 - ⚠️ **Ne jamais `pnpm build` sans `sudo systemctl restart domo`** (le dossier `/home/laurent/domo` est à la fois dev **et** WorkingDirectory du service → 500 `ERR_MODULE_NOT_FOUND` sinon). `pnpm check` (svelte-check) est en lecture seule, sûr.
 
-## 11. Règles d'or (ne jamais casser)
+## 12. Règles d'or (ne jamais casser)
 
 1. **Lisibilité d'abord** (contraste texte suffisant).
 2. **Lumière en haut-gauche, ombre verte en bas-droite** — partout.
@@ -113,3 +132,4 @@ Toutes les cartes = **verre transparent à bords arrondis, éclairé par une sou
 4. Tout effet animé = **gated** (Animations + reduced-motion) **et** pausé en arrière-plan.
 5. **iOS-first**, mais vérifier **iPad paysage**.
 6. **Centraliser dans `app.css`** : un seul réglage de token se propage à toute l'app.
+7. **Boutons « façon iOS »** (§10) : l'enfoncement + le haptique de confirmation + l'anti-sélection sont **centralisés** (`+layout.svelte` + `app.css`) — ne pas les recâbler ni les casser par composant. Marquer `data-no-haptic` / `.selectable` au besoin.
