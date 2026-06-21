@@ -111,12 +111,15 @@
   const EDF_BLUE = 'oklch(0.62 0.19 256)'; // réseau EDF (import)
   const SURPLUS_RED = 'oklch(0.62 0.21 27)'; // surplus renvoyé
 
-  // ─── 3 cards lifetime (depuis Anker, vraies données) ─────────────────
-  const hasLifetime = $derived(anker.connected && anker.lifetimeProductionKwh > 0);
+  // ─── Cards lifetime — production cumulée de TOUTE l'installation ──────
+  // production.lifetimeKwh = SolarBank (SB1+SB2, cloud Solix) + onduleur APS (EZ1).
+  // L'APS (pan Sud) était jadis omise → total et équivalent VE sous-estimés.
+  // Affichage conditionné à Anker (source principale) ; l'APS s'ajoute si relevée.
+  const hasLifetime = $derived(anker.connected && production.lifetimeKwh > 0);
   // Équivalent VE : l'énergie produite depuis l'installation, convertie en km
   // qu'une voiture électrique parcourrait (conso ~16,7 kWh/100 km → 6 km/kWh).
   const EV_KM_PER_KWH = 6;
-  const evKm = $derived(anker.lifetimeProductionKwh * EV_KM_PER_KWH);
+  const evKm = $derived(production.lifetimeKwh * EV_KM_PER_KWH);
 
   function fmtNumber(n: number, decimals = 0): string {
     return n.toLocaleString('fr-FR', {
@@ -324,12 +327,12 @@
         <!-- Bilan du jour juste sous la batterie (colonne stats, dès lg). -->
         <div class="hidden lg:block">{@render flowsCard()}</div>
 
-        <!-- ═══ KPI lifetime (vraies données Anker) ═══ -->
+        <!-- ═══ KPI lifetime (SolarBank + APsystems, vraies données) ═══ -->
         {#if hasLifetime}
           <div class="grid grid-cols-2 gap-3">
             <KpiCard
               label="Production totale"
-              value={fmtNumber(anker.lifetimeProductionKwh, 0)}
+              value={fmtNumber(production.lifetimeKwh, 0)}
               unit="kWh"
               trend="depuis l'installation"
               domain="solar"
