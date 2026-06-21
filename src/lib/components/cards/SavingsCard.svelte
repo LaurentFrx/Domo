@@ -214,8 +214,12 @@
           <span class="rate">+{eur(rate)}/h</span>
         {/if}
         <span class="split">
-          <span style="color: var(--color-hp);">HP {connected ? eur(today.eur_hp) : DASH}</span>
-          <span style="color: var(--color-hc);">HC {connected ? eur(today.eur_hc) : DASH}</span>
+          <!-- Teintes éclaircies LOCALEMENT (fond hero très sombre) : on garde le
+               rouge HP (hue 25) / violet HC (hue 293) mais en lightness haute pour
+               la lisibilité. Tokens globaux --color-hp/hc inchangés (servent ailleurs). -->
+          <span style="color: oklch(0.72 0.17 25);">HP {connected ? eur(today.eur_hp) : DASH}</span>
+          <span style="color: oklch(0.72 0.19 293);">HC {connected ? eur(today.eur_hc) : DASH}</span
+          >
         </span>
       </footer>
     </div>
@@ -424,7 +428,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 0.45rem 0.9rem;
-    padding-top: 0.85rem;
+    padding-top: 0.45rem;
   }
   .rate {
     display: inline-flex;
