@@ -1,6 +1,7 @@
 <script lang="ts">
   import '../app.css';
-  import { page } from '$app/state';
+  import { page, updated } from '$app/state';
+  import { beforeNavigate } from '$app/navigation';
   import Sidebar from '$components/layout/Sidebar.svelte';
   import TabBar from '$components/layout/TabBar.svelte';
   import PullToRefresh from '$components/layout/PullToRefresh.svelte';
@@ -17,6 +18,18 @@
   import { haptic } from '$utils/haptic';
 
   let { children } = $props();
+
+  // ─── Auto-reload après déploiement (anti « client périmé ») ─────────────
+  // À chaque déploiement, les chunks JS changent de hash : un onglet/PWA déjà
+  // ouvert garde d'anciennes références → une navigation client échoue à charger
+  // les modules et l'app « ne répond plus ». `version.pollInterval` (svelte.config)
+  // détecte la nouvelle version (`updated.current`) ; on force alors une navigation
+  // PLEINE page (location.href) qui recharge le code à jour. Filet durable.
+  beforeNavigate(({ willUnload, to }) => {
+    if (updated.current && to?.url && !willUnload) {
+      location.href = to.url.href;
+    }
+  });
 
   // ─── Boutons « façon iOS » : pression visuelle + haptique de CONFIRMATION ──
   // Un seul gestionnaire délégué reproduit le bouton natif iOS, sans câbler
