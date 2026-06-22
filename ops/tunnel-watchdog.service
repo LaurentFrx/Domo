@@ -1,0 +1,9 @@
+[Unit]
+Description=Watchdog tunnels reverse RPi4 — libère les ports sshd zombies pour réattache auto
+Documentation=memory:vps_tazieff_tunnel_ghost_ports_powercut
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/tunnel-watchdog.sh
+Nice=10
