@@ -3,7 +3,7 @@
   import * as THREE from 'three';
   import { T, useThrelte } from '@threlte/core';
   import { OrbitControls, HTML, interactivity, type IntersectionEvent } from '@threlte/extras';
-  import { WALLS, ROOMS } from './maison-plan';
+  import { WALLS, ROOMS, WALL_HEIGHT } from './maison-plan';
 
   // Raycasting Threlte : clic/tap sur les sols de pièce.
   interactivity();
@@ -59,6 +59,48 @@
       return shape;
     })
   );
+
+  // ─── Escalier DEMI-TOUR (U) dans la bande à l'ouest des WC ────────────────
+  // 2 volées nord↔sud côte à côte + demi-palier au sud (le 180°), montant au
+  // palier de l'étage (y = hauteur des murs). Le dessous au sud reste ouvert
+  // → cumulus accessible. Marches = blocs (profil plein vu de dessus, dessous
+  // ajouré).
+  const stairSteps = (() => {
+    const xWall = -2.008;
+    const xToilet = -1.027;
+    const zNorth = -0.7; // départ (sol, côté hall)
+    const zSouth = 2.05; // demi-palier (côté mur sud)
+    const N = 8; // marches par volée
+    const landingDepth = 0.5;
+    const fullW = xToilet - xWall;
+    const flightW = fullW * 0.4; // volées étroites → vide central (cage) visible
+    const xEast = xToilet - flightW / 2; // volée A (côté WC)
+    const xWest = xWall + flightW / 2; // volée B (côté Salon)
+    const riser = WALL_HEIGHT / (2 * N);
+    const tread = (zSouth - landingDepth - zNorth) / N;
+    type Step = { pos: [number, number, number]; size: [number, number, number] };
+    const steps: Step[] = [];
+    // volée A (est) : nord (sol) → demi-palier (sud), monte
+    for (let i = 0; i < N; i++) {
+      steps.push({
+        pos: [xEast, (i + 0.5) * riser, zNorth + (i + 0.5) * tread],
+        size: [flightW, riser, tread * 1.02]
+      });
+    }
+    // demi-palier (sud), pleine largeur, au niveau haut de la volée A (le 180°)
+    steps.push({
+      pos: [(xWall + xToilet) / 2, N * riser - riser / 2, zSouth - landingDepth / 2],
+      size: [fullW, riser, landingDepth]
+    });
+    // volée B (ouest) : demi-palier (sud) → palier de l'étage (nord), monte
+    for (let i = 0; i < N; i++) {
+      steps.push({
+        pos: [xWest, (N + i + 0.5) * riser, zSouth - landingDepth - (i + 0.5) * tread],
+        size: [flightW, riser, tread * 1.02]
+      });
+    }
+    return steps;
+  })();
 
   let selectedId = $state<string | null>(null);
   function selectRoom(id: string) {
@@ -124,6 +166,14 @@
         metalness={0}
         side={THREE.DoubleSide}
       />
+    </T.Mesh>
+  {/each}
+
+  <!-- Escalier demi-tour (bois clair, opaque) — repère vertical de la maquette. -->
+  {#each stairSteps as s, i (i)}
+    <T.Mesh position={s.pos}>
+      <T.BoxGeometry args={s.size} />
+      <T.MeshStandardMaterial color="#caa978" roughness={0.8} metalness={0} />
     </T.Mesh>
   {/each}
 
