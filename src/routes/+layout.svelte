@@ -5,6 +5,7 @@
   import Sidebar from '$components/layout/Sidebar.svelte';
   import TabBar from '$components/layout/TabBar.svelte';
   import PullToRefresh from '$components/layout/PullToRefresh.svelte';
+  import HealthBanner from '$components/layout/HealthBanner.svelte';
   import { startDemoTicker, stopDemoTicker } from '$stores/demo-ticker.svelte';
   import { anker } from '$stores/anker.svelte';
   import { apsystems } from '$stores/apsystems.svelte';
@@ -15,6 +16,7 @@
   import { dashboard } from '$stores/dashboard.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { settings } from '$stores/settings.svelte';
+  import { health } from '$stores/health.svelte';
   import { haptic } from '$utils/haptic';
 
   let { children } = $props();
@@ -102,6 +104,15 @@
   $effect(() => {
     startDemoTicker();
     return () => stopDemoTicker();
+  });
+
+  // ─── Santé de la liaison domotique (bandeau d'alerte global) ───────────
+  // Poll /api/health (état du hub MQTT). Visibility-aware, idempotent. Le
+  // bandeau ne s'affiche qu'après le délai de grâce du store (auto-réparation
+  // infra échouée), pour éviter d'alerter sur une coupure passagère.
+  $effect(() => {
+    health.connect();
+    return () => health.disconnect();
   });
 
   // ─── Connexion Anker bridge (cloud Solix) ──────────────────────────────
@@ -201,6 +212,7 @@
     style="padding-bottom: calc(60px + env(safe-area-inset-bottom));"
   >
     <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
+      <HealthBanner />
       {#key page.url.pathname}
         <div class="page-enter">
           {@render children()}

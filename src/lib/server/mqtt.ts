@@ -58,6 +58,17 @@ export function getMqttClient(): MqttClient {
   return getClient();
 }
 
+/**
+ * État de la liaison MQTT serveur (hub central : capteurs Zigbee, sonde cumulus,
+ * portail). Crée le singleton au besoin pour amorcer la connexion, puis renvoie
+ * son état temps réel. Lu par /api/health → bandeau « Liaison domotique
+ * interrompue » côté client. `connected` repasse à true tout seul dès que le
+ * tunnel ws://127.0.0.1:9001 est rétabli (reconnectPeriod 5 s).
+ */
+export function isMqttConnected(): boolean {
+  return getClient().connected;
+}
+
 /** Résout quand le client est connecté, rejette au-delà de `timeoutMs`. */
 function waitConnected(c: MqttClient, timeoutMs: number): Promise<void> {
   if (c.connected) return Promise.resolve();
