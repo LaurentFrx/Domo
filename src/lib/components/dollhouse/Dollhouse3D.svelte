@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Canvas } from '@threlte/core';
-  import SceneTest from './SceneTest.svelte';
+  import MaisonScene from './MaisonScene.svelte';
 </script>
 
 <!-- Garde-fous iOS :
@@ -15,6 +15,6 @@
      verre Domo reste visible derrière la scène. -->
 <div class="h-full w-full">
   <Canvas dpr={[1, 2]}>
-    <SceneTest />
+    <MaisonScene />
   </Canvas>
 </div>

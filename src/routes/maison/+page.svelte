@@ -23,7 +23,7 @@
 <div class="flex flex-col gap-4 py-4">
   <header class="flex items-center justify-between">
     <h1 class="text-2xl font-semibold tracking-tight">Maison</h1>
-    <span class="text-[12px]" style="color: var(--color-muted-fg);"> Scène de validation 3D </span>
+    <span class="text-[12px]" style="color: var(--color-muted-fg);"> Plan 3D · pièces </span>
   </header>
 
   <!-- Coque de la scène : carte verre Domo (l'arête/ombre plexiglass vient du
