@@ -68,37 +68,46 @@
   const stairSteps = (() => {
     const xWall = -2.008;
     const xToilet = -1.027;
-    const zNorth = -0.7; // départ (sol, côté hall)
-    const zSouth = 2.05; // demi-palier (côté mur sud)
-    const N = 8; // marches par volée
-    const landingDepth = 0.5;
-    const fullW = xToilet - xWall;
-    const flightW = fullW * 0.4; // volées étroites → vide central (cage) visible
-    const xEast = xToilet - flightW / 2; // volée A (côté WC)
-    const xWest = xWall + flightW / 2; // volée B (côté Salon)
+    const N = 7; // contremarches par volée (14 au total → niveau étage)
+    const fullW = xToilet - xWall; // largeur de la cage (~0.98 m)
+    const flightW = 0.4; // volées étroites → vide central (cage) visible
+    const xEast = xToilet - flightW / 2; // volée BASSE (côté WC)
+    const xWest = xWall + flightW / 2; // volée HAUTE (côté Salon)
     const riser = WALL_HEIGHT / (2 * N);
-    const tread = (zSouth - landingDepth - zNorth) / N;
+    const half = N * riser; // hauteur du demi-palier (mi-étage)
+    const top = 2 * N * riser; // = WALL_HEIGHT (niveau de l'étage)
+    // emprise z : palier d'étage au NORD, demi-palier au SUD, volées entre
+    const palStart = -0.7; // bord nord (mur) du palier d'étage
+    const palEnd = -0.15; // bord sud du palier d'étage
+    const demiStart = 1.5; // bord nord du demi-palier
+    const demiEnd = 2.05; // bord sud (mur) du demi-palier
+    const tread = (demiStart - palEnd) / N;
     type Step = { pos: [number, number, number]; size: [number, number, number] };
     const steps: Step[] = [];
-    // volée A (est) : nord (sol) → demi-palier (sud), monte
+    // VOLÉE BASSE (est) : entrée au nord (sol) → demi-palier (sud), monte
     for (let i = 0; i < N; i++) {
       steps.push({
-        pos: [xEast, (i + 0.5) * riser, zNorth + (i + 0.5) * tread],
+        pos: [xEast, (i + 0.5) * riser, palEnd + (i + 0.5) * tread],
         size: [flightW, riser, tread * 1.02]
       });
     }
-    // demi-palier (sud), pleine largeur, au niveau haut de la volée A (le 180°)
+    // DEMI-PALIER (sud) : le demi-tour 180°, pleine largeur, à mi-hauteur
     steps.push({
-      pos: [(xWall + xToilet) / 2, N * riser - riser / 2, zSouth - landingDepth / 2],
-      size: [fullW, riser, landingDepth]
+      pos: [(xWall + xToilet) / 2, half - riser / 2, (demiStart + demiEnd) / 2],
+      size: [fullW, riser, demiEnd - demiStart]
     });
-    // volée B (ouest) : demi-palier (sud) → palier de l'étage (nord), monte
+    // VOLÉE HAUTE (ouest) : demi-palier (sud) → palier d'étage (nord), monte
     for (let i = 0; i < N; i++) {
       steps.push({
-        pos: [xWest, (N + i + 0.5) * riser, zSouth - landingDepth - (i + 0.5) * tread],
+        pos: [xWest, half + (i + 0.5) * riser, demiStart - (i + 0.5) * tread],
         size: [flightW, riser, tread * 1.02]
       });
     }
+    // PALIER DE L'ÉTAGE (nord) : plateau d'arrivée au niveau du 1er étage
+    steps.push({
+      pos: [(xWall + xToilet) / 2, top - riser / 2, (palStart + palEnd) / 2],
+      size: [fullW, riser, palEnd - palStart]
+    });
     return steps;
   })();
 
