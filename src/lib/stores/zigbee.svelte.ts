@@ -1,20 +1,14 @@
 /**
- * Zigbee store — connexion MQTT WebSocket (mosquitto:9001) au broker
- * du RPi4, proxié en WSS via Caddy (/mqtt/).
+ * Zigbee store — état temps réel via SSE serveur (/api/zigbee/stream), commandes
+ * via /api/zigbee/set. AUCUN identifiant MQTT côté navigateur (R14) : le serveur
+ * (ha_user) est le seul à parler à mosquitto ; le client ne voit qu'un flux
+ * authentifié. Le format `{topic, payload}` reproduit le flux MQTT d'origine, donc
+ * la logique de dispatch par topic est inchangée.
  *
- * Découverte : abonnement à `zigbee2mqtt/bridge/devices` (retained →
- * snapshot complet à la connexion). États : abonnement à
- * `zigbee2mqtt/<friendly_name>` (un topic par device, retained).
- * Commandes : publish sur `zigbee2mqtt/<friendly_name>/set` payload JSON.
+ * Découverte : `zigbee2mqtt/bridge/devices` (snapshot complet à la connexion).
+ * États : `zigbee2mqtt/<friendly_name>` (un topic par device).
+ * Commandes : POST /api/zigbee/set (allow-list appliquée côté serveur).
  */
-
-import mqtt from 'mqtt';
-import type { MqttClient } from 'mqtt';
-import { env } from '$env/dynamic/public';
-
-const PUBLIC_MQTT_WS_URL = env.PUBLIC_MQTT_WS_URL || '';
-const PUBLIC_MQTT_USER = env.PUBLIC_MQTT_USER || '';
-const PUBLIC_MQTT_PASSWORD = env.PUBLIC_MQTT_PASSWORD || '';
 
 export type ZigbeeCategory = 'sensor' | 'plug' | 'light' | 'cover' | 'switch' | 'unknown';
 
@@ -76,9 +70,8 @@ type BridgeDevice = {
 };
 
 // ─── Cache localStorage : restaure les derniers états connus avant
-// que MQTT n'ait fini de reconnecter (évite le « toggle qui flashe OFF »
-// pendant 1-2s au reload). Le cache est écrasé dès qu'un payload MQTT
-// retained arrive.
+// que le flux n'ait fini de (re)connecter (évite le « toggle qui flashe OFF »
+// pendant 1-2s au reload). Écrasé dès qu'un payload retained arrive.
 const CACHE_KEY = 'domo.zigbee.cache.v1';
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h
 
@@ -111,7 +104,7 @@ class ZigbeeState {
   );
   lastUpdate = $state<Date | null>(null);
   lastError = $state<string | null>(null);
-  private client: MqttClient | null = null;
+  private es: EventSource | null = null;
 
   /** Devices regroupés par pièce. Utilisé par /pieces. */
   rooms = $derived.by<{ room: string; devices: ZigbeeDevice[] }[]>(() => {
@@ -133,66 +126,44 @@ class ZigbeeState {
 
   connect() {
     if (typeof window === 'undefined') return;
-    if (this.client) return;
-
-    if (!PUBLIC_MQTT_WS_URL || !PUBLIC_MQTT_USER || !PUBLIC_MQTT_PASSWORD) {
-      this.connectionStatus = 'unconfigured';
-      this.lastError = 'MQTT credentials manquants (PUBLIC_MQTT_*)';
-      return;
-    }
+    if (this.es) return;
 
     this.connectionStatus = 'connecting';
-    this.client = mqtt.connect(PUBLIC_MQTT_WS_URL, {
-      username: PUBLIC_MQTT_USER,
-      password: PUBLIC_MQTT_PASSWORD,
-      protocolVersion: 4,
-      reconnectPeriod: 5000,
-      connectTimeout: 8000,
-      clientId: `domo-pwa-${Math.random().toString(36).slice(2, 10)}`
-    });
+    const es = new EventSource('/api/zigbee/stream');
+    this.es = es;
 
-    this.client.on('connect', () => {
+    es.onopen = () => {
       this.connectionStatus = 'connected';
       this.lastError = null;
-      this.client?.subscribe('zigbee2mqtt/bridge/devices', { qos: 0 });
-      this.client?.subscribe('zigbee2mqtt/+', { qos: 0 });
-    });
+    };
 
-    this.client.on('reconnect', () => {
-      this.connectionStatus = 'connecting';
-    });
-
-    this.client.on('close', () => {
-      if (this.connectionStatus !== 'unconfigured') {
-        this.connectionStatus = 'disconnected';
-      }
-    });
-
-    this.client.on('error', (err) => {
-      this.lastError = err.message;
-    });
-
-    this.client.on('message', (topic, payload) => {
+    es.addEventListener('zigbee', (ev) => {
       try {
-        const txt = payload.toString();
+        const { topic, payload } = JSON.parse((ev as MessageEvent).data) as {
+          topic: string;
+          payload: string;
+        };
         if (topic === 'zigbee2mqtt/bridge/devices') {
-          this.handleDeviceList(JSON.parse(txt) as BridgeDevice[]);
+          this.handleDeviceList(JSON.parse(payload) as BridgeDevice[]);
         } else if (topic.startsWith('zigbee2mqtt/') && !topic.includes('/bridge/')) {
           const friendly = topic.slice('zigbee2mqtt/'.length);
-          if (friendly && !friendly.includes('/')) {
-            this.handleDeviceState(friendly, txt);
-          }
+          if (friendly && !friendly.includes('/')) this.handleDeviceState(friendly, payload);
         }
       } catch (e) {
         this.lastError = `parse: ${(e as Error).message}`;
       }
       this.lastUpdate = new Date();
     });
+
+    es.onerror = () => {
+      // EventSource se reconnecte tout seul ; on reflète juste l'état.
+      this.connectionStatus = 'disconnected';
+    };
   }
 
   disconnect() {
-    this.client?.end();
-    this.client = null;
+    this.es?.close();
+    this.es = null;
     this.connectionStatus = 'disconnected';
   }
 
@@ -238,38 +209,54 @@ class ZigbeeState {
     saveCachedDevices(this.devices);
   }
 
-  // ─── Commandes ───
-  private publishSet(friendlyName: string, payload: Record<string, unknown>): boolean {
-    if (!this.client || this.connectionStatus !== 'connected') {
-      // Avant : retour silencieux → l'utilisateur cliquait sans aucun effet ni
-      // indice. On consigne l'erreur (observable via zigbee.lastError) pour pouvoir
-      // signaler « hors ligne, commande non envoyée » dans l'UI.
-      this.lastError = 'MQTT hors ligne — commande non envoyée';
+  // ─── Commandes (via endpoint serveur authentifié, allow-list serveur) ───
+  private async publishSet(
+    friendlyName: string,
+    payload: Record<string, unknown>
+  ): Promise<boolean> {
+    try {
+      const r = await fetch('/api/zigbee/set', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-domo-app': '1' },
+        body: JSON.stringify({ device: friendlyName, payload })
+      });
+      if (!r.ok) {
+        this.lastError = `commande refusée (HTTP ${r.status})`;
+        return false;
+      }
+      const d = (await r.json().catch(() => ({ ok: false }))) as { ok?: boolean };
+      if (!d.ok) {
+        this.lastError = 'commande non transmise (hors ligne)';
+        return false;
+      }
+      this.lastError = null;
+      return true;
+    } catch {
+      this.lastError = 'commande non envoyée';
       return false;
     }
-    this.client.publish(`zigbee2mqtt/${friendlyName}/set`, JSON.stringify(payload), { qos: 0 });
-    return true;
   }
 
   setState(friendlyName: string, state: 'ON' | 'OFF' | 'TOGGLE') {
-    this.publishSet(friendlyName, { state });
+    void this.publishSet(friendlyName, { state });
   }
 
   toggle(friendlyName: string) {
     const dev = this.devices.find((d) => d.friendlyName === friendlyName);
     if (!dev) return;
     const cur = dev.state.state as string | undefined;
-    this.publishSet(friendlyName, { state: cur === 'ON' ? 'OFF' : 'ON' });
+    void this.publishSet(friendlyName, { state: cur === 'ON' ? 'OFF' : 'ON' });
   }
 
   setBrightness(friendlyName: string, brightness: number) {
-    this.publishSet(friendlyName, { brightness: Math.max(0, Math.min(254, brightness)) });
+    void this.publishSet(friendlyName, { brightness: Math.max(0, Math.min(254, brightness)) });
   }
 
-  /** Portail NodOn : impulse (pulse on/off court). */
+  /** Portail NodOn : impulse (pulse on/off court). Note : le Portail n'est PAS dans
+   *  l'allow-list serveur (passe par /api/portail/pulse) — conservé par cohérence. */
   pulse(friendlyName: string) {
-    this.publishSet(friendlyName, { state: 'ON' });
-    setTimeout(() => this.publishSet(friendlyName, { state: 'OFF' }), 500);
+    void this.publishSet(friendlyName, { state: 'ON' });
+    setTimeout(() => void this.publishSet(friendlyName, { state: 'OFF' }), 500);
   }
 }
 
