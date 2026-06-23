@@ -17,7 +17,18 @@
 
   async function toggle() {
     busy = true;
-    pstate = pstate === 'enabled' ? await disablePush() : await enablePush();
+    if (pstate === 'enabled') {
+      pstate = await disablePush();
+      testMsg = '';
+    } else {
+      pstate = await enablePush();
+      // Confirme TOUT DE SUITE par une vraie notification : pas besoin de chercher
+      // un bouton « Tester » séparé. Le canal est validé dès l'activation.
+      if (pstate === 'enabled') {
+        testMsg = 'Activé ✓ — notification de test envoyée';
+        await test();
+      }
+    }
     busy = false;
   }
 
@@ -45,7 +56,7 @@
           ? 'Indisponible — installer l’app sur l’écran d’accueil'
           : pstate === 'error'
             ? 'Erreur — réessayer'
-            : 'Alertes désactivées sur cet appareil'
+            : 'Touchez « Activer » pour être prévenu des anomalies'
   );
 
   function ageMin(ts: number): number {
