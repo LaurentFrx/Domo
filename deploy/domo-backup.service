@@ -1,0 +1,19 @@
+# Sauvegarde quotidienne Domo (data/*.json + history.db cohérent + rotation).
+#
+# ⚠ NON géré par le CI/CD — installation MANUELLE :
+#   sudo cp deploy/domo-backup.service deploy/domo-backup.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now domo-backup.timer
+#   sudo systemctl start domo-backup        # sauvegarde immédiate de test
+#   journalctl -u domo-backup -f
+
+[Unit]
+Description=Domo — sauvegarde des données (réglages + base history.db)
+Documentation=file:/home/laurent/domo/ops/backup-domo.sh
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=laurent
+Group=laurent
+ExecStart=/home/laurent/domo/ops/backup-domo.sh

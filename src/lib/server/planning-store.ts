@@ -9,9 +9,9 @@
  * $lib/utils/planning-derive ; la dérivation de la chauffe se fait côté daemon.
  */
 
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { readJsonSafe, writeJsonAtomic } from './atomic-store';
 import {
   defaultPlanningV2,
   defaultWeek,
@@ -178,25 +178,16 @@ export function normalizePlanning(raw: unknown): PlanningV2 {
   };
 }
 
-async function ensureDataDir(): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-}
-
 export async function readPlanning(): Promise<PlanningV2> {
-  try {
-    const raw = await fs.readFile(FILE, 'utf-8');
-    return normalizePlanning(JSON.parse(raw));
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return defaultPlanningV2();
-    throw e;
-  }
+  return readJsonSafe(FILE, {
+    fallback: defaultPlanningV2,
+    normalize: normalizePlanning,
+    label: 'planning.json'
+  });
 }
 
 export async function writePlanning(data: PlanningV2): Promise<PlanningV2> {
-  await ensureDataDir();
   const clean = normalizePlanning(data);
-  const tmp = FILE + '.tmp';
-  await fs.writeFile(tmp, JSON.stringify(clean, null, 2), 'utf-8');
-  await fs.rename(tmp, FILE);
+  await writeJsonAtomic(FILE, clean);
   return clean;
 }

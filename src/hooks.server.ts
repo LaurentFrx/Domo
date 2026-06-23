@@ -1,5 +1,14 @@
-import { redirect, type Handle } from '@sveltejs/kit';
+import { redirect, type Handle, type HandleServerError } from '@sveltejs/kit';
 import { isAuthenticated } from '$lib/server/auth';
+import { setIncidentReporter } from '$lib/server/atomic-store';
+import { raiseIncident, resolveIncident } from '$lib/server/monitor/incidents';
+
+// Branche la remontée d'incidents du socle de persistence sur le bus (une fois,
+// au chargement du serveur) : une corruption de fichier d'état devient une alerte.
+setIncidentReporter(
+  (i) => void raiseIncident(i),
+  (key, repaired) => void resolveIncident(key, repaired)
+);
 
 const PUBLIC_PATHS = ['/auth', '/denied'];
 
@@ -15,6 +24,7 @@ function isAsset(pathname: string): boolean {
     pathname === '/favicon.ico' ||
     pathname === '/manifest.webmanifest' ||
     pathname === '/sw.js' ||
+    pathname === '/push-sw.js' ||
     pathname === '/registerSW.js' ||
     pathname.endsWith('.png') ||
     pathname.endsWith('.svg') ||
@@ -48,6 +58,12 @@ export const handle: Handle = async ({ event, resolve }) => {
     return withApiCacheControl(pathname, await resolve(event));
   }
 
+  // Endpoint tick du moniteur de fiabilité : timer systemd en localhost, sans
+  // cookie. Auth par token (Bearer) appliquée dans la route. Match EXACT.
+  if (pathname === '/api/monitor/tick') {
+    return withApiCacheControl(pathname, await resolve(event));
+  }
+
   if (isAsset(pathname) || isPublic(pathname)) {
     return resolve(event);
   }
@@ -57,4 +73,15 @@ export const handle: Handle = async ({ event, resolve }) => {
   }
 
   return withApiCacheControl(pathname, await resolve(event));
+};
+
+/**
+ * Filet d'erreur global : aucune exception non rattrapée ne doit partir en 500
+ * brute silencieuse. On journalise (route + message) pour l'observabilité et on
+ * renvoie un message neutre au client (pas de fuite de détail interne).
+ */
+export const handleError: HandleServerError = ({ error, event }) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[handleError] ${event.request.method} ${event.url.pathname} — ${message}`);
+  return { message: 'Une erreur interne est survenue.' };
 };

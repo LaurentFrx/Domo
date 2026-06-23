@@ -16,7 +16,8 @@
     "format": "prettier --write .",
     "lint": "prettier --check .",
     "test:cumulus": "node --experimental-strip-types --test scripts/cumulus-decide.test.ts",
-    "test:energy": "node --experimental-strip-types --test scripts/cumulus-energy.test.ts"
+    "test:energy": "node --experimental-strip-types --test scripts/cumulus-energy.test.ts",
+    "test:atomic": "node --experimental-strip-types --test scripts/atomic-store.test.ts"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.0",
@@ -27,6 +28,7 @@
     "@types/d3-shape": "^3.1.8",
     "@types/node": "^22.10.0",
     "@types/three": "^0.184.1",
+    "@types/web-push": "^3.6.4",
     "@vite-pwa/sveltekit": "^1.1.0",
     "prettier": "^3.4.0",
     "prettier-plugin-svelte": "^3.5.0",
@@ -46,7 +48,8 @@
     "d3-shape": "^3.2.0",
     "layercake": "^8.4.0",
     "mqtt": "^5.15.1",
-    "three": "^0.184.0"
+    "three": "^0.184.0",
+    "web-push": "^3.6.7"
   },
   "engines": {
     "node": ">=20.0.0"

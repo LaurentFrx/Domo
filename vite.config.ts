@@ -51,6 +51,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['client/**/*.{js,css,ico,png,svg,woff,woff2}'],
+        // Greffe le handler Web Push (push + notificationclick) sur le SW généré,
+        // SANS modifier la stratégie de cache. Le fichier est servi en statique.
+        importScripts: ['/push-sw.js'],
         // navigateFallback ('/') ne doit JAMAIS court-circuiter ces routes une
         // fois la PWA installée (SW actif) : /auth pose le cookie de session
         // (sinon /denied perpétuel), /api/* sont des endpoints serveur (dont

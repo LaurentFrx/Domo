@@ -6,39 +6,36 @@
  *
  * Convention : un seul fichier, structure ouverte (any key/value
  * sérialisable). Le front décide du shape via le store preferences.
+ *
+ * Durabilité & intégrité : via `atomic-store` (écriture fsync + .bak, lecture
+ * auto-réparante sur corruption). Le seul invariant imposé ici est que le contenu
+ * soit un OBJET (sinon un `[]`/scalaire casserait le merge `{ ...current }`).
  */
-
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { readJsonSafe, writeJsonAtomic } from './atomic-store';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
-const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+const SETTINGS_FILE = path.resolve(process.cwd(), 'data', 'settings.json');
 
 export type Settings = Record<string, unknown>;
 
-async function ensureDataDir(): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-}
+const asObject = (raw: unknown): Settings =>
+  raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Settings) : {};
 
 export async function readSettings(): Promise<Settings> {
-  try {
-    const raw = await fs.readFile(SETTINGS_FILE, 'utf-8');
-    return JSON.parse(raw) as Settings;
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return {};
-    throw e;
-  }
+  return readJsonSafe(SETTINGS_FILE, {
+    fallback: () => ({}),
+    normalize: asObject,
+    label: 'settings.json'
+  });
 }
 
-/** Merge des clés fournies dans le JSON existant. */
+/** Merge des clés fournies dans le JSON existant. Rejette un payload non-objet. */
 export async function writeSettings(partial: Settings): Promise<Settings> {
-  await ensureDataDir();
+  if (!partial || typeof partial !== 'object' || Array.isArray(partial)) {
+    throw new Error('settings: le payload doit être un objet');
+  }
   const current = await readSettings();
   const merged = { ...current, ...partial };
-  // Écriture atomique : tmp + rename pour éviter un fichier corrompu en cas
-  // de crash en plein write.
-  const tmp = SETTINGS_FILE + '.tmp';
-  await fs.writeFile(tmp, JSON.stringify(merged, null, 2), 'utf-8');
-  await fs.rename(tmp, SETTINGS_FILE);
+  await writeJsonAtomic(SETTINGS_FILE, merged);
   return merged;
 }

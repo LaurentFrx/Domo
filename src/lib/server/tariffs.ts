@@ -18,6 +18,7 @@
 
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { raiseIncident, resolveIncident } from './monitor/incidents';
 
 export interface TariffRegime {
   /** Date d'entrée en vigueur 'YYYY-MM-DD' (locale Paris). */
@@ -160,14 +161,34 @@ function normalize(raw: unknown): TariffConfig {
 }
 
 function loadConfig(): TariffConfig {
+  let mtimeMs: number;
   try {
-    const { mtimeMs } = statSync(TARIFFS_FILE);
-    if (cache && cache.mtimeMs === mtimeMs) return cache.cfg;
+    mtimeMs = statSync(TARIFFS_FILE).mtimeMs;
+  } catch {
+    return DEFAULT_CONFIG; // fichier ABSENT (déploiement neuf) → défaut légitime, silencieux
+  }
+  if (cache && cache.mtimeMs === mtimeMs) return cache.cfg;
+  try {
     const cfg = normalize(JSON.parse(readFileSync(TARIFFS_FILE, 'utf-8')));
     cache = { mtimeMs, cfg };
+    resolveIncident('corrupt:tariffs.json', 'tariffs.json relu avec succès');
     return cfg;
-  } catch {
-    return DEFAULT_CONFIG; // fichier absent/illisible → défaut, jamais de crash
+  } catch (e) {
+    // Fichier PRÉSENT mais illisible/corrompu : sur des données FINANCIÈRES, on ne
+    // masque jamais en silence (la baseline/les économies disparaîtraient sans
+    // signal). On crie (log + incident critique) et on met le défaut en cache sous
+    // ce mtime pour ne pas re-signaler à chaque requête (jusqu'à correction du fichier).
+    console.error(`[tariffs] tariffs.json illisible: ${(e as Error).message} → tarif par défaut`);
+    raiseIncident({
+      key: 'corrupt:tariffs.json',
+      severity: 'critical',
+      source: 'tariffs.json',
+      kind: 'corrupt',
+      message:
+        'tariffs.json illisible — repli sur le tarif par défaut (baseline & économies masquées)'
+    });
+    cache = { mtimeMs, cfg: DEFAULT_CONFIG };
+    return DEFAULT_CONFIG;
   }
 }
 

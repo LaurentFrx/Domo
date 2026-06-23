@@ -37,6 +37,42 @@
   </div>
 {/if}
 
+<!-- Anomalies détectées par le moniteur (recorder figé, APS aveugle, capteur muet,
+     fichier corrompu…). Le moniteur tente d'abord de réparer ; ce qui reste affiché
+     ici est ce qui demande une attention. -->
+{#each health.alerts as a (a.key)}
+  <div
+    class="health-banner alert-row"
+    class:is-warn={a.severity !== 'critical'}
+    role="alert"
+    aria-live="polite"
+  >
+    <svg class="hb-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 3.2 1.8 20.4a1 1 0 0 0 .87 1.5h18.66a1 1 0 0 0 .87-1.5L12 3.2Z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M12 9.5v5"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.9"
+        stroke-linecap="round"
+      />
+      <circle cx="12" cy="17.6" r="1.05" fill="currentColor" />
+    </svg>
+    <div class="hb-text">
+      <strong>{a.severity === 'critical' ? 'Anomalie détectée' : 'Alerte'}</strong>
+      <span
+        >{a.message}{#if a.repaired}<br /><em class="hb-repaired">↻ {a.repaired}</em>{/if}</span
+      >
+    </div>
+  </div>
+{/each}
+
 <style>
   .health-banner {
     position: sticky;
@@ -76,6 +112,23 @@
   .hb-text span {
     font-size: 0.8rem;
     opacity: 0.92;
+  }
+  .hb-repaired {
+    font-style: italic;
+    opacity: 0.85;
+  }
+
+  /* Anomalie de gravité « warning » : ton ambre calme (≠ rouge plein des criticals),
+     en verre teinté plutôt qu'aplat tranchant. oklch DIRECT (safe Chrome). */
+  .alert-row {
+    margin: 0.4rem 0;
+  }
+  .alert-row.is-warn {
+    background: oklch(0.66 0.14 75 / 0.16);
+    color: var(--color-fg);
+    box-shadow:
+      0 8px 22px -12px oklch(0.66 0.14 75 / 0.4),
+      inset 0 0 0 1px oklch(0.66 0.14 75 / 0.45);
   }
 
   @media (prefers-reduced-motion: no-preference) {

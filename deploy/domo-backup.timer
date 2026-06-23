@@ -1,0 +1,14 @@
+# Sauvegarde quotidienne (03:30 locale) + un rattrapage si le VPS était éteint.
+# Installation : voir l'en-tête de domo-backup.service.
+
+[Unit]
+Description=Planifie la sauvegarde Domo quotidienne
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+AccuracySec=5min
+Unit=domo-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,14 @@
+# Planifie le moniteur de fiabilité toutes les 60 s.
+# Installation : voir l'en-tête de domo-monitor.service.
+
+[Unit]
+Description=Planifie le moniteur de fiabilité toutes les 60 s
+
+[Timer]
+OnBootSec=120s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=domo-monitor.service
+
+[Install]
+WantedBy=timers.target

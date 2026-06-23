@@ -1,0 +1,26 @@
+# Moniteur de fiabilité — un cycle de détection/auto-réparation/alerte.
+#
+# Déclenché toutes les 60 s par domo-monitor.timer : appelle /api/monitor/tick
+# (auth Bearer, bypass cookie en match exact dans hooks.server.ts). Le moniteur
+# sonde toutes les sources (recorder, APS, EM-50, Anker, MQTT, fichiers), tente
+# l'auto-réparation, et pousse une alerte Web Push pour toute nouvelle anomalie.
+#
+# ⚠ NON géré par le CI/CD (comme domo-cumulus / domo-recorder) — install MANUELLE :
+#   sudo cp deploy/domo-monitor.service deploy/domo-monitor.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now domo-monitor.timer
+#   journalctl -u domo-monitor -f
+# Pré-requis : MONITOR_TOKEN défini dans /home/laurent/domo/.env.
+
+[Unit]
+Description=Domo — moniteur de fiabilité (détection + auto-réparation + alerte)
+Documentation=file:/home/laurent/domo/src/lib/server/monitor/probes.ts
+After=network-online.target domo.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=laurent
+Group=laurent
+EnvironmentFile=-/home/laurent/domo/.env
+ExecStart=/usr/bin/curl -fsS -m 50 -X POST -H "Authorization: Bearer ${MONITOR_TOKEN}" http://127.0.0.1:3000/api/monitor/tick

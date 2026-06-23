@@ -9,8 +9,8 @@
  * atomique (tmp + rename). Jamais de crash sur fichier absent/corrompu.
  */
 
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { readJsonSafe, writeJsonAtomic } from '../atomic-store';
 import type {
   CumulusRuntimeState,
   AutoMode,
@@ -156,26 +156,18 @@ function normEnergyView(v: unknown): EnergyView | null {
   };
 }
 
-async function ensureDataDir(): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-}
-
 export async function readCumulusState(): Promise<CumulusRuntimeState> {
-  try {
-    const raw = await fs.readFile(FILE, 'utf-8');
-    return normalizeCumulusState(JSON.parse(raw));
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return defaultCumulusState();
-    // Fichier corrompu : repartir d'un état sûr plutôt que de planter le moteur.
-    return defaultCumulusState();
-  }
+  // Corruption → quarantaine + restauration .bak + incident (au lieu d'un défaut
+  // muet qui effaçait silencieusement l'anti-cycling / le compteur d'énergie).
+  return readJsonSafe(FILE, {
+    fallback: defaultCumulusState,
+    normalize: normalizeCumulusState,
+    label: 'cumulus-state.json'
+  });
 }
 
 export async function writeCumulusState(state: CumulusRuntimeState): Promise<void> {
-  await ensureDataDir();
   const clean = normalizeCumulusState(state);
   clean.log = clean.log.slice(-LOG_MAX);
-  const tmp = FILE + '.tmp';
-  await fs.writeFile(tmp, JSON.stringify(clean, null, 2), 'utf-8');
-  await fs.rename(tmp, FILE);
+  await writeJsonAtomic(FILE, clean);
 }

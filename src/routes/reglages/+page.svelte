@@ -13,6 +13,7 @@
   import { thermostat } from '$stores/thermostat.svelte';
   import { tariff } from '$stores/tariff.svelte';
   import { haptic } from '$utils/haptic';
+  import AlertsCard from '$components/settings/AlertsCard.svelte';
 
   const APP_VERSION = '0.2.0';
 
@@ -188,6 +189,9 @@
 
 <div class="flex flex-col gap-6 py-4">
   <h1 class="text-2xl font-semibold tracking-tight">Réglages</h1>
+
+  <!-- ═══ Section 0 : Alertes & anomalies ═══ -->
+  <AlertsCard />
 
   <!-- ═══ Section 1 : Connexions ═══ -->
   <section class="flex flex-col gap-3">

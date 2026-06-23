@@ -14,9 +14,22 @@
  * serait trompeur. Voir le pattern visibility-aware de apsystems.svelte.ts.
  */
 
+export interface HealthIncident {
+  key: string;
+  severity: 'critical' | 'warning' | 'info';
+  source: string;
+  kind: string;
+  message: string;
+  firstTs: number;
+  lastTs: number;
+  count: number;
+  repaired?: string | null;
+}
+
 interface HealthResponse {
   mqtt: boolean;
   ts: number;
+  incidents?: HealthIncident[];
 }
 
 const REFRESH_MS = 30_000; // lecture mémoire serveur → pas besoin de poller vite
@@ -30,6 +43,8 @@ class HealthState {
   #downSince = $state<number | null>(null);
   /** Horloge rafraîchie à chaque poll pour faire avancer la durée affichée. */
   #now = $state(0);
+  /** Anomalies actives détectées par le moniteur (hors MQTT, géré à part). */
+  #incidents = $state<HealthIncident[]>([]);
 
   status = $state<'idle' | 'live' | 'error'>('idle');
 
@@ -45,6 +60,18 @@ class HealthState {
   get downMinutes(): number {
     if (this.#downSince === null) return 0;
     return Math.max(1, Math.round((this.#now - this.#downSince) / 60_000));
+  }
+  /** Toutes les anomalies actives (telles que vues par le serveur). */
+  get incidents(): HealthIncident[] {
+    return this.#incidents;
+  }
+  /** Anomalies à afficher dans le bandeau : hors MQTT (déjà couvert par linkDown). */
+  get alerts(): HealthIncident[] {
+    return this.#incidents.filter((i) => i.source !== 'mqtt');
+  }
+  /** Y a-t-il au moins une anomalie critique active ? */
+  get hasCritical(): boolean {
+    return this.#incidents.some((i) => i.severity === 'critical');
   }
 
   connect() {
@@ -89,6 +116,7 @@ class HealthState {
       const data = (await res.json()) as HealthResponse;
       this.#now = Date.now();
       this.#mqtt = data.mqtt;
+      this.#incidents = Array.isArray(data.incidents) ? data.incidents : [];
       if (data.mqtt) {
         this.#downSince = null; // liaison OK → on efface la coupure
       } else if (this.#downSince === null) {
