@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { writeJsonAtomic, readJsonSafe } from '../src/lib/server/atomic-store.ts';
+import { writeJsonAtomic, readJsonSafe, withFileLock } from '../src/lib/server/atomic-store.ts';
 
 async function tmpFile(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'atomic-'));
@@ -59,6 +59,23 @@ test('corruption sans .bak → fallback (jamais un crash)', async () => {
   await fs.writeFile(f, '{{{ corrompu', 'utf-8');
   const r = await readJsonSafe(f, { fallback: () => ({ safe: true }), label: 'test2' });
   assert.deepEqual(r, { safe: true });
+});
+
+test('withFileLock sérialise les read-modify-write (aucun lost update)', async () => {
+  const f = await tmpFile();
+  await writeJsonAtomic(f, { n: 0 });
+  // 20 incréments concurrents : sans verrou, l'entrelacement read→write en
+  // perdrait (résultat < 20). Avec withFileLock, ils sont sérialisés → 20.
+  await Promise.all(
+    Array.from({ length: 20 }, () =>
+      withFileLock(f, async () => {
+        const cur = await readJsonSafe<{ n: number }>(f, { fallback: () => ({ n: 0 }) });
+        await writeJsonAtomic(f, { n: cur.n + 1 });
+      })
+    )
+  );
+  const final = await readJsonSafe<{ n: number }>(f, { fallback: () => ({ n: -1 }) });
+  assert.equal(final.n, 20);
 });
 
 test('normalize est appliqué à la lecture', async () => {

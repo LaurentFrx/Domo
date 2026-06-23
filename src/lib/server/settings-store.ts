@@ -12,7 +12,7 @@
  * soit un OBJET (sinon un `[]`/scalaire casserait le merge `{ ...current }`).
  */
 import path from 'node:path';
-import { readJsonSafe, writeJsonAtomic } from './atomic-store';
+import { readJsonSafe, writeJsonAtomic, withFileLock } from './atomic-store';
 
 const SETTINGS_FILE = path.resolve(process.cwd(), 'data', 'settings.json');
 
@@ -29,13 +29,17 @@ export async function readSettings(): Promise<Settings> {
   });
 }
 
-/** Merge des clés fournies dans le JSON existant. Rejette un payload non-objet. */
+/** Merge des clés fournies dans le JSON existant. Rejette un payload non-objet.
+ *  Le read-modify-write est SÉRIALISÉ (withFileLock) pour éviter qu'un PUT réglages
+ *  et un PUT config cumulus concurrents s'écrasent mutuellement (lost update). */
 export async function writeSettings(partial: Settings): Promise<Settings> {
   if (!partial || typeof partial !== 'object' || Array.isArray(partial)) {
     throw new Error('settings: le payload doit être un objet');
   }
-  const current = await readSettings();
-  const merged = { ...current, ...partial };
-  await writeJsonAtomic(SETTINGS_FILE, merged);
-  return merged;
+  return withFileLock(SETTINGS_FILE, async () => {
+    const current = await readSettings();
+    const merged = { ...current, ...partial };
+    await writeJsonAtomic(SETTINGS_FILE, merged);
+    return merged;
+  });
 }

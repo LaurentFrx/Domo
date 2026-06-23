@@ -74,6 +74,27 @@ export async function writeJsonAtomic(file: string, value: unknown): Promise<voi
   }
 }
 
+const fileLocks = new Map<string, Promise<unknown>>();
+
+/**
+ * Sérialise les sections critiques (read-modify-write) par fichier. Empêche deux
+ * requêtes concurrentes de s'entrelacer sur leurs `await` et de se perdre l'une
+ * l'autre (lost update) — ex. un PUT réglages et un PUT config cumulus qui
+ * écrivent tous deux settings.json.
+ */
+export function withFileLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
+  const prev = fileLocks.get(file) ?? Promise.resolve();
+  const run = prev.then(fn, fn); // exécute fn que la précédente ait réussi ou non
+  fileLocks.set(
+    file,
+    run.then(
+      () => undefined,
+      () => undefined
+    )
+  );
+  return run;
+}
+
 async function quarantine(file: string): Promise<void> {
   try {
     await fs.rename(file, `${file}.corrupt-${Date.now()}`);
