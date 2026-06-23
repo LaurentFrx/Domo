@@ -1,13 +1,14 @@
 /**
  * Activation des alertes Web Push côté navigateur (PWA installée).
  *
- * Le service worker est celui de vite-pwa (registerType autoUpdate) ; on y greffe
- * le handler `push` via static/push-sw.js (importScripts). Ici on gère seulement
- * l'abonnement : permission → souscription PushManager → envoi au serveur.
+ * ⚠️ vite-pwa (avec SvelteKit) n'auto-enregistre PAS le service worker généré
+ * (`/sw.js`) : on l'enregistre donc EXPLICITEMENT ici (ensureServiceWorker). Sans
+ * SW actif, `pushManager.subscribe()` est impossible et `navigator.serviceWorker.
+ * ready` reste bloqué à l'infini — c'était la cause du « rien ne se passe ».
  *
- * 100 % tolérant : navigateur non compatible / permission refusée → on renvoie un
- * état clair sans jamais jeter. iOS exige une PWA installée (écran d'accueil) et
- * un geste utilisateur pour la permission — d'où le bouton dédié dans Réglages.
+ * Le handler `push` est greffé sur le SW via static/push-sw.js (importScripts).
+ * Ici on gère permission → enregistrement SW → souscription → envoi au serveur.
+ * 100 % tolérant : non compatible / permission refusée → état clair, jamais de jet.
  */
 function urlBase64ToUint8Array(base64: string): Uint8Array {
   const padding = '='.repeat((4 - (base64.length % 4)) % 4);
@@ -29,11 +30,36 @@ function supported(): boolean {
   );
 }
 
+/**
+ * Garantit un service worker ACTIF. vite-pwa ne l'enregistre pas tout seul ici,
+ * donc on l'enregistre explicitement, puis on attend son activation (borné pour
+ * ne jamais bloquer indéfiniment).
+ */
+async function ensureServiceWorker(): Promise<ServiceWorkerRegistration | null> {
+  if (!('serviceWorker' in navigator)) return null;
+  let reg = (await navigator.serviceWorker.getRegistration()) ?? null;
+  if (!reg) {
+    try {
+      reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    } catch (e) {
+      console.error('[push] enregistrement du service worker échoué:', e);
+      return null;
+    }
+  }
+  await Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise((res) => setTimeout(res, 8000)) // garde-fou anti-blocage
+  ]);
+  return (await navigator.serviceWorker.getRegistration()) ?? reg;
+}
+
 export async function pushStatus(): Promise<PushState> {
   if (!supported()) return 'unsupported';
   if (Notification.permission === 'denied') return 'denied';
   try {
-    const reg = await navigator.serviceWorker.ready;
+    // getRegistration (et NON .ready, qui bloque tant qu'aucun SW n'existe).
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return 'disabled';
     const sub = await reg.pushManager.getSubscription();
     return sub ? 'enabled' : 'disabled';
   } catch {
@@ -49,7 +75,8 @@ export async function enablePush(): Promise<PushState> {
     const res = await fetch('/api/push/subscribe');
     const { vapidPublicKey } = (await res.json()) as { vapidPublicKey: string | null };
     if (!vapidPublicKey) return 'error';
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await ensureServiceWorker();
+    if (!reg) return 'error';
     let sub = await reg.pushManager.getSubscription();
     if (!sub) {
       sub = await reg.pushManager.subscribe({
@@ -72,8 +99,8 @@ export async function enablePush(): Promise<PushState> {
 export async function disablePush(): Promise<PushState> {
   if (!supported()) return 'unsupported';
   try {
-    const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.getSubscription();
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
     if (sub) {
       await fetch('/api/push/subscribe', {
         method: 'POST',
