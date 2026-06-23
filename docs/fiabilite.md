@@ -183,11 +183,35 @@ anomalie (couper un tunnel) et observer le bandeau + le push après le délai.
 
 ---
 
-## 9. Ce qui reste (hors de cette couche)
+## 9. Durcissements complémentaires (faits 2026-06-23)
 
-Volet **infra** des audits, à traiter séparément (RPi4 / réseau) : réservations DHCP
-(EZ1 surtout, cause racine C1), suppression du schedule HA fantôme sur le Shelly,
-unification du transport Tailscale, retrait de `PUBLIC_MQTT_*` du client (R14),
-anti-CSRF explicite sur les commandes (R15). Le moniteur **détecte et alerte**
-désormais ces pannes quand elles surviennent (ex. EM-50 muet), même si leur
-correction de fond est infra.
+- **L'UI ne ment plus sur les commandes (R8/R10)** : la tuile Portail attend la
+  réponse et affiche « Échec — réessayer » + haptique si la commande ne passe pas
+  (fini le fire-and-forget) ; la carte Cumulus affiche désormais l'anomalie du
+  moteur (relais désynchronisé, boîtier injoignable…).
+- **Anti-CSRF explicite (R15)** : `hooks.server.ts` bloque (403) toute commande
+  mutante `/api/` déclenchée par un autre site (Fetch Metadata), en plus du
+  `checkOrigin` SvelteKit. Endpoints token (portail/tick/monitor) non concernés.
+- **Identifiants MQTT retirés du navigateur (R14)** : l'état Zigbee passe par un
+  proxy SSE serveur (`zigbee-hub.ts` + `/api/zigbee/stream`) et les commandes par
+  `/api/zigbee/set` (allow-list serveur : lumiere*atelier + imprimante). Plus aucun
+  `PUBLIC_MQTT*_`(retirées du`.env`— toute var`PUBLIC\__` est servie au client).
+  Fin de la fuite d'activité de la maison + des creds dans le bundle.
+
+### Infra RPi4 (faite 2026-06-23)
+
+- **EM-50 réparé** : son tunnel reverse pointait par erreur sur `.19` (vide) alors
+  que le compteur est à `.54`. Re-ciblé sur son **nom mDNS**
+  (`shellyproem50-08f9e0e768b4.local`) → **DHCP-proof** (joignable quelle que soit
+  son IP future). Idem pour le tunnel du Shelly cumulus (`.20` → nom mDNS).
+- **Schedules HA fantômes supprimés** du Shelly cumulus (le « OFF 08:00 » qui
+  coupait le chauffe-eau chaque matin, + un reliquat dormant).
+
+### Reste (infra Livebox — geste manuel)
+
+- **Réservation DHCP de l'onduleur EZ1** (`.40`, MAC `34:98:7a:00:cb:5c`) : l'EZ1
+  n'a pas de mDNS, sa robustesse finale passe par une réservation sur la Livebox
+  (interface hostile à l'automatisation). **Mitigation en place** : le bridge cible
+  `.40` de façon persistante (compose) et le moniteur **détecte + alerte +
+  réconcilie** automatiquement toute future dérive. Pas de perte de données même
+  si l'EZ1 rebouge.
