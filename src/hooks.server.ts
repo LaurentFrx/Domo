@@ -16,6 +16,10 @@ function isPublic(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
 }
 
+function isMutating(method: string): boolean {
+  return method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
+}
+
 function isAsset(pathname: string): boolean {
   return (
     pathname.startsWith('/_app/') ||
@@ -70,6 +74,22 @@ export const handle: Handle = async ({ event, resolve }) => {
 
   if (!isAuthenticated(event.cookies)) {
     throw redirect(303, '/denied');
+  }
+
+  // Anti-CSRF explicite (défense en profondeur, en plus du checkOrigin SvelteKit) :
+  // une commande d'actuateur ou une écriture déclenchée par un AUTRE site, dans le
+  // navigateur d'un utilisateur authentifié, est bloquée. Fetch Metadata :
+  // same-origin / none (= app elle-même ou client non-navigateur) = OK ; cross-site
+  // ou same-site = refus. Les endpoints token (portail/tick/monitor) sont déjà
+  // sortis plus haut (curl serveur, sans Sec-Fetch-Site).
+  if (pathname.startsWith('/api/') && isMutating(event.request.method)) {
+    const site = event.request.headers.get('sec-fetch-site');
+    if (site && site !== 'same-origin' && site !== 'none') {
+      return new Response(JSON.stringify({ error: 'cross_site_blocked' }), {
+        status: 403,
+        headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }
+      });
+    }
   }
 
   return withApiCacheControl(pathname, await resolve(event));

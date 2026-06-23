@@ -16,7 +16,7 @@
    * Mobile-first iOS PWA (~380px), skin Yeldra (violet #6E45FF, mint #3DFD98).
    */
   import { onMount } from 'svelte';
-  import { cumulus } from '$stores/cumulus.svelte';
+  import { cumulus, CUMULUS_ANOMALY_LABELS } from '$stores/cumulus.svelte';
   import { em50 } from '$stores/em50.svelte';
   import { haptic } from '$utils/haptic';
   import BottomSheet from '$lib/components/ui/BottomSheet.svelte';
@@ -25,6 +25,9 @@
 
   const online = $derived(cumulus.relayConnected);
   const relayOn = $derived(cumulus.relayOn === true);
+  // Anomalie remontée par le moteur (relais désync, boîtier injoignable…) : on la
+  // MONTRE — l'état affiché ne doit pas mentir si le système a perdu le contrôle.
+  const anomalyLabel = $derived(CUMULUS_ANOMALY_LABELS[cumulus.anomaly] || '');
   const cumulusW = $derived(em50.cumulusPowerW);
 
   // ── Voyant : priorité à la PUISSANCE mesurée ──
@@ -149,6 +152,29 @@
     </button>
   </header>
 
+  {#if anomalyLabel}
+    <div class="cc-anomaly" role="alert">
+      <svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16">
+        <path
+          d="M12 3.2 1.8 20.4a1 1 0 0 0 .87 1.5h18.66a1 1 0 0 0 .87-1.5L12 3.2Z"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linejoin="round"
+        />
+        <path
+          d="M12 9.5v5"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+        />
+        <circle cx="12" cy="17.6" r="1.05" fill="currentColor" />
+      </svg>
+      <span>{anomalyLabel} — le pilotage automatique peut être affecté.</span>
+    </div>
+  {/if}
+
   <!-- Hero : réserve d'eau chaude -->
   <div class="flex flex-col gap-2">
     {#if reserveKnown}
@@ -226,6 +252,26 @@
 </BottomSheet>
 
 <style>
+  /* ── Bandeau d'anomalie : la carte NE MENT PAS si le moteur a perdu le contrôle.
+     Ton ambre calme, verre teinté, oklch DIRECT (safe Chrome). ── */
+  .cc-anomaly {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.7rem;
+    border-radius: var(--radius-lg);
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--color-fg);
+    background: oklch(0.66 0.14 75 / 0.16);
+    box-shadow: inset 0 0 0 1px oklch(0.66 0.14 75 / 0.5);
+  }
+  .cc-anomaly svg {
+    flex: 0 0 auto;
+    color: oklch(0.6 0.16 60);
+  }
+
   /* ── Voyant LED (glow Chrome-safe : pas de color-mix en box-shadow) ── */
   .led {
     width: 11px;

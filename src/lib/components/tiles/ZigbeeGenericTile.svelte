@@ -84,24 +84,50 @@
   // Impulsion (portail) : le device n'a pas d'état durable → on « allume » la tuile
   // 3 s en visuel (bouton coloré en relief) puis retour à l'état initial.
   let pulsing = $state(false);
+  let pulseError = $state(false);
   let pulseTimer: ReturnType<typeof setTimeout> | null = null;
-  function onPulse() {
+  let errorTimer: ReturnType<typeof setTimeout> | null = null;
+  async function onPulse() {
     if (!device.available) return;
     haptic('medium');
-    if (device.friendlyName === 'Portail') {
-      fetch('/api/portail/pulse', { method: 'POST', headers: { 'x-domo-app': '1' } }).catch((e) =>
-        console.error('Portail pulse error', e)
-      );
-    }
+    pulseError = false;
     pulsing = true;
     if (pulseTimer) clearTimeout(pulseTimer);
     pulseTimer = setTimeout(() => {
       pulsing = false;
       pulseTimer = null;
     }, 3000);
+    if (device.friendlyName === 'Portail') {
+      try {
+        // On ATTEND la réponse : un glow vert ne doit pas mentir si la commande
+        // n'est pas passée (tunnel MQTT mort → 503, rate-limit → 429…).
+        const r = await fetch('/api/portail/pulse', {
+          method: 'POST',
+          headers: { 'x-domo-app': '1' }
+        });
+        if (!r.ok) {
+          const d = (await r.json().catch(() => ({}))) as { error?: string };
+          throw new Error(d.error || `HTTP ${r.status}`);
+        }
+      } catch (e) {
+        // Échec réel : on annule le faux succès et on le signale clairement.
+        if (pulseTimer) clearTimeout(pulseTimer);
+        pulseTimer = null;
+        pulsing = false;
+        pulseError = true;
+        haptic('heavy');
+        if (errorTimer) clearTimeout(errorTimer);
+        errorTimer = setTimeout(() => {
+          pulseError = false;
+          errorTimer = null;
+        }, 3500);
+        console.error('Portail pulse échec', e);
+      }
+    }
   }
   onDestroy(() => {
     if (pulseTimer) clearTimeout(pulseTimer);
+    if (errorTimer) clearTimeout(errorTimer);
   });
 
   function onToggle() {
@@ -124,6 +150,7 @@
     class="generic-tile flex w-full flex-col items-center justify-center gap-1.5 rounded-[var(--radius-xl)] border px-3 py-2 sm:flex-row sm:justify-start sm:gap-3"
     class:opacity-50={!device.available}
     class:pulsing
+    class:error={pulseError}
     style="background: var(--color-card); border-color: var(--color-border); --neon: {style.color}; --neon-glow: {style.glow}; --neon-mid: {style.mid}; --neon-soft: {style.soft};"
     role="button"
     tabindex={device.available ? 0 : -1}
@@ -161,9 +188,9 @@
     <div class="flex min-w-0 flex-col items-center gap-0.5 sm:flex-1 sm:items-start">
       <span
         class="generic-name max-w-full truncate text-center text-[11px] leading-tight font-semibold sm:text-left sm:text-[13px]"
-        style="color: var(--color-fg);"
+        style="color: {pulseError ? 'var(--color-alert)' : 'var(--color-fg)'};"
       >
-        {displayName}
+        {pulseError ? 'Échec — réessayer' : displayName}
       </span>
       <span class="hidden truncate text-[10px] sm:block" style="color: var(--color-muted-fg);">
         {device.vendor} · {device.model}
@@ -299,6 +326,17 @@
   }
   .generic-tile:disabled {
     cursor: not-allowed;
+  }
+
+  /* Échec de commande (portail) : la tuile NE MENT PAS — bordure d'alerte + halo
+     rouge bref. oklch DIRECT (safe Chrome). Prime sur le glow de succès. */
+  .generic-tile.error {
+    border-color: var(--color-alert) !important;
+    box-shadow:
+      inset 0 0 0 1px var(--color-alert),
+      0 6px 16px -6px oklch(0.55 0.24 27 / 0.5) !important;
+    background-image: none !important;
+    background-color: var(--color-card) !important;
   }
 
   /* ─── Lueur néon quand ON / impulsion portail active (idem SwitchTile) ─── */
