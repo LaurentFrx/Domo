@@ -135,9 +135,16 @@ Tout tourne dans le process de l'app, donc partage le bus d'incidents avec
 
 ## 7. Sauvegardes — `ops/backup-domo.sh` + `domo-backup.timer`
 
-Quotidienne (03:30) : `data/*.json` + `history.db` (**snapshot SQLite cohérent** via
-l'API `.backup`, jamais un `cp` à chaud), copie horodatée dans
-`/home/laurent/backups/domo/<STAMP>/`, rotation 14 jours. Couvre **R4/V4**.
+Quotidienne (03:30), copie horodatée dans `/home/laurent/backups/domo/<STAMP>/`,
+rotation 14 jours. Couvre **R4/V4**. Contenu :
+
+- `data/*.json` (réglages, planning, tarifs, état cumulus, incidents, abonnements push) ;
+- `history.db` (**snapshot SQLite cohérent** via l'API `.backup`, jamais un `cp` à chaud) ;
+- **`record.py`** (le recorder est hors-git — sans ça, la logique de réconciliation
+  anti-perte vivrait dans un fichier ni versionné ni sauvegardé) ;
+- **`zigbee/`** (config Zigbee du RPi4 via Tailscale, best-effort : `configuration.yaml`
+  - `coordinator_backup.json` + `database.db` — leur perte = re-pairing de tous les
+    capteurs).
 
 **Restauration** : un dossier = un instantané complet autoportant.
 
@@ -195,7 +202,7 @@ anomalie (couper un tunnel) et observer le bandeau + le push après le délai.
 - **Identifiants MQTT retirés du navigateur (R14)** : l'état Zigbee passe par un
   proxy SSE serveur (`zigbee-hub.ts` + `/api/zigbee/stream`) et les commandes par
   `/api/zigbee/set` (allow-list serveur : lumiere*atelier + imprimante). Plus aucun
-  `PUBLIC_MQTT*_`(retirées du`.env`— toute var`PUBLIC\__` est servie au client).
+  `PUBLIC_MQTT*\_`(retirées du`.env`— toute var`PUBLIC\_\_` est servie au client).
   Fin de la fuite d'activité de la maison + des creds dans le bundle.
 
 ### Infra RPi4 (faite 2026-06-23)
