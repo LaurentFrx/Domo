@@ -188,7 +188,7 @@
         pendingHref = tgt.href;
         committing = true;
         dragging = false; // transition active → page sort, cible arrive à 0
-        commitFallback = setTimeout(finishNavigate, 380); // filet si transitionend muet
+        commitFallback = setTimeout(finishNavigate, 580); // filet > durée du commit amorti (420ms)
       } else {
         frozenTarget = tgt;
         frozenBasePct = dragX < 0 ? 100 : -100;
@@ -418,6 +418,7 @@
         class="swipe-shell"
         class:swipe-anim={!dragging}
         class:swipe-noanim={noAnim}
+        class:committing
         style:transform={shellTransform}
         ontransitionend={onShellTransitionEnd}
       >
@@ -439,6 +440,7 @@
         class="swipe-peek"
         class:swipe-anim={!dragging}
         class:swipe-noanim={noAnim}
+        class:committing
         style:transform={peekTransform}
       >
         <!-- Vrai contenu de la page cible (monté via le registre), défile sous le doigt. -->
@@ -468,6 +470,14 @@
      contenu et aperçu suivent le doigt sans inertie. */
   .swipe-anim {
     transition: transform var(--duration-normal) var(--ease-out);
+  }
+  /* « Amortisseur de tiroir » : au COMMIT, la course se termine en forte
+     décélération (expo-out), plus longue qu'un simple ease-out. L'annulation
+     (retour) garde le .swipe-anim snappy ci-dessus. Durée à garder < au filet
+     `commitFallback` (JS). */
+  .swipe-shell.committing,
+  .swipe-peek.committing {
+    transition: transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
   }
   /* Reset post-navigation : aucun glissement de la page neuve. */
   .swipe-noanim {
