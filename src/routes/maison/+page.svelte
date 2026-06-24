@@ -9,10 +9,6 @@
   const dollhouse = browser ? import('$components/dollhouse/Dollhouse3D.svelte') : null;
 </script>
 
-<svelte:head>
-  <title>Maison · Domo</title>
-</svelte:head>
-
 {#snippet loading()}
   <div class="flex h-full flex-col items-center justify-center gap-3">
     <span class="loader-ring" aria-hidden="true"></span>

@@ -423,10 +423,6 @@
   }
 </script>
 
-<svelte:head>
-  <title>Énergie — Domo</title>
-</svelte:head>
-
 <div class="flex flex-col gap-6 py-4">
   <header class="flex items-center justify-between">
     <h1 class="text-2xl font-semibold tracking-tight">Énergie</h1>

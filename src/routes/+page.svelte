@@ -132,10 +132,6 @@
   }
 </script>
 
-<svelte:head>
-  <title>Domo</title>
-</svelte:head>
-
 <div class="relative overflow-x-clip">
   <!-- gap/padding plus serrés sur mobile (condensation iPhone vertical) ; généreux dès sm. -->
   <div

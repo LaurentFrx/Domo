@@ -183,10 +183,6 @@
   const RAIN_BLUE = 'oklch(0.6 0.13 245)'; // pluie / humidité (icônes)
 </script>
 
-<svelte:head>
-  <title>Climat — Domo</title>
-</svelte:head>
-
 <div class="flex flex-col gap-6 py-4">
   <!-- ═══ Daikin Séjour + Salle de bain — cartes instrument ═══ -->
   <!-- iPhone portrait : 1 carte/ligne (confort) ; écran large : 2 colonnes. -->

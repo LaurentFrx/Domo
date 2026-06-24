@@ -55,7 +55,7 @@
 {#if open}
   <!-- Backdrop : fermeture au tap ; le clavier ferme via Escape (svelte:window). -->
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="bs-overlay" role="presentation" onclick={onClose}>
+  <div class="bs-overlay" role="presentation" data-swipe-ignore onclick={onClose}>
     <div
       class="bs-panel"
       bind:this={panelEl}

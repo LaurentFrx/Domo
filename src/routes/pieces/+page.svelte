@@ -166,10 +166,6 @@
   const storeShutter = $derived(sortedShutters.find((s) => s.labelMin !== undefined) ?? null);
 </script>
 
-<svelte:head>
-  <title>Pièces — Domo</title>
-</svelte:head>
-
 <div class="flex flex-col gap-2 py-3">
   {#if matterLost}
     <div

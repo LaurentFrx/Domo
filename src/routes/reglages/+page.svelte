@@ -235,10 +235,6 @@
   const sumSysteme = `v${APP_VERSION} · domo.feroux.fr`;
 </script>
 
-<svelte:head>
-  <title>Réglages — Domo</title>
-</svelte:head>
-
 <div class="flex flex-col gap-5 py-4">
   <h1 class="text-2xl font-semibold tracking-tight">Réglages</h1>
 

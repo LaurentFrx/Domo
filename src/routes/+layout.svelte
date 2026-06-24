@@ -342,6 +342,12 @@
   });
 </script>
 
+<!-- Titre centralisé : avec le pager (plusieurs pages montées), un <title> par page
+     se télescoperait. Une seule source = la page active (curIdx). -->
+<svelte:head>
+  <title>{curIdx <= 0 ? 'Domo' : `${navItems[curIdx].label} · Domo`}</title>
+</svelte:head>
+
 <!-- Délégation PASSIVE : gère seulement l'enfoncement visuel + le retour haptique
      de confirmation ; les vraies interactions restent sur les boutons enfants (qui
      ont leur rôle). Un role ARIA ici serait trompeur → règles a11y désactivées. -->
