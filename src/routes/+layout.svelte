@@ -1,13 +1,14 @@
 <script lang="ts">
   import '../app.css';
   import { page, updated } from '$app/state';
-  import { beforeNavigate, goto, preloadCode } from '$app/navigation';
-  import { navItems, isActive, type NavItem } from '$components/layout/nav-items';
+  import { beforeNavigate } from '$app/navigation';
+  import { navItems, isActive } from '$components/layout/nav-items';
+  import { onMount } from 'svelte';
   import Sidebar from '$components/layout/Sidebar.svelte';
   import TabBar from '$components/layout/TabBar.svelte';
   import PullToRefresh from '$components/layout/PullToRefresh.svelte';
   import HealthBanner from '$components/layout/HealthBanner.svelte';
-  import PagerCell from '$lib/pager/PagerCell.svelte';
+  import Pager from '$lib/pager/Pager.svelte';
   import { startDemoTicker, stopDemoTicker } from '$stores/demo-ticker.svelte';
   import { anker } from '$stores/anker.svelte';
   import { apsystems } from '$stores/apsystems.svelte';
@@ -23,202 +24,16 @@
 
   let { children } = $props();
 
-  // ─── Navigation par glissé à DEUX doigts, avec aperçu « push » iOS ──────────
-  // À 1 doigt : rien d'intercepté (scroll, sliders, tirer-pour-rafraîchir intacts).
-  // À 2 doigts horizontal : la page courante recule en suivant les doigts et la
-  // page CIBLE glisse PAR-DESSUS depuis le bord (continuité visuelle). Au lâcher
-  // franchi, la cible finit sa course (plein écran = couverture pendant le chargement)
-  // puis la vraie page se monte ; sinon retour élastique.
-  // Garde-fous : pincement (zoom) rejeté, geste vertical laissé au scroll. Le 3D de
-  // /maison garde sa rotation 1 doigt et son zoom-pincement ; seul le pan 2 doigts
-  // cède à la navigation (opt-out ciblé possible via [data-swipe-ignore]).
-  const SWIPE_COMMIT = 70; // px (après résistance) pour déclencher la bascule
-  let dragX = $state(0);
-  let dragging = $state(false); // doigt en cours : suivi direct, sans transition
-  let committing = $state(false); // bascule en cours : la cible glisse jusqu'au plein écran
-  let settling = $state(false); // retour élastique (annulation)
-  let noAnim = $state(false); // reset instantané après navigation (anti-glissement)
-  let commitMs = $state(300); // durée du commit, calculée ∝ distance restante (vitesse ~constante)
-
-  // Cible + côtés figés pendant les animations ; vivants pendant le drag.
-  let frozenTarget = $state<NavItem | null>(null);
-  let frozenBasePct = 0; // côté d'où vient le panneau cible (±100)
-  let frozenShellPct = 0; // côté où sort la page courante (±100)
-  let pendingHref = '';
-  let commitFallback: ReturnType<typeof setTimeout> | undefined;
-
+  // ─── Page active (pour le <title> centralisé) ─────────────────────────
   const curIdx = $derived(navItems.findIndex((it) => isActive(page.url.pathname, it.href)));
-  // Direction VIVE pendant le drag : dragX<0 → page suivante (vient de droite).
-  const liveBasePct = $derived(dragX < 0 ? 100 : -100);
-  const liveTargetIdx = $derived(dragX < 0 ? curIdx + 1 : dragX > 0 ? curIdx - 1 : -1);
-  const liveTarget = $derived(
-    liveTargetIdx >= 0 && liveTargetIdx < navItems.length ? navItems[liveTargetIdx] : null
-  );
 
-  const swipeActive = $derived(dragging || committing || settling);
-  const peekTarget = $derived(committing || settling ? frozenTarget : liveTarget);
-  const peekVisible = $derived(swipeActive && !!peekTarget);
-
-  // Transforms : px pendant le drag (suivi direct), % pendant les animations.
-  const shellTransform = $derived(
-    committing
-      ? `translateX(${frozenShellPct}%)`
-      : dragging
-        ? `translateX(${dragX}px)`
-        : 'translateX(0)'
-  );
-  const peekTransform = $derived(
-    committing
-      ? 'translateX(0)'
-      : settling
-        ? `translateX(${frozenBasePct}%)`
-        : `translateX(calc(${liveBasePct}% + ${dragX}px))`
-  );
-
-  // Pré-charge les chunks des pages voisines → leur contenu est prêt dès le glissé
-  // (pas de cellule vide le temps d'un fetch). /maison exclue (3D, jamais en voisine).
-  $effect(() => {
-    for (const h of [navItems[curIdx - 1]?.href, navItems[curIdx + 1]?.href]) {
-      if (h && h !== '/maison') preloadCode(h);
-    }
-  });
-
-  // Quand une navigation vient d'un COMMIT de pager, la page d'arrivée ne doit pas
-  // rejouer son `.page-enter` (slide-up-fade) : le pager assure déjà la transition,
-  // les deux ensemble = clignotement. L'action lit le drapeau UNE fois au montage du
-  // <div> (pas de binding réactif qui re-déclencherait l'anim en retard). Les clics
-  // TabBar/Sidebar (pagerNav=false) gardent leur entrée animée.
-  let pagerNav = false;
-  function enterAnim(node: HTMLElement) {
-    if (!pagerNav) node.classList.add('page-enter');
-  }
-
-  function finishNavigate() {
-    if (!committing || !pendingHref) return;
-    clearTimeout(commitFallback);
-    const href = pendingHref;
-    pendingHref = '';
-    pagerNav = true; // pas de slide-up-fade sur la page committée
-    goto(href).then(() => {
-      // Laisse la nouvelle page (children, encore à frozenShellPct hors-écran) PEINDRE
-      // avant de retirer l'aperçu et de recentrer → pas de cadre blanc ni de double anim.
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
-          noAnim = true;
-          committing = false; // shell → translateX(0) instantané : la page arrive au centre
-          dragX = 0;
-          frozenTarget = null; // aperçu retiré (vraie page déjà peinte au centre)
-          requestAnimationFrame(() => {
-            noAnim = false;
-            pagerNav = false;
-          });
-        })
-      );
-    });
-  }
-  function onShellTransitionEnd(e: TransitionEvent) {
-    // Seulement la fin de transition PROPRE au shell (pas un enfant page-enter).
-    if (e.target !== e.currentTarget || e.propertyName !== 'transform') return;
-    if (committing) finishNavigate();
-  }
-
-  $effect(() => {
-    let armed = false;
-    let locked = false;
-    let startX = 0;
-    let startY = 0;
-    let startSpread = 0;
-    const mid = (t: TouchList, k: 'clientX' | 'clientY') => (t[0][k] + t[1][k]) / 2;
-    const spread = (t: TouchList) =>
-      Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-    const ignored = (el: EventTarget | null) =>
-      !!(el as Element | null)?.closest?.('[data-swipe-ignore]');
-
-    function onStart(e: TouchEvent) {
-      if (committing || settling || e.touches.length !== 2 || ignored(e.target)) {
-        armed = false;
-        locked = false;
-        return;
-      }
-      armed = true;
-      locked = false;
-      startX = mid(e.touches, 'clientX');
-      startY = mid(e.touches, 'clientY');
-      startSpread = spread(e.touches);
-      dragX = 0;
-    }
-    function onMove(e: TouchEvent) {
-      if (!armed || e.touches.length !== 2) return;
-      const dx = mid(e.touches, 'clientX') - startX;
-      const dy = mid(e.touches, 'clientY') - startY;
-      // Écartement des doigts qui varie beaucoup = pincement (zoom) → on abandonne.
-      if (Math.abs(spread(e.touches) - startSpread) > 40) {
-        armed = false;
-        locked = false;
-        dragging = false;
-        if (dragX !== 0) dragX = 0;
-        return;
-      }
-      if (!locked) {
-        if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return; // attendre l'intention
-        if (Math.abs(dx) <= Math.abs(dy)) {
-          armed = false; // geste plutôt vertical → laisser le scroll
-          return;
-        }
-        locked = true;
-      }
-      if (e.cancelable) e.preventDefault();
-      e.stopPropagation(); // coupe le geste pour le 3D /maison (et tout handler enfant)
-      dragging = true;
-      const hasTarget = (dx > 0 && curIdx > 0) || (dx < 0 && curIdx < navItems.length - 1);
-      dragX = dx * (hasTarget ? 0.85 : 0.18); // suivi quasi 1:1, résistance en bout de liste
-    }
-    function onEnd() {
-      if (!locked) {
-        armed = false;
-        return;
-      }
-      armed = false;
-      locked = false;
-      const tgt = liveTarget;
-      if (Math.abs(dragX) > SWIPE_COMMIT && tgt) {
-        haptic('light');
-        frozenTarget = tgt;
-        frozenBasePct = dragX < 0 ? 100 : -100;
-        frozenShellPct = dragX < 0 ? -100 : 100;
-        pendingHref = tgt.href;
-        // Amortisseur : durée ∝ distance RESTANTE (W − |dragX|) → vitesse ~constante
-        // quelle que soit la position de lâcher (régulier), décélération via l'ease-out.
-        const W = window.innerWidth || 390;
-        const remaining = Math.max(0, W - Math.abs(dragX));
-        commitMs = Math.round(Math.min(340, Math.max(150, (remaining / W) * 340)));
-        committing = true;
-        dragging = false; // transition active → page sort, cible arrive à 0
-        commitFallback = setTimeout(finishNavigate, commitMs + 160); // filet > durée du commit
-      } else {
-        frozenTarget = tgt;
-        frozenBasePct = dragX < 0 ? 100 : -100;
-        settling = true;
-        dragging = false;
-        dragX = 0; // ressort
-        setTimeout(() => {
-          settling = false;
-          frozenTarget = null;
-        }, 240);
-      }
-    }
-    // touchmove en CAPTURE : on passe AVANT les handlers enfants (canvas 3D) pour
-    // pouvoir stopPropagation une fois le glissé verrouillé.
-    window.addEventListener('touchstart', onStart, { passive: true });
-    window.addEventListener('touchmove', onMove, { passive: false, capture: true });
-    window.addEventListener('touchend', onEnd, { passive: true });
-    window.addEventListener('touchcancel', onEnd, { passive: true });
-    return () => {
-      window.removeEventListener('touchstart', onStart);
-      window.removeEventListener('touchmove', onMove, true);
-      window.removeEventListener('touchend', onEnd);
-      window.removeEventListener('touchcancel', onEnd);
-    };
+  // ─── Pager (rail unifié, physique de ressort) ─────────────────────────
+  // Rendu CÔTÉ CLIENT après hydratation : SSR + 1er paint = la page du routeur
+  // (children) ; puis le Pager prend la main (rail keyé par href, ressort seedé par
+  // la vitesse du doigt, commit par pushState → zéro re-montage). Cf. src/lib/pager/.
+  let pagerReady = $state(false);
+  onMount(() => {
+    pagerReady = true;
   });
 
   // ─── Auto-reload après déploiement (anti « client périmé ») ─────────────
@@ -417,49 +232,20 @@
     class="safe-top min-h-screen sm:pl-[72px] lg:pl-[280px]"
     style="padding-bottom: calc(60px + env(safe-area-inset-bottom));"
   >
-    <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8" style="overflow-x: clip;">
+    <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
       <HealthBanner />
-      <!-- Page courante : recule en suivant les doigts ; la cible glisse par-dessus -->
-      <div
-        class="swipe-shell"
-        class:swipe-anim={!dragging}
-        class:swipe-noanim={noAnim}
-        class:committing
-        style:transform={shellTransform}
-        style:--commit-ms={`${commitMs}ms`}
-        ontransitionend={onShellTransitionEnd}
-      >
-        {#key page.url.pathname}
-          <div use:enterAnim>
-            {@render children()}
-          </div>
-        {/key}
-      </div>
     </div>
+    {#if pagerReady}
+      <Pager />
+    {:else}
+      <!-- SSR + 1er paint : la page du routeur, avant que le Pager prenne la main -->
+      <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
+        {@render children()}
+      </div>
+    {/if}
   </main>
 
   <TabBar />
-
-  <!-- Aperçu « push » : la page cible glisse par-dessus pendant le glissé 2 doigts -->
-  {#if peekVisible && peekTarget}
-    <div class="swipe-peek-clip" aria-hidden="true">
-      <div
-        class="swipe-peek"
-        class:swipe-anim={!dragging}
-        class:swipe-noanim={noAnim}
-        class:committing
-        style:transform={peekTransform}
-        style:--commit-ms={`${commitMs}ms`}
-      >
-        <!-- Vrai contenu de la page cible (monté via le registre), défile sous le doigt. -->
-        <div class="swipe-peek-page safe-top">
-          <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
-            <PagerCell href={peekTarget.href} />
-          </div>
-        </div>
-      </div>
-    </div>
-  {/if}
 </div>
 
 <style>
@@ -467,54 +253,6 @@
   @media (min-width: 640px) {
     main {
       padding-bottom: 0 !important;
-    }
-  }
-
-  /* ─── Glissé 2 doigts : page courante + aperçu « push » de la cible ─── */
-  .swipe-shell {
-    will-change: transform;
-  }
-  /* Transition HORS glissé seulement (retour / bascule) : pendant le glissé,
-     contenu et aperçu suivent le doigt sans inertie. */
-  .swipe-anim {
-    transition: transform var(--duration-normal) var(--ease-out);
-  }
-  /* « Amortisseur de tiroir » : au COMMIT, durée ∝ distance restante (--commit-ms,
-     posé en JS → vitesse ~constante, régulière) + décélération naturelle (ease-out
-     cubic). L'annulation (retour) garde le .swipe-anim snappy ci-dessus. */
-  .swipe-shell.committing,
-  .swipe-peek.committing {
-    transition: transform var(--commit-ms, 300ms) cubic-bezier(0.215, 0.61, 0.355, 1);
-  }
-  /* Reset post-navigation : aucun glissement de la page neuve. */
-  .swipe-noanim {
-    transition: none !important;
-  }
-  /* Conteneur plein écran qui CLIPPE l'aperçu hors-cadre (pas de scroll horizontal).
-     Sous la Sidebar (40) et la TabBar (50) : elles restent visibles au-dessus. */
-  .swipe-peek-clip {
-    position: fixed;
-    inset: 0;
-    z-index: 30;
-    overflow: hidden;
-    pointer-events: none;
-  }
-  .swipe-peek {
-    position: absolute;
-    inset: 0;
-    overflow: hidden; /* clippe le contenu plus haut que l'écran (montre le 1er écran) */
-    background: var(--color-bg);
-    will-change: transform;
-  }
-  /* Le contenu réel de la voisine, sous la status-bar et au-dessus de la TabBar. */
-  .swipe-peek-page {
-    height: 100%;
-    overflow: hidden;
-    padding-bottom: calc(60px + env(safe-area-inset-bottom));
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .swipe-anim {
-      transition: none;
     }
   }
 </style>

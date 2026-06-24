@@ -14,14 +14,16 @@
   import { loaderFor } from '$lib/pager/page-registry';
   import { navItems } from '$components/layout/nav-items';
 
-  let { href }: { href: string } = $props();
+  let { href, active = false }: { href: string; active?: boolean } = $props();
 
   const item = $derived(navItems.find((n) => n.href === href) ?? null);
-  const is3D = $derived(href === '/maison');
+  // /maison : la 3D (WebGL) n'est montée QUE quand la cellule est centrale (active).
+  // En voisine → repère léger, pour ne garder qu'UN seul contexte WebGL vivant.
+  const useSplash = $derived(href === '/maison' && !active);
 
   let Comp = $state<Component | null>(null);
   $effect(() => {
-    if (is3D) return; // 3D jamais montée en voisine
+    if (useSplash) return; // pas de chargement tant qu'on affiche le repère
     let cancelled = false;
     Comp = null;
     loaderFor(href)?.().then((m) => {
@@ -33,7 +35,7 @@
   });
 </script>
 
-{#if is3D}
+{#if useSplash}
   <div class="pc-splash">
     <span class="pc-splash-icon" aria-hidden="true">
       <svg
