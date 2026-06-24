@@ -1,12 +1,13 @@
 <script lang="ts">
   import '../app.css';
   import { page, updated } from '$app/state';
-  import { beforeNavigate, goto } from '$app/navigation';
+  import { beforeNavigate, goto, preloadCode } from '$app/navigation';
   import { navItems, isActive, type NavItem } from '$components/layout/nav-items';
   import Sidebar from '$components/layout/Sidebar.svelte';
   import TabBar from '$components/layout/TabBar.svelte';
   import PullToRefresh from '$components/layout/PullToRefresh.svelte';
   import HealthBanner from '$components/layout/HealthBanner.svelte';
+  import PagerCell from '$lib/pager/PagerCell.svelte';
   import { startDemoTicker, stopDemoTicker } from '$stores/demo-ticker.svelte';
   import { anker } from '$stores/anker.svelte';
   import { apsystems } from '$stores/apsystems.svelte';
@@ -72,6 +73,14 @@
         ? `translateX(${frozenBasePct}%)`
         : `translateX(calc(${liveBasePct}% + ${dragX}px))`
   );
+
+  // Pré-charge les chunks des pages voisines → leur contenu est prêt dès le glissé
+  // (pas de cellule vide le temps d'un fetch). /maison exclue (3D, jamais en voisine).
+  $effect(() => {
+    for (const h of [navItems[curIdx - 1]?.href, navItems[curIdx + 1]?.href]) {
+      if (h && h !== '/maison') preloadCode(h);
+    }
+  });
 
   function finishNavigate() {
     if (!committing || !pendingHref) return;
@@ -414,22 +423,11 @@
         class:swipe-noanim={noAnim}
         style:transform={peekTransform}
       >
-        <div class="swipe-peek-inner">
-          <span class="swipe-peek-icon">
-            <svg
-              width="26"
-              height="26"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d={peekTarget.icon} />
-            </svg>
-          </span>
-          <span class="swipe-peek-label">{peekTarget.label}</span>
+        <!-- Vrai contenu de la page cible (monté via le registre), défile sous le doigt. -->
+        <div class="swipe-peek-page safe-top">
+          <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
+            <PagerCell href={peekTarget.href} />
+          </div>
         </div>
       </div>
     </div>
@@ -469,35 +467,15 @@
   .swipe-peek {
     position: absolute;
     inset: 0;
+    overflow: hidden; /* clippe le contenu plus haut que l'écran (montre le 1er écran) */
     background: var(--color-bg);
-    display: flex;
-    align-items: center;
-    justify-content: center;
     will-change: transform;
   }
-  .swipe-peek-inner {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 14px;
-    /* Recentre optiquement au-dessus de la TabBar mobile. */
+  /* Le contenu réel de la voisine, sous la status-bar et au-dessus de la TabBar. */
+  .swipe-peek-page {
+    height: 100%;
+    overflow: hidden;
     padding-bottom: calc(60px + env(safe-area-inset-bottom));
-  }
-  .swipe-peek-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 64px;
-    height: 64px;
-    border-radius: var(--radius-2xl);
-    background: var(--color-card-hover);
-    border: 1px solid var(--color-border);
-    color: var(--color-primary);
-  }
-  .swipe-peek-label {
-    font-size: 17px;
-    font-weight: 600;
-    color: var(--color-fg);
   }
   @media (prefers-reduced-motion: reduce) {
     .swipe-anim {
