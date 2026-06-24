@@ -21,7 +21,12 @@ const APS_WINDOW_S = 900; // 15 min sans APS éveillé en plein jour = aveugle
 const EM50_WINDOW_S = 600;
 const ANKER_WINDOW_S = 600;
 const MIN_SAMPLES = 8; // assez d'échantillons pour conclure (anti-faux positif)
-const DAYLIGHT_ELEV_DEG = 5; // soleil franchement levé
+// L'onduleur EZ1 s'éteint NORMALEMENT quand ses panneaux ne reçoivent plus assez de
+// lumière (nuit, crépuscule, ciel très couvert) — ce n'est PAS un défaut. On ne juge
+// donc pas l'APS par la géométrie du soleil (trompeuse au crépuscule) mais par la
+// PRODUCTION RÉELLE : le SolarBank (Anker) a ses propres panneaux sous le MÊME soleil.
+const SB_SOLAR_MIN_W = 250; // prod solaire Anker « franche » → il y a clairement du soleil
+const GHI_MIN_WM2 = 150; // repli (Anker indispo) : irradiance prévue clairement productive
 
 export interface ProbeSummary {
   ts: number;
@@ -103,30 +108,45 @@ export function runProbes(): ProbeSummary {
     });
     if (recorderBad) return s;
 
-    // Jour/nuit (le recorder écrit l'élévation solaire dans weather_samples).
-    const w = db
-      .prepare('SELECT sun_elev_deg, is_daylight FROM weather_samples ORDER BY ts DESC LIMIT 1')
-      .get() as { sun_elev_deg: number | null; is_daylight: number | null } | undefined;
-    const daylight = w ? w.is_daylight === 1 || (w.sun_elev_deg ?? -90) > DAYLIGHT_ELEV_DEG : false;
-
-    // 2) APS aveugle en plein jour (le scénario du 23/06) : sur 15 min, aucun
-    //    relevé « éveillé » ET compteur lifetime figé, alors que le soleil est levé.
+    // 2) APS muet ALORS QU'IL Y A DE LA PRODUCTION SOLAIRE (= vrai défaut).
+    //    APS muet = jamais éveillé ET compteur figé sur la fenêtre. On n'alerte QUE
+    //    si une production solaire est réellement en cours, prouvée par :
+    //      · le JUMEAU Anker qui produit franchement (mesure réelle, même soleil) ;
+    //      · à défaut (Anker indispo) l'irradiance prévue clairement productive.
+    //    La nuit / au crépuscule, l'Anker est à ~0 et le GHI bas → AUCUNE alerte.
     const aps = db
       .prepare(
-        'SELECT COALESCE(SUM(aps_available),0) AS av, COUNT(*) AS n, ' +
-          'COALESCE(MAX(aps_lifetime_kwh),0)-COALESCE(MIN(aps_lifetime_kwh),0) AS dlife ' +
+        'SELECT COUNT(*) AS n, COALESCE(SUM(aps_available),0) AS aps_av, ' +
+          'COALESCE(MAX(aps_lifetime_kwh),0)-COALESCE(MIN(aps_lifetime_kwh),0) AS aps_dlife, ' +
+          'COALESCE(SUM(sb_available),0) AS sb_n, AVG(CASE WHEN sb_available=1 THEN sb_w END) AS sb_solar ' +
           'FROM pv_samples WHERE ts > ?'
       )
-      .get(nowS - APS_WINDOW_S) as { av: number; n: number; dlife: number };
-    // En pleine nuit, APS endormi = NORMAL → on résout (pas d'alerte).
-    const apsBad = daylight && aps.n >= MIN_SAMPLES && aps.av === 0 && aps.dlife === 0;
+      .get(nowS - APS_WINDOW_S) as {
+      n: number;
+      aps_av: number;
+      aps_dlife: number;
+      sb_n: number;
+      sb_solar: number | null;
+    };
+    const wx = db.prepare('SELECT ghi FROM weather_samples ORDER BY ts DESC LIMIT 1').get() as
+      | { ghi: number | null }
+      | undefined;
+    const ghi = wx && typeof wx.ghi === 'number' ? wx.ghi : null;
+
+    const apsDark = aps.n >= MIN_SAMPLES && aps.aps_av === 0 && aps.aps_dlife === 0;
+    const ankerUp = aps.sb_n >= MIN_SAMPLES;
+    // Priorité à la mesure réelle (Anker) ; l'irradiance ne sert de repli QUE si
+    // l'Anker est indisponible (sinon on lui fait confiance, même par ciel couvert).
+    const twinProducing = ankerUp && (aps.sb_solar ?? 0) > SB_SOLAR_MIN_W;
+    const irradianceHigh = !ankerUp && ghi !== null && ghi > GHI_MIN_WM2;
+    const apsBad = apsDark && (twinProducing || irradianceHigh);
     assess(apsBad, {
       key: 'apsystems:blind',
       severity: 'critical',
       source: 'apsystems',
       kind: 'blind',
       message:
-        'Onduleur solaire APSystems non lu en plein jour (production = 0, compteur figé) — économies sous-comptées en temps réel'
+        'Onduleur solaire APSystems muet alors que les panneaux produisent — production solaire non comptée (à vérifier)'
     });
 
     // 3) EM-50 (compteur réseau + cumulus) muet : aucune mesure non-nulle.
