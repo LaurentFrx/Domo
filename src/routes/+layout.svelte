@@ -82,19 +82,37 @@
     }
   });
 
+  // Quand une navigation vient d'un COMMIT de pager, la page d'arrivée ne doit pas
+  // rejouer son `.page-enter` (slide-up-fade) : le pager assure déjà la transition,
+  // les deux ensemble = clignotement. L'action lit le drapeau UNE fois au montage du
+  // <div> (pas de binding réactif qui re-déclencherait l'anim en retard). Les clics
+  // TabBar/Sidebar (pagerNav=false) gardent leur entrée animée.
+  let pagerNav = false;
+  function enterAnim(node: HTMLElement) {
+    if (!pagerNav) node.classList.add('page-enter');
+  }
+
   function finishNavigate() {
     if (!committing || !pendingHref) return;
     clearTimeout(commitFallback);
     const href = pendingHref;
     pendingHref = '';
+    pagerNav = true; // pas de slide-up-fade sur la page committée
     goto(href).then(() => {
-      // La vraie cible est montée : on remet tout en place SANS transition,
-      // sinon la page neuve glisserait depuis le bord.
-      noAnim = true;
-      committing = false;
-      dragX = 0;
-      frozenTarget = null;
-      requestAnimationFrame(() => requestAnimationFrame(() => (noAnim = false)));
+      // Laisse la nouvelle page (children, encore à frozenShellPct hors-écran) PEINDRE
+      // avant de retirer l'aperçu et de recentrer → pas de cadre blanc ni de double anim.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          noAnim = true;
+          committing = false; // shell → translateX(0) instantané : la page arrive au centre
+          dragX = 0;
+          frozenTarget = null; // aperçu retiré (vraie page déjà peinte au centre)
+          requestAnimationFrame(() => {
+            noAnim = false;
+            pagerNav = false;
+          });
+        })
+      );
     });
   }
   function onShellTransitionEnd(e: TransitionEvent) {
@@ -404,7 +422,7 @@
         ontransitionend={onShellTransitionEnd}
       >
         {#key page.url.pathname}
-          <div class="page-enter">
+          <div use:enterAnim>
             {@render children()}
           </div>
         {/key}
