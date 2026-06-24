@@ -11,6 +11,7 @@
   import { cumulus } from '$stores/cumulus.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { matter } from '$stores/matter.svelte';
+  import { acquire, acquireFns } from '$stores/refcount';
   import { formatPower, formatCurrency } from '$utils/format';
   import {
     smoothLinePath,
@@ -26,36 +27,39 @@
   import CumulusCard from '$components/cards/CumulusCard.svelte';
   import HpHcSplitCard from '$components/cards/HpHcSplitCard.svelte';
 
+  // Stores page-scoped : refcountés → une page voisine (pager) qui se démonte ne
+  // coupe pas un store encore utilisé par une autre. anker/apsystems restent
+  // app-wide (pilotés par le layout), savings idem.
+  let releases: (() => void)[] = [];
   onMount(() => {
     settings.hydrate(); // coût installation (ROI) + prix, depuis /api/settings
-    zigbee.connect();
-    matter.connect(); // prises Matter mesurées (Bureau multimédia, Home cinéma) — conso
-    forecast.connect();
-    // anker ET apsystems sont désormais connectés app-wide par +layout.svelte
-    // (leur production entre dans le bilan de l'accueil). connect() est idempotent
-    // → on les rappelle sans risque, MAIS on ne les disconnect PAS ici (sinon on
-    // couperait le polling global au départ de la page).
+    // anker ET apsystems sont connectés app-wide par +layout.svelte (idempotent) →
+    // on les rappelle sans risque, mais on ne les relâche PAS ici.
     apsystems.connect();
     anker.connect();
-    productionHistory.connect();
-    // Ventilation mensuelle (tableau + KPI). savings est déjà connecté app-wide
-    // par +layout.svelte (utilisé pour le ROI annuel) → pas besoin ici.
-    energyMonthly.connect();
-    // Relais cumulus RÉEL (Shelly Pro 1) — état + on/off dans CumulusCard.
-    cumulus.connectRelay();
-    // Orchestrateur (mode, raison de décision, énergie réelle, anomalie).
-    cumulus.connectOrchestrator();
+    releases = [
+      acquire(zigbee),
+      acquire(matter), // prises Matter mesurées (Bureau multimédia, Home cinéma) — conso
+      acquire(forecast),
+      acquire(productionHistory),
+      acquire(energyMonthly), // ventilation mensuelle (tableau + KPI)
+      // Relais cumulus RÉEL (Shelly Pro 1) — état + on/off dans CumulusCard.
+      acquireFns(
+        'cumulus:relay',
+        () => cumulus.connectRelay(),
+        () => cumulus.disconnectRelay()
+      ),
+      // Orchestrateur (mode, raison de décision, énergie réelle, anomalie).
+      acquireFns(
+        'cumulus:orchestrator',
+        () => cumulus.connectOrchestrator(),
+        () => cumulus.disconnectOrchestrator()
+      )
+    ];
   });
   onDestroy(() => {
-    zigbee.disconnect();
-    matter.disconnect();
-    forecast.disconnect();
-    productionHistory.disconnect();
-    energyMonthly.disconnect();
-    cumulus.disconnectRelay();
-    cumulus.disconnectOrchestrator();
-    // Pas de anker.disconnect() ni apsystems.disconnect() : leur cycle de vie
-    // appartient au layout racine (utilisés app-wide, notamment par le dashboard).
+    releases.forEach((r) => r());
+    releases = [];
   });
 
   // Prises Zigbee suivies pour la conso électroménager (Frigo, Lave-linge).

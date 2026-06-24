@@ -12,6 +12,7 @@
   import { settings } from '$stores/settings.svelte';
   import { thermostat } from '$stores/thermostat.svelte';
   import { tariff } from '$stores/tariff.svelte';
+  import { acquire, acquireFns } from '$stores/refcount';
   import { haptic } from '$utils/haptic';
   import AlertsCard from '$components/settings/AlertsCard.svelte';
   import AccordionSection from '$components/settings/AccordionSection.svelte';
@@ -49,31 +50,33 @@
   const nextSwitchAt = $derived(tariff.next.at); // 'HH:MM' local Paris
   const hoursUntilSwitch = $derived(tariff.nextInHours);
 
+  // Stores affichés dans « Connexions » + sections, refcountés (cf. $stores/refcount)
+  // → partagés avec les pages voisines du pager sans coupure au démontage de l'une.
+  // anker/apsystems restent app-wide (layout). matter est désormais RELÂCHÉ (avant :
+  // connecté sans disconnect → fuite).
+  let releases: (() => void)[] = [];
   onMount(() => {
     preferences.hydrate();
     settings.hydrate();
-    if (matter.connectionStatus === 'disconnected') {
-      matter.connect();
-    }
-    // Connecter les stores affichés dans « Connexions » pour des états RÉELS et
-    // à jour (anker/apsystems sont déjà connectés app-wide via le layout).
-    daikin.connect();
-    weather.connect();
-    zigbee.connect();
-    airzone.connect(); // pour la section « Batteries » (thermostats de zone)
-    forecast.connect();
-    cumulus.connectRelay(); // relais Shelly cumulus → ligne « Connexions »
-    cumulus.refreshOrchestrator(); // config + état du moteur cumulus
-    thermostat.connect(); // daemon thermostat sèche-serviette → « Connexions »
+    cumulus.refreshOrchestrator(); // config + état du moteur cumulus (one-shot)
+    releases = [
+      acquire(matter),
+      acquire(daikin),
+      acquire(weather),
+      acquire(zigbee),
+      acquire(airzone), // section « Batteries » (thermostats de zone)
+      acquire(forecast),
+      acquire(thermostat), // daemon thermostat sèche-serviette → « Connexions »
+      acquireFns(
+        'cumulus:relay',
+        () => cumulus.connectRelay(),
+        () => cumulus.disconnectRelay()
+      )
+    ];
   });
   onDestroy(() => {
-    daikin.disconnect();
-    weather.disconnect();
-    zigbee.disconnect();
-    airzone.disconnect();
-    forecast.disconnect();
-    cumulus.disconnectRelay();
-    thermostat.disconnect();
+    releases.forEach((r) => r());
+    releases = [];
   });
 
   // ─── Batteries regroupées (toute l'app) — hors appareils Apple (cf. FindMyCard) ──

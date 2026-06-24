@@ -50,7 +50,7 @@ class ForecastState {
 
   connect() {
     if (typeof window === 'undefined') return; // pas de poll en SSR
-    this.poll();
+    if (!this.#timer) this.poll(); // idempotent : poll immédiat seulement au 1er connect
     this.#timer ??= setInterval(() => this.poll(), REFRESH_MS);
   }
 

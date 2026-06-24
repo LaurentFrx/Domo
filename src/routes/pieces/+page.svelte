@@ -12,20 +12,19 @@
   import { matter } from '$stores/matter.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
   import { findmy } from '$stores/findmy.svelte';
+  import { acquire } from '$stores/refcount';
   import { haptic } from '$utils/haptic';
 
+  // Stores page-scoped refcountés (cf. $stores/refcount) — partagés avec les pages
+  // voisines du pager sans couper le polling au démontage de l'une d'elles.
+  let releases: (() => void)[] = [];
   onMount(() => {
-    matter.connect();
-    zigbee.connect();
-    printer.connect();
-    findmy.connect();
+    releases = [acquire(matter), acquire(zigbee), acquire(printer), acquire(findmy)];
   });
 
   onDestroy(() => {
-    matter.disconnect();
-    zigbee.disconnect();
-    printer.disconnect();
-    findmy.disconnect();
+    releases.forEach((r) => r());
+    releases = [];
   });
 
   // ─── Fusion Matter + Zigbee par pièce ──────────────────────────────────

@@ -6,25 +6,28 @@
   import { zigbee } from '$stores/zigbee.svelte';
   import { haptic } from '$utils/haptic';
   import { onMount, onDestroy } from 'svelte';
+  import { acquire } from '$stores/refcount';
   import ClimateDial from '$components/cards/ClimateDial.svelte';
   import ZigbeeSensorTile from '$components/tiles/ZigbeeSensorTile.svelte';
   import ThermostatCard from '$components/cards/ThermostatCard.svelte';
   import { thermostat } from '$stores/thermostat.svelte';
   import { preferences } from '$stores/preferences.svelte';
 
+  // Stores page-scoped refcountés (cf. $stores/refcount) — partagés avec les pages
+  // voisines du pager sans couper le polling au démontage de l'une d'elles.
+  let releases: (() => void)[] = [];
   onMount(() => {
-    zigbee.connect();
-    daikin.connect();
-    airzone.connect();
-    weather.connect();
-    thermostat.connect();
+    releases = [
+      acquire(zigbee),
+      acquire(daikin),
+      acquire(airzone),
+      acquire(weather),
+      acquire(thermostat)
+    ];
   });
   onDestroy(() => {
-    zigbee.disconnect();
-    daikin.disconnect();
-    airzone.disconnect();
-    weather.disconnect();
-    thermostat.disconnect();
+    releases.forEach((r) => r());
+    releases = [];
   });
 
   // Animation des icônes de fond Airzone (flocon/flamme) — gated sur la préférence
