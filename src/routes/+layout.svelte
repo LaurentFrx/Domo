@@ -38,6 +38,7 @@
   let committing = $state(false); // bascule en cours : la cible glisse jusqu'au plein écran
   let settling = $state(false); // retour élastique (annulation)
   let noAnim = $state(false); // reset instantané après navigation (anti-glissement)
+  let commitMs = $state(300); // durée du commit, calculée ∝ distance restante (vitesse ~constante)
 
   // Cible + côtés figés pendant les animations ; vivants pendant le drag.
   let frozenTarget = $state<NavItem | null>(null);
@@ -186,9 +187,14 @@
         frozenBasePct = dragX < 0 ? 100 : -100;
         frozenShellPct = dragX < 0 ? -100 : 100;
         pendingHref = tgt.href;
+        // Amortisseur : durée ∝ distance RESTANTE (W − |dragX|) → vitesse ~constante
+        // quelle que soit la position de lâcher (régulier), décélération via l'ease-out.
+        const W = window.innerWidth || 390;
+        const remaining = Math.max(0, W - Math.abs(dragX));
+        commitMs = Math.round(Math.min(340, Math.max(150, (remaining / W) * 340)));
         committing = true;
         dragging = false; // transition active → page sort, cible arrive à 0
-        commitFallback = setTimeout(finishNavigate, 580); // filet > durée du commit amorti (420ms)
+        commitFallback = setTimeout(finishNavigate, commitMs + 160); // filet > durée du commit
       } else {
         frozenTarget = tgt;
         frozenBasePct = dragX < 0 ? 100 : -100;
@@ -420,6 +426,7 @@
         class:swipe-noanim={noAnim}
         class:committing
         style:transform={shellTransform}
+        style:--commit-ms={`${commitMs}ms`}
         ontransitionend={onShellTransitionEnd}
       >
         {#key page.url.pathname}
@@ -442,6 +449,7 @@
         class:swipe-noanim={noAnim}
         class:committing
         style:transform={peekTransform}
+        style:--commit-ms={`${commitMs}ms`}
       >
         <!-- Vrai contenu de la page cible (monté via le registre), défile sous le doigt. -->
         <div class="swipe-peek-page safe-top">
@@ -471,13 +479,12 @@
   .swipe-anim {
     transition: transform var(--duration-normal) var(--ease-out);
   }
-  /* « Amortisseur de tiroir » : au COMMIT, la course se termine en forte
-     décélération (expo-out), plus longue qu'un simple ease-out. L'annulation
-     (retour) garde le .swipe-anim snappy ci-dessus. Durée à garder < au filet
-     `commitFallback` (JS). */
+  /* « Amortisseur de tiroir » : au COMMIT, durée ∝ distance restante (--commit-ms,
+     posé en JS → vitesse ~constante, régulière) + décélération naturelle (ease-out
+     cubic). L'annulation (retour) garde le .swipe-anim snappy ci-dessus. */
   .swipe-shell.committing,
   .swipe-peek.committing {
-    transition: transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
+    transition: transform var(--commit-ms, 300ms) cubic-bezier(0.215, 0.61, 0.355, 1);
   }
   /* Reset post-navigation : aucun glissement de la page neuve. */
   .swipe-noanim {
