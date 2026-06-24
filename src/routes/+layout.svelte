@@ -2,7 +2,7 @@
   import '../app.css';
   import { page, updated } from '$app/state';
   import { beforeNavigate, goto } from '$app/navigation';
-  import { navItems, isActive } from '$components/layout/nav-items';
+  import { navItems, isActive, type NavItem } from '$components/layout/nav-items';
   import Sidebar from '$components/layout/Sidebar.svelte';
   import TabBar from '$components/layout/TabBar.svelte';
   import PullToRefresh from '$components/layout/PullToRefresh.svelte';
@@ -22,23 +22,77 @@
 
   let { children } = $props();
 
-  // ─── Navigation par glissé à DEUX doigts (sans gêner les gestes à 1 doigt) ──
+  // ─── Navigation par glissé à DEUX doigts, avec aperçu « push » iOS ──────────
   // À 1 doigt : rien d'intercepté (scroll, sliders, tirer-pour-rafraîchir intacts).
-  // À 2 doigts horizontal : le contenu suit les doigts (résistance en bout de liste)
-  // et une pastille de bord annonce la page cible ; au relâché franchi → bascule.
-  // Garde-fous : pincement (zoom) rejeté, geste vertical laissé au scroll, et le
-  // canvas 3D de /maison exclu (data-swipe-ignore) pour ne pas voler sa rotation.
-  const SWIPE_COMMIT = 80; // px (après résistance) pour déclencher la bascule
+  // À 2 doigts horizontal : la page courante recule en suivant les doigts et la
+  // page CIBLE glisse PAR-DESSUS depuis le bord (continuité visuelle). Au lâcher
+  // franchi, la cible finit sa course (plein écran = couverture pendant le chargement)
+  // puis la vraie page se monte ; sinon retour élastique.
+  // Garde-fous : pincement (zoom) rejeté, geste vertical laissé au scroll. Le 3D de
+  // /maison garde sa rotation 1 doigt et son zoom-pincement ; seul le pan 2 doigts
+  // cède à la navigation (opt-out ciblé possible via [data-swipe-ignore]).
+  const SWIPE_COMMIT = 70; // px (après résistance) pour déclencher la bascule
   let dragX = $state(0);
-  let dragging = $state(false);
-  let settling = $state(false); // transition de retour/bascule en cours
+  let dragging = $state(false); // doigt en cours : suivi direct, sans transition
+  let committing = $state(false); // bascule en cours : la cible glisse jusqu'au plein écran
+  let settling = $state(false); // retour élastique (annulation)
+  let noAnim = $state(false); // reset instantané après navigation (anti-glissement)
+
+  // Cible + côtés figés pendant les animations ; vivants pendant le drag.
+  let frozenTarget = $state<NavItem | null>(null);
+  let frozenBasePct = 0; // côté d'où vient le panneau cible (±100)
+  let frozenShellPct = 0; // côté où sort la page courante (±100)
+  let pendingHref = '';
+  let commitFallback: ReturnType<typeof setTimeout> | undefined;
 
   const curIdx = $derived(navItems.findIndex((it) => isActive(page.url.pathname, it.href)));
-  const targetIdx = $derived(dragX > 0 ? curIdx - 1 : dragX < 0 ? curIdx + 1 : -1);
-  const swipeTarget = $derived(
-    targetIdx >= 0 && targetIdx < navItems.length ? navItems[targetIdx] : null
+  // Direction VIVE pendant le drag : dragX<0 → page suivante (vient de droite).
+  const liveBasePct = $derived(dragX < 0 ? 100 : -100);
+  const liveTargetIdx = $derived(dragX < 0 ? curIdx + 1 : dragX > 0 ? curIdx - 1 : -1);
+  const liveTarget = $derived(
+    liveTargetIdx >= 0 && liveTargetIdx < navItems.length ? navItems[liveTargetIdx] : null
   );
-  const swipeProgress = $derived(Math.min(1, Math.abs(dragX) / SWIPE_COMMIT));
+
+  const swipeActive = $derived(dragging || committing || settling);
+  const peekTarget = $derived(committing || settling ? frozenTarget : liveTarget);
+  const peekVisible = $derived(swipeActive && !!peekTarget);
+
+  // Transforms : px pendant le drag (suivi direct), % pendant les animations.
+  const shellTransform = $derived(
+    committing
+      ? `translateX(${frozenShellPct}%)`
+      : dragging
+        ? `translateX(${dragX}px)`
+        : 'translateX(0)'
+  );
+  const peekTransform = $derived(
+    committing
+      ? 'translateX(0)'
+      : settling
+        ? `translateX(${frozenBasePct}%)`
+        : `translateX(calc(${liveBasePct}% + ${dragX}px))`
+  );
+
+  function finishNavigate() {
+    if (!committing || !pendingHref) return;
+    clearTimeout(commitFallback);
+    const href = pendingHref;
+    pendingHref = '';
+    goto(href).then(() => {
+      // La vraie cible est montée : on remet tout en place SANS transition,
+      // sinon la page neuve glisserait depuis le bord.
+      noAnim = true;
+      committing = false;
+      dragX = 0;
+      frozenTarget = null;
+      requestAnimationFrame(() => requestAnimationFrame(() => (noAnim = false)));
+    });
+  }
+  function onShellTransitionEnd(e: TransitionEvent) {
+    // Seulement la fin de transition PROPRE au shell (pas un enfant page-enter).
+    if (e.target !== e.currentTarget || e.propertyName !== 'transform') return;
+    if (committing) finishNavigate();
+  }
 
   $effect(() => {
     let armed = false;
@@ -50,10 +104,10 @@
     const spread = (t: TouchList) =>
       Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
     const ignored = (el: EventTarget | null) =>
-      !!(el as Element | null)?.closest?.('canvas, [data-swipe-ignore]');
+      !!(el as Element | null)?.closest?.('[data-swipe-ignore]');
 
     function onStart(e: TouchEvent) {
-      if (settling || e.touches.length !== 2 || ignored(e.target)) {
+      if (committing || settling || e.touches.length !== 2 || ignored(e.target)) {
         armed = false;
         locked = false;
         return;
@@ -73,6 +127,7 @@
       if (Math.abs(spread(e.touches) - startSpread) > 40) {
         armed = false;
         locked = false;
+        dragging = false;
         if (dragX !== 0) dragX = 0;
         return;
       }
@@ -85,9 +140,10 @@
         locked = true;
       }
       if (e.cancelable) e.preventDefault();
+      e.stopPropagation(); // coupe le geste pour le 3D /maison (et tout handler enfant)
       dragging = true;
       const hasTarget = (dx > 0 && curIdx > 0) || (dx < 0 && curIdx < navItems.length - 1);
-      dragX = dx * (hasTarget ? 0.6 : 0.18); // résistance « caoutchouc » en bout de liste
+      dragX = dx * (hasTarget ? 0.85 : 0.18); // suivi quasi 1:1, résistance en bout de liste
     }
     function onEnd() {
       if (!locked) {
@@ -96,26 +152,37 @@
       }
       armed = false;
       locked = false;
-      dragging = false;
-      const tgt = swipeTarget;
+      const tgt = liveTarget;
       if (Math.abs(dragX) > SWIPE_COMMIT && tgt) {
         haptic('light');
-        settling = true;
-        dragX = 0;
-        goto(tgt.href).finally(() => (settling = false));
+        frozenTarget = tgt;
+        frozenBasePct = dragX < 0 ? 100 : -100;
+        frozenShellPct = dragX < 0 ? -100 : 100;
+        pendingHref = tgt.href;
+        committing = true;
+        dragging = false; // transition active → page sort, cible arrive à 0
+        commitFallback = setTimeout(finishNavigate, 380); // filet si transitionend muet
       } else {
+        frozenTarget = tgt;
+        frozenBasePct = dragX < 0 ? 100 : -100;
         settling = true;
-        dragX = 0;
-        setTimeout(() => (settling = false), 220);
+        dragging = false;
+        dragX = 0; // ressort
+        setTimeout(() => {
+          settling = false;
+          frozenTarget = null;
+        }, 240);
       }
     }
+    // touchmove en CAPTURE : on passe AVANT les handlers enfants (canvas 3D) pour
+    // pouvoir stopPropagation une fois le glissé verrouillé.
     window.addEventListener('touchstart', onStart, { passive: true });
-    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchmove', onMove, { passive: false, capture: true });
     window.addEventListener('touchend', onEnd, { passive: true });
     window.addEventListener('touchcancel', onEnd, { passive: true });
     return () => {
       window.removeEventListener('touchstart', onStart);
-      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchmove', onMove, true);
       window.removeEventListener('touchend', onEnd);
       window.removeEventListener('touchcancel', onEnd);
     };
@@ -313,8 +380,14 @@
   >
     <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8" style="overflow-x: clip;">
       <HealthBanner />
-      <!-- Shell qui suit les doigts pendant le glissé 2 doigts (transform piloté plus haut) -->
-      <div class="swipe-shell" class:swipe-anim={!dragging} style:transform="translateX({dragX}px)">
+      <!-- Page courante : recule en suivant les doigts ; la cible glisse par-dessus -->
+      <div
+        class="swipe-shell"
+        class:swipe-anim={!dragging}
+        class:swipe-noanim={noAnim}
+        style:transform={shellTransform}
+        ontransitionend={onShellTransitionEnd}
+      >
         {#key page.url.pathname}
           <div class="page-enter">
             {@render children()}
@@ -326,28 +399,33 @@
 
   <TabBar />
 
-  <!-- Pastille de bord pendant le glissé 2 doigts : annonce la page cible -->
-  {#if dragging && swipeTarget}
-    <div
-      class="swipe-hint"
-      class:swipe-hint-right={dragX < 0}
-      class:swipe-hint-ready={swipeProgress >= 1}
-      style:opacity={swipeProgress}
-      aria-hidden="true"
-    >
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.75"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+  <!-- Aperçu « push » : la page cible glisse par-dessus pendant le glissé 2 doigts -->
+  {#if peekVisible && peekTarget}
+    <div class="swipe-peek-clip" aria-hidden="true">
+      <div
+        class="swipe-peek"
+        class:swipe-anim={!dragging}
+        class:swipe-noanim={noAnim}
+        style:transform={peekTransform}
       >
-        <path d={swipeTarget.icon} />
-      </svg>
-      <span>{swipeTarget.label}</span>
+        <div class="swipe-peek-inner">
+          <span class="swipe-peek-icon">
+            <svg
+              width="26"
+              height="26"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d={peekTarget.icon} />
+            </svg>
+          </span>
+          <span class="swipe-peek-label">{peekTarget.label}</span>
+        </div>
+      </div>
     </div>
   {/if}
 </div>
@@ -360,43 +438,60 @@
     }
   }
 
-  /* ─── Glissé 2 doigts : suivi du contenu + pastille de bord ─── */
+  /* ─── Glissé 2 doigts : page courante + aperçu « push » de la cible ─── */
   .swipe-shell {
     will-change: transform;
   }
-  /* Transition seulement HORS glissé (retour élastique / bascule) : pendant le
-     glissé, le contenu suit le doigt sans inertie. */
+  /* Transition HORS glissé seulement (retour / bascule) : pendant le glissé,
+     contenu et aperçu suivent le doigt sans inertie. */
   .swipe-anim {
     transition: transform var(--duration-normal) var(--ease-out);
   }
-  .swipe-hint {
+  /* Reset post-navigation : aucun glissement de la page neuve. */
+  .swipe-noanim {
+    transition: none !important;
+  }
+  /* Conteneur plein écran qui CLIPPE l'aperçu hors-cadre (pas de scroll horizontal).
+     Sous la Sidebar (40) et la TabBar (50) : elles restent visibles au-dessus. */
+  .swipe-peek-clip {
     position: fixed;
-    top: 50%;
-    left: 12px;
-    transform: translateY(-50%);
-    z-index: 55;
+    inset: 0;
+    z-index: 30;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .swipe-peek {
+    position: absolute;
+    inset: 0;
+    background: var(--color-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    will-change: transform;
+  }
+  .swipe-peek-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    /* Recentre optiquement au-dessus de la TabBar mobile. */
+    padding-bottom: calc(60px + env(safe-area-inset-bottom));
+  }
+  .swipe-peek-icon {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 14px;
-    border-radius: var(--radius-pill);
+    justify-content: center;
+    width: 64px;
+    height: 64px;
+    border-radius: var(--radius-2xl);
     background: var(--color-card-hover);
     border: 1px solid var(--color-border);
-    color: var(--color-fg);
-    font-size: 13px;
-    font-weight: 600;
-    pointer-events: none;
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-    box-shadow: 0 6px 20px -8px oklch(0.1 0.01 286 / 0.4);
-  }
-  .swipe-hint-right {
-    left: auto;
-    right: 12px;
-  }
-  .swipe-hint-ready {
     color: var(--color-primary);
-    border-color: var(--color-primary);
+  }
+  .swipe-peek-label {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--color-fg);
   }
   @media (prefers-reduced-motion: reduce) {
     .swipe-anim {
