@@ -18,25 +18,41 @@
   import { onMount } from 'svelte';
   import { flushSync } from 'svelte';
   import { page } from '$app/state';
-  import { pushState, preloadCode } from '$app/navigation';
+  import { pushState, preloadCode, afterNavigate } from '$app/navigation';
   import { navItems, isActive } from '$components/layout/nav-items';
   import PagerCell from './PagerCell.svelte';
   import { createSpring } from './spring';
   import { createVelocityTracker } from './velocity';
   import { haptic } from '$utils/haptic';
+  import { pagerNav } from './pager-nav.svelte';
 
   // ── Page centrale (suit le routeur ET les commits) ──
   function routeHref(): string {
     return navItems.find((n) => isActive(page.url.pathname, n.href))?.href ?? '/';
   }
-  // currentHref DÉRIVÉ du routeur : un commit (pushState) comme un clic TabBar/Sidebar
-  // mettent page.url à jour → currentHref suit tout seul. Pas d'effet de synchro qui
-  // « combattrait » le commit (sinon revert pendant le flushSync, page.url encore ancienne).
-  const currentHref = $derived(routeHref());
+  // currentHref : source de vérité VISUELLE du pager, pilotée DIRECTEMENT au commit.
+  // (pushState/shallow routing ne met PAS page.url à jour de façon fiable/synchrone
+  // pour un changement de route → on ne peut pas en dépendre pour l'affichage.) La
+  // synchro depuis le routeur (clics TabBar/Sidebar, back/forward) passe par
+  // afterNavigate, qui ne se déclenche PAS pour le pushState d'un swipe → aucun combat.
+  let currentHref = $state(routeHref());
+  afterNavigate(() => {
+    const h = routeHref();
+    if (h !== currentHref) {
+      currentHref = h;
+      p = 0;
+      applyTransform();
+    }
+  });
   const curIdx = $derived(navItems.findIndex((n) => n.href === currentHref));
   const windowItems = $derived(
     [navItems[curIdx - 1], navItems[curIdx], navItems[curIdx + 1]].filter(Boolean)
   );
+
+  // Publie l'href central → TabBar/Sidebar/titre (page.url ne suit PAS le pushState).
+  $effect(() => {
+    pagerNav.current = currentHref;
+  });
 
   // Pré-chargement des chunks voisins (prêts avant le geste). /maison exclue (3D).
   $effect(() => {
@@ -119,15 +135,15 @@
     }
   }
   function commit(href: string) {
-    // pushState d'ABORD : page.url → currentHref (dérivé) → la fenêtre se redéfinit ;
-    // cellules keyées par href → instances RÉUTILISÉES (zéro remount). flushSync
-    // applique MAINTENANT les nouveaux offsets, puis on remet p=0 : la nouvelle
-    // centrale est déjà à sa place exacte (aucun saut).
-    pushState(href, {});
+    // currentHref ($state) en PREMIER → la fenêtre se redéfinit ; cellules keyées par
+    // href → instances RÉUTILISÉES (zéro remount). flushSync applique MAINTENANT les
+    // nouveaux offsets, puis p=0 : la nouvelle centrale est déjà à sa place (aucun saut).
+    currentHref = href;
     flushSync();
     p = 0;
     applyTransform();
     window.scrollTo(0, 0); // nouvelle page en haut
+    pushState(href, {}); // URL/historique (TabBar actif, titre, retour) — APRÈS le visuel
   }
 
   // ── Geste 2 doigts ──
@@ -245,6 +261,7 @@
       if (document.visibilityState === 'hidden') onHide();
     });
     return () => {
+      pagerNav.current = null; // pager démonté (sous-route) → repli routeur pour la TabBar
       cancelAnimationFrame(raf);
       window.removeEventListener('touchstart', onStart);
       window.removeEventListener('touchmove', onMove, true);

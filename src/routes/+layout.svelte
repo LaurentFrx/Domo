@@ -2,7 +2,8 @@
   import '../app.css';
   import { page, updated } from '$app/state';
   import { beforeNavigate } from '$app/navigation';
-  import { navItems, isActive } from '$components/layout/nav-items';
+  import { navItems } from '$components/layout/nav-items';
+  import { activeNavHref } from '$lib/pager/pager-nav.svelte';
   import { onMount } from 'svelte';
   import Sidebar from '$components/layout/Sidebar.svelte';
   import TabBar from '$components/layout/TabBar.svelte';
@@ -24,8 +25,14 @@
 
   let { children } = $props();
 
-  // ─── Page active (pour le <title> centralisé) ─────────────────────────
-  const curIdx = $derived(navItems.findIndex((it) => isActive(page.url.pathname, it.href)));
+  // ─── Page active (titre + condition pager) ────────────────────────────
+  // activeNavHref reflète la page centrale du PAGER quand il pilote (page.url ne
+  // suit pas le pushState d'un swipe).
+  const activeHref = $derived(activeNavHref(page.url.pathname));
+  const curIdx = $derived(navItems.findIndex((it) => it.href === activeHref));
+  // Le pager ne pilote que les routes EXACTES de navItem ; les sous-routes
+  // (/reglages/planning…) restent rendues par le routeur (children).
+  const onNavItem = $derived(navItems.some((n) => n.href === page.url.pathname));
 
   // ─── Pager (rail unifié, physique de ressort) ─────────────────────────
   // Rendu CÔTÉ CLIENT après hydratation : SSR + 1er paint = la page du routeur
@@ -235,10 +242,10 @@
     <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
       <HealthBanner />
     </div>
-    {#if pagerReady}
+    {#if pagerReady && onNavItem}
       <Pager />
     {:else}
-      <!-- SSR + 1er paint : la page du routeur, avant que le Pager prenne la main -->
+      <!-- SSR/1er paint + sous-routes (/reglages/planning…) : rendu par le routeur -->
       <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
         {@render children()}
       </div>

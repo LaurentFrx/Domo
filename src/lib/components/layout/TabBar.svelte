@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { navItems, isActive } from './nav-items';
+  import { navItems } from './nav-items';
+  import { activeNavHref } from '$lib/pager/pager-nav.svelte';
 
   // ─── Clavier iOS : garder la barre vraiment collée en bas ──────────────────
   // Une barre `position: fixed` est ancrée au viewport de MISE EN PAGE, pas au
@@ -73,7 +74,7 @@
 >
   <div class="flex h-[60px] items-center justify-around px-2">
     {#each navItems as tab (tab.href)}
-      {@const active = isActive(page.url.pathname, tab.href)}
+      {@const active = tab.href === activeNavHref(page.url.pathname)}
       <a
         href={tab.href}
         class="tabbar-item flex h-full flex-1 flex-col items-center justify-center gap-1 rounded-lg"
