@@ -147,6 +147,7 @@
   const SHUTTER_ORDER = [
     'salon',
     'salle à manger',
+    'cuisine',
     'balcon',
     'bureau',
     'chambre parents',

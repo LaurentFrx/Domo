@@ -54,7 +54,10 @@ const NODE_NAMES: Record<number, { name: string; room: string }> = {
   21: { name: 'Chambre amis', room: 'Étage' },
   // node 25 commissionné le 2026-06-04 (Sonoff « WiFi Smart Switch »,
   // device type 514 WindowCovering) — store roulant du séjour.
-  25: { name: 'Store', room: 'Séjour' }
+  25: { name: 'Store', room: 'Séjour' },
+  // node 27 commissionné le 2026-06-24 (Sonoff « WiFi Smart Switch »,
+  // device type 514 WindowCovering, network_only) — volet roulant de la cuisine.
+  27: { name: 'Cuisine', room: 'Cuisine' }
 };
 
 // Sonoff Matter Smart Switch — assignation par date de commissioning.
