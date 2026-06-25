@@ -197,6 +197,7 @@
            ╚═══════════════════════════════════════════════════════════════════╝ -->
       {#each daikin.units as unit (unit.id)}
         {@const thermo = thermoForUnit(unit)}
+        {@const thermoKey = DAIKIN_UNIT_THERMO[unit.id] ?? thermo?.friendlyName ?? null}
         {@const indoorT =
           typeof thermo?.state.temperature === 'number'
             ? (thermo.state.temperature as number)
@@ -334,6 +335,9 @@
               max={TGT_MAX}
               mode={unit.operationMode}
               on={unit.onOff}
+              onActivate={thermoKey
+                ? () => openTempHistory(thermoKey, daikinLabel(unit))
+                : undefined}
             />
 
             <div class="flex flex-col gap-1.5" role="group" aria-label="Mode Chaud / Froid">

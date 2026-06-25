@@ -30,6 +30,9 @@
     unitLabel?: string;
     /** Alimentation de l'unité (off → grisé, pas de halo, « À l'arrêt »). */
     on?: boolean;
+    /** Si fourni, un bouton TRANSPARENT couvre le cadran (clic = historique 4 h).
+     *  N'altère EN RIEN le rendu verrouillé — simple cible de tap invisible. */
+    onActivate?: () => void;
   }
 
   let {
@@ -39,7 +42,8 @@
     max = 30,
     mode = 'off',
     unitLabel = '°C',
-    on = false
+    on = false,
+    onActivate
   }: Props = $props();
 
   const uid = `cd${__cdCounter++}`;
@@ -167,6 +171,16 @@
       <div class="cd-arret">—</div>
     {/if}
   </div>
+
+  <!-- Cible de tap invisible (historique 4 h) — n'altère pas le rendu du cadran. -->
+  {#if onActivate}
+    <button
+      type="button"
+      class="cd-hit"
+      aria-label="Voir l'historique 4 h de la température"
+      onclick={onActivate}
+    ></button>
+  {/if}
 </div>
 
 <style>
@@ -246,5 +260,19 @@
   }
   .cd-off .cd-unit {
     color: #8094ad;
+  }
+
+  /* Cible de tap invisible posée par-dessus tout le cadran (rendu inchangé). */
+  .cd-hit {
+    position: absolute;
+    inset: 0;
+    appearance: none;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    border-radius: 50%;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
 </style>

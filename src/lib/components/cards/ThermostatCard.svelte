@@ -125,16 +125,7 @@
         title={thermostat.connected ? 'En ligne' : 'Hors ligne'}
         aria-hidden="true"
       ></span>
-      {#if roomTemp != null}
-        <button
-          type="button"
-          class="tw-name tw-name-btn truncate"
-          aria-label="Historique 4 h — salle de bain"
-          onclick={() => openTempHistory('Thermo SdB', 'Salle de bain')}>Salle de bain</button
-        >
-      {:else}
-        <span class="tw-name truncate">Salle de bain</span>
-      {/if}
+      <span class="tw-name truncate">Salle de bain</span>
     </div>
     <div class="flex shrink-0 items-center gap-2.5">
       <span class="tw-stat c">
@@ -186,6 +177,9 @@
       max={SCALE_MAX}
       mode={dialMode}
       on={isOn}
+      onActivate={roomTemp != null
+        ? () => openTempHistory('Thermo SdB', 'Salle de bain')
+        : undefined}
     />
     <div class="flex flex-col gap-1.5" role="group" aria-label="Réglage du chauffage">
       {#each PILLS as p (p.key)}
@@ -282,19 +276,6 @@
     font-size: 15px;
     font-weight: 600;
     color: #eef5ff;
-  }
-  /* Nom cliquable → pop-up historique 4 h (cadran verrouillé, on cible le titre). */
-  .tw-name-btn {
-    appearance: none;
-    border: none;
-    background: none;
-    margin: 0;
-    padding: 0;
-    cursor: pointer;
-    text-decoration: underline;
-    text-decoration-style: dotted;
-    text-underline-offset: 2px;
-    -webkit-tap-highlight-color: transparent;
   }
   .tw-stat {
     display: inline-flex;
