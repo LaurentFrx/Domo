@@ -1,12 +1,22 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import * as THREE from 'three';
   import { T, useThrelte } from '@threlte/core';
   import { OrbitControls, HTML, interactivity, type IntersectionEvent } from '@threlte/extras';
   import { WALLS, ROOMS } from './maison-plan';
+  import { zigbee } from '$stores/zigbee.svelte';
+  import { acquire } from '$stores/refcount';
 
   // Raycasting Threlte : clic/tap sur les sols de pièce.
   interactivity();
+
+  // ─── Flux temps réel des sondes Zigbee (SSE, refcount partagé avec les
+  //     autres pages — ne coupe pas le flux au démontage si une autre page
+  //     l'utilise). ──────────────────────────────────────────────────────────
+  let releaseZigbee: (() => void) | null = null;
+  onMount(() => {
+    releaseZigbee = acquire(zigbee);
+  });
 
   // ─── Libération EXPLICITE du contexte WebGL au démontage (RÈGLE Domo) ──────
   // renderer.dispose() libère le GPU mais PAS le contexte WebGL ; sans
@@ -14,6 +24,7 @@
   // → au-delà Safari tue les anciens et la scène devient noire. Voir Phase 0.
   const { renderer } = useThrelte();
   onDestroy(() => {
+    releaseZigbee?.();
     try {
       renderer?.dispose();
       renderer?.forceContextLoss();
@@ -21,6 +32,28 @@
       /* contexte déjà perdu — sans gravité */
     }
   });
+
+  // ─── Mapping pièce → sonde de température (PROVISOIRE, à confirmer) ─────────
+  // L'espace de vie ouvert (Salon/SàM/Cuisine) partage la sonde « Thermo Salon ».
+  // Les pièces sans sonde n'affichent pas de température.
+  const ROOM_SENSOR: Record<string, string> = {
+    Salon: 'Thermo Salon',
+    'Salle à Manger': 'Thermo Salon',
+    Cuisine: 'Thermo Salon',
+    Terrasse: 'Thermo_ext',
+    Vélos: 'Thermo_velos'
+  };
+  const tempByRoom = $derived.by(() => {
+    const m: Record<string, number | null> = {};
+    for (const room of ROOMS) {
+      const sensor = ROOM_SENSOR[room.name];
+      const dev = sensor ? zigbee.devices.find((d) => d.friendlyName === sensor) : undefined;
+      const t = dev?.state?.temperature;
+      m[room.id] = typeof t === 'number' ? t : null;
+    }
+    return m;
+  });
+  const fmtTemp = (t: number) => `${t.toFixed(1).replace('.', ',')} °C`;
 
   // ─── Recentrage du modèle (murs + pièces, terrasse/garage compris) ─────────
   const roomPoints = ROOMS.flatMap((r) => r.polygons.flat());
@@ -127,12 +160,16 @@
     </T.Mesh>
   {/each}
 
-  <!-- Labels flottants : nom de pièce (+ température à brancher). -->
+  <!-- Labels flottants : nom de pièce + température (sonde Zigbee) ; surface au tap. -->
   {#each ROOMS as room (room.id)}
     {@const selected = selectedId === room.id}
+    {@const temp = tempByRoom[room.id]}
     <HTML position={[room.labelAt[0], 1.4, room.labelAt[1]]} center pointerEvents="none">
       <div class="room-label" class:is-selected={selected}>
         <span class="rl-name">{room.name}</span>
+        {#if temp != null}
+          <span class="rl-temp">{fmtTemp(temp)}</span>
+        {/if}
         {#if selected}
           <span class="rl-area">{room.area} m²</span>
         {/if}
@@ -163,6 +200,10 @@
   .room-label.is-selected {
     border-color: var(--color-primary);
     transform: scale(1.06);
+  }
+  .rl-temp {
+    font-weight: 700;
+    color: var(--color-primary);
   }
   .rl-area {
     font-weight: 500;
