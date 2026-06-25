@@ -12,6 +12,7 @@
   import ThermostatCard from '$components/cards/ThermostatCard.svelte';
   import { thermostat } from '$stores/thermostat.svelte';
   import { preferences } from '$stores/preferences.svelte';
+  import { openTempHistory } from '$stores/temp-history.svelte';
 
   // Stores page-scoped refcountés (cf. $stores/refcount) — partagés avec les pages
   // voisines du pager sans couper le polling au démontage de l'une d'elles.
@@ -591,17 +592,34 @@
             <!-- Température réelle + consigne sur la MÊME ligne (présentation Séjour) -->
             <div class="relative z-[1] flex flex-wrap items-center justify-between gap-2">
               <div class="flex items-baseline gap-2">
-                <div class="flex items-baseline gap-0.5">
-                  <span
-                    class="text-[32px] leading-none font-bold tabular-nums"
-                    style="color: var(--color-fg); letter-spacing: -0.02em;"
+                {#if zone.roomTemp !== null}
+                  <button
+                    type="button"
+                    class="temp-link flex items-baseline gap-0.5"
+                    aria-label={`Historique 4 h — ${zone.name}`}
+                    onclick={() => openTempHistory(`airzone:${zone.id}`, zone.name)}
                   >
-                    {zone.roomTemp !== null ? zone.roomTemp.toFixed(1) : '—'}
-                  </span>
-                  <span class="text-[14px] font-medium" style="color: var(--color-muted-fg);"
-                    >°C</span
-                  >
-                </div>
+                    <span
+                      class="text-[32px] leading-none font-bold tabular-nums"
+                      style="color: var(--color-fg); letter-spacing: -0.02em;"
+                    >
+                      {zone.roomTemp.toFixed(1)}
+                    </span>
+                    <span class="text-[14px] font-medium" style="color: var(--color-muted-fg);"
+                      >°C</span
+                    >
+                  </button>
+                {:else}
+                  <div class="flex items-baseline gap-0.5">
+                    <span
+                      class="text-[32px] leading-none font-bold tabular-nums"
+                      style="color: var(--color-fg); letter-spacing: -0.02em;">—</span
+                    >
+                    <span class="text-[14px] font-medium" style="color: var(--color-muted-fg);"
+                      >°C</span
+                    >
+                  </div>
+                {/if}
                 {#if zone.humidity !== null}
                   <span class="text-[13px] tabular-nums" style="color: var(--color-consumption);">
                     {Math.round(zone.humidity)}%
@@ -660,7 +678,13 @@
     <section>
       <div class="grid grid-cols-3 gap-2">
         {#each thermoSensors as device (device.ieee)}
-          <ZigbeeSensorTile {device} name={thermoDisplayName(device.friendlyName)} compact />
+          <ZigbeeSensorTile
+            {device}
+            name={thermoDisplayName(device.friendlyName)}
+            compact
+            onActivate={() =>
+              openTempHistory(device.friendlyName, thermoDisplayName(device.friendlyName))}
+          />
         {/each}
       </div>
     </section>
@@ -746,7 +770,12 @@
         <div class="flex items-center gap-3">
           {@render weatherIcon(weather.condition, 44)}
           <div class="flex flex-col">
-            <div class="flex items-start gap-0.5">
+            <button
+              type="button"
+              class="temp-link flex items-start gap-0.5"
+              aria-label="Historique 4 h — extérieur (Sanguinet)"
+              onclick={() => openTempHistory('meteo:sanguinet', 'Extérieur · Sanguinet')}
+            >
               <span
                 class="text-[2.3rem] font-semibold"
                 style="color: var(--color-fg); line-height: 0.85; letter-spacing: -0.02em;"
@@ -756,7 +785,7 @@
               <span class="mt-1 text-[14px] font-medium" style="color: var(--color-muted-fg);"
                 >°C</span
               >
-            </div>
+            </button>
             <span class="mt-0.5 text-[12px]" style="color: var(--color-muted-fg);">
               {conditionLabel[weather.condition]}
             </span>
@@ -890,6 +919,19 @@
 </div>
 
 <style>
+  /* Température cliquable → pop-up historique 4 h (reset bouton, alignement hérité). */
+  .temp-link {
+    appearance: none;
+    border: none;
+    background: none;
+    margin: 0;
+    padding: 0;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
   /* ─── Gainable : icône de fond (flocon froid / flamme chaud) par zone ─── */
   /* Réduite et centrée (entre la température réelle et la consigne), en arrière-plan. */
   .az-zone-bg {

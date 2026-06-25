@@ -20,6 +20,7 @@
   import { em50 } from '$stores/em50.svelte';
   import { haptic } from '$utils/haptic';
   import BottomSheet from '$lib/components/ui/BottomSheet.svelte';
+  import { openTempHistory } from '$stores/temp-history.svelte';
 
   const HEATING_W = 500; // au-dessus → le cumulus chauffe (à comparer au voyant du capot)
 
@@ -200,7 +201,21 @@
 
   <!-- Stats -->
   <div class="stats">
-    <div class="stat"><span>Température du ballon</span><strong>{ballonTemp}</strong></div>
+    <div class="stat">
+      <span>Température du ballon</span>
+      {#if cumulus.waterTempC !== null}
+        <button
+          type="button"
+          class="temp-link"
+          aria-label="Historique 4 h — eau chaude (ballon)"
+          onclick={() => openTempHistory('thermo_cumulus', 'Eau chaude (ballon)')}
+        >
+          <strong>{ballonTemp}</strong>
+        </button>
+      {:else}
+        <strong>{ballonTemp}</strong>
+      {/if}
+    </div>
     <div class="stat"><span>Dernier plein</span><strong>{lastFull}</strong></div>
     <div class="stat"><span>Consommé aujourd’hui</span><strong>{consoToday}</strong></div>
   </div>
@@ -331,6 +346,19 @@
     font-size: 13.5px;
     font-weight: 600;
     color: var(--color-fg);
+  }
+  /* Température cliquable → pop-up historique 4 h (conserve l'allure du <strong>). */
+  .temp-link {
+    appearance: none;
+    border: none;
+    background: none;
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+    -webkit-tap-highlight-color: transparent;
   }
 
   /* ── Bouton aide ── */

@@ -9,6 +9,7 @@
   import TabBar from '$components/layout/TabBar.svelte';
   import PullToRefresh from '$components/layout/PullToRefresh.svelte';
   import HealthBanner from '$components/layout/HealthBanner.svelte';
+  import TempHistorySheet from '$components/temperature/TempHistorySheet.svelte';
   import Pager from '$lib/pager/Pager.svelte';
   import { startDemoTicker, stopDemoTicker } from '$stores/demo-ticker.svelte';
   import { anker } from '$stores/anker.svelte';
@@ -253,6 +254,9 @@
   </main>
 
   <TabBar />
+
+  <!-- Pop-up global « historique de température 4 h » (piloté par openTempHistory) -->
+  <TempHistorySheet />
 </div>
 
 <style>

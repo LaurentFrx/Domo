@@ -6,6 +6,7 @@
   import { WALLS, ROOMS } from './maison-plan';
   import { zigbee } from '$stores/zigbee.svelte';
   import { acquire } from '$stores/refcount';
+  import { openTempHistory } from '$stores/temp-history.svelte';
 
   // Raycasting Threlte : clic/tap sur les sols de pièce.
   interactivity();
@@ -168,7 +169,20 @@
       <div class="room-label" class:is-selected={selected}>
         <span class="rl-name">{room.name}</span>
         {#if temp != null}
-          <span class="rl-temp">{fmtTemp(temp)}</span>
+          {@const sensor = ROOM_SENSOR[room.name]}
+          {#if sensor}
+            <button
+              type="button"
+              class="rl-temp rl-temp-btn"
+              aria-label={`Historique 4 h — ${room.name}`}
+              onclick={(e) => {
+                e.stopPropagation();
+                openTempHistory(sensor, room.name);
+              }}>{fmtTemp(temp)}</button
+            >
+          {:else}
+            <span class="rl-temp">{fmtTemp(temp)}</span>
+          {/if}
         {/if}
         {#if selected}
           <span class="rl-area">{room.area} m²</span>
@@ -204,6 +218,23 @@
   .rl-temp {
     font-weight: 700;
     color: var(--color-primary);
+  }
+  /* Le label porte pointer-events:none (overlay 3D) ; on RÉACTIVE le tap sur la
+     seule pastille de température → ouvre l'historique sans bloquer l'orbite. */
+  .rl-temp-btn {
+    pointer-events: auto;
+    cursor: pointer;
+    border: none;
+    background: none;
+    margin: 0;
+    padding: 0 1px;
+    font: inherit;
+    font-weight: 700;
+    color: var(--color-primary);
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+    -webkit-tap-highlight-color: transparent;
   }
   .rl-area {
     font-weight: 500;

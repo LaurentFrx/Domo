@@ -7,9 +7,11 @@
     name?: string;
     /** Compact : masque ZB / LQI en vue iPhone (réapparaissent dès sm). */
     compact?: boolean;
+    /** Si fourni, la tuile devient cliquable (ex. ouvrir l'historique 4 h). */
+    onActivate?: () => void;
   }
 
-  let { device, name, compact = false }: Props = $props();
+  let { device, name, compact = false, onActivate }: Props = $props();
 
   const displayName = $derived(name ?? device.friendlyName);
 
@@ -26,10 +28,17 @@
   );
 </script>
 
-<div
-  class="flex flex-col gap-1.5 rounded-[var(--radius-xl)] border p-3"
+<!-- Tuile : <div> par défaut, vrai <button> si cliquable (focus/clavier natifs). -->
+<svelte:element
+  this={onActivate ? 'button' : 'div'}
+  type={onActivate ? 'button' : undefined}
+  class="tile-root flex flex-col gap-1.5 rounded-[var(--radius-xl)] border p-3"
   class:opacity-50={!device.available}
+  class:tile-clickable={!!onActivate}
   style="background: var(--color-card); border-color: var(--color-border);"
+  role={onActivate ? 'button' : undefined}
+  aria-label={onActivate ? `Historique 4 h — ${displayName}` : undefined}
+  onclick={onActivate}
 >
   <div class="flex items-start justify-between gap-2">
     <span class="truncate text-[12px] leading-tight font-semibold" style="color: var(--color-fg);">
@@ -78,4 +87,17 @@
       <span class="tabular-nums">LQI {link}</span>
     </div>
   {/if}
-</div>
+</svelte:element>
+
+<style>
+  /* Variante <button> : neutralise les styles natifs, conserve l'allure de tuile. */
+  .tile-clickable {
+    appearance: none;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+</style>

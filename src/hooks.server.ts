@@ -68,6 +68,12 @@ export const handle: Handle = async ({ event, resolve }) => {
     return withApiCacheControl(pathname, await resolve(event));
   }
 
+  // Endpoint tick de la collecte de température : timer systemd en localhost,
+  // sans cookie. Auth par token (Bearer) appliquée dans la route. Match EXACT.
+  if (pathname === '/api/temperature/tick') {
+    return withApiCacheControl(pathname, await resolve(event));
+  }
+
   if (isAsset(pathname) || isPublic(pathname)) {
     return resolve(event);
   }

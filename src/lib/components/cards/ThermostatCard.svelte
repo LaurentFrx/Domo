@@ -13,6 +13,7 @@
   import { zigbee } from '$stores/zigbee.svelte';
   import { haptic } from '$utils/haptic';
   import ClimateDial from '$components/cards/ClimateDial.svelte';
+  import { openTempHistory } from '$stores/temp-history.svelte';
 
   // Échelle du cadran thermomètre (température ambiante d'une SdB).
   const SCALE_MIN = 10;
@@ -124,7 +125,16 @@
         title={thermostat.connected ? 'En ligne' : 'Hors ligne'}
         aria-hidden="true"
       ></span>
-      <span class="tw-name truncate">Salle de bain</span>
+      {#if roomTemp != null}
+        <button
+          type="button"
+          class="tw-name tw-name-btn truncate"
+          aria-label="Historique 4 h — salle de bain"
+          onclick={() => openTempHistory('Thermo SdB', 'Salle de bain')}>Salle de bain</button
+        >
+      {:else}
+        <span class="tw-name truncate">Salle de bain</span>
+      {/if}
     </div>
     <div class="flex shrink-0 items-center gap-2.5">
       <span class="tw-stat c">
@@ -272,6 +282,19 @@
     font-size: 15px;
     font-weight: 600;
     color: #eef5ff;
+  }
+  /* Nom cliquable → pop-up historique 4 h (cadran verrouillé, on cible le titre). */
+  .tw-name-btn {
+    appearance: none;
+    border: none;
+    background: none;
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+    -webkit-tap-highlight-color: transparent;
   }
   .tw-stat {
     display: inline-flex;

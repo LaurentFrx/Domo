@@ -1,0 +1,15 @@
+# Planifie la collecte de température toutes les 60 s.
+# Installation : voir l'en-tête de domo-temps.service.
+
+[Unit]
+Description=Planifie la collecte de température toutes les 60 s
+
+[Timer]
+# Laisse le service Domo démarrer après un boot avant le 1er tick.
+OnBootSec=90s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=domo-temps.service
+
+[Install]
+WantedBy=timers.target
