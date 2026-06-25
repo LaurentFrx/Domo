@@ -3,9 +3,19 @@
   import * as THREE from 'three';
   import { T, useThrelte } from '@threlte/core';
   import { OrbitControls, HTML, interactivity, type IntersectionEvent } from '@threlte/extras';
-  import { WALLS, ROOMS } from './maison-plan';
+  import { WALLS, ROOMS, FURNITURE } from './maison-plan';
   import { zigbee } from '$stores/zigbee.svelte';
   import { acquire } from '$stores/refcount';
+
+  // Teinte des silhouettes de mobilier par catégorie (sobres, façon Yeldra).
+  const FURN_COLOR: Record<string, string> = {
+    seat: '#8fa6cf', // assise
+    storage: '#c2a884', // rangement
+    appliance: '#9fb6bd', // électroménager
+    table: '#cbb892', // table
+    screen: '#6b7488', // écran / TV
+    other: '#a9a9bd' // autre
+  };
 
   // Raycasting Threlte : clic/tap sur les sols de pièce.
   interactivity();
@@ -156,6 +166,21 @@
         roughness={0.4}
         metalness={0}
         side={THREE.DoubleSide}
+      />
+    </T.Mesh>
+  {/each}
+
+  <!-- Mobilier en silhouettes : blocs translucides à la vraie position/taille,
+       teintés par catégorie. Léger (aucun asset, que des boîtes). -->
+  {#each FURNITURE as f, i (i)}
+    <T.Mesh position={[f.x, f.elev + f.h / 2, f.z]} rotation.y={-f.angle}>
+      <T.BoxGeometry args={[f.w, f.h, f.d]} />
+      <T.MeshStandardMaterial
+        color={FURN_COLOR[f.cat]}
+        transparent
+        opacity={0.55}
+        roughness={0.7}
+        metalness={0}
       />
     </T.Mesh>
   {/each}

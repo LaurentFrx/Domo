@@ -26,6 +26,22 @@ export type Opening = {
   elev: number;
   angle: number;
 };
+export type FurnitureCat = 'seat' | 'storage' | 'appliance' | 'table' | 'screen' | 'other';
+export type Furniture = {
+  name: string | null;
+  cat: FurnitureCat;
+  /** centre (m, monde) */
+  x: number;
+  z: number;
+  /** dimensions (m) */
+  w: number;
+  d: number;
+  h: number;
+  /** hauteur de la base au-dessus du sol (m) */
+  elev: number;
+  /** rotation autour de la verticale (rad, convention SH3D) */
+  angle: number;
+};
 
 export const WALL_HEIGHT = 2.5;
 export const FOOTPRINT: [number, number] = [11.041, 11.4481];
@@ -298,4 +314,359 @@ export const OPENINGS: Opening[] = [
   },
   { name: 'Porte', x: -0.5261, z: -0.473, w: 0.83, d: 0.175, h: 2.1, elev: 0.0, angle: 6.3 },
   { name: 'Porte', x: 2.0165, z: 4.8891, w: 1.1, d: 0.1, h: 1.7, elev: 0.0, angle: 0.0 }
+];
+
+export const FURNITURE: Furniture[] = [
+  {
+    name: 'Chauffeau électrique sur pied',
+    cat: 'appliance',
+    x: -1.372,
+    z: 1.883,
+    w: 0.55,
+    d: 0.55,
+    h: 1.5,
+    elev: 0.0,
+    angle: 3.1416
+  },
+  {
+    name: 'Air conditionné intérieur',
+    cat: 'appliance',
+    x: -5.2965,
+    z: -1.7761,
+    w: 0.885,
+    d: 0.198,
+    h: 0.285,
+    elev: 2.0,
+    angle: 4.7124
+  },
+  {
+    name: 'Panier à linge',
+    cat: 'other',
+    x: -0.1139,
+    z: -4.6335,
+    w: 0.55,
+    d: 0.3,
+    h: 0.674,
+    elev: 0.0,
+    angle: 0.0
+  },
+  {
+    name: 'Lave linge',
+    cat: 'appliance',
+    x: -0.0884,
+    z: -5.1236,
+    w: 0.59,
+    d: 0.601,
+    h: 0.842,
+    elev: 0.0,
+    angle: 4.7124
+  },
+  {
+    name: 'Réfrigérateur / Congélateur',
+    cat: 'appliance',
+    x: 2.1572,
+    z: -0.4972,
+    w: 0.6,
+    d: 0.66,
+    h: 1.9,
+    elev: 0.0,
+    angle: 0.0
+  },
+  {
+    name: 'Lavabo et meuble',
+    cat: 'appliance',
+    x: 0.4358,
+    z: -0.1965,
+    w: 0.5,
+    d: 0.35,
+    h: 0.76,
+    elev: 0.2,
+    angle: 1.5708
+  },
+  {
+    name: 'WC',
+    cat: 'appliance',
+    x: 0.2587,
+    z: 0.6017,
+    w: 0.4,
+    d: 0.8,
+    h: 0.62,
+    elev: 0.0,
+    angle: 3.1416
+  },
+  {
+    name: 'NiagaraFallsFrame',
+    cat: 'screen',
+    x: -5.385,
+    z: 0.6358,
+    w: 1.268,
+    d: 0.021,
+    h: 0.47,
+    elev: 1.15,
+    angle: 4.7124
+  },
+  {
+    name: 'BESTA+BURS+TV+bench+white',
+    cat: 'screen',
+    x: -2.2708,
+    z: 0.6701,
+    w: 1.8,
+    d: 0.42,
+    h: 0.491,
+    elev: 0.0,
+    angle: 1.5708
+  },
+  {
+    name: 'tv Panasonic',
+    cat: 'screen',
+    x: -2.1561,
+    z: 0.6921,
+    w: 1.269,
+    d: 0.13,
+    h: 0.699,
+    elev: 0.49,
+    angle: 4.7124
+  },
+  {
+    name: 'Table Knoll',
+    cat: 'table',
+    x: -3.2329,
+    z: -3.5872,
+    w: 1.2,
+    d: 1.2,
+    h: 0.731,
+    elev: 0.0,
+    angle: 0.0
+  },
+  {
+    name: 'Chaises tulipe Knoll',
+    cat: 'seat',
+    x: -3.2072,
+    z: -4.194,
+    w: 0.629,
+    d: 0.594,
+    h: 0.76,
+    elev: 0.0,
+    angle: 0.0
+  },
+  {
+    name: 'Chaises tulipe Knoll',
+    cat: 'seat',
+    x: -3.8754,
+    z: -3.5485,
+    w: 0.629,
+    d: 0.594,
+    h: 0.76,
+    elev: 0.0,
+    angle: 4.7124
+  },
+  {
+    name: 'Chaises tulipe Knoll',
+    cat: 'seat',
+    x: -2.5693,
+    z: -3.5485,
+    w: 0.629,
+    d: 0.594,
+    h: 0.76,
+    elev: 0.0,
+    angle: 1.5708
+  },
+  {
+    name: 'Chaises tulipe Knoll',
+    cat: 'seat',
+    x: -3.2224,
+    z: -2.9258,
+    w: 0.629,
+    d: 0.594,
+    h: 0.76,
+    elev: 0.0,
+    angle: 3.1416
+  },
+  {
+    name: 'Bibliotheque garnie',
+    cat: 'storage',
+    x: -3.9454,
+    z: -5.397,
+    w: 0.945,
+    d: 0.389,
+    h: 2.0,
+    elev: 0.0,
+    angle: 0.0
+  },
+  {
+    name: 'Bibliotheque garnie',
+    cat: 'storage',
+    x: -3.0232,
+    z: -5.397,
+    w: 0.945,
+    d: 0.389,
+    h: 2.0,
+    elev: 0.0,
+    angle: 0.0
+  },
+  {
+    name: 'Bibliotheque garnie',
+    cat: 'storage',
+    x: -2.101,
+    z: -5.397,
+    w: 0.945,
+    d: 0.389,
+    h: 2.0,
+    elev: 0.0,
+    angle: 0.0
+  },
+  {
+    name: 'Banquette entrée',
+    cat: 'seat',
+    x: 1.0455,
+    z: -1.9342,
+    w: 1.1,
+    d: 0.461,
+    h: 0.71,
+    elev: 0.005,
+    angle: 0.0
+  },
+  {
+    name: 'Buffet Salon',
+    cat: 'storage',
+    x: -0.8754,
+    z: -3.6644,
+    w: 1.6,
+    d: 0.473,
+    h: 0.887,
+    elev: 0.0,
+    angle: 1.5708
+  },
+  {
+    name: 'Love-seat',
+    cat: 'seat',
+    x: -3.4892,
+    z: -0.9225,
+    w: 1.5,
+    d: 1.178,
+    h: 0.859,
+    elev: 0.0,
+    angle: 0.0
+  },
+  {
+    name: 'Canapé Salon',
+    cat: 'seat',
+    x: -4.843,
+    z: 0.6054,
+    w: 1.105,
+    d: 2.055,
+    h: 0.85,
+    elev: 0.0,
+    angle: 0.0
+  },
+  {
+    name: 'Meuble haut de cuisine',
+    cat: 'storage',
+    x: 1.9246,
+    z: 1.9256,
+    w: 2.6,
+    d: 0.53,
+    h: 0.622,
+    elev: 1.86,
+    angle: 0.0
+  },
+  {
+    name: 'Meuble haut de cuisine',
+    cat: 'storage',
+    x: 0.3173,
+    z: 1.6167,
+    w: 1.08,
+    d: 0.73,
+    h: 0.6,
+    elev: 1.89,
+    angle: 1.5708
+  },
+  {
+    name: 'Vélo',
+    cat: 'other',
+    x: 1.5208,
+    z: 3.6296,
+    w: 0.545,
+    d: 1.9,
+    h: 1.1,
+    elev: 0.0,
+    angle: 3.1416
+  },
+  {
+    name: 'Vélo',
+    cat: 'other',
+    x: 2.4435,
+    z: 3.5784,
+    w: 0.545,
+    d: 1.9,
+    h: 1.1,
+    elev: 0.0,
+    angle: 3.1416
+  },
+  {
+    name: 'Table',
+    cat: 'table',
+    x: -1.2518,
+    z: 3.9408,
+    w: 1.7,
+    d: 1.0,
+    h: 0.73,
+    elev: 0.0,
+    angle: 0.0
+  },
+  {
+    name: 'Table',
+    cat: 'table',
+    x: 0.7333,
+    z: 3.4816,
+    w: 1.5,
+    d: 0.45,
+    h: 0.7,
+    elev: 0.0,
+    angle: 1.5708
+  },
+  {
+    name: 'Chaise',
+    cat: 'seat',
+    x: -4.7102,
+    z: 3.4212,
+    w: 1.5,
+    d: 0.7,
+    h: 0.734,
+    elev: 0.0,
+    angle: 0.0
+  },
+  {
+    name: 'Chaise',
+    cat: 'seat',
+    x: -3.6338,
+    z: 4.5212,
+    w: 1.5,
+    d: 0.7,
+    h: 0.734,
+    elev: 0.0,
+    angle: 1.5708
+  },
+  {
+    name: 'Chaise',
+    cat: 'seat',
+    x: -3.6594,
+    z: 3.4212,
+    w: 0.7,
+    d: 0.7,
+    h: 0.734,
+    elev: 0.0,
+    angle: 0.0
+  },
+  {
+    name: 'Table',
+    cat: 'table',
+    x: -4.6605,
+    z: 4.4534,
+    w: 0.7,
+    d: 0.7,
+    h: 0.4,
+    elev: 0.0,
+    angle: 0.0
+  }
 ];
