@@ -46,6 +46,9 @@ class ApsystemsState {
 
   #timer: ReturnType<typeof setInterval> | null = null;
   #visibilityHandler: (() => void) | null = null;
+  /** Cadence de poll courante (ms) ; boostée par setBoost() sur une page qui
+   *  regarde la prod en direct (accueil/comparatif), REFRESH_MS par défaut. */
+  #intervalMs: number = REFRESH_MS;
 
   // ─── Getters exposés au front ─────────────────────────────────────────
   /** Onduleur joignable et éveillé. */
@@ -103,13 +106,39 @@ class ApsystemsState {
   }
 
   #start() {
-    this.#timer ??= setInterval(() => this.poll(), REFRESH_MS);
+    this.#timer ??= setInterval(() => this.poll(), this.#intervalMs);
   }
 
   #stop() {
     if (this.#timer) {
       clearInterval(this.#timer);
       this.#timer = null;
+    }
+  }
+
+  /**
+   * Accélère la cadence de poll (ms). ⚠️ Ne PAS booster sous ~5 s : le bridge APS
+   * cache ~5 s (2,5 s = ~50 % de polls redondants + charge doublée inutile sur le
+   * tunnel 8100). À appeler en onMount, annuler via clearBoost() en onDestroy.
+   * #stop() AVANT #start() (le `??=` de #start sinon ne change pas la cadence).
+   */
+  setBoost(ms: number) {
+    if (ms === this.#intervalMs) return;
+    this.#intervalMs = ms;
+    if (this.#timer) {
+      this.#stop();
+      this.#start();
+    }
+    this.poll();
+  }
+
+  /** Restaure la cadence par défaut (REFRESH_MS). */
+  clearBoost() {
+    if (this.#intervalMs === REFRESH_MS) return;
+    this.#intervalMs = REFRESH_MS;
+    if (this.#timer) {
+      this.#stop();
+      this.#start();
     }
   }
 

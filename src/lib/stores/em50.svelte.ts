@@ -61,6 +61,10 @@ class Em50State {
 
   #timer: ReturnType<typeof setInterval> | null = null;
   #visibilityHandler: (() => void) | null = null;
+  /** Cadence de poll courante (ms). Boostée par setBoost() sur une page qui regarde
+   *  le réseau en direct (accueil / comparatif) ; REFRESH_MS par défaut. Le device
+   *  EM-50 est sub-seconde et SANS cache serveur → on peut le lire vite sans bridage. */
+  #intervalMs: number = REFRESH_MS;
 
   // ─── Getters exposés au front ─────────────────────────────────────────
   /** Compteur joignable (dernier poll réussi). */
@@ -138,13 +142,41 @@ class Em50State {
   }
 
   #start() {
-    this.#timer ??= setInterval(() => this.poll(), REFRESH_MS);
+    this.#timer ??= setInterval(() => this.poll(), this.#intervalMs);
   }
 
   #stop() {
     if (this.#timer) {
       clearInterval(this.#timer);
       this.#timer = null;
+    }
+  }
+
+  /**
+   * Accélère la cadence de poll (ms) tant qu'une page « regarde » le réseau en
+   * direct (accueil/comparatif). À appeler en onMount, à annuler via clearBoost()
+   * en onDestroy. #start() utilise `??=` → on #stop() AVANT #start() pour que la
+   * cadence change réellement ; le #visibilityHandler relit #intervalMs, donc le
+   * boost survit à un aller-retour arrière-plan. NE PAS mettre dans connect()
+   * (rappels idempotents app-wide).
+   */
+  setBoost(ms: number) {
+    if (ms === this.#intervalMs) return;
+    this.#intervalMs = ms;
+    if (this.#timer) {
+      this.#stop();
+      this.#start();
+    }
+    this.poll(); // tick immédiat : la 1re lecture rapide n'attend pas `ms`
+  }
+
+  /** Restaure la cadence par défaut (REFRESH_MS). */
+  clearBoost() {
+    if (this.#intervalMs === REFRESH_MS) return;
+    this.#intervalMs = REFRESH_MS;
+    if (this.#timer) {
+      this.#stop();
+      this.#start();
     }
   }
 

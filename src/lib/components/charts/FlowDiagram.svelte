@@ -34,6 +34,14 @@
     /** Conso cumulus (W, mesure EM-50) — sous-conso de la Maison, affichée à part
      *  quand il chauffe. 0 ⇒ pas de nœud Cumulus (rendu inchangé). */
     cumulusW?: number;
+    /**
+     * Pastille de fraîcheur sur le nœud Maison. La part de conso « tamponnée par la
+     * batterie » provient du cloud Solix (~60 s de retard) → on le signale honnêtement
+     * au lieu de le masquer. 'off' (défaut) = AUCUNE pastille (rendu historique,
+     * non-régression). 'live' = point vert (cloud frais). 'cloud-lag' = point ambre
+     * (snapshot cloud figé, à recaler). Strictement additif.
+     */
+    homeConfidence?: 'off' | 'live' | 'cloud-lag';
   }
 
   // Le Sankey utilise les puissances du bilan AC (+ le SoC pour l'état repos).
@@ -45,7 +53,8 @@
     batteryDischargeW,
     batterySoc,
     gridPowerW,
-    cumulusW = 0
+    cumulusW = 0,
+    homeConfidence = 'off'
   }: Props = $props();
 
   /** Format Watts (séparateur de milliers, espace fine). */
@@ -363,6 +372,25 @@
               style="font-size: 9.5px; font-weight: 500; fill: var(--color-muted-fg);">W</tspan
             ></text
           >
+          <!-- Pastille de fraîcheur Maison (additif ; rien si homeConfidence='off'). -->
+          {#if l.key === 'home' && homeConfidence !== 'off'}
+            <circle
+              cx={l.barX + BAR_W / 2}
+              cy={l.barY - 6}
+              r="3.5"
+              fill={homeConfidence === 'cloud-lag'
+                ? 'var(--color-warning)'
+                : 'var(--color-glow-bright)'}
+              stroke="var(--color-card)"
+              stroke-width="1.5"
+            >
+              <title
+                >{homeConfidence === 'cloud-lag'
+                  ? 'Conso Maison : donnée cloud Solix figée (> 75 s), à recaler.'
+                  : 'Conso Maison : la part absorbée par la batterie est estimée via le cloud Solix (~60 s de retard).'}</title
+              >
+            </circle>
+          {/if}
         {/each}
       {/if}
     </svg>

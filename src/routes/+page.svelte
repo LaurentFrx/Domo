@@ -1,5 +1,6 @@
 <script lang="ts">
   import FlowDiagram from '$components/charts/FlowDiagram.svelte';
+  import GridHero from '$components/charts/GridHero.svelte';
   import KpiCard from '$components/cards/KpiCard.svelte';
   import SavingsCard from '$components/cards/SavingsCard.svelte';
   import { anker } from '$stores/anker.svelte';
@@ -7,10 +8,13 @@
   import { savings } from '$stores/savings.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
   import { em50 } from '$stores/em50.svelte';
+  import { apsystems } from '$stores/apsystems.svelte';
   import { shelly } from '$stores/shelly.svelte';
   import { preferences } from '$stores/preferences.svelte';
+  import { pagerNav } from '$lib/pager/pager-nav.svelte';
   import { Tween } from 'svelte/motion';
   import { cubicOut } from 'svelte/easing';
+  import { onDestroy } from 'svelte';
 
   // ─── Source canonique : Anker quand connecté, mock sinon ─────────────
   // Tout en watts, signed (+ import / − export).
@@ -88,6 +92,65 @@
   // mesure Linky FIABLE, donc le bilan se referme correctement sans terme correctif.
   // Équilibre instantané ; pertes de conversion < 5 % ignorées.
   const homeA = $derived(Math.max(0, Math.round(pvA + gridA - batA)));
+
+  // ─── Réseau « en avant » + boost de réactivité local ─────────────────────────
+  // Le réseau EDF est le signal LOCAL le plus fiable et le plus actionnable quand
+  // on jongle avec les appareils → chiffre héros temps réel (GridHero, au-dessus du
+  // Sankey). On accélère em50/aps (2,5 s / 5 s) SEULEMENT quand l'accueil est la page
+  // CENTRALE du pager (pagerNav.current==='/' ; null = 1er paint hors pager = accueil)
+  // → pas de poll rapide en arrière-plan sur les autres pages. Anker JAMAIS boosté
+  // (mur cloud Solix ~60 s + risque de ban).
+  const homePageActive = $derived(pagerNav.current === null || pagerNav.current === '/');
+  $effect(() => {
+    if (homePageActive) {
+      em50.setBoost(2500);
+      apsystems.setBoost(5000);
+    } else {
+      em50.clearBoost();
+      apsystems.clearBoost();
+    }
+  });
+  onDestroy(() => {
+    em50.clearBoost();
+    apsystems.clearBoost();
+  });
+  const gridLive = $derived(em50.available);
+  // Réseau héros : mesure EM-50 brute (rapide) si dispo, sinon repli lissé (Linky).
+  const gridHeroW = $derived(em50.available ? em50.gridPowerW : gridA);
+
+  // ─── Fraîcheur de la part « batterie » de la conso (cloud Solix ~60 s) ───────
+  // La conso Maison mêle réseau (frais) et part SolarBank (cloud). Le snapshot Anker
+  // avance ~toutes les 60 s ; figé > 75 s ⇒ pastille ambre sur le nœud Maison (sinon
+  // verte). Tick visibility-aware : pas de timer fantôme en arrière-plan (PWA).
+  let nowMs = $state(Date.now());
+  $effect(() => {
+    let id: ReturnType<typeof setInterval> | null = null;
+    const start = () => void (id ??= setInterval(() => (nowMs = Date.now()), 1000));
+    const stop = () => {
+      if (id) {
+        clearInterval(id);
+        id = null;
+      }
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        nowMs = Date.now();
+        start();
+      } else stop();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    start();
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  });
+  const ANKER_STALE_MS = 75_000;
+  const homeConfidence = $derived.by<'live' | 'cloud-lag'>(() =>
+    anker.connected && anker.snapshotTs && nowMs - anker.snapshotTs * 1000 > ANKER_STALE_MS
+      ? 'cloud-lag'
+      : 'live'
+  );
 
   // ─── Énergie stockée en batterie (kWh) — pour la carte Batterie ───────
   const storedKwh = $derived(anker.totalBatteryEnergyWh / 1000);
@@ -303,17 +366,24 @@
     <!-- items-stretch : la colonne stats remplit la hauteur du Sankey carré (sinon
          un grand vide à droite sur desktop). -->
     <div class="grid gap-3.5 sm:gap-5 lg:grid-cols-2 lg:items-stretch">
-      <!-- Flow Diagram (carré centré, max 520px) -->
-      <FlowDiagram
-        pvSudW={pvSudA}
-        pvOuestW={pvOuestA}
-        homePowerW={homeA}
-        batteryChargeW={batChargeA}
-        batteryDischargeW={batDischargeA}
-        batterySoc={socA}
-        gridPowerW={gridA}
-        cumulusW={em50.cumulusPowerW}
-      />
+      <!-- Colonne gauche : Réseau EDF en avant (chiffre héros temps réel) + Sankey -->
+      <div class="flex flex-col gap-3.5 sm:gap-4">
+        <div class="mx-auto w-full" style="max-width: 520px;">
+          <GridHero gridPowerW={gridHeroW} live={gridLive} animate={animMs > 0} />
+        </div>
+        <!-- Flow Diagram (carré centré, max 520px) -->
+        <FlowDiagram
+          pvSudW={pvSudA}
+          pvOuestW={pvOuestA}
+          homePowerW={homeA}
+          batteryChargeW={batChargeA}
+          batteryDischargeW={batDischargeA}
+          batterySoc={socA}
+          gridPowerW={gridA}
+          cumulusW={em50.cumulusPowerW}
+          {homeConfidence}
+        />
+      </div>
 
       <!-- Colonne stats : remplit la hauteur du Sankey (justify-between) ─────── -->
       <div class="flex flex-col gap-4 lg:justify-between">
