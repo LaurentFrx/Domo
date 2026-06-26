@@ -1106,17 +1106,24 @@
   /* Bascule verticale Chaud (haut) / Froid (bas) — appui long pour changer. */
   .mode-toggle {
     position: relative;
-    width: 40px;
-    height: 86px;
+    width: 44px;
+    height: 88px; /* rectangle vertical : hauteur = 2 × largeur */
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: space-between;
     padding: 6px 0;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 20px;
-    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 15px; /* coins arrondis (pas un pill) */
+    /* Effet verre : translucide + flou d'arrière-plan + reflet haut. */
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03));
+    -webkit-backdrop-filter: blur(8px) saturate(1.15);
+    backdrop-filter: blur(8px) saturate(1.15);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.25),
+      inset 0 -9px 16px rgba(0, 0, 0, 0.3),
+      0 4px 12px rgba(0, 0, 0, 0.38);
     cursor: pointer;
     overflow: hidden;
     -webkit-tap-highlight-color: transparent;
@@ -1164,8 +1171,8 @@
     position: absolute;
     left: 4px;
     right: 4px;
-    height: 34px;
-    border-radius: 15px;
+    height: 38px;
+    border-radius: 12px;
     z-index: 1;
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -1175,12 +1182,12 @@
       border-color 220ms ease;
   }
   .mt-heat .mt-knob {
-    top: 4px;
+    top: 5px;
     background: rgba(255, 168, 80, 0.2);
     border-color: rgba(255, 180, 90, 0.42);
   }
   .mt-cool .mt-knob {
-    top: 48px;
+    top: 45px;
     background: rgba(60, 180, 255, 0.22);
     border-color: rgba(120, 200, 255, 0.44);
   }
