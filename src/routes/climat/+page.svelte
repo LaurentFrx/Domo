@@ -636,13 +636,15 @@
                   type="button"
                   data-no-haptic
                   class="gbtn"
+                  class:gbtn-dim={!zone.on}
+                  disabled={!zone.on}
                   aria-label="Baisser la consigne {zone.name}"
                   onclick={() => {
                     haptic('light');
                     airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) - (zone.tempStep ?? 0.5));
                   }}>−</button
                 >
-                <div class="dk-tgt">
+                <div class="dk-tgt" class:dk-tgt-off={!zone.on}>
                   <b
                     >{zone.setpoint !== null
                       ? zone.setpoint % 1
@@ -656,6 +658,8 @@
                   type="button"
                   data-no-haptic
                   class="gbtn"
+                  class:gbtn-dim={!zone.on}
+                  disabled={!zone.on}
                   aria-label="Monter la consigne {zone.name}"
                   onclick={() => {
                     haptic('light');
