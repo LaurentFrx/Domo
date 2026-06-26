@@ -13,7 +13,9 @@
   import { zigbee } from '$stores/zigbee.svelte';
   import { haptic } from '$utils/haptic';
   import ClimateDial from '$components/cards/ClimateDial.svelte';
+  import ClimateAura from '$components/climate/ClimateAura.svelte';
   import { openTempHistory } from '$stores/temp-history.svelte';
+  import { preferences } from '$stores/preferences.svelte';
 
   // Échelle du cadran thermomètre (température ambiante d'une SdB).
   const SCALE_MIN = 10;
@@ -47,6 +49,11 @@
 
   // Cadran : le sèche-serviette ne fait que chauffer → mode 'heating' quand allumé.
   const dialMode = $derived(isOn ? 'heating' : 'off');
+
+  // Aura d'arrière-plan (flamme uniquement — pas de froid en SdB) : visible quand
+  // allumé, fantôme quand éteint, vacille quand ça chauffe vraiment.
+  const animOn = $derived(preferences.animationsEnabled);
+  const auraColor = $derived(isOn ? 'var(--color-hp)' : 'var(--color-muted-fg)');
   const dialTarget = $derived(thermostat.targetTempC ?? SCALE_MIN);
   const cibleShown = $derived(
     thermostat.targetTempC != null
@@ -114,8 +121,10 @@
 </script>
 
 <section
-  class="tw-card relative flex flex-col gap-2 overflow-hidden rounded-[var(--radius-2xl)] p-2.5"
+  class="tw-card relative isolate flex flex-col gap-2 overflow-hidden rounded-[var(--radius-2xl)] p-2.5"
 >
+  <!-- Aura d'arrière-plan : flamme du sèche-serviette (jamais de froid). -->
+  <ClimateAura heat cool={false} on={isOn} demand={heating} animate={animOn} color={auraColor} />
   <!-- Haut, une ligne : nom · humidité + extérieur · toggle -->
   <header class="flex items-center justify-between gap-2">
     <div class="flex min-w-0 items-center gap-1.5">

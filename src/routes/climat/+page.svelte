@@ -8,6 +8,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { acquire } from '$stores/refcount';
   import ClimateDial from '$components/cards/ClimateDial.svelte';
+  import ClimateAura from '$components/climate/ClimateAura.svelte';
   import ZigbeeSensorTile from '$components/tiles/ZigbeeSensorTile.svelte';
   import ThermostatCard from '$components/cards/ThermostatCard.svelte';
   import { thermostat } from '$stores/thermostat.svelte';
@@ -209,9 +210,26 @@
         {@const TGT_MIN = 16}
         {@const TGT_MAX = 30}
         {@const active = unit.onOff && unit.operationMode !== 'off'}
+        {@const dHeat = unit.operationMode === 'heating'}
+        {@const dCool = unit.operationMode === 'cooling'}
+        {@const dAccent = dHeat
+          ? 'var(--color-hp)'
+          : dCool
+            ? 'var(--color-consumption)'
+            : 'var(--color-muted-fg)'}
         <article
-          class="dk-card relative flex flex-col gap-2 overflow-hidden rounded-[var(--radius-2xl)] p-2.5"
+          class="dk-card relative isolate flex flex-col gap-2 overflow-hidden rounded-[var(--radius-2xl)] p-2.5"
         >
+          <!-- Aura d'arrière-plan : flamme (chaud) / flocon (froid) ; s'anime quand
+               l'unité est en marche, fantôme quand éteinte. Sans froid si mode off. -->
+          <ClimateAura
+            heat={dHeat}
+            cool={dCool}
+            on={unit.onOff}
+            demand={unit.onOff && (dHeat || dCool)}
+            animate={animOn}
+            color={unit.onOff ? dAccent : 'var(--color-muted-fg)'}
+          />
           <!-- Haut, une ligne : nom · humidité + extérieur · toggle -->
           <header class="flex items-center justify-between gap-2">
             <div class="flex min-w-0 items-center gap-1.5">
