@@ -30,6 +30,7 @@
   onDestroy(() => {
     releases.forEach((r) => r());
     releases = [];
+    cancelModeHold();
   });
 
   // Animation des icônes de fond Airzone (flocon/flamme) — gated sur la préférence
@@ -64,24 +65,9 @@
   }
 
   // ─── Daikin ────────────────────────────────────────────────────────
-  // Sélecteur de mode = uniquement Chaud / Froid. L'allumage/extinction passe
-  // par l'interrupteur du header (onOffMode). 'off' reste un état possible de
-  // l'unité (affiché au centre de la jauge) mais n'est plus un bouton — éviter
-  // la redondance avec le toggle, et le faux « Off » que le bridge ignorait.
-  const operationModes: {
-    id: Exclude<DaikinOperationMode, 'off'>;
-    label: string;
-    color: string;
-    bg: string;
-  }[] = [
-    { id: 'heating', label: 'Chaud', color: 'var(--color-hp)', bg: 'var(--color-hp-muted)' },
-    {
-      id: 'cooling',
-      label: 'Froid',
-      color: 'var(--color-consumption)',
-      bg: 'var(--color-consumption-muted)'
-    }
-  ];
+  // Bascule de mode Chaud/Froid : un seul toggle vertical, changement par APPUI
+  // LONG (commande importante → anti-erreur). L'allumage/extinction passe par
+  // l'interrupteur du header.
   const fanSpeeds: { id: FanSpeed; label: string }[] = [
     { id: 'auto', label: 'Auto' },
     { id: 'quiet', label: 'Quiet' },
@@ -105,11 +91,33 @@
     haptic('light');
     daikin.setTargetDebounced(u.id, base + dir * TGT_STEP);
   }
-  // Sélecteur Chaud/Froid : un tap bascule le mode opérationnel.
+  // Bascule de mode appliquée (après appui long).
   function tapMode(u: DaikinUnit, mode: Exclude<DaikinOperationMode, 'off'>) {
     if (u.operationMode === mode) return;
     haptic('medium');
     daikin.setOperationMode(u.id, mode);
+  }
+
+  // ─── Appui long pour basculer Chaud ↔ Froid (commande importante) ──────────
+  let holdUnitId = $state<string | null>(null);
+  let holdTimer: ReturnType<typeof setTimeout> | null = null;
+  const MODE_HOLD_MS = 550;
+  function startModeHold(u: DaikinUnit) {
+    if (!u.online) return;
+    cancelModeHold();
+    holdUnitId = u.id;
+    holdTimer = setTimeout(() => {
+      holdUnitId = null;
+      holdTimer = null;
+      tapMode(u, u.operationMode === 'heating' ? 'cooling' : 'heating');
+    }, MODE_HOLD_MS);
+  }
+  function cancelModeHold() {
+    if (holdTimer) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+    holdUnitId = null;
   }
 
   function tapOnOff(u: DaikinUnit) {
@@ -155,6 +163,18 @@
     if (unit.zone === 'Séjour') return thermoByName('Thermo Salon');
     if (unit.zone === 'Salle de bain') return thermoByName('Thermo SdB');
     return null;
+  }
+
+  const finiteNum = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) ? v : null;
+  // Température extérieure = MOYENNE des sources disponibles (fallback si l'une
+  // manque) : « Terrasse Ouest » (Thermo_ext) · extérieur Daikin · prévision AROME.
+  function outdoorAvgFor(u: DaikinUnit): number | null {
+    const ext = finiteNum(thermoByName('Thermo_ext')?.state?.temperature);
+    const daik = u.online ? finiteNum(u.outdoorTempC) : null;
+    const arome = weather.connected ? finiteNum(weather.tempC) : null;
+    const vals = [ext, daik, arome].filter((v): v is number => v !== null);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }
 
   const conditionLabel: Record<string, string> = {
@@ -210,6 +230,7 @@
         {@const TGT_MIN = 16}
         {@const TGT_MAX = 30}
         {@const active = unit.onOff && unit.operationMode !== 'off'}
+        {@const outdoorAvg = outdoorAvgFor(unit)}
         {@const dHeat = unit.operationMode === 'heating'}
         {@const dCool = unit.operationMode === 'cooling'}
         {@const dAccent = dHeat
@@ -255,10 +276,13 @@
                 </svg>
                 {indoorH !== null ? `${Math.round(indoorH)}%` : '—'}
               </span>
-              <span class="dk-stat o">
+              <span
+                class="dk-stat o dk-out"
+                title="Extérieur — moyenne Terrasse Ouest · Daikin · prévision AROME"
+              >
                 <svg
-                  width="12"
-                  height="12"
+                  width="15"
+                  height="15"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -271,7 +295,7 @@
                     d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
                   />
                 </svg>
-                {unit.outdoorTempC.toFixed(1)}°
+                {outdoorAvg !== null ? outdoorAvg.toFixed(1) : '—'}°
               </span>
               <button
                 type="button"
@@ -359,57 +383,52 @@
                 : undefined}
             />
 
-            <div class="flex flex-col gap-1.5" role="group" aria-label="Mode Chaud / Froid">
-              {#each operationModes as m (m.id)}
-                {@const isActive = unit.operationMode === m.id}
-                <button
-                  type="button"
-                  data-no-haptic
-                  class="mi"
-                  class:on={isActive}
-                  class:warm={m.id === 'heating'}
-                  onclick={() => tapMode(unit, m.id)}
-                  disabled={!unit.online}
-                  aria-pressed={isActive}
-                  aria-label={m.label}
-                  title={m.label}
+            <!-- Bascule verticale Chaud (haut) / Froid (bas) — APPUI LONG pour
+                 changer (commande importante : on évite la bascule accidentelle). -->
+            <button
+              type="button"
+              data-no-haptic
+              class="mode-toggle"
+              class:mt-heat={dHeat}
+              class:mt-cool={dCool}
+              class:mt-holding={holdUnitId === unit.id}
+              style="--hold: {MODE_HOLD_MS}ms;"
+              disabled={!unit.online}
+              aria-label={`Mode ${dCool ? 'Froid' : 'Chaud'} — appui long pour changer`}
+              title="Appui long pour changer chaud / froid"
+              onpointerdown={() => startModeHold(unit)}
+              onpointerup={cancelModeHold}
+              onpointerleave={cancelModeHold}
+              onpointercancel={cancelModeHold}
+              oncontextmenu={(e) => e.preventDefault()}
+            >
+              <span class="mt-fill" aria-hidden="true"></span>
+              <span class="mt-knob" aria-hidden="true"></span>
+              <span class="mt-icon mt-top" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                  <path
+                    d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+                  />
+                </svg>
+              </span>
+              <span class="mt-icon mt-bot" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
                 >
-                  {#if m.id === 'heating'}
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      stroke="none"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
-                      />
-                    </svg>
-                  {:else}
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      aria-hidden="true"
-                    >
-                      <line x1="2" x2="22" y1="12" y2="12" />
-                      <line x1="12" x2="12" y1="2" y2="22" />
-                      <path d="m20 16-4-4 4-4" />
-                      <path d="m4 8 4 4-4 4" />
-                      <path d="m16 4-4 4-4-4" />
-                      <path d="m8 20 4-4 4 4" />
-                    </svg>
-                  {/if}
-                </button>
-              {/each}
-            </div>
+                  <line x1="2" x2="22" y1="12" y2="12" />
+                  <line x1="12" x2="12" y1="2" y2="22" />
+                  <path d="m20 16-4-4 4-4" />
+                  <path d="m4 8 4 4-4 4" />
+                  <path d="m16 4-4 4-4-4" />
+                  <path d="m8 20 4-4 4 4" />
+                </svg>
+              </span>
+            </button>
           </div>
 
           <!-- Barre consigne (métal) : − / valeur / + (débouncé) -->
@@ -1031,6 +1050,11 @@
   .dk-stat.o {
     color: #ffc46b;
   }
+  /* Température extérieure (moyenne 3 sources) — agrandie. */
+  .dk-stat.dk-out {
+    font-size: 18px;
+    gap: 4px;
+  }
 
   /* Boutons glossy bombés (oscillation + − / +) — reflet, AUCUN halo flou */
   .gbtn {
@@ -1079,41 +1103,116 @@
   }
 
   /* Sélecteur Chaud / Froid — boutons empilés (verre), cible tactile ≥ 44 px */
-  .mi {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+  /* Bascule verticale Chaud (haut) / Froid (bas) — appui long pour changer. */
+  .mode-toggle {
+    position: relative;
     width: 40px;
-    height: 40px;
-    min-width: 40px;
-    min-height: 40px;
-    padding: 0;
+    height: 86px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
     border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 11px;
+    border-radius: 20px;
     background: rgba(255, 255, 255, 0.04);
-    color: #8c9bb5;
-    font-size: 13px;
-    font-weight: 600;
     cursor: pointer;
+    overflow: hidden;
     -webkit-tap-highlight-color: transparent;
-    transition: all var(--duration-fast) var(--ease-default);
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: manipulation;
+    transition: border-color 200ms ease;
   }
-  .mi:active:not(:disabled) {
-    transform: scale(0.95);
-  }
-  .mi:disabled {
+  .mode-toggle:disabled {
     cursor: not-allowed;
     opacity: 0.5;
   }
-  .mi.on {
-    background: rgba(60, 180, 255, 0.2);
-    color: #9fe6ff;
-    border-color: rgba(120, 200, 255, 0.45);
+  .mt-icon {
+    position: relative;
+    z-index: 2;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #8c9bb5;
+    transition:
+      color 220ms ease,
+      opacity 220ms ease;
   }
-  .mi.warm.on {
-    background: rgba(255, 168, 80, 0.2);
+  .mt-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+  .mt-heat .mt-top {
     color: #ffce9a;
-    border-color: rgba(255, 180, 90, 0.45);
+  }
+  .mt-heat .mt-bot {
+    opacity: 0.32;
+  }
+  .mt-cool .mt-bot {
+    color: #9fe6ff;
+  }
+  .mt-cool .mt-top {
+    opacity: 0.32;
+  }
+  /* Pastille de sélection qui glisse vers le mode actif. */
+  .mt-knob {
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    height: 34px;
+    border-radius: 15px;
+    z-index: 1;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition:
+      top 300ms var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1)),
+      background 220ms ease,
+      border-color 220ms ease;
+  }
+  .mt-heat .mt-knob {
+    top: 4px;
+    background: rgba(255, 168, 80, 0.2);
+    border-color: rgba(255, 180, 90, 0.42);
+  }
+  .mt-cool .mt-knob {
+    top: 48px;
+    background: rgba(60, 180, 255, 0.22);
+    border-color: rgba(120, 200, 255, 0.44);
+  }
+  /* Remplissage de progression pendant l'appui long. */
+  .mt-fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 0;
+    z-index: 0;
+    background: rgba(255, 255, 255, 0.16);
+    pointer-events: none;
+  }
+  .mode-toggle.mt-holding .mt-fill {
+    animation: mt-rise var(--hold, 550ms) linear forwards;
+  }
+  @keyframes mt-rise {
+    from {
+      height: 0;
+    }
+    to {
+      height: 100%;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mt-knob {
+      transition: none;
+    }
+    .mode-toggle.mt-holding .mt-fill {
+      animation: none;
+    }
   }
 
   /* Barre consigne — métal brossé (marges verticales contenues) */
