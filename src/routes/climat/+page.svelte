@@ -229,6 +229,7 @@
             demand={unit.onOff && (dHeat || dCool)}
             animate={animOn}
             color={unit.onOff ? dAccent : 'var(--color-muted-fg)'}
+            leftPct={27}
           />
           <!-- Haut, une ligne : nom · humidité + extérieur · toggle -->
           <header class="flex items-center justify-between gap-2">

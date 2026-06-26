@@ -124,7 +124,15 @@
   class="tw-card relative isolate flex flex-col gap-2 overflow-hidden rounded-[var(--radius-2xl)] p-2.5"
 >
   <!-- Aura d'arrière-plan : flamme du sèche-serviette (jamais de froid). -->
-  <ClimateAura heat cool={false} on={isOn} demand={heating} animate={animOn} color={auraColor} />
+  <ClimateAura
+    heat
+    cool={false}
+    on={isOn}
+    demand={heating}
+    animate={animOn}
+    color={auraColor}
+    leftPct={27}
+  />
   <!-- Haut, une ligne : nom · humidité + extérieur · toggle -->
   <header class="flex items-center justify-between gap-2">
     <div class="flex min-w-0 items-center gap-1.5">

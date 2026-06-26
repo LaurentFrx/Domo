@@ -21,8 +21,10 @@
     animate?: boolean;
     /** Couleur de l'icône (accent quand on, muet quand off) — résolue par l'appelant. */
     color?: string;
-    /** Largeur de l'aura en % de la carte (défaut large : déborde le cadran central). */
+    /** Largeur de l'aura en % de la carte (défaut = taille des cartes Airzone). */
     widthPct?: number;
+    /** Position horizontale du centre en % (50 = centré ; <50 décale à gauche). */
+    leftPct?: number;
   }
   let {
     heat = false,
@@ -31,7 +33,8 @@
     demand = false,
     animate = false,
     color = 'var(--color-muted-fg)',
-    widthPct = 58
+    widthPct = 30,
+    leftPct = 50
   }: Props = $props();
 </script>
 
@@ -46,7 +49,7 @@
     stroke-width="1.5"
     stroke-linecap="round"
     stroke-linejoin="round"
-    style="color: {color}; opacity: {on ? 0.5 : 0.12}; width: {widthPct}%;"
+    style="color: {color}; opacity: {on ? 0.5 : 0.12}; width: {widthPct}%; left: {leftPct}%;"
     aria-hidden="true"
   >
     {#if cool}
@@ -67,7 +70,6 @@
 <style>
   .aura {
     position: absolute;
-    left: 50%;
     top: 50%;
     height: auto;
     transform: translate(-50%, -50%);
