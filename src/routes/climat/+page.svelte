@@ -527,14 +527,6 @@
                 <span class="text-[14px] font-semibold" style="color: #eef5ff;">
                   {zone.name}
                 </span>
-                {#if zone.demand}
-                  <span
-                    class="rounded-full px-1.5 py-0.5 text-[8px] font-semibold tracking-[0.06em] uppercase"
-                    style="color: {accent}; background: color-mix(in oklab, {accent} 18%, transparent);"
-                  >
-                    actif
-                  </span>
-                {/if}
               </div>
               <div class="flex shrink-0 items-center gap-2">
                 {#if zone.isMaster}
