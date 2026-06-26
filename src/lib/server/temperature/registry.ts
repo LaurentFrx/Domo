@@ -63,3 +63,23 @@ export function isValidSensorKey(key: string): boolean {
   // Zones Airzone : nombre de zones dynamique selon l'installation.
   return /^airzone:\d+$/.test(key);
 }
+
+/**
+ * Zone de confort [min, max] °C par capteur — sert à COLORER la courbe selon
+ * l'état (trop froid / confortable / trop chaud) et non la seule température
+ * absolue. Valeurs indicatives, faciles à ajuster.
+ */
+export function comfortBand(key: string): [number, number] {
+  if (key === 'thermo_cumulus') return [50, 62]; // eau chaude sanitaire souhaitée
+  if (key === 'Thermo SdB') return [21, 25]; // salle de bain (un peu plus chaud)
+  if (key === 'Thermo Garage') return [15, 23]; // atelier / garage (tolérant)
+  if (
+    key === 'Thermo_ext' ||
+    key === 'Thermo_velos' ||
+    key === 'meteo:sanguinet' ||
+    key === 'daikin:outdoor'
+  ) {
+    return [16, 26]; // extérieur : plage de ressenti agréable
+  }
+  return [19, 24]; // pièces de vie (Thermo Salon, zones Airzone…)
+}

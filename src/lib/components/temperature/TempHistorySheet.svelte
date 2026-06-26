@@ -2,15 +2,21 @@
   /**
    * Pop-up « historique de température 4 h » — monté UNE fois dans le layout,
    * piloté par le store global `tempHistory`. Trace la courbe des 4 dernières
-   * heures (lissée, d3-shape via $utils/chart) + repères min / max / actuel.
+   * heures + repères min / max / actuel.
    *
-   * Données : GET /api/temperature/history (recollectées à chaque ouverture).
-   * Couleur chaud↔froid interpolée en oklch LITTÉRAL (Safari iOS : jamais de
-   * color-mix). Vide juste après un déploiement (l'historique se constitue).
+   * - Série LISSÉE (moyenne glissante `smoothSeries`) avant tracé → courbe
+   *   dérivable, sans « escalier » (les sondes tiennent leur valeur entre deux
+   *   événements, d'où des marches dans le brut).
+   * - Couleur = ÉTAT de CONFORT (pas la seule température absolue) : un dégradé
+   *   le long de la courbe va du froid (cyan) au confort (vert) au chaud
+   *   (corail), centré sur la zone de confort du capteur (renvoyée par l'API).
+   *   oklch LITTÉRAL, chroma toujours élevé (Safari iOS, jamais d'ocre terne).
+   *
+   * Vide juste après un déploiement (l'historique se constitue).
    */
   import BottomSheet from '$components/ui/BottomSheet.svelte';
   import { tempHistory } from '$stores/temp-history.svelte';
-  import { smoothLinePath, smoothAreaPath, type XY } from '$utils/chart';
+  import { smoothLinePath, smoothAreaPath, smoothSeries, type XY } from '$utils/chart';
 
   // Géométrie SVG (viewBox étiré, stroke non-scaling — modèle page Énergie).
   const SVG_W = 300;
@@ -23,6 +29,8 @@
   let loading = $state(false);
   let error = $state(false);
   let points = $state<Pt[]>([]);
+  // Zone de confort [min, max] °C du capteur (centre du dégradé). Défaut = pièce.
+  let band = $state<[number, number]>([19, 24]);
 
   // Recharge à chaque ouverture (la fenêtre glisse, les données changent).
   $effect(() => {
@@ -36,9 +44,13 @@
       signal: ac.signal
     })
       .then(async (r) => {
-        const d = (await r.json().catch(() => ({}))) as { points?: Pt[] };
+        const d = (await r.json().catch(() => ({}))) as {
+          points?: Pt[];
+          comfort?: [number, number];
+        };
         if (!r.ok) throw new Error('http');
         points = Array.isArray(d.points) ? d.points : [];
+        if (Array.isArray(d.comfort) && d.comfort.length === 2) band = d.comfort;
       })
       .catch((e) => {
         if ((e as Error).name !== 'AbortError') error = true;
@@ -68,47 +80,60 @@
     const tMin = valid[0].ts;
     const tMax = valid[valid.length - 1].ts;
     const tSpan = Math.max(1, tMax - tMin);
-    const cs = valid.map((p) => p.c);
+    // Lissage : transforme les marches (sample-and-hold) en pentes douces.
+    // Fenêtre adaptée à la densité (≈11 points autour), bornée pour rester réactif.
+    const half = Math.max(1, Math.min(5, Math.round(valid.length / 24)));
+    const cs = smoothSeries(
+      valid.map((p) => p.c),
+      half
+    );
     let lo = Math.min(...cs);
     let hi = Math.max(...cs);
     const pad = Math.max(0.5, (hi - lo) * 0.18);
     lo -= pad;
     hi += pad;
     const cSpan = Math.max(0.1, hi - lo);
-    const xy: XY[] = valid.map((p) => ({
+    const xy: XY[] = valid.map((p, i) => ({
       x: ((p.ts - tMin) / tSpan) * SVG_W,
-      y: BASE_Y - ((p.c - lo) / cSpan) * CHART_H
+      y: BASE_Y - ((cs[i] - lo) / cSpan) * CHART_H
     }));
-    return { tMin, tMax, line: smoothLinePath(xy), area: smoothAreaPath(xy, BASE_Y) };
+    return { tMin, tMax, lo, hi, line: smoothLinePath(xy), area: smoothAreaPath(xy, BASE_Y) };
   });
 
-  // Rampe chaud↔froid 100 % accents de la charte (lumineux, jamais d'ocre
-  // terne) : cyan → lime → ambre → mandarine → corail. Interpolation oklch
-  // DIRECTE, chroma toujours élevé (≥0.15) ⇒ teintes vives. Les valeurs sont
-  // celles des tokens app.css (--color-cyan/lime/ambre/mandarine/hp).
-  const TEMP_STOPS: [number, number, number, number][] = [
-    [2, 0.82, 0.15, 200], // cyan — glacial
-    [10, 0.86, 0.2, 128], // lime — froid
-    [17, 0.84, 0.18, 78], // ambre — frais
-    [25, 0.8, 0.2, 60], // mandarine — confort
-    [40, 0.74, 0.19, 30] // corail — très chaud (eau, canicule)
-  ];
-  function tempColor(t: number): string {
-    const s = TEMP_STOPS;
-    if (t <= s[0][0]) return `oklch(${s[0][1]} ${s[0][2]} ${s[0][3]})`;
-    const last = s[s.length - 1];
-    if (t >= last[0]) return `oklch(${last[1]} ${last[2]} ${last[3]})`;
-    let i = 0;
-    while (t > s[i + 1][0]) i++;
-    const [t0, l0, c0, h0] = s[i];
-    const [t1, l1, c1, h1] = s[i + 1];
-    const f = (t - t0) / (t1 - t0);
-    const L = l0 + f * (l1 - l0);
-    const C = c0 + f * (c1 - c0);
-    const H = h0 + f * (h1 - h0);
-    return `oklch(${L.toFixed(3)} ${C.toFixed(3)} ${H.toFixed(1)})`;
+  // ─── Couleur = ÉTAT de CONFORT ────────────────────────────────────────────
+  // Centre = vert lumineux (dans la zone de confort) ; glisse vers cyan quand
+  // c'est trop froid, vers corail quand c'est trop chaud. Tous accents charte,
+  // chroma ≥0.15 (jamais d'ocre terne). Interp oklch L/C/H linéaire.
+  type LCH = [number, number, number];
+  const C_COMFORT: LCH = [0.84, 0.19, 150]; // vert lumineux
+  const C_COLD: LCH = [0.8, 0.15, 205]; // cyan
+  const C_HOT: LCH = [0.75, 0.19, 32]; // corail
+  function lch(c: LCH): string {
+    return `oklch(${c[0]} ${c[1]} ${c[2]})`;
   }
-  const color = $derived(stats ? tempColor(stats.current) : 'var(--color-primary)');
+  function mix(a: LCH, b: LCH, f: number): string {
+    const g = Math.max(0, Math.min(1, f));
+    return `oklch(${(a[0] + g * (b[0] - a[0])).toFixed(3)} ${(a[1] + g * (b[1] - a[1])).toFixed(3)} ${(a[2] + g * (b[2] - a[2])).toFixed(1)})`;
+  }
+  function comfortColor(t: number): string {
+    const [cmin, cmax] = band;
+    if (t < cmin) return mix(C_COMFORT, C_COLD, (cmin - t) / 7);
+    if (t > cmax) return mix(C_COMFORT, C_HOT, (t - cmax) / 9);
+    return lch(C_COMFORT);
+  }
+  const color = $derived(stats ? comfortColor(stats.current) : 'var(--color-primary)');
+
+  // Arrêts du dégradé vertical (userSpaceOnUse) : la couleur suit la TEMPÉRATURE
+  // (axe Y), pas l'instant → chaque portion de courbe prend sa teinte d'état.
+  const gradStops = $derived.by(() => {
+    if (!geom) return [];
+    const N = 14;
+    return Array.from({ length: N + 1 }, (_, k) => {
+      const off = k / N; // 0 = haut (hi) … 1 = bas (lo)
+      const t = geom.hi - off * (geom.hi - geom.lo);
+      return { offset: +(off * 100).toFixed(1), color: comfortColor(t) };
+    });
+  });
 
   const fmtC = (t: number) => `${t.toFixed(1).replace('.', ',')} °C`;
   function fmtTime(ts: number): string {
@@ -172,12 +197,28 @@
       role="img"
       aria-label="Courbe de température des 4 dernières heures"
     >
-      <path d={geom.area} fill={color} opacity="0.16" />
+      <defs>
+        <!-- Dégradé d'état : froid (haut/bas selon T) → confort → chaud, mappé
+             sur l'axe température (userSpaceOnUse → partagé courbe + aire). -->
+        <linearGradient
+          id="thGrad"
+          gradientUnits="userSpaceOnUse"
+          x1="0"
+          y1={TOP_Y}
+          x2="0"
+          y2={BASE_Y}
+        >
+          {#each gradStops as s (s.offset)}
+            <stop offset="{s.offset}%" stop-color={s.color} />
+          {/each}
+        </linearGradient>
+      </defs>
+      <path d={geom.area} fill="url(#thGrad)" opacity="0.18" />
       <path
         d={geom.line}
         fill="none"
-        stroke={color}
-        stroke-width="2"
+        stroke="url(#thGrad)"
+        stroke-width="2.25"
         stroke-linecap="round"
         stroke-linejoin="round"
         vector-effect="non-scaling-stroke"

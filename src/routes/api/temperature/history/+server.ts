@@ -10,7 +10,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { querySeries } from '$lib/server/temperature/db';
-import { isValidSensorKey } from '$lib/server/temperature/registry';
+import { isValidSensorKey, comfortBand } from '$lib/server/temperature/registry';
 
 export const GET: RequestHandler = async ({ url }) => {
   const sensor = url.searchParams.get('sensor') ?? '';
@@ -24,7 +24,7 @@ export const GET: RequestHandler = async ({ url }) => {
 
   try {
     const points = querySeries(sensor, since);
-    return json({ sensor, points });
+    return json({ sensor, points, comfort: comfortBand(sensor) });
   } catch (e) {
     console.error('[temps/history] DB error:', e instanceof Error ? e.message : e);
     return json({ points: [], error: 'database_unavailable' }, { status: 503 });
