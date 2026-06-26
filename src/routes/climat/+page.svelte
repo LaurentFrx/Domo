@@ -1069,13 +1069,13 @@
       inset 0 -8px 12px rgba(0, 0, 0, 0.45);
   }
   .gbtn.osc {
-    width: 40px;
-    height: 40px;
-    border-radius: 11px;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
   }
   .gbtn.osc svg {
-    width: 18px;
-    height: 18px;
+    width: 15px;
+    height: 15px;
   }
 
   /* Sélecteur Chaud / Froid — boutons empilés (verre), cible tactile ≥ 44 px */
