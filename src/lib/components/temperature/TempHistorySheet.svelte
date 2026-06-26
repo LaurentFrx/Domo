@@ -82,11 +82,31 @@
     return { tMin, tMax, line: smoothLinePath(xy), area: smoothAreaPath(xy, BASE_Y) };
   });
 
-  /** Teinte chaud↔froid (oklch littéral) : ~8 °C froid (hue 210) → ~28 °C chaud (hue 30). */
+  // Rampe chaud↔froid 100 % accents de la charte (lumineux, jamais d'ocre
+  // terne) : cyan → lime → ambre → mandarine → corail. Interpolation oklch
+  // DIRECTE, chroma toujours élevé (≥0.15) ⇒ teintes vives. Les valeurs sont
+  // celles des tokens app.css (--color-cyan/lime/ambre/mandarine/hp).
+  const TEMP_STOPS: [number, number, number, number][] = [
+    [2, 0.82, 0.15, 200], // cyan — glacial
+    [10, 0.86, 0.2, 128], // lime — froid
+    [17, 0.84, 0.18, 78], // ambre — frais
+    [25, 0.8, 0.2, 60], // mandarine — confort
+    [40, 0.74, 0.19, 30] // corail — très chaud (eau, canicule)
+  ];
   function tempColor(t: number): string {
-    const f = Math.max(0, Math.min(1, (t - 8) / 20));
-    const hue = Math.round(210 + f * (30 - 210));
-    return `oklch(0.72 0.17 ${hue})`;
+    const s = TEMP_STOPS;
+    if (t <= s[0][0]) return `oklch(${s[0][1]} ${s[0][2]} ${s[0][3]})`;
+    const last = s[s.length - 1];
+    if (t >= last[0]) return `oklch(${last[1]} ${last[2]} ${last[3]})`;
+    let i = 0;
+    while (t > s[i + 1][0]) i++;
+    const [t0, l0, c0, h0] = s[i];
+    const [t1, l1, c1, h1] = s[i + 1];
+    const f = (t - t0) / (t1 - t0);
+    const L = l0 + f * (l1 - l0);
+    const C = c0 + f * (c1 - c0);
+    const H = h0 + f * (h1 - h0);
+    return `oklch(${L.toFixed(3)} ${C.toFixed(3)} ${H.toFixed(1)})`;
   }
   const color = $derived(stats ? tempColor(stats.current) : 'var(--color-primary)');
 
@@ -152,7 +172,7 @@
       role="img"
       aria-label="Courbe de température des 4 dernières heures"
     >
-      <path d={geom.area} fill={color} opacity="0.12" />
+      <path d={geom.area} fill={color} opacity="0.16" />
       <path
         d={geom.line}
         fill="none"
