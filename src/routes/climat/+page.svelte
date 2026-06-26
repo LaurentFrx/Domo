@@ -1083,9 +1083,11 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 56px;
-    min-height: 44px;
-    padding: 6px 12px;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    padding: 0;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 11px;
     background: rgba(255, 255, 255, 0.04);
