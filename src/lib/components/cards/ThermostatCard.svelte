@@ -9,7 +9,6 @@
    * Pilote le daemon thermostat-bridge via le store `thermostat`.
    */
   import { thermostat, type ThermostatPreset } from '$stores/thermostat.svelte';
-  import { weather } from '$stores/weather.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
   import { haptic } from '$utils/haptic';
   import ClimateDial from '$components/cards/ClimateDial.svelte';
@@ -45,7 +44,6 @@
   // Marche/arrêt du thermostat (≠ relais) : « éteint » = preset Arrêt / Hors-gel.
   const isOff = $derived(thermostat.activePreset === 'off' || thermostat.activePreset === 'frost');
   const isOn = $derived(thermostat.connected && !isOff);
-  const outdoor = $derived(thermostat.outdoorTempC ?? weather.tempC);
 
   // Cadran : le sèche-serviette ne fait que chauffer → mode 'heating' quand allumé.
   const dialMode = $derived(isOn ? 'heating' : 'off');
@@ -150,24 +148,6 @@
           <path d="M12 2.5C12 2.5 6 9.5 6 14a6 6 0 0 0 12 0C18 9.5 12 2.5 12 2.5Z" />
         </svg>
         {roomHum != null ? `${Math.round(roomHum)}%` : '—'}
-      </span>
-      <span class="tw-stat o">
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          aria-hidden="true"
-        >
-          <circle cx="12" cy="12" r="4" />
-          <path
-            d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
-          />
-        </svg>
-        {outdoor != null ? `${outdoor.toFixed(1)}°` : '—'}
       </span>
       <button
         type="button"
@@ -304,9 +284,6 @@
   }
   .tw-stat.c {
     color: #7fdcff;
-  }
-  .tw-stat.o {
-    color: #ffc46b;
   }
 
   /* Presets Éco / Confort / Boost — boutons empilés (verre) */
