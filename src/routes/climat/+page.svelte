@@ -458,11 +458,10 @@
             ? 'var(--color-consumption)'
             : 'var(--color-muted-fg)'}
         {@const iconColor = !zone.on ? 'var(--color-muted-fg)' : accent}
+        <!-- Fond « instrument verre sombre » repris de la carte Séjour (.dk-card) :
+             dégradé sombre + bordure bleu pâle + ombre profonde + texte clair. -->
         <article
-          class="az-zone relative flex flex-col gap-2.5 overflow-hidden rounded-[var(--radius-xl)] border p-4"
-          style="background: var(--color-card); border-color: {zone.on
-            ? accent
-            : 'var(--color-border)'};"
+          class="az-zone dk-card relative flex flex-col gap-2.5 overflow-hidden rounded-[var(--radius-2xl)] p-4"
         >
           <!-- Icône de fond = fonction qui s'activera à l'allumage (flocon = froid,
                flamme = chaud) selon le mode système piloté par Parents ; grise en
@@ -506,7 +505,7 @@
                   title={airzone.connected ? 'Système en ligne' : 'Système hors ligne'}
                   aria-hidden="true"
                 ></span>
-                <span class="text-[14px] font-semibold" style="color: var(--color-fg);">
+                <span class="text-[14px] font-semibold" style="color: #eef5ff;">
                   {zone.name}
                 </span>
                 {#if zone.demand}
@@ -605,27 +604,23 @@
                   >
                     <span
                       class="text-[32px] leading-none font-bold tabular-nums"
-                      style="color: var(--color-fg); letter-spacing: -0.02em;"
+                      style="color: #eaf3ff; letter-spacing: -0.02em;"
                     >
                       {zone.roomTemp.toFixed(1)}
                     </span>
-                    <span class="text-[14px] font-medium" style="color: var(--color-muted-fg);"
-                      >°C</span
-                    >
+                    <span class="text-[14px] font-medium" style="color: #9ec2d8;">°C</span>
                   </button>
                 {:else}
                   <div class="flex items-baseline gap-0.5">
                     <span
                       class="text-[32px] leading-none font-bold tabular-nums"
-                      style="color: var(--color-fg); letter-spacing: -0.02em;">—</span
+                      style="color: #eaf3ff; letter-spacing: -0.02em;">—</span
                     >
-                    <span class="text-[14px] font-medium" style="color: var(--color-muted-fg);"
-                      >°C</span
-                    >
+                    <span class="text-[14px] font-medium" style="color: #9ec2d8;">°C</span>
                   </div>
                 {/if}
                 {#if zone.humidity !== null}
-                  <span class="text-[13px] tabular-nums" style="color: var(--color-consumption);">
+                  <span class="text-[13px] tabular-nums" style="color: #7fdcff;">
                     {Math.round(zone.humidity)}%
                   </span>
                 {/if}
