@@ -8,10 +8,12 @@
   import ZigbeeGenericTile from '$components/tiles/ZigbeeGenericTile.svelte';
   import PrinterTile from '$components/tiles/PrinterTile.svelte';
   import FindMyCard from '$components/cards/FindMyCard.svelte';
+  import WledCard from '$components/cards/WledCard.svelte';
   import { printer } from '$stores/printer.svelte';
   import { matter } from '$stores/matter.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
   import { findmy } from '$stores/findmy.svelte';
+  import { wled } from '$stores/wled.svelte';
   import { acquire } from '$stores/refcount';
   import { haptic } from '$utils/haptic';
 
@@ -19,7 +21,7 @@
   // voisines du pager sans couper le polling au démontage de l'une d'elles.
   let releases: (() => void)[] = [];
   onMount(() => {
-    releases = [acquire(matter), acquire(zigbee), acquire(printer), acquire(findmy)];
+    releases = [acquire(matter), acquire(zigbee), acquire(printer), acquire(findmy), acquire(wled)];
   });
 
   onDestroy(() => {
@@ -295,6 +297,10 @@
       </div>
     {/if}
   {/if}
+
+  <!-- ═══ Éclairage terrasse (WLED — QuinLed Dig-Uno) — indépendant de Matter,
+       donc HORS du bloc conditionnel ci-dessus (toujours visible). ═══ -->
+  <WledCard />
 
   <!-- ═══ Appareils Apple « Localiser » (findmy-bridge → MQTT) — bas de page ═══ -->
   <FindMyCard />
