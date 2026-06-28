@@ -284,9 +284,12 @@ const state: MockState = {
   seg: [
     {
       id: 0,
+      // Défaut = mode « Ensemble » : segment unique sur TOUTE la longueur
+      // (Store + SàM), pour des effets continus. Le mode « Par ligne » re-scinde
+      // en deux segments via un POST seg start/stop (cf. store setScope).
       start: 0,
-      stop: SEG_STORE_LEN,
-      len: SEG_STORE_LEN,
+      stop: SEG_STORE_LEN + SEG_SAM_LEN,
+      len: SEG_STORE_LEN + SEG_SAM_LEN,
       grp: 1,
       spc: 0,
       of: 0,
@@ -294,7 +297,7 @@ const state: MockState = {
       frz: false,
       bri: 255,
       cct: 127,
-      n: 'Store',
+      n: 'Terrasse',
       // COB RGBW 4000K : par défaut, blanc propre via le canal W (RGB à 0).
       col: [
         [0, 0, 0, 220],
@@ -319,9 +322,10 @@ const state: MockState = {
     },
     {
       id: 1,
-      start: SEG_STORE_LEN,
+      // Désactivé par défaut (len 0) ; réactivé en mode « Par ligne ».
+      start: SEG_STORE_LEN + SEG_SAM_LEN,
       stop: SEG_STORE_LEN + SEG_SAM_LEN,
-      len: SEG_SAM_LEN,
+      len: 0,
       grp: 1,
       spc: 0,
       of: 0,
@@ -425,6 +429,11 @@ function buildInfo() {
 function mergeSeg(seg: MockSeg, p: Record<string, unknown>): void {
   if (p.on === true || p.on === false) seg.on = p.on;
   else if (p.on === 't') seg.on = !seg.on;
+  // Bornes du segment (fusion/séparation des lignes) → recalcule la longueur.
+  if (typeof p.start === 'number') seg.start = clampInt(p.start, 0, 100000, seg.start);
+  if (typeof p.stop === 'number') seg.stop = clampInt(p.stop, 0, 100000, seg.stop);
+  if (typeof p.start === 'number' || typeof p.stop === 'number')
+    seg.len = Math.max(0, seg.stop - seg.start);
   if (typeof p.bri === 'number') seg.bri = clampInt(p.bri, 0, 255, seg.bri);
   if (typeof p.fx === 'number') seg.fx = clampInt(p.fx, 0, WLED_EFFECTS.length - 1, seg.fx);
   if (typeof p.pal === 'number') seg.pal = clampInt(p.pal, 0, WLED_PALETTES.length - 1, seg.pal);

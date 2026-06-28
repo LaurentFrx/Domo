@@ -2,30 +2,46 @@
   /**
    * Carte de contrôle de l'éclairage terrasse (WLED — QuinLed Dig-Uno V3).
    *
-   * Ruban COB RGBW 4000K : canal blanc dédié (slider « Blanc 4000K ») + teinte
-   * RGB (picker avec saturation). Aperçu visuel live en tête (WledPreview).
+   * Pensée pour un usage SIMPLE au quotidien :
+   *   - Mode « Ensemble » (défaut) : la terrasse pilotée comme UNE seule lumière
+   *     (segment WLED unique sur toute la longueur → effets coordonnés qui se
+   *     déroulent sur les deux lignes). Visibles : on/off, luminosité, ambiances.
+   *     Couleur / effet / réglages fins sont repliés sous « Personnaliser ».
+   *   - Mode « Par ligne » (repliable) : deux segments indépendants (Store / SàM).
+   * Le sélecteur [Ensemble | Par ligne] reconfigure réellement les segments WLED
+   * (fusion ↔ séparation) via wled.setScope.
    *
-   * Deux segments = deux lignes LED : « Store » (bras du store banne) et
-   * « SàM Été » (véranda). Maître (on/off + luminosité), ambiances rapides, puis
-   * par segment : on/off, luminosité, blanc, couleur, effet (liste curée FR +
-   * tous repliable), et réglages avancés (palette, vitesse, intensité).
+   * Ruban COB RGBW 4000K : canal blanc dédié + teinte RGB (picker avec saturation).
    */
-  import { wled, WLED_AMBIANCES, previewColor, type RGB } from '$stores/wled.svelte';
+  import {
+    wled,
+    WLED_AMBIANCES,
+    previewColor,
+    type RGB,
+    type WledSegment
+  } from '$stores/wled.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import WledColorPicker from './WledColorPicker.svelte';
   import WledPreview from './WledPreview.svelte';
   import { haptic } from '$utils/haptic';
 
   let selectedId = $state(0);
+  let showCustom = $state(false);
   let showAllFx = $state(false);
   let showAdvanced = $state(false);
   let fxQuery = $state('');
 
-  const seg = $derived(wled.segments.find((s) => s.id === selectedId) ?? wled.segments[0] ?? null);
+  const isTogether = $derived(wled.scope === 'together');
+  // Segment ciblé par les contrôles : le segment unique en Ensemble, l'onglet
+  // sélectionné en Par ligne.
+  const target = $derived(
+    isTogether
+      ? (wled.segments[0] ?? null)
+      : (wled.segments.find((s) => s.id === selectedId) ?? wled.segments[0] ?? null)
+  );
 
-  // Garde l'onglet de segment valide quand la liste arrive/évolue.
   $effect(() => {
-    if (wled.segments.length && !wled.segments.some((s) => s.id === selectedId)) {
+    if (!isTogether && wled.segments.length && !wled.segments.some((s) => s.id === selectedId)) {
       selectedId = wled.segments[0].id;
     }
   });
@@ -40,12 +56,8 @@
   );
 
   const briPct = $derived(Math.round((wled.bri / 255) * 100));
-  const segBriPct = $derived(seg ? Math.round((seg.bri / 255) * 100) : 0);
-  const segWhitePct = $derived(seg ? Math.round((seg.white / 255) * 100) : 0);
+  const ctlDisabled = $derived(!wled.on);
   const effLoaded = $derived(wled.effects.length > 0);
-  const segFxName = $derived(seg ? (wled.effects[seg.fx] ?? '') : '');
-  const isSolid = $derived(!effLoaded || segFxName === 'Solid');
-  const segCtlDisabled = $derived(!wled.on || !seg);
 
   // ─── Effets curés (terrasse) : libellés FR → premier nom WLED présent ───
   const CURATED_FX: { label: string; names: string[] }[] = [
@@ -54,12 +66,13 @@
     { label: 'Bougie', names: ['Candle', 'Candle Multi'] },
     { label: 'Feu', names: ['Fire 2012', 'Fire Flicker'] },
     { label: 'Scintillement', names: ['Twinklefox', 'Twinkle'] },
-    { label: 'Vagues', names: ['Colorwaves', 'Colorloop'] },
     { label: 'Arc-en-ciel', names: ['Rainbow'] },
-    { label: 'Aurore', names: ['Aurora'] },
-    { label: 'Océan', names: ['Pacifica', 'Lake'] },
+    { label: 'Vagues', names: ['Colorwaves', 'Colorloop'] },
+    { label: 'Poursuite', names: ['Running', 'Chase'] },
     { label: 'Balayage', names: ['Scanner', 'Scan'] },
-    { label: 'Comète', names: ['Multi Comet', 'Meteor'] }
+    { label: 'Comète', names: ['Multi Comet', 'Meteor'] },
+    { label: 'Aurore', names: ['Aurora'] },
+    { label: 'Océan', names: ['Pacifica', 'Lake'] }
   ];
   const curatedFx = $derived(
     CURATED_FX.map((c) => {
@@ -74,7 +87,7 @@
       .filter((e) => !q || e.name.toLowerCase().includes(q));
   });
 
-  function segDotCss(s: { on: boolean; col: RGB; white: number }): string {
+  function segDotCss(s: WledSegment): string {
     if (!wled.on || !s.on) return 'var(--color-muted)';
     const e = previewColor(s.col, s.white);
     return `rgb(${e[0]} ${e[1]} ${e[2]})`;
@@ -139,13 +152,13 @@
     </label>
   </div>
 
-  <!-- ─── Aperçu visuel live (rendu COB RGBW « tel que réglé ») ─── -->
+  <!-- ─── Aperçu visuel live ─── -->
   <WledPreview animated={preferences.animationsEnabled} />
 
-  <!-- ─── Luminosité maître (toujours visible, grisée si éteint) ─── -->
-  <div class="flex flex-col gap-1.5" class:dimmed={!wled.on}>
+  <!-- ─── Luminosité générale (toujours visible, grisée si éteint) ─── -->
+  <div class="flex flex-col gap-1.5" class:dimmed={ctlDisabled}>
     <div class="flex items-center justify-between text-[12px]">
-      <span style="color: var(--color-muted-fg);">Luminosité générale</span>
+      <span style="color: var(--color-muted-fg);">Luminosité</span>
       <span class="font-semibold tabular-nums" style="color: var(--color-fg);">{briPct}%</span>
     </div>
     <input
@@ -154,14 +167,14 @@
       min="0"
       max="255"
       value={wled.bri}
-      disabled={!wled.on}
+      disabled={ctlDisabled}
       oninput={(e) => wled.setBri(+(e.currentTarget as HTMLInputElement).value)}
       onchange={() => haptic('light')}
       aria-label="Luminosité générale"
     />
   </div>
 
-  <!-- ─── Ambiances rapides (actions, appliquées aux deux lignes) ─── -->
+  <!-- ─── Ambiances (le contrôle « simple » principal) ─── -->
   <div class="flex flex-col gap-1.5">
     <span
       class="text-[11px] font-semibold tracking-[0.04em] uppercase"
@@ -196,235 +209,289 @@
       {wled.connected ? 'Aucun segment configuré.' : 'Connexion au module LED…'}
     </p>
   {:else}
-    <!-- ─── Sélecteur de ligne LED (segment) ─── -->
-    <div class="seg-tabs" role="tablist" aria-label="Ligne LED">
-      {#each wled.segments as s (s.id)}
+    <!-- ─── Mode : Ensemble (continu) ↔ Par ligne (séparé) ─── -->
+    <div class="flex flex-col gap-1.5">
+      <span
+        class="text-[11px] font-semibold tracking-[0.04em] uppercase"
+        style="color: var(--color-muted-fg);"
+      >
+        Lignes
+      </span>
+      <div class="seg-tabs">
         <button
           type="button"
           class="seg-tab"
-          class:active={s.id === selectedId}
-          role="tab"
-          aria-selected={s.id === selectedId}
-          onclick={() => (selectedId = s.id)}
+          class:active={isTogether}
+          aria-pressed={isTogether}
+          onclick={() => wled.setScope('together')}
         >
-          <span class="seg-dot" style="background: {segDotCss(s)};" aria-hidden="true"></span>
-          <span class="truncate">{s.name}</span>
+          Ensemble
         </button>
-      {/each}
+        <button
+          type="button"
+          class="seg-tab"
+          class:active={!isTogether}
+          aria-pressed={!isTogether}
+          onclick={() => wled.setScope('perLine')}
+        >
+          Par ligne
+        </button>
+      </div>
+      {#if isTogether}
+        <span class="text-[11px]" style="color: var(--color-muted-fg);">
+          Toute la terrasse pilotée d'un bloc — les effets de mouvement se déroulent sur les deux
+          lignes.
+        </span>
+      {/if}
     </div>
 
-    <!-- ─── Contrôles du segment sélectionné ─── -->
-    {#if seg}
-      {@const s = seg}
-      <div
-        class="grid gap-4 lg:grid-cols-2"
-        class:dimmed={segCtlDisabled}
-        role="tabpanel"
-        aria-label={s.name}
+    {#if isTogether}
+      <!-- ─── Ensemble : réglages fins repliés (usage simple par défaut) ─── -->
+      <button
+        type="button"
+        class="disclosure"
+        aria-expanded={showCustom}
+        onclick={() => (showCustom = !showCustom)}
       >
-        <!-- Colonne 1 : on/off + luminosité + blanc + couleur -->
-        <div class="flex flex-col gap-3">
-          <div class="flex items-center justify-between">
-            <span class="text-[13px] font-semibold" style="color: var(--color-fg);">{s.name}</span>
-            <label class="toggle-pill" aria-label="Allumer / éteindre {s.name}">
-              <input
-                type="checkbox"
-                checked={s.on}
-                disabled={!wled.on}
-                onchange={(e) => {
-                  haptic('light');
-                  wled.setSegOn(s.id, (e.currentTarget as HTMLInputElement).checked);
-                }}
-              />
-              <span class="toggle-pill-knob"></span>
-            </label>
-          </div>
-
-          <div class="flex flex-col gap-1.5">
-            <div class="flex items-center justify-between text-[12px]">
-              <span style="color: var(--color-muted-fg);">Luminosité</span>
-              <span class="font-semibold tabular-nums" style="color: var(--color-fg);">
-                {segBriPct}%
-              </span>
-            </div>
-            <input
-              type="range"
-              class="bri-range"
-              min="0"
-              max="255"
-              value={s.bri}
-              disabled={segCtlDisabled}
-              oninput={(e) => wled.setSegBri(s.id, +(e.currentTarget as HTMLInputElement).value)}
-              onchange={() => haptic('light')}
-              aria-label="Luminosité {s.name}"
-            />
-          </div>
-
-          {#if wled.rgbw}
-            <div class="flex flex-col gap-1.5">
-              <div class="flex items-center justify-between text-[12px]">
-                <span style="color: var(--color-muted-fg);">Blanc 4000K</span>
-                <span class="font-semibold tabular-nums" style="color: var(--color-fg);">
-                  {segWhitePct}%
-                </span>
-              </div>
-              <input
-                type="range"
-                class="bri-range white-range"
-                min="0"
-                max="255"
-                value={s.white}
-                disabled={segCtlDisabled}
-                oninput={(e) =>
-                  wled.setSegWhite(s.id, +(e.currentTarget as HTMLInputElement).value)}
-                onchange={() => haptic('light')}
-                aria-label="Canal blanc 4000K {s.name}"
-              />
-            </div>
-          {/if}
-
-          <div class="flex flex-col gap-1.5">
-            <span class="text-[12px]" style="color: var(--color-muted-fg);">Couleur (teinte)</span>
-            <WledColorPicker
-              color={s.col}
-              disabled={segCtlDisabled}
-              onpick={(rgb) => wled.setSegColor(s.id, rgb)}
-            />
-          </div>
-        </div>
-
-        <!-- Colonne 2 : effet (curé + tous) + avancé (palette, vitesse, intensité) -->
-        <div class="flex flex-col gap-3">
-          <div class="flex flex-col gap-1.5">
-            <div class="flex items-center justify-between">
-              <span class="text-[12px]" style="color: var(--color-muted-fg);">Effet</span>
-              {#if segFxName}
-                <span class="truncate text-[11px]" style="color: var(--color-muted-fg);">
-                  {segFxName}
-                </span>
-              {/if}
-            </div>
-            <div class="fx-curated">
-              {#each curatedFx as c (c.idx)}
-                <button
-                  type="button"
-                  class="fx-chip"
-                  class:active={s.fx === c.idx}
-                  aria-pressed={s.fx === c.idx}
-                  disabled={segCtlDisabled}
-                  onclick={() => wled.setSegEffect(s.id, c.idx)}
-                >
-                  {c.label}
-                </button>
-              {/each}
-            </div>
-
-            <button
-              type="button"
-              class="disclosure"
-              aria-expanded={showAllFx}
-              onclick={() => (showAllFx = !showAllFx)}
-            >
-              <span>Tous les effets ({wled.effects.length})</span>
-              <span class="chevron" class:open={showAllFx} aria-hidden="true">⌄</span>
-            </button>
-
-            {#if showAllFx}
-              <input
-                type="search"
-                class="fx-search"
-                placeholder="Rechercher un effet…"
-                bind:value={fxQuery}
-                disabled={segCtlDisabled}
-                aria-label="Rechercher un effet"
-              />
-              <div class="fx-grid" role="listbox" aria-label="Tous les effets">
-                {#each fxFiltered as e (e.i)}
-                  <button
-                    type="button"
-                    class="fx-chip"
-                    class:active={s.fx === e.i}
-                    role="option"
-                    aria-selected={s.fx === e.i}
-                    disabled={segCtlDisabled}
-                    onclick={() => wled.setSegEffect(s.id, e.i)}
-                  >
-                    {e.name}
-                  </button>
-                {/each}
-              </div>
-            {/if}
-          </div>
-
-          <!-- Réglages avancés (repliés par défaut) -->
+        <span>Personnaliser (couleur, effet…)</span>
+        <span class="chevron" class:open={showCustom} aria-hidden="true">⌄</span>
+      </button>
+      {#if showCustom && target}
+        {@render targetControls(target, false)}
+      {/if}
+    {:else}
+      <!-- ─── Par ligne : onglets + contrôles du segment sélectionné ─── -->
+      <div class="seg-tabs" role="tablist" aria-label="Ligne LED">
+        {#each wled.segments as s (s.id)}
           <button
             type="button"
-            class="disclosure"
-            aria-expanded={showAdvanced}
-            onclick={() => (showAdvanced = !showAdvanced)}
+            class="seg-tab"
+            class:active={s.id === selectedId}
+            role="tab"
+            aria-selected={s.id === selectedId}
+            onclick={() => (selectedId = s.id)}
           >
-            <span>Réglages avancés</span>
-            <span class="chevron" class:open={showAdvanced} aria-hidden="true">⌄</span>
+            <span class="seg-dot" style="background: {segDotCss(s)};" aria-hidden="true"></span>
+            <span class="truncate">{s.name}</span>
           </button>
-
-          {#if showAdvanced}
-            {#if wled.palettes.length}
-              <label class="flex flex-col gap-1.5">
-                <span class="text-[12px]" style="color: var(--color-muted-fg);">Palette</span>
-                <select
-                  class="pal-select"
-                  value={s.pal}
-                  disabled={segCtlDisabled}
-                  onchange={(e) =>
-                    wled.setSegPalette(s.id, +(e.currentTarget as HTMLSelectElement).value)}
-                >
-                  {#each wled.palettes as name, i (name)}
-                    <option value={i}>{name}</option>
-                  {/each}
-                </select>
-              </label>
-            {/if}
-
-            {#if effLoaded && !isSolid}
-              <div class="grid grid-cols-2 gap-3">
-                <div class="flex flex-col gap-1.5">
-                  <span class="text-[12px]" style="color: var(--color-muted-fg);">Vitesse</span>
-                  <input
-                    type="range"
-                    class="bri-range"
-                    min="0"
-                    max="255"
-                    value={s.sx}
-                    disabled={segCtlDisabled}
-                    oninput={(e) =>
-                      wled.setSegSpeed(s.id, +(e.currentTarget as HTMLInputElement).value)}
-                    onchange={() => haptic('light')}
-                    aria-label="Vitesse de l'effet"
-                  />
-                </div>
-                <div class="flex flex-col gap-1.5">
-                  <span class="text-[12px]" style="color: var(--color-muted-fg);">Intensité</span>
-                  <input
-                    type="range"
-                    class="bri-range"
-                    min="0"
-                    max="255"
-                    value={s.ix}
-                    disabled={segCtlDisabled}
-                    oninput={(e) =>
-                      wled.setSegIntensity(s.id, +(e.currentTarget as HTMLInputElement).value)}
-                    onchange={() => haptic('light')}
-                    aria-label="Intensité de l'effet"
-                  />
-                </div>
-              </div>
-            {/if}
-          {/if}
-        </div>
+        {/each}
       </div>
+      {#if target}
+        {@render targetControls(target, true)}
+      {/if}
     {/if}
   {/if}
 </section>
+
+<!-- ─── Bloc de contrôles d'un segment (réutilisé Ensemble + Par ligne) ─── -->
+{#snippet targetControls(s: WledSegment, perLine: boolean)}
+  {@const fxName = wled.effects[s.fx] ?? ''}
+  {@const isSolid = !effLoaded || fxName === 'Solid'}
+  {@const segBriPct = Math.round((s.bri / 255) * 100)}
+  {@const segWhitePct = Math.round((s.white / 255) * 100)}
+  <div
+    class="grid gap-4 lg:grid-cols-2"
+    class:dimmed={ctlDisabled}
+    role="tabpanel"
+    aria-label={s.name}
+  >
+    <!-- Colonne 1 : (par ligne) on/off + lum. + blanc + couleur -->
+    <div class="flex flex-col gap-3">
+      {#if perLine}
+        <div class="flex items-center justify-between">
+          <span class="text-[13px] font-semibold" style="color: var(--color-fg);">{s.name}</span>
+          <label class="toggle-pill" aria-label="Allumer / éteindre {s.name}">
+            <input
+              type="checkbox"
+              checked={s.on}
+              disabled={!wled.on}
+              onchange={(e) => {
+                haptic('light');
+                wled.setSegOn(s.id, (e.currentTarget as HTMLInputElement).checked);
+              }}
+            />
+            <span class="toggle-pill-knob"></span>
+          </label>
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <div class="flex items-center justify-between text-[12px]">
+            <span style="color: var(--color-muted-fg);">Luminosité {s.name}</span>
+            <span class="font-semibold tabular-nums" style="color: var(--color-fg);">
+              {segBriPct}%
+            </span>
+          </div>
+          <input
+            type="range"
+            class="bri-range"
+            min="0"
+            max="255"
+            value={s.bri}
+            disabled={ctlDisabled}
+            oninput={(e) => wled.setSegBri(s.id, +(e.currentTarget as HTMLInputElement).value)}
+            onchange={() => haptic('light')}
+            aria-label="Luminosité {s.name}"
+          />
+        </div>
+      {/if}
+
+      {#if wled.rgbw}
+        <div class="flex flex-col gap-1.5">
+          <div class="flex items-center justify-between text-[12px]">
+            <span style="color: var(--color-muted-fg);">Blanc 4000K</span>
+            <span class="font-semibold tabular-nums" style="color: var(--color-fg);">
+              {segWhitePct}%
+            </span>
+          </div>
+          <input
+            type="range"
+            class="bri-range white-range"
+            min="0"
+            max="255"
+            value={s.white}
+            disabled={ctlDisabled}
+            oninput={(e) => wled.setSegWhite(s.id, +(e.currentTarget as HTMLInputElement).value)}
+            onchange={() => haptic('light')}
+            aria-label="Canal blanc 4000K"
+          />
+        </div>
+      {/if}
+
+      <div class="flex flex-col gap-1.5">
+        <span class="text-[12px]" style="color: var(--color-muted-fg);">Couleur (teinte)</span>
+        <WledColorPicker
+          color={s.col}
+          disabled={ctlDisabled}
+          onpick={(rgb) => wled.setSegColor(s.id, rgb)}
+        />
+      </div>
+    </div>
+
+    <!-- Colonne 2 : effet (curé + tous) + avancé -->
+    <div class="flex flex-col gap-3">
+      <div class="flex flex-col gap-1.5">
+        <div class="flex items-center justify-between">
+          <span class="text-[12px]" style="color: var(--color-muted-fg);">Effet</span>
+          {#if fxName}
+            <span class="truncate text-[11px]" style="color: var(--color-muted-fg);">{fxName}</span>
+          {/if}
+        </div>
+        <div class="fx-curated">
+          {#each curatedFx as c (c.idx)}
+            <button
+              type="button"
+              class="fx-chip"
+              class:active={s.fx === c.idx}
+              aria-pressed={s.fx === c.idx}
+              disabled={ctlDisabled}
+              onclick={() => wled.setSegEffect(s.id, c.idx)}
+            >
+              {c.label}
+            </button>
+          {/each}
+        </div>
+
+        <button
+          type="button"
+          class="disclosure"
+          aria-expanded={showAllFx}
+          onclick={() => (showAllFx = !showAllFx)}
+        >
+          <span>Tous les effets ({wled.effects.length})</span>
+          <span class="chevron" class:open={showAllFx} aria-hidden="true">⌄</span>
+        </button>
+        {#if showAllFx}
+          <input
+            type="search"
+            class="fx-search"
+            placeholder="Rechercher un effet…"
+            bind:value={fxQuery}
+            disabled={ctlDisabled}
+            aria-label="Rechercher un effet"
+          />
+          <div class="fx-grid" role="listbox" aria-label="Tous les effets">
+            {#each fxFiltered as e (e.i)}
+              <button
+                type="button"
+                class="fx-chip"
+                class:active={s.fx === e.i}
+                role="option"
+                aria-selected={s.fx === e.i}
+                disabled={ctlDisabled}
+                onclick={() => wled.setSegEffect(s.id, e.i)}
+              >
+                {e.name}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
+      <button
+        type="button"
+        class="disclosure"
+        aria-expanded={showAdvanced}
+        onclick={() => (showAdvanced = !showAdvanced)}
+      >
+        <span>Réglages avancés</span>
+        <span class="chevron" class:open={showAdvanced} aria-hidden="true">⌄</span>
+      </button>
+      {#if showAdvanced}
+        {#if wled.palettes.length}
+          <label class="flex flex-col gap-1.5">
+            <span class="text-[12px]" style="color: var(--color-muted-fg);">Palette</span>
+            <select
+              class="pal-select"
+              value={s.pal}
+              disabled={ctlDisabled}
+              onchange={(e) =>
+                wled.setSegPalette(s.id, +(e.currentTarget as HTMLSelectElement).value)}
+            >
+              {#each wled.palettes as name, i (name)}
+                <option value={i}>{name}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
+
+        {#if effLoaded && !isSolid}
+          <div class="grid grid-cols-2 gap-3">
+            <div class="flex flex-col gap-1.5">
+              <span class="text-[12px]" style="color: var(--color-muted-fg);">Vitesse</span>
+              <input
+                type="range"
+                class="bri-range"
+                min="0"
+                max="255"
+                value={s.sx}
+                disabled={ctlDisabled}
+                oninput={(e) =>
+                  wled.setSegSpeed(s.id, +(e.currentTarget as HTMLInputElement).value)}
+                onchange={() => haptic('light')}
+                aria-label="Vitesse de l'effet"
+              />
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <span class="text-[12px]" style="color: var(--color-muted-fg);">Intensité</span>
+              <input
+                type="range"
+                class="bri-range"
+                min="0"
+                max="255"
+                value={s.ix}
+                disabled={ctlDisabled}
+                oninput={(e) =>
+                  wled.setSegIntensity(s.id, +(e.currentTarget as HTMLInputElement).value)}
+                onchange={() => haptic('light')}
+                aria-label="Intensité de l'effet"
+              />
+            </div>
+          </div>
+        {/if}
+      {/if}
+    </div>
+  </div>
+{/snippet}
 
 <style>
   /* ─── Interrupteur (toggle-pill iOS, 44×24) ─── */
@@ -479,7 +546,7 @@
     outline-offset: 2px;
   }
 
-  /* ─── Slider générique (luminosité / blanc / vitesse / intensité) ─── */
+  /* ─── Slider générique ─── */
   .bri-range {
     width: 100%;
     height: 6px;
@@ -513,7 +580,6 @@
     outline: 2px solid var(--color-primary);
     outline-offset: 3px;
   }
-  /* Canal blanc 4000K : rail teinté blanc chaud pour le distinguer. */
   .white-range {
     background: linear-gradient(90deg, var(--color-muted), rgb(255 223 191));
   }
@@ -568,7 +634,7 @@
       var(--color-muted);
   }
 
-  /* ─── Onglets de segment ─── */
+  /* ─── Onglets (mode + segments) ─── */
   .seg-tabs {
     display: flex;
     gap: 6px;
@@ -673,14 +739,14 @@
     outline-offset: 1px;
   }
 
-  /* ─── Bouton dépliant (effets/avancé) ─── */
+  /* ─── Bouton dépliant ─── */
   .disclosure {
     display: flex;
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    min-height: 36px;
-    padding: 6px 4px;
+    min-height: 40px;
+    padding: 8px 4px;
     background: transparent;
     border: none;
     border-top: 1px solid var(--color-border);
@@ -701,7 +767,7 @@
     transform: rotate(180deg);
   }
 
-  /* ─── Sélecteur de palette (natif, font 16px = pas de zoom iOS) ─── */
+  /* ─── Sélecteur de palette ─── */
   .pal-select {
     width: 100%;
     padding: 9px 12px;
@@ -721,7 +787,6 @@
     outline-offset: 1px;
   }
 
-  /* Zone de contrôle grisée quand l'éclairage / le segment est indisponible. */
   .dimmed {
     opacity: 0.45;
   }

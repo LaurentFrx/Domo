@@ -177,6 +177,28 @@ const TIMEOUT_MS = 8_000;
 /** Durée de gel du resync après la dernière interaction continue (ms). */
 const INTERACT_HOLD_MS = 900;
 
+export type WledScope = 'together' | 'perLine';
+
+// Disposition des segments WLED pour les deux modes de pilotage :
+//   - together : UN segment continu sur toute la longueur (effets coordonnés
+//     qui parcourent les deux lignes) ; le 2ᵉ segment est désactivé (len 0).
+//   - perLine  : deux segments indépendants (Store / SàM Été).
+// ⚠️ Au branchement du vrai module, ajuster SEG_SPLIT / SEG_TOTAL au nombre
+// réel de LED par ligne (et configurer les 2 sorties en bus CONTIGUS pour que
+// les effets « Ensemble » se déroulent d'une ligne à l'autre).
+const SEG_SPLIT = 60; // fin de la ligne « Store »
+const SEG_TOTAL = 210; // total Store + SàM Été
+const LAYOUT: Record<WledScope, Record<string, unknown>[]> = {
+  together: [
+    { id: 0, start: 0, stop: SEG_TOTAL, n: 'Terrasse' },
+    { id: 1, start: SEG_TOTAL, stop: SEG_TOTAL }
+  ],
+  perLine: [
+    { id: 0, start: 0, stop: SEG_SPLIT, n: 'Store' },
+    { id: 1, start: SEG_SPLIT, stop: SEG_TOTAL, n: 'SàM Été' }
+  ]
+};
+
 class WledStore {
   // ─── Connexion / source ───────────────────────────
   /** Le module (ou le mock) répond-il avec une réponse WLED valide ? */
@@ -209,6 +231,9 @@ class WledStore {
 
   /** Index de l'effet « Solid » (-1 si le catalogue n'est pas chargé). */
   solidFx = $derived(this.effects.indexOf('Solid'));
+
+  /** Mode déduit de la disposition réelle : 1 segment = Ensemble, ≥2 = Par ligne. */
+  scope = $derived<WledScope>(this.segments.length > 1 ? 'perLine' : 'together');
 
   /** Une interaction continue est-elle en cours (gel du resync) ? */
   #busy(): boolean {
@@ -411,6 +436,10 @@ class WledStore {
   }
   toggle(): Promise<void> {
     return this.setOn(!this.on);
+  }
+  /** Bascule Ensemble (1 segment continu) ↔ Par ligne (2 segments). */
+  async setScope(s: WledScope): Promise<void> {
+    await this.#post({ seg: LAYOUT[s] });
   }
   /** Luminosité maître. bri=0 NE coupe PAS l'alimentation (le slider reste pilotable). */
   async setBri(v: number): Promise<void> {
