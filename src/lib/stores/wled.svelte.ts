@@ -9,10 +9,16 @@
  * Ruban : COB RGBW 4000K → chaque couleur a un 4ᵉ canal BLANC dédié (W). La
  * lumière perçue = RGB mélangé additivement avec le blanc 4000K. On garde donc
  * `col` (teinte RGB) et `white` (canal W) séparés, comme l'app WLED native.
+ * ⚠️ Au branchement du vrai module : régler « Auto-calculate white » sur None
+ * dans les LED settings, sinon le firmware recalcule W depuis le RGB et le
+ * slider Blanc sera ignoré.
  *
  * Conventions Domo : runes $state, polling visibility-aware (pause en arrière-
  * plan + refetch au retour de visibilité), cycle de vie refcounté via acquire(),
- * commandes optimistes (reflet immédiat + POST, resync GET au prochain tick).
+ * commandes optimistes (reflet immédiat + POST). Le resync (poll/écho POST) est
+ * GELÉ pendant une interaction continue (drag d'un slider) pour ne pas faire
+ * sauter le curseur sous le doigt, et l'état des segments est mis à jour
+ * IN-PLACE (identité référentielle préservée).
  *
  * Modèle : deux segments WLED = deux lignes LED physiques :
  *   - id 0 « Store »   → bras articulés du store banne
@@ -47,16 +53,23 @@ export interface WledSegment {
 }
 
 /**
- * Couleur RÉELLEMENT perçue = teinte RGB + canal blanc 4000K (additif).
- * Sert au rendu visuel (barre d'aperçu, pastilles) — pas envoyée au module.
+ * Couleur RÉELLEMENT perçue = teinte RGB + canal blanc 4000K (additif), clampée.
+ * @param weight pondération du canal blanc (1 = physique réel ; <1 = aperçu,
+ *   pour éviter que tout vire au blanc dès qu'on monte le blanc et garder la
+ *   teinte lisible). Sert au rendu visuel uniquement (jamais envoyé au module).
  */
-export function effectiveColor(col: RGB, white: number): RGB {
-  const w = white / 255;
+export function effectiveColor(col: RGB, white: number, weight = 1): RGB {
+  const w = (white / 255) * weight;
   return [
     Math.min(255, Math.round(col[0] + WHITE_4000K[0] * w)),
     Math.min(255, Math.round(col[1] + WHITE_4000K[1] * w)),
     Math.min(255, Math.round(col[2] + WHITE_4000K[2] * w))
   ];
+}
+
+/** Couleur d'aperçu (blanc atténué pour garder la teinte distinguable). */
+export function previewColor(col: RGB, white: number): RGB {
+  return effectiveColor(col, white, 0.6);
 }
 
 /** Ambiances rapides (appliquées aux deux segments d'un coup). */
@@ -161,10 +174,12 @@ function clamp(v: number, min = 0, max = 255): number {
 
 const POLL_MS = 5_000;
 const TIMEOUT_MS = 8_000;
+/** Durée de gel du resync après la dernière interaction continue (ms). */
+const INTERACT_HOLD_MS = 900;
 
 class WledStore {
   // ─── Connexion / source ───────────────────────────
-  /** Le module (ou le mock) répond-il ? */
+  /** Le module (ou le mock) répond-il avec une réponse WLED valide ? */
   connected = $state(false);
   /** L'état est-il servi par le MOCK (vrai module pas encore branché) ? */
   isMock = $state(false);
@@ -189,54 +204,88 @@ class WledStore {
   #timer: ReturnType<typeof setInterval> | null = null;
   #vis: (() => void) | null = null;
   #metaLoaded = false;
+  /** Horodatage de la dernière interaction continue (drag). */
+  #lastTouch = 0;
 
-  /** Index de l'effet « Solid » (pour savoir si un segment affiche une couleur fixe). */
-  solidFx = $derived(Math.max(0, this.effects.indexOf('Solid')));
+  /** Index de l'effet « Solid » (-1 si le catalogue n'est pas chargé). */
+  solidFx = $derived(this.effects.indexOf('Solid'));
+
+  /** Une interaction continue est-elle en cours (gel du resync) ? */
+  #busy(): boolean {
+    return Date.now() - this.#lastTouch < INTERACT_HOLD_MS;
+  }
+  #touch(): void {
+    this.#lastTouch = Date.now();
+  }
 
   // ─── Lecture ──────────────────────────────────────
+  /** Une réponse ressemble-t-elle à du WLED (anti faux-positif de connexion) ? */
+  #looksWled(d: unknown): boolean {
+    if (!d || typeof d !== 'object') return false;
+    const o = d as Record<string, unknown>;
+    const state = (o.state ?? o) as Record<string, unknown>;
+    return Array.isArray(state.seg) || typeof state.on === 'boolean' || Array.isArray(o.effects);
+  }
+
+  /** Met à jour les segments IN-PLACE (préserve l'identité des objets). */
   #applyState(s: Record<string, unknown>): void {
     if (typeof s.on === 'boolean') this.on = s.on;
     if (typeof s.bri === 'number') this.bri = clamp(s.bri);
-    if (Array.isArray(s.seg)) {
-      const segs: WledSegment[] = [];
-      let sawRgbw = false;
-      for (const raw of s.seg) {
-        if (!raw || typeof raw !== 'object') continue;
-        const seg = raw as Record<string, unknown>;
-        const start = typeof seg.start === 'number' ? seg.start : 0;
-        const stop = typeof seg.stop === 'number' ? seg.stop : 0;
-        const len = typeof seg.len === 'number' ? seg.len : Math.max(0, stop - start);
-        if (len <= 0) continue; // segment inactif
+    if (!Array.isArray(s.seg)) return;
 
-        // Couleur primaire : [r,g,b] ou [r,g,b,w] (RGBW).
-        let col: RGB = [255, 255, 255];
-        let white = 0;
-        if (Array.isArray(seg.col) && Array.isArray(seg.col[0])) {
-          const c = seg.col[0] as unknown[];
-          col = [clamp(Number(c[0]) || 0), clamp(Number(c[1]) || 0), clamp(Number(c[2]) || 0)];
-          if (c.length >= 4) {
-            white = clamp(Number(c[3]) || 0);
-            sawRgbw = true;
-          }
+    let sawRgbw = false;
+    const byId = new Map(this.segments.map((seg) => [seg.id, seg]));
+    const next: WledSegment[] = [];
+
+    for (const raw of s.seg) {
+      if (!raw || typeof raw !== 'object') continue;
+      const seg = raw as Record<string, unknown>;
+      const start = typeof seg.start === 'number' ? seg.start : 0;
+      const stop = typeof seg.stop === 'number' ? seg.stop : 0;
+      const len = typeof seg.len === 'number' ? seg.len : Math.max(0, stop - start);
+      if (len <= 0) continue; // segment inactif
+
+      // Couleur primaire : [r,g,b] ou [r,g,b,w] (RGBW).
+      let col: RGB = [255, 255, 255];
+      let white = 0;
+      if (Array.isArray(seg.col) && Array.isArray(seg.col[0])) {
+        const c = seg.col[0] as unknown[];
+        col = [clamp(Number(c[0]) || 0), clamp(Number(c[1]) || 0), clamp(Number(c[2]) || 0)];
+        if (c.length >= 4) {
+          white = clamp(Number(c[3]) || 0);
+          sawRgbw = true;
         }
-
-        const id = typeof seg.id === 'number' ? seg.id : segs.length;
-        segs.push({
-          id,
-          name: typeof seg.n === 'string' && seg.n.trim() ? seg.n : `Segment ${id + 1}`,
-          on: seg.on !== false,
-          bri: typeof seg.bri === 'number' ? clamp(seg.bri) : 255,
-          col,
-          white,
-          fx: typeof seg.fx === 'number' ? seg.fx : 0,
-          sx: typeof seg.sx === 'number' ? clamp(seg.sx) : 128,
-          ix: typeof seg.ix === 'number' ? clamp(seg.ix) : 128,
-          pal: typeof seg.pal === 'number' ? seg.pal : 0,
-          len
-        });
       }
-      if (sawRgbw) this.rgbw = true;
-      if (segs.length) this.segments = segs;
+
+      const id = typeof seg.id === 'number' ? seg.id : next.length;
+      const fields = {
+        name: typeof seg.n === 'string' && seg.n.trim() ? seg.n : `Segment ${id + 1}`,
+        on: seg.on !== false,
+        bri: typeof seg.bri === 'number' ? clamp(seg.bri) : 255,
+        col,
+        white,
+        fx: typeof seg.fx === 'number' ? seg.fx : 0,
+        sx: typeof seg.sx === 'number' ? clamp(seg.sx) : 128,
+        ix: typeof seg.ix === 'number' ? clamp(seg.ix) : 128,
+        pal: typeof seg.pal === 'number' ? seg.pal : 0,
+        len
+      };
+
+      const existing = byId.get(id);
+      if (existing) {
+        Object.assign(existing, fields); // mutation in-place → identité préservée
+        next.push(existing);
+      } else {
+        next.push({ id, ...fields });
+      }
+    }
+
+    if (sawRgbw) this.rgbw = true;
+    if (next.length) {
+      // Réassigne seulement si la topologie change (évite un churn inutile).
+      const sameTopology =
+        next.length === this.segments.length && next.every((s2, i) => s2 === this.segments[i]);
+      if (!sameTopology) this.segments = next;
     }
   }
 
@@ -245,42 +294,46 @@ class WledStore {
     const leds = info.leds as Record<string, unknown> | undefined;
     if (leds) {
       // RGBW signalé de plusieurs façons selon la version WLED : booléen `rgbw`,
-      // ou bit blanc dans les capacités `lc` (bit 1 = 2). On combine (OR).
+      // ou bit blanc dans les capacités `lc`. On combine (OR) — ne jamais repasser à false.
       if (leds.rgbw === true) this.rgbw = true;
       if (typeof leds.lc === 'number' && (leds.lc & 2) !== 0) this.rgbw = true;
     }
   }
 
-  /** Charge effets + palettes (rarement changeants) — une seule fois. */
+  /** Charge effets + palettes (rarement changeants). */
   async loadMeta(): Promise<void> {
     try {
       const res = await fetch('/api/wled/json', { signal: AbortSignal.timeout(TIMEOUT_MS) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      this.isMock = res.headers.get('x-wled-source') === 'mock';
       const d = await res.json();
+      if (!this.#looksWled(d)) throw new Error('réponse non-WLED');
+      this.isMock = res.headers.get('x-wled-source') === 'mock';
       if (Array.isArray(d?.effects))
         this.effects = d.effects.filter((x: unknown) => typeof x === 'string');
       if (Array.isArray(d?.palettes))
         this.palettes = d.palettes.filter((x: unknown) => typeof x === 'string');
       if (d?.info) this.#applyInfo(d.info);
-      if (d?.state) this.#applyState(d.state);
+      if (d?.state && !this.#busy()) this.#applyState(d.state);
       this.connected = true;
       this.lastError = null;
       this.lastUpdate = new Date();
-      this.#metaLoaded = true;
+      this.#metaLoaded = this.effects.length > 0;
     } catch (e) {
       this.connected = false;
       this.lastError = e instanceof Error ? e.message : 'erreur';
     }
   }
 
-  /** Rafraîchit l'état courant (polling léger /json/si). */
+  /** Rafraîchit l'état courant (polling léger /json/si). Gelé pendant un drag. */
   async refresh(): Promise<void> {
+    if (this.#busy()) return; // ne pas écraser un réglage en cours
+    if (!this.#metaLoaded) this.loadMeta(); // retry catalogue tant qu'absent
     try {
       const res = await fetch('/api/wled/json/si', { signal: AbortSignal.timeout(TIMEOUT_MS) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      this.isMock = res.headers.get('x-wled-source') === 'mock';
       const d = await res.json();
+      if (!this.#looksWled(d)) throw new Error('réponse non-WLED');
+      this.isMock = res.headers.get('x-wled-source') === 'mock';
       if (d?.info) this.#applyInfo(d.info);
       if (d?.state) this.#applyState(d.state);
       this.connected = true;
@@ -295,16 +348,13 @@ class WledStore {
   // ─── Cycle de vie (refcount via acquire) ──────────
   connect(): void {
     if (this.#timer || typeof document === 'undefined') return;
-    if (!this.#metaLoaded) this.loadMeta();
+    this.loadMeta();
     this.refresh();
     this.#timer = setInterval(() => {
       if (document.visibilityState === 'visible') this.refresh();
     }, POLL_MS);
     this.#vis = () => {
-      if (document.visibilityState === 'visible') {
-        if (!this.#metaLoaded) this.loadMeta();
-        this.refresh();
-      }
+      if (document.visibilityState === 'visible') this.refresh();
     };
     document.addEventListener('visibilitychange', this.#vis);
   }
@@ -320,19 +370,20 @@ class WledStore {
     }
   }
 
-  // ─── Commandes (optimistes + POST, resync au tick suivant) ────────
+  // ─── Commandes (optimistes + POST) ────────
   async #post(partial: object): Promise<void> {
     try {
       const res = await fetch('/api/wled/json/state', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(partial),
+        // v:true → le vrai WLED renvoie l'état complet (sinon {success:true}).
+        body: JSON.stringify({ ...partial, v: true }),
         signal: AbortSignal.timeout(TIMEOUT_MS)
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json().catch(() => null);
-      // WLED renvoie le nouvel état (le mock aussi) → reconciliation immédiate.
-      if (d && typeof d === 'object' && ('seg' in d || 'bri' in d || 'on' in d)) {
+      // Reconciliation immédiate SAUF pendant un drag (l'optimiste fait foi).
+      if (!this.#busy() && d && typeof d === 'object' && ('seg' in d || 'bri' in d || 'on' in d)) {
         this.#applyState(d as Record<string, unknown>);
       }
       this.connected = true;
@@ -340,7 +391,7 @@ class WledStore {
       this.lastUpdate = new Date();
     } catch (e) {
       this.lastError = e instanceof Error ? e.message : 'erreur';
-      this.refresh(); // resync sur échec
+      if (!this.#busy()) this.refresh(); // resync sur échec
     }
   }
 
@@ -361,11 +412,13 @@ class WledStore {
   toggle(): Promise<void> {
     return this.setOn(!this.on);
   }
+  /** Luminosité maître. bri=0 NE coupe PAS l'alimentation (le slider reste pilotable). */
   async setBri(v: number): Promise<void> {
+    this.#touch();
     const b = clamp(v);
     this.bri = b;
     if (b > 0) this.on = true;
-    await this.#post({ on: b > 0, bri: b });
+    await this.#post({ bri: b }); // pas de on:false couplé à bri:0
   }
 
   // Segment
@@ -375,6 +428,7 @@ class WledStore {
     await this.#post({ seg: [{ id, on }] });
   }
   async setSegBri(id: number, v: number): Promise<void> {
+    this.#touch();
     const b = clamp(v);
     const s = this.#seg(id);
     if (s) {
@@ -384,6 +438,7 @@ class WledStore {
     await this.#post({ seg: [{ id, on: b > 0 ? true : undefined, bri: b }] });
   }
   async setSegColor(id: number, rgb: RGB): Promise<void> {
+    this.#touch();
     const s = this.#seg(id);
     const white = s?.white ?? 0;
     if (s) {
@@ -394,6 +449,7 @@ class WledStore {
   }
   /** Canal blanc 4000K (RGBW). */
   async setSegWhite(id: number, white: number): Promise<void> {
+    this.#touch();
     const w = clamp(white);
     const s = this.#seg(id);
     const rgb = s?.col ?? [0, 0, 0];
@@ -416,19 +472,21 @@ class WledStore {
     await this.#post({ seg: [{ id, pal }] });
   }
   async setSegSpeed(id: number, sx: number): Promise<void> {
+    this.#touch();
     const v = clamp(sx);
     const s = this.#seg(id);
     if (s) s.sx = v;
     await this.#post({ seg: [{ id, sx: v }] });
   }
   async setSegIntensity(id: number, ix: number): Promise<void> {
+    this.#touch();
     const v = clamp(ix);
     const s = this.#seg(id);
     if (s) s.ix = v;
     await this.#post({ seg: [{ id, ix: v }] });
   }
 
-  /** Applique une ambiance aux DEUX segments d'un coup. */
+  /** Applique une ambiance aux segments RÉELS (jamais d'id fantôme). */
   async applyAmbiance(key: string): Promise<void> {
     const a = WLED_AMBIANCES.find((x) => x.key === key);
     if (!a) return;
@@ -436,39 +494,40 @@ class WledStore {
       await this.setOn(false);
       return;
     }
-    const fxIdx = a.fx ? Math.max(0, this.effects.indexOf(a.fx)) : undefined;
-    const palIdx = a.pal ? Math.max(0, this.palettes.indexOf(a.pal)) : undefined;
-    const ids = this.segments.length ? this.segments.map((s) => s.id) : [0, 1];
+    const fxIdx = a.fx ? this.effects.indexOf(a.fx) : -1;
+    const palIdx = a.pal ? this.palettes.indexOf(a.pal) : -1;
 
-    // Reflet optimiste local
+    // Reflet optimiste local + payload depuis la MÊME source (segments réels).
     for (const s of this.segments) {
       s.on = true;
       if (a.bri !== undefined) s.bri = clamp(a.bri);
       if (a.col) s.col = a.col;
       if (a.white !== undefined) s.white = clamp(a.white);
-      if (fxIdx !== undefined) s.fx = fxIdx;
-      if (palIdx !== undefined) s.pal = palIdx;
+      if (fxIdx >= 0) s.fx = fxIdx;
+      if (palIdx >= 0) s.pal = palIdx;
       if (a.sx !== undefined) s.sx = clamp(a.sx);
       if (a.ix !== undefined) s.ix = clamp(a.ix);
     }
     this.on = true;
 
-    const seg = ids.map((id) => {
-      const cur = this.#seg(id);
-      const o: Record<string, unknown> = { id, on: true };
+    const seg = this.segments.map((s) => {
+      const o: Record<string, unknown> = { id: s.id, on: true };
       if (a.bri !== undefined) o.bri = clamp(a.bri);
       if (a.col || a.white !== undefined) {
-        const rgb = a.col ?? cur?.col ?? [0, 0, 0];
-        const w = a.white ?? cur?.white ?? 0;
-        o.col = this.#colPayload(rgb as RGB, w);
+        const rgb = a.col ?? s.col;
+        const w = a.white ?? s.white;
+        o.col = this.#colPayload(rgb, w);
       }
-      if (fxIdx !== undefined) o.fx = fxIdx;
-      if (palIdx !== undefined) o.pal = palIdx;
+      if (fxIdx >= 0) o.fx = fxIdx;
+      if (palIdx >= 0) o.pal = palIdx;
       if (a.sx !== undefined) o.sx = clamp(a.sx);
       if (a.ix !== undefined) o.ix = clamp(a.ix);
       return o;
     });
-    await this.#post({ on: true, seg });
+    const body: Record<string, unknown> = { on: true };
+    if (a.bri !== undefined) body.bri = clamp(a.bri);
+    if (seg.length) body.seg = seg;
+    await this.#post(body);
   }
 }
 

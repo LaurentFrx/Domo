@@ -33,16 +33,25 @@ function subPath(path: string | undefined): string {
   return (path || '').replace(/^json\/?/, '').replace(/^\/+/, '');
 }
 
+// Sous-chemins GET autorisés (lecture seule). Défense en profondeur : on ne
+// relaie PAS un chemin arbitraire vers le module LAN (config/win/reboot…),
+// même derrière l'auth — seule la lecture de l'état est exposée.
+const ALLOWED_GET = new Set(['', 'state', 'info', 'si', 'eff', 'pal']);
+
 const MOCK_HEADERS = { 'x-wled-source': 'mock', 'cache-control': 'no-store' };
 const LIVE_HEADERS = { 'x-wled-source': 'live', 'cache-control': 'no-store' };
 
 export const GET: RequestHandler = async ({ params }) => {
+  const sub = subPath(params.path);
+  if (!ALLOWED_GET.has(sub)) throw error(404, 'WLED: chemin non autorisé');
+
   const base = liveBase();
   if (!base) {
-    return json(wledGet(subPath(params.path)), { headers: MOCK_HEADERS });
+    return json(wledGet(sub), { headers: MOCK_HEADERS });
   }
 
-  const url = `${base}/${params.path || 'json'}`;
+  // URL reconstruite à partir de la liste fermée (jamais params.path brut).
+  const url = sub ? `${base}/json/${sub}` : `${base}/json`;
   let upstream: Response;
   try {
     upstream = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
