@@ -37,6 +37,25 @@
   // (+ @media reduced-motion en CSS) ; tourne quand la zone refroidit/chauffe vraiment.
   const animOn = $derived(preferences.animationsEnabled);
 
+  // ─── État hors-ligne Airzone (le boîtier ne répond plus : données figées,
+  //     commandes inopérantes). On le rend VISIBLE — sinon la panne est muette. ──
+  const azOffline = $derived(airzone.offline);
+  function fmtAgo(ms: number): string {
+    const m = Math.round(ms / 60000);
+    if (m < 1) return "à l'instant";
+    if (m < 60) return `il y a ${m} min`;
+    const h = Math.floor(m / 60);
+    const r = m % 60;
+    return r ? `il y a ${h} h ${r} min` : `il y a ${h} h`;
+  }
+  // Ancienneté des dernières données matériel. Dépendance explicite à `lastUpdate`
+  // (qui avance à chaque poll proxy réussi, même matériel HS) → l'âge « vit ».
+  const azStaleText = $derived.by(() => {
+    void airzone.lastUpdate;
+    const ts = airzone.bridgeUpdate;
+    return ts == null ? null : fmtAgo(Date.now() - ts);
+  });
+
   // Thermomètres Zigbee (SNZB-02 etc.) — détectés par 'thermo' dans le nom.
   // « Thermo Salon » / « Thermo SdB » sont déjà dans les cartes Daikin / Sèche-
   // serviette, et « thermo_cumulus » dans la carte Cumulus (/energie) → on les
@@ -486,6 +505,33 @@
 
   <!-- ═══ Climatisation gainable Airzone (3 zones) ═══ -->
   <section class="flex flex-col gap-3">
+    {#if azOffline}
+      <!-- Panne RENDUE VISIBLE : tant que le boîtier Airzone ne répond pas, les
+           cartes affichent un dernier état figé et les commandes échouent. -->
+      <div class="az-offline-banner" role="status" aria-live="polite">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          aria-hidden="true"
+        >
+          <path
+            d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"
+          />
+          <line x1="12" x2="12" y1="9" y2="13" />
+          <line x1="12" x2="12.01" y1="17" y2="17" />
+        </svg>
+        <div class="azob-text">
+          <strong>Climatisation Airzone hors ligne</strong>
+          <span>
+            Le boîtier ne répond plus — données figées{azStaleText ? ` (${azStaleText})` : ''}, les
+            commandes ne s'appliqueront pas. Vérifiez son alimentation et son réseau&nbsp;; la
+            reprise est automatique au retour.
+          </span>
+        </div>
+      </div>
+    {/if}
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
       {#each airzone.zones as zone (zone.id)}
         {@const heat = airzone.systemMode === 'heating'}
@@ -500,6 +546,7 @@
              dégradé sombre + bordure bleu pâle + ombre profonde + texte clair. -->
         <article
           class="az-zone dk-card relative flex flex-col gap-2.5 overflow-hidden rounded-[var(--radius-2xl)] p-4"
+          class:az-offline={azOffline}
         >
           <!-- Icône de fond = fonction qui s'activera à l'allumage (flocon = froid,
                flamme = chaud) selon le mode système piloté par Parents ; grise en
@@ -556,6 +603,7 @@
                       data-no-haptic
                       class="az-mode-btn warm"
                       class:on={airzone.systemMode === 'heating'}
+                      disabled={azOffline}
                       aria-label="Chaud"
                       aria-pressed={airzone.systemMode === 'heating'}
                       title="Chaud"
@@ -576,6 +624,7 @@
                       data-no-haptic
                       class="az-mode-btn"
                       class:on={airzone.systemMode === 'cooling'}
+                      disabled={azOffline}
                       aria-label="Froid"
                       aria-pressed={airzone.systemMode === 'cooling'}
                       title="Froid"
@@ -611,6 +660,7 @@
                   class:toggle-on={zone.on}
                   role="switch"
                   aria-checked={zone.on}
+                  disabled={azOffline}
                   aria-label="Allumer / éteindre {zone.name}"
                   onclick={() => {
                     haptic('medium');
@@ -661,8 +711,8 @@
                   type="button"
                   data-no-haptic
                   class="gbtn"
-                  class:gbtn-dim={!zone.on}
-                  disabled={!zone.on}
+                  class:gbtn-dim={!zone.on || azOffline}
+                  disabled={!zone.on || azOffline}
                   aria-label="Baisser la consigne {zone.name}"
                   onclick={() => {
                     haptic('light');
@@ -683,8 +733,8 @@
                   type="button"
                   data-no-haptic
                   class="gbtn"
-                  class:gbtn-dim={!zone.on}
-                  disabled={!zone.on}
+                  class:gbtn-dim={!zone.on || azOffline}
+                  disabled={!zone.on || azOffline}
                   aria-label="Monter la consigne {zone.name}"
                   onclick={() => {
                     haptic('light');
@@ -980,6 +1030,50 @@
       color 280ms ease,
       opacity 280ms ease;
   }
+  /* ─── Airzone hors ligne : bandeau d'alerte + cartes atténuées (non muet) ─── */
+  .az-offline-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7rem;
+    padding: 0.7rem 0.9rem;
+    border-radius: var(--radius-xl, 16px);
+    background: var(--color-alert-muted);
+    border: 1px solid color-mix(in oklch, var(--color-alert) 45%, transparent);
+    color: var(--color-alert-fg, #fff);
+  }
+  .az-offline-banner svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    margin-top: 1px;
+    color: var(--color-alert);
+  }
+  .azob-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
+  .azob-text strong {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: #f4e7e8;
+  }
+  .azob-text span {
+    font-size: 12px;
+    line-height: 1.35;
+    color: #d3c2c6;
+  }
+  /* Carte d'une zone dont le système ne répond plus : grisée + désaturée. La
+     barre de consigne / le toggle sont déjà `disabled` côté markup. */
+  .az-zone.az-offline {
+    opacity: 0.55;
+    filter: saturate(0.5);
+  }
+  .az-zone.az-offline :is(.toggle-track, .az-mode-btn, .gbtn):disabled {
+    cursor: not-allowed;
+  }
+
   /* En marche (zone.demand) : flocon qui tourne (froid) / flamme qui vacille (chaud). */
   .az-zone-bg.az-spin {
     animation: az-spin 9s linear infinite;

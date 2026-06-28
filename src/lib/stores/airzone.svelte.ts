@@ -149,6 +149,18 @@ class AirzoneState {
   systemId = $state(1);
   zones = $state<AirzoneZone[]>(MOCK_ZONES);
 
+  /** Au moins un cycle de poll terminé — évite le « flash hors-ligne » au montage (seed mock). */
+  everPolled = $state(false);
+  /**
+   * Fraîcheur RÉELLE des données matériel (epoch ms), tirée du `last_update` du
+   * bridge — DISTINCTE de `lastUpdate` (= horodatage du dernier fetch proxy). Si
+   * le bridge perd le matériel, il ressert son dernier snapshot : `lastUpdate`
+   * continue d'avancer alors que `bridgeUpdate` se fige → on sait que c'est périmé.
+   */
+  bridgeUpdate = $state<number | null>(null);
+  /** Dernière commande refusée par le matériel (transitoire, effacée au prochain poll OK). */
+  commandError = $state<string | null>(null);
+
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private reconcileTimers: ReturnType<typeof setTimeout>[] = [];
 
@@ -159,6 +171,13 @@ class AirzoneState {
   // bouton (réaction contradictoire).
   private pins = new Map<number, { patch: Partial<AirzoneZone>; until: number }>();
   private readonly PIN_MS = 7000;
+
+  /**
+   * Système réellement HORS LIGNE : le bridge ne joint plus le matériel Airzone
+   * (commandes inopérantes, données figées). Gated par `everPolled` pour ne pas
+   * clignoter au montage (le seed mock part `connected:false`).
+   */
+  offline = $derived.by<boolean>(() => this.everPolled && !this.connected);
 
   /** Mode système (= mode de la zone master). */
   systemMode = $derived.by<AirzoneMode>(() => {
@@ -254,6 +273,7 @@ class AirzoneState {
     // normalizeMode propage la bonne valeur à toutes les zones.
     this.zones = this.normalizeMode(this.applyPins(p.zones.map((z) => this.mapZone(z))));
     this.systemId = p.system_id ?? this.systemId;
+    if (typeof p.last_update === 'number') this.bridgeUpdate = p.last_update * 1000;
   }
 
   private async poll() {
@@ -267,11 +287,15 @@ class AirzoneState {
       this.status = 'connected';
       this.lastError = null;
       this.lastUpdate = new Date();
+      // Matériel de nouveau joignable → l'éventuel échec de commande n'est plus d'actualité.
+      if (this.connected) this.commandError = null;
     } catch (e) {
       // Backend/bridge KO → on garde le dernier état affiché (ou le mock).
       this.connected = false;
       this.status = 'error';
       this.lastError = (e as Error).message;
+    } finally {
+      this.everPolled = true;
     }
   }
 
@@ -318,9 +342,11 @@ class AirzoneState {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await res.json().catch(() => ({}));
       this.lastError = null;
+      this.commandError = null;
     } catch (e) {
       // L'optimiste reste affiché ; le re-poll débouncé corrigera (ou 403 si write off).
       this.lastError = (e as Error).message;
+      this.commandError = 'Commande non appliquée — climatisation hors ligne.';
     } finally {
       this.schedulePollSoon();
     }

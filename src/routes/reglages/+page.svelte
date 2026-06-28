@@ -154,6 +154,13 @@
       devices: daikin.units.length
     },
     {
+      name: 'Airzone',
+      connected: airzone.connected,
+      mode: airzone.connected ? 'direct' : 'disconnected',
+      lastUpdate: airzone.lastUpdate,
+      devices: airzone.zones.length
+    },
+    {
       name: 'Prévision PV',
       connected: forecast.status === 'live',
       mode:

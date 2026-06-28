@@ -51,7 +51,7 @@ function openDb(): Database.Database | null {
   }
 }
 
-export function runProbes(): ProbeSummary {
+export async function runProbes(): Promise<ProbeSummary> {
   const s: ProbeSummary = {
     ts: Date.now(),
     checked: [],
@@ -81,6 +81,49 @@ export function runProbes(): ProbeSummary {
     });
   } catch {
     /* lecture mémoire, ne devrait pas jeter */
+  }
+
+  // ── Climatisation Airzone (bridge local relayé) ──
+  //    Le bridge ressert un dernier snapshot FIGÉ quand il perd le matériel : le
+  //    proxy renvoie HTTP 200 et l'app croyait le système « en ligne ». On sonde
+  //    le bridge en server-to-server (comme le proxy) et on lit son `connected`
+  //    réel — sinon une panne de clim reste totalement muette.
+  const azUrl = env.AIRZONE_BRIDGE_URL?.replace(/\/+$/, '');
+  if (azUrl) {
+    let azBad = false;
+    let azMsg =
+      'Climatisation Airzone hors ligne — le système ne répond plus (commandes inopérantes).';
+    try {
+      const r = await fetch(`${azUrl}/api/status`, { signal: AbortSignal.timeout(6000) });
+      if (!r.ok) {
+        azBad = true;
+      } else {
+        const d = (await r.json().catch(() => null)) as {
+          connected?: boolean;
+          last_update?: number | null;
+        } | null;
+        if (!d || !d.connected) {
+          azBad = true;
+          const ageMin =
+            d && typeof d.last_update === 'number'
+              ? Math.round((Date.now() / 1000 - d.last_update) / 60)
+              : null;
+          azMsg =
+            'Climatisation Airzone hors ligne — le boîtier ne répond plus' +
+            (ageMin != null ? `, données figées depuis ${ageMin} min` : '') +
+            ' (commandes inopérantes).';
+        }
+      }
+    } catch {
+      azBad = true; // injoignable / timeout : le bridge lui-même est down
+    }
+    assess(azBad, {
+      key: 'airzone:down',
+      severity: 'warning',
+      source: 'airzone',
+      kind: 'unreachable',
+      message: azMsg
+    });
   }
 
   // ── Sources énergie via history.db ──

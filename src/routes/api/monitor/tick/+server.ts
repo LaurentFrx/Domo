@@ -42,7 +42,7 @@ export const POST: RequestHandler = async ({ request }) => {
   }
 
   try {
-    const summary = runProbes();
+    const summary = await runProbes();
     const repaired = await autoRepair(summary);
     const pushed = await notifyNewIncidents();
     const recovered = await notifyResolved(summary.resolved);
