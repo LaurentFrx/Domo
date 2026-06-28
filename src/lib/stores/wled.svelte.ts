@@ -6,6 +6,10 @@
  * pilotée par les données renvoyées (effets, palettes, segments) → identique une
  * fois la carte réelle sur le réseau (il suffira de poser WLED_URL dans .env).
  *
+ * Ruban : COB RGBW 4000K → chaque couleur a un 4ᵉ canal BLANC dédié (W). La
+ * lumière perçue = RGB mélangé additivement avec le blanc 4000K. On garde donc
+ * `col` (teinte RGB) et `white` (canal W) séparés, comme l'app WLED native.
+ *
  * Conventions Domo : runes $state, polling visibility-aware (pause en arrière-
  * plan + refetch au retour de visibilité), cycle de vie refcounté via acquire(),
  * commandes optimistes (reflet immédiat + POST, resync GET au prochain tick).
@@ -17,14 +21,19 @@
 
 export type RGB = [number, number, number];
 
+/** Teinte sRGB approximative d'un blanc 4000K (neutre légèrement chaud). */
+export const WHITE_4000K: RGB = [255, 223, 191];
+
 export interface WledSegment {
   id: number;
   name: string;
   on: boolean;
   /** Luminosité du segment (0-255). */
   bri: number;
-  /** Couleur primaire [r,g,b]. */
+  /** Couleur (teinte RGB) — s'ajoute au canal blanc. */
   col: RGB;
+  /** Canal blanc dédié 4000K (0-255). */
+  white: number;
   /** Index d'effet (dans `effects`). */
   fx: number;
   /** Vitesse de l'effet (0-255). */
@@ -37,6 +46,19 @@ export interface WledSegment {
   len: number;
 }
 
+/**
+ * Couleur RÉELLEMENT perçue = teinte RGB + canal blanc 4000K (additif).
+ * Sert au rendu visuel (barre d'aperçu, pastilles) — pas envoyée au module.
+ */
+export function effectiveColor(col: RGB, white: number): RGB {
+  const w = white / 255;
+  return [
+    Math.min(255, Math.round(col[0] + WHITE_4000K[0] * w)),
+    Math.min(255, Math.round(col[1] + WHITE_4000K[1] * w)),
+    Math.min(255, Math.round(col[2] + WHITE_4000K[2] * w))
+  ];
+}
+
 /** Ambiances rapides (appliquées aux deux segments d'un coup). */
 export interface WledAmbiance {
   key: string;
@@ -46,6 +68,8 @@ export interface WledAmbiance {
   off?: boolean;
   bri?: number;
   col?: RGB;
+  /** Canal blanc 4000K (0-255). */
+  white?: number;
   /** Nom d'effet (résolu en index sur le module). */
   fx?: string;
   /** Nom de palette (résolu en index sur le module). */
@@ -56,27 +80,39 @@ export interface WledAmbiance {
 
 export const WLED_AMBIANCES: WledAmbiance[] = [
   {
+    key: 'blanc',
+    label: 'Blanc 4000K',
+    swatch: 'rgb(255 223 191)',
+    bri: 255,
+    col: [0, 0, 0],
+    white: 255,
+    fx: 'Solid'
+  },
+  {
     key: 'warm',
     label: 'Blanc chaud',
-    swatch: 'rgb(255 175 95)',
+    swatch: 'rgb(255 180 110)',
     bri: 255,
-    col: [255, 175, 95],
+    col: [255, 120, 40],
+    white: 150,
     fx: 'Solid'
   },
   {
     key: 'soiree',
     label: 'Soirée',
-    swatch: 'rgb(255 130 55)',
+    swatch: 'rgb(255 140 70)',
     bri: 90,
-    col: [255, 130, 55],
+    col: [255, 110, 45],
+    white: 40,
     fx: 'Solid'
   },
   {
     key: 'diner',
     label: 'Dîner',
-    swatch: 'rgb(255 95 70)',
+    swatch: 'rgb(255 110 70)',
     bri: 150,
-    col: [255, 95, 70],
+    col: [255, 80, 50],
+    white: 70,
     fx: 'Breathe',
     sx: 40,
     ix: 128
@@ -86,6 +122,8 @@ export const WLED_AMBIANCES: WledAmbiance[] = [
     label: 'Coucher de soleil',
     swatch: 'linear-gradient(90deg,#ff5e62,#ff9966,#ffd56b)',
     bri: 200,
+    col: [0, 0, 0],
+    white: 0,
     fx: 'Colorloop',
     pal: 'Sunset',
     sx: 60,
@@ -96,6 +134,8 @@ export const WLED_AMBIANCES: WledAmbiance[] = [
     label: 'Fête',
     swatch: 'linear-gradient(90deg,#f0f,#0ff,#ff0)',
     bri: 255,
+    col: [0, 0, 0],
+    white: 0,
     fx: 'Rainbow',
     pal: 'Party',
     sx: 200,
@@ -106,7 +146,8 @@ export const WLED_AMBIANCES: WledAmbiance[] = [
     label: 'Bougie',
     swatch: 'rgb(255 120 30)',
     bri: 160,
-    col: [255, 120, 30],
+    col: [255, 110, 25],
+    white: 30,
     fx: 'Candle',
     sx: 110,
     ix: 130
@@ -116,14 +157,6 @@ export const WLED_AMBIANCES: WledAmbiance[] = [
 
 function clamp(v: number, min = 0, max = 255): number {
   return Math.max(min, Math.min(max, Math.round(v)));
-}
-
-function normCol(col: unknown): RGB {
-  if (Array.isArray(col) && Array.isArray(col[0])) {
-    const c = col[0] as unknown[];
-    return [clamp(Number(c[0]) || 0), clamp(Number(c[1]) || 0), clamp(Number(c[2]) || 0)];
-  }
-  return [255, 255, 255];
 }
 
 const POLL_MS = 5_000;
@@ -145,7 +178,7 @@ class WledStore {
   bri = $state(128);
   /** Nom du module (info.name). */
   name = $state('Éclairage terrasse');
-  /** Strip RGBW (canal blanc dédié) — pilote l'affichage d'un éventuel réglage blanc. */
+  /** Ruban RGBW (canal blanc dédié) — pilote l'affichage du réglage « Blanc ». */
   rgbw = $state(false);
 
   // ─── Segments + catalogues ────────────────────────
@@ -166,6 +199,7 @@ class WledStore {
     if (typeof s.bri === 'number') this.bri = clamp(s.bri);
     if (Array.isArray(s.seg)) {
       const segs: WledSegment[] = [];
+      let sawRgbw = false;
       for (const raw of s.seg) {
         if (!raw || typeof raw !== 'object') continue;
         const seg = raw as Record<string, unknown>;
@@ -173,15 +207,27 @@ class WledStore {
         const stop = typeof seg.stop === 'number' ? seg.stop : 0;
         const len = typeof seg.len === 'number' ? seg.len : Math.max(0, stop - start);
         if (len <= 0) continue; // segment inactif
+
+        // Couleur primaire : [r,g,b] ou [r,g,b,w] (RGBW).
+        let col: RGB = [255, 255, 255];
+        let white = 0;
+        if (Array.isArray(seg.col) && Array.isArray(seg.col[0])) {
+          const c = seg.col[0] as unknown[];
+          col = [clamp(Number(c[0]) || 0), clamp(Number(c[1]) || 0), clamp(Number(c[2]) || 0)];
+          if (c.length >= 4) {
+            white = clamp(Number(c[3]) || 0);
+            sawRgbw = true;
+          }
+        }
+
+        const id = typeof seg.id === 'number' ? seg.id : segs.length;
         segs.push({
-          id: typeof seg.id === 'number' ? seg.id : segs.length,
-          name:
-            typeof seg.n === 'string' && seg.n.trim()
-              ? seg.n
-              : `Segment ${(typeof seg.id === 'number' ? seg.id : segs.length) + 1}`,
+          id,
+          name: typeof seg.n === 'string' && seg.n.trim() ? seg.n : `Segment ${id + 1}`,
           on: seg.on !== false,
           bri: typeof seg.bri === 'number' ? clamp(seg.bri) : 255,
-          col: normCol(seg.col),
+          col,
+          white,
           fx: typeof seg.fx === 'number' ? seg.fx : 0,
           sx: typeof seg.sx === 'number' ? clamp(seg.sx) : 128,
           ix: typeof seg.ix === 'number' ? clamp(seg.ix) : 128,
@@ -189,6 +235,7 @@ class WledStore {
           len
         });
       }
+      if (sawRgbw) this.rgbw = true;
       if (segs.length) this.segments = segs;
     }
   }
@@ -196,7 +243,12 @@ class WledStore {
   #applyInfo(info: Record<string, unknown>): void {
     if (typeof info.name === 'string' && info.name) this.name = info.name;
     const leds = info.leds as Record<string, unknown> | undefined;
-    if (leds && typeof leds.rgbw === 'boolean') this.rgbw = leds.rgbw;
+    if (leds) {
+      // RGBW signalé de plusieurs façons selon la version WLED : booléen `rgbw`,
+      // ou bit blanc dans les capacités `lc` (bit 1 = 2). On combine (OR).
+      if (leds.rgbw === true) this.rgbw = true;
+      if (typeof leds.lc === 'number' && (leds.lc & 2) !== 0) this.rgbw = true;
+    }
   }
 
   /** Charge effets + palettes (rarement changeants) — une seule fois. */
@@ -296,6 +348,11 @@ class WledStore {
     return this.segments.find((s) => s.id === id);
   }
 
+  /** Construit l'entrée `col` RGBW [[r,g,b,w]] pour un segment. */
+  #colPayload(rgb: RGB, white: number): number[][] {
+    return [[rgb[0], rgb[1], rgb[2], clamp(white)]];
+  }
+
   // Maître
   async setOn(on: boolean): Promise<void> {
     this.on = on;
@@ -328,11 +385,25 @@ class WledStore {
   }
   async setSegColor(id: number, rgb: RGB): Promise<void> {
     const s = this.#seg(id);
+    const white = s?.white ?? 0;
     if (s) {
       s.col = rgb;
       s.on = true;
     }
-    await this.#post({ seg: [{ id, on: true, col: [rgb] }] });
+    await this.#post({ seg: [{ id, on: true, col: this.#colPayload(rgb, white) }] });
+  }
+  /** Canal blanc 4000K (RGBW). */
+  async setSegWhite(id: number, white: number): Promise<void> {
+    const w = clamp(white);
+    const s = this.#seg(id);
+    const rgb = s?.col ?? [0, 0, 0];
+    if (s) {
+      s.white = w;
+      if (w > 0) s.on = true;
+    }
+    await this.#post({
+      seg: [{ id, on: w > 0 ? true : undefined, col: this.#colPayload(rgb, w) }]
+    });
   }
   async setSegEffect(id: number, fx: number): Promise<void> {
     const s = this.#seg(id);
@@ -374,6 +445,7 @@ class WledStore {
       s.on = true;
       if (a.bri !== undefined) s.bri = clamp(a.bri);
       if (a.col) s.col = a.col;
+      if (a.white !== undefined) s.white = clamp(a.white);
       if (fxIdx !== undefined) s.fx = fxIdx;
       if (palIdx !== undefined) s.pal = palIdx;
       if (a.sx !== undefined) s.sx = clamp(a.sx);
@@ -382,9 +454,14 @@ class WledStore {
     this.on = true;
 
     const seg = ids.map((id) => {
+      const cur = this.#seg(id);
       const o: Record<string, unknown> = { id, on: true };
       if (a.bri !== undefined) o.bri = clamp(a.bri);
-      if (a.col) o.col = [a.col];
+      if (a.col || a.white !== undefined) {
+        const rgb = a.col ?? cur?.col ?? [0, 0, 0];
+        const w = a.white ?? cur?.white ?? 0;
+        o.col = this.#colPayload(rgb as RGB, w);
+      }
       if (fxIdx !== undefined) o.fx = fxIdx;
       if (palIdx !== undefined) o.pal = palIdx;
       if (a.sx !== undefined) o.sx = clamp(a.sx);

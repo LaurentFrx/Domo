@@ -2,14 +2,18 @@
   /**
    * Carte de contrôle de l'éclairage terrasse (WLED — QuinLed Dig-Uno V3).
    *
+   * Ruban COB RGBW 4000K : canal blanc dédié (slider « Blanc 4000K ») en plus de
+   * la teinte RGB. Aperçu visuel live en tête (WledPreview).
+   *
    * Deux segments = deux lignes LED : « Store » (bras du store banne) et
    * « SàM Été » (véranda). Maître (on/off + luminosité), ambiances rapides,
-   * puis contrôles par segment : on/off, luminosité, couleur, effet, palette,
-   * vitesse, intensité. Pilotée par le store wled (mock tant que le module
-   * n'est pas branché → badge « Démo »).
+   * puis par segment : on/off, luminosité, blanc, couleur, effet, palette,
+   * vitesse, intensité. Pilotée par le store wled (mock → badge « Démo »).
    */
-  import { wled, WLED_AMBIANCES, type RGB } from '$stores/wled.svelte';
+  import { wled, WLED_AMBIANCES, effectiveColor, type RGB } from '$stores/wled.svelte';
+  import { preferences } from '$stores/preferences.svelte';
   import WledColorPicker from './WledColorPicker.svelte';
+  import WledPreview from './WledPreview.svelte';
   import { haptic } from '$utils/haptic';
 
   let selectedId = $state(0);
@@ -34,11 +38,14 @@
 
   const briPct = $derived(Math.round((wled.bri / 255) * 100));
   const segBriPct = $derived(seg ? Math.round((seg.bri / 255) * 100) : 0);
+  const segWhitePct = $derived(seg ? Math.round((seg.white / 255) * 100) : 0);
   const isSolid = $derived(seg ? seg.fx === wled.solidFx : true);
   const segCtlDisabled = $derived(!wled.on || !seg);
 
-  function segDotCss(s: { on: boolean; col: RGB }): string {
-    return s.on ? `rgb(${s.col[0]} ${s.col[1]} ${s.col[2]})` : 'var(--color-muted)';
+  function segDotCss(s: { on: boolean; col: RGB; white: number }): string {
+    if (!s.on) return 'var(--color-muted)';
+    const e = effectiveColor(s.col, s.white);
+    return `rgb(${e[0]} ${e[1]} ${e[2]})`;
   }
 </script>
 
@@ -99,6 +106,9 @@
       <span class="toggle-pill-knob"></span>
     </label>
   </div>
+
+  <!-- ─── Aperçu visuel live (rendu COB RGBW « tel que réglé ») ─── -->
+  <WledPreview animated={preferences.animationsEnabled} />
 
   <!-- ─── Luminosité maître ─── -->
   {#if wled.on}
@@ -173,7 +183,7 @@
     {#if seg}
       {@const s = seg}
       <div class="grid gap-4 lg:grid-cols-2" class:dimmed={segCtlDisabled}>
-        <!-- Colonne 1 : on/off + luminosité + couleur -->
+        <!-- Colonne 1 : on/off + luminosité + blanc + couleur -->
         <div class="flex flex-col gap-3">
           <div class="flex items-center justify-between">
             <span class="text-[13px] font-semibold" style="color: var(--color-fg);">{s.name}</span>
@@ -194,9 +204,9 @@
           <div class="flex flex-col gap-1.5">
             <div class="flex items-center justify-between text-[12px]">
               <span style="color: var(--color-muted-fg);">Luminosité</span>
-              <span class="font-semibold tabular-nums" style="color: var(--color-fg);"
-                >{segBriPct}%</span
-              >
+              <span class="font-semibold tabular-nums" style="color: var(--color-fg);">
+                {segBriPct}%
+              </span>
             </div>
             <input
               type="range"
@@ -210,8 +220,30 @@
             />
           </div>
 
+          {#if wled.rgbw}
+            <div class="flex flex-col gap-1.5">
+              <div class="flex items-center justify-between text-[12px]">
+                <span style="color: var(--color-muted-fg);">Blanc 4000K</span>
+                <span class="font-semibold tabular-nums" style="color: var(--color-fg);">
+                  {segWhitePct}%
+                </span>
+              </div>
+              <input
+                type="range"
+                class="bri-range white-range"
+                min="0"
+                max="255"
+                value={s.white}
+                disabled={segCtlDisabled}
+                oninput={(e) =>
+                  wled.setSegWhite(s.id, +(e.currentTarget as HTMLInputElement).value)}
+                aria-label="Canal blanc 4000K {s.name}"
+              />
+            </div>
+          {/if}
+
           <div class="flex flex-col gap-1.5">
-            <span class="text-[12px]" style="color: var(--color-muted-fg);">Couleur</span>
+            <span class="text-[12px]" style="color: var(--color-muted-fg);">Couleur (teinte)</span>
             <WledColorPicker
               color={s.col}
               disabled={segCtlDisabled}
@@ -371,6 +403,10 @@
     border-radius: 50%;
     background: var(--color-primary);
     cursor: pointer;
+  }
+  /* Canal blanc 4000K : rail teinté blanc chaud pour le distinguer. */
+  .white-range {
+    background: linear-gradient(90deg, var(--color-muted), rgb(255 223 191));
   }
 
   /* ─── Ambiances ─── */

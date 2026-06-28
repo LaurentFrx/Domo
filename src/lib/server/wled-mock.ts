@@ -222,8 +222,6 @@ export const WLED_PALETTES: string[] = [
   'Candy2'
 ];
 
-type RGB = [number, number, number];
-
 interface MockSeg {
   id: number;
   start: number;
@@ -238,8 +236,8 @@ interface MockSeg {
   cct: number;
   /** Nom du segment (WLED 0.14+). */
   n: string;
-  /** Couleurs : primaire, secondaire, tertiaire — chacune [r,g,b]. */
-  col: RGB[];
+  /** Couleurs : primaire, secondaire, tertiaire — chacune [r,g,b] ou [r,g,b,w] (RGBW). */
+  col: number[][];
   fx: number;
   sx: number;
   ix: number;
@@ -297,10 +295,11 @@ const state: MockState = {
       bri: 255,
       cct: 127,
       n: 'Store',
+      // COB RGBW 4000K : par défaut, blanc propre via le canal W (RGB à 0).
       col: [
-        [255, 170, 85],
-        [0, 0, 0],
-        [0, 0, 0]
+        [0, 0, 0, 220],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0]
       ],
       fx: 0,
       sx: 128,
@@ -332,9 +331,9 @@ const state: MockState = {
       cct: 127,
       n: 'SàM Été',
       col: [
-        [255, 200, 140],
-        [0, 0, 0],
-        [0, 0, 0]
+        [0, 0, 0, 200],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0]
       ],
       fx: 0,
       sx: 128,
@@ -362,14 +361,16 @@ function clampInt(v: unknown, min: number, max: number, fallback: number): numbe
   return Math.max(min, Math.min(max, Math.round(v)));
 }
 
-/** Puissance estimée (W) — réaliste, varie avec on/luminosité (≈0,22 W/LED max). */
+/** Puissance estimée (W) — RGBW, varie avec on/luminosité/canaux (≈0,3 W/LED max). */
 function estimatePowerW(): number {
   if (!state.on) return 0;
   const master = state.bri / 255;
   let w = 0;
   for (const s of state.seg) {
     if (!s.on) continue;
-    w += s.len * 0.22 * (s.bri / 255) * master;
+    const c = s.col[0] ?? [0, 0, 0, 0];
+    const intensity = ((c[0] || 0) + (c[1] || 0) + (c[2] || 0) + (c[3] || 0)) / (4 * 255);
+    w += s.len * 0.3 * intensity * (s.bri / 255) * master;
   }
   return Math.round(w);
 }
@@ -386,10 +387,10 @@ function buildInfo() {
       fps: state.on ? 42 : 0,
       maxpwr: 0,
       maxseg: 32,
-      seglc: state.seg.map(() => 1),
-      lc: 1,
-      rgbw: false,
-      wv: 0,
+      seglc: state.seg.map(() => 3),
+      lc: 3,
+      rgbw: true,
+      wv: 1,
       cct: 0
     },
     str: false,
@@ -435,13 +436,17 @@ function mergeSeg(seg: MockSeg, p: Record<string, unknown>): void {
   if (typeof p.rev === 'boolean') seg.rev = p.rev;
   if (typeof p.frz === 'boolean') seg.frz = p.frz;
   if (Array.isArray(p.col)) {
-    const cols: RGB[] = [[...seg.col[0]] as RGB, [...seg.col[1]] as RGB, [...seg.col[2]] as RGB];
+    // RGBW : chaque entrée peut porter 4 canaux [r,g,b,w].
+    const cols: number[][] = [[...seg.col[0]], [...seg.col[1]], [...seg.col[2]]];
     p.col.forEach((entry, i) => {
       if (i > 2 || !Array.isArray(entry)) return;
-      const r = clampInt(entry[0], 0, 255, cols[i][0]);
-      const g = clampInt(entry[1], 0, 255, cols[i][1]);
-      const b = clampInt(entry[2], 0, 255, cols[i][2]);
-      cols[i] = [r, g, b];
+      const base = cols[i] ?? [0, 0, 0, 0];
+      cols[i] = [
+        clampInt(entry[0], 0, 255, base[0] ?? 0),
+        clampInt(entry[1], 0, 255, base[1] ?? 0),
+        clampInt(entry[2], 0, 255, base[2] ?? 0),
+        clampInt(entry[3], 0, 255, base[3] ?? 0)
+      ];
     });
     seg.col = cols;
   }
