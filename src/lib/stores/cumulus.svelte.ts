@@ -140,6 +140,15 @@ class CumulusState {
   lastAnchorTs = $state<number | null>(null);
   /** Config effective du moteur (cibles/seuils) — null avant le 1er poll. */
   config = $state<CumulusConfigClient | null>(null);
+  /** ÉTAPE 2a — plan du planificateur prédictif (shadow, lecture seule UI). */
+  plan = $state<{
+    action: 'heat_now' | 'heat_hc' | 'wait_solar' | 'wait';
+    reason: string;
+    targetHour: number | null;
+    showers: number;
+    floorShowers: number;
+    computedAt: number;
+  } | null>(null);
   #orchTimer: ReturnType<typeof setInterval> | null = null;
   #orchVis: (() => void) | null = null;
 
@@ -304,6 +313,18 @@ class CumulusState {
         const ev = s.energyView;
         this.eFullWh = typeof ev?.eFullWh === 'number' ? ev.eFullWh : null;
         this.showers = typeof ev?.showers === 'number' ? ev.showers : null;
+        const pl = s.plan;
+        this.plan =
+          pl && typeof pl.action === 'string'
+            ? {
+                action: pl.action,
+                reason: typeof pl.reason === 'string' ? pl.reason : '',
+                targetHour: typeof pl.targetHour === 'number' ? pl.targetHour : null,
+                showers: typeof pl.showers === 'number' ? pl.showers : 0,
+                floorShowers: typeof pl.floorShowers === 'number' ? pl.floorShowers : 0,
+                computedAt: typeof pl.computedAt === 'number' ? pl.computedAt : 0
+              }
+            : null;
       }
       if (d?.config) this.config = d.config as CumulusConfigClient;
       this.orchestratorConnected = true;

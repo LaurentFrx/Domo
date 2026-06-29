@@ -25,6 +25,7 @@
   import ChartHoverLayer from '$components/charts/ChartHoverLayer.svelte';
   import ApplianceCard from '$components/tiles/ApplianceCard.svelte';
   import CumulusCard from '$components/cards/CumulusCard.svelte';
+  import PlannerCard from '$components/cards/PlannerCard.svelte';
   import HpHcSplitCard from '$components/cards/HpHcSplitCard.svelte';
 
   // Stores page-scoped : refcountés → une page voisine (pager) qui se démonte ne
@@ -434,6 +435,9 @@
 
   <!-- ═══ Chauffe-eau (ECS) — carte en tête de page ═══ -->
   <CumulusCard />
+
+  <!-- ═══ Planificateur prédictif (observation / shadow) ═══ -->
+  <PlannerCard />
 
   <!-- ═══ Paysage (iPad/desktop) : production + prévisions côte à côte ═══ -->
   <div class="grid gap-6 lg:grid-cols-2 lg:items-start">
