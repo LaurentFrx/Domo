@@ -61,7 +61,7 @@ export function defaultEnergyModel(): EnergyModelConfig {
     roomOffsetSummerC: 1,
     roomOffsetWinterC: -2,
     roomFallbackC: 20,
-    lossCoeffWhPerCh: 2.8, // recalibré sur les nuits (1c) ; 1,7 sous-estimait ~1,7×
+    lossCoeffWhPerCh: 2.1, // = Cr·V/24 (fiche Atlantic 154330 : Cr=0,17 Wh/L/°C/24h × 300 L = 2,125) ; recoupé par Qpr=2,41 kWh/24h à ΔT≈47°C. La sonde de point bas surlit ~×2 (stratification) → ne PAS calibrer dessus.
     eDoucheWhSummer: 2000,
     eDoucheWhWinter: 2800,
     drawDropThresholdC: 2.0,
