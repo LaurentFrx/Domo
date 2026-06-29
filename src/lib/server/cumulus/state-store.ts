@@ -18,7 +18,9 @@ import type {
   Anomaly,
   DecisionLogEntry,
   EnergyState,
-  EnergyView
+  EnergyView,
+  HeatPlan,
+  PlanAction
 } from './types';
 import type { CumulusMode } from '$theme/tokens';
 
@@ -54,6 +56,7 @@ export function defaultCumulusState(): CumulusRuntimeState {
     anomaly: 'none',
     energy: defaultEnergyState(),
     energyView: null,
+    plan: null,
     log: []
   };
 }
@@ -141,6 +144,7 @@ export function normalizeCumulusState(raw: unknown): CumulusRuntimeState {
     anomaly: (o.anomaly as Anomaly) ?? d.anomaly,
     energy: normEnergy(o.energy),
     energyView: normEnergyView(o.energyView),
+    plan: normPlan(o.plan),
     log: normLog(o.log)
   };
 }
@@ -153,6 +157,21 @@ function normEnergyView(v: unknown): EnergyView | null {
     eFullWh: numOr(o.eFullWh, 0),
     showers: numOr(o.showers, 0),
     tTankC: numOr(o.tTankC, 0)
+  };
+}
+
+const PLAN_ACTIONS: PlanAction[] = ['heat_now', 'heat_hc', 'wait_solar', 'wait'];
+function normPlan(v: unknown): HeatPlan | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  if (!PLAN_ACTIONS.includes(o.action as PlanAction)) return null;
+  return {
+    action: o.action as PlanAction,
+    reason: typeof o.reason === 'string' ? o.reason : '',
+    targetHour: numOrNull(o.targetHour),
+    showers: numOr(o.showers, 0),
+    floorShowers: numOr(o.floorShowers, 0),
+    computedAt: numOr(o.computedAt, 0)
   };
 }
 

@@ -75,6 +75,8 @@ export interface CumulusInputs {
   forecastAvailable: boolean;
   /** Énergie PV prévue sur le prochain créneau diurne à venir (kWh). */
   solNextDaylightKwh: number;
+  /** Courbe PV horaire à venir (heures ≥ courante) — pour le planificateur (ÉTAPE 2a). */
+  forecastHourly: PlanForecastPoint[];
 
   // ── Relais (état physique lu) ──
   relayAvailable: boolean;
@@ -211,6 +213,13 @@ export interface PlannerConfig {
   socFloorPct: number; // marge batterie : pas de chauffe solaire si SoC < ce seuil (%)
 }
 
+/** Un point horaire de la courbe de prévision PV à venir (≥ heure courante). */
+export interface PlanForecastPoint {
+  hoursAhead: number; // 0 = heure courante, 1 = la suivante, …
+  hour: number; // heure locale Paris 0..23
+  pvW: number; // puissance PV prévue (W)
+}
+
 /** Une entrée du journal de décisions (ring buffer). */
 export interface DecisionLogEntry {
   ts: number;
@@ -269,6 +278,8 @@ export interface CumulusRuntimeState {
   energy: EnergyState;
   /** Instantané d'affichage du modèle (lecture seule UI ; écrit par engine.ts). */
   energyView: EnergyView | null;
+  /** ÉTAPE 2a — dernier plan du planificateur (shadow : journalisé, ne pilote pas). */
+  plan: HeatPlan | null;
   log: DecisionLogEntry[];
 }
 

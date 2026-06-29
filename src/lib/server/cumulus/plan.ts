@@ -17,14 +17,10 @@
  *     s'il arrive à temps, sinon en heures creuses.
  */
 
-import type { HeatPlan, PlanAction, PlannerConfig } from './types';
+import type { HeatPlan, PlanAction, PlannerConfig, PlanForecastPoint } from './types';
 
-/** Un point horaire de prévision PV (heures à venir, ≥ heure courante). */
-export interface PlanForecastPoint {
-  hoursAhead: number; // 0 = heure courante, 1 = la suivante, …
-  hour: number; // heure locale Paris 0..23
-  pvW: number; // puissance PV prévue (W)
-}
+// PlanForecastPoint vit dans types.ts (partagé avec CumulusInputs.forecastHourly) ; réexporté ici.
+export type { PlanForecastPoint };
 
 /** Instantané d'entrée du planificateur (construit par engine.ts depuis les inputs). */
 export interface PlanInput {

@@ -64,6 +64,7 @@ export interface EnergyTickResult {
   anchored: boolean;
   hoursSinceAnchor: number | null;
   showers: number; // E_avail / eDouche
+  eDoucheWh: number; // énergie d'une douche (interpolée saison) — pour le planificateur (2a)
   probeC: number | null;
 }
 
@@ -250,6 +251,7 @@ export function updateEnergyModel(
       anchored,
       hoursSinceAnchor,
       showers,
+      eDoucheWh: eDouche,
       probeC
     }
   };

@@ -21,6 +21,7 @@ import { readCumulusState, writeCumulusState } from './state-store';
 import { setRelay } from './relay';
 import { ensureTempSensor } from './temp-sensor';
 import { updateEnergyModel, type EnergyTickResult } from './energy-model';
+import { planHeating } from './plan';
 import type { AutoMode, DecisionLogEntry } from './types';
 
 const TICK_TIMEOUT_MS = 45_000; // < intervalle timer (60 s)
@@ -127,6 +128,30 @@ async function runTick(apply: boolean): Promise<TickResult> {
     showers: +er.showers.toFixed(2),
     tTankC: er.tTankC
   };
+
+  // ── Planificateur prédictif (ÉTAPE 2a — SHADOW : calcule + journalise, ne pilote pas) ──
+  if (config.planner.enabled) {
+    const socs = inputs.batterySocPct.filter((s) => Number.isFinite(s));
+    next.plan = planHeating(
+      {
+        now,
+        eAvailWh: er.eAvailWh,
+        eFullWh: er.eFullWh,
+        eDoucheWh: er.eDoucheWh,
+        isHC: inputs.isHC,
+        socPct: socs.length ? socs.reduce((a, b) => a + b, 0) / socs.length : null,
+        forecast: inputs.forecastHourly
+      },
+      config.planner
+    );
+    const p = next.plan;
+    console.log(
+      `[plan] ${p.action} — ${p.reason}` +
+        ` (réserve ${p.showers}/${p.floorShowers} douches` +
+        `${p.targetHour !== null ? `, cible ${p.targetHour}h` : ''})`
+    );
+  }
+
   const fmtSrc = (s: { name: string; tempC: number }[]) =>
     s.length ? s.map((x) => `${x.name} ${x.tempC}`).join(' + ') : 'repli';
   console.log(

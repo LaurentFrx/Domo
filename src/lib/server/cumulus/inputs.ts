@@ -8,7 +8,7 @@
 
 import { env } from '$env/dynamic/private';
 import { isHC, nextTariffSwitch, parisDate } from '../tariffs';
-import type { CumulusConfig, CumulusInputs, TempSource } from './types';
+import type { CumulusConfig, CumulusInputs, TempSource, PlanForecastPoint } from './types';
 import { readRelay } from './relay';
 import { averageTemp } from './energy-model';
 import { ensureTempSensor, getCumulusTemp, ensureTempTopic, getTempTopic } from './temp-sensor';
@@ -16,6 +16,7 @@ import { ensureTempSensor, getCumulusTemp, ensureTempTopic, getTempTopic } from 
 const TIMEOUT_MS = 8_000;
 const FORECAST_TIMEOUT_MS = 12_000;
 const INDOOR_STALE_MS = 3 * 3_600_000; // sonde intérieure périmée au-delà de 3 h
+const FORECAST_HORIZON_H = 30; // courbe PV à venir conservée pour le planificateur (h)
 
 const num = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) ? n : 0);
 
@@ -87,16 +88,19 @@ function pointPowerW(pt: ForecastPoint): number {
  * Comparaison par préfixe de chaîne sur le `time` ISO local (pas de new Date →
  * zéro ambiguïté DST). Repli sur next_24h_kwh si pas de série horaire.
  */
-async function readForecastNextDaylight(
-  now: Date
-): Promise<{ available: boolean; kwh: number; outdoorC: number | null }> {
+async function readForecastNextDaylight(now: Date): Promise<{
+  available: boolean;
+  kwh: number;
+  outdoorC: number | null;
+  hourly: PlanForecastPoint[];
+}> {
   const base = forecastUrl();
-  if (!base) return { available: false, kwh: 0, outdoorC: null };
+  if (!base) return { available: false, kwh: 0, outdoorC: null, hourly: [] };
   try {
     const r = await fetch(`${base}/api/forecast`, {
       signal: AbortSignal.timeout(FORECAST_TIMEOUT_MS)
     });
-    if (!r.ok) return { available: false, kwh: 0, outdoorC: null };
+    if (!r.ok) return { available: false, kwh: 0, outdoorC: null, hourly: [] };
     const d = (await r.json()) as {
       hourly?: ForecastPoint[];
       points?: ForecastPoint[];
@@ -122,6 +126,22 @@ async function readForecastNextDaylight(
       break;
     }
 
+    // Courbe PV horaire À VENIR (heures ≥ courante, jusqu'à l'horizon) pour le planificateur.
+    // hoursAhead = jours d'écart × 24 + (heure du point − heure courante) ; raisonnement en
+    // heures locales (dates calendaires en UTC minuit) → pas d'ambiguïté DST.
+    const todayMidnight = Date.parse(today);
+    const hourly: PlanForecastPoint[] = [];
+    for (const pt of arr) {
+      const time = typeof pt.time === 'string' ? pt.time : '';
+      const ph = Number(time.slice(11, 13));
+      const ptDay = Date.parse(time.slice(0, 10));
+      if (!Number.isFinite(ph) || Number.isNaN(ptDay) || Number.isNaN(todayMidnight)) continue;
+      const hoursAhead = Math.round((ptDay - todayMidnight) / 86_400_000) * 24 + (ph - h);
+      if (hoursAhead < 0 || hoursAhead > FORECAST_HORIZON_H) continue;
+      hourly.push({ hoursAhead, hour: ph, pvW: Math.round(pointPowerW(pt)) });
+    }
+    hourly.sort((a, b) => a.hoursAhead - b.hoursAhead);
+
     if (arr.length) {
       let wh = 0;
       for (const pt of arr) {
@@ -131,13 +151,13 @@ async function readForecastNextDaylight(
         if (!Number.isFinite(ph) || ph < fromHour || ph >= 19) continue;
         wh += pointPowerW(pt);
       }
-      return { available: true, kwh: +(wh / 1000).toFixed(2), outdoorC };
+      return { available: true, kwh: +(wh / 1000).toFixed(2), outdoorC, hourly };
     }
     if (typeof d.next_24h_kwh === 'number')
-      return { available: true, kwh: d.next_24h_kwh, outdoorC };
-    return { available: false, kwh: 0, outdoorC };
+      return { available: true, kwh: d.next_24h_kwh, outdoorC, hourly };
+    return { available: false, kwh: 0, outdoorC, hourly };
   } catch {
-    return { available: false, kwh: 0, outdoorC: null };
+    return { available: false, kwh: 0, outdoorC: null, hourly: [] };
   }
 }
 
@@ -277,6 +297,7 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     minutesToHcEnd: isHCnow ? sw.inMinutes : -1,
     forecastAvailable: forecast.available,
     solNextDaylightKwh: forecast.kwh,
+    forecastHourly: forecast.hourly,
     relayAvailable: relay.available,
     relayOn: relay.on,
     ankerAvailable: anker.available,
