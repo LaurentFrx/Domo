@@ -1,279 +1,224 @@
 <script lang="ts">
   /**
-   * Carte « Planificateur (observation) » — ÉTAPE 2a SHADOW.
+   * Carte « Eau chaude » — explique, en langage de tous les jours, ce que le
+   * système ferait du chauffe-eau et pourquoi. Pensée pour être comprise sans
+   * connaître le fonctionnement (réserve en douches, gratuit/soleil vs payant,
+   * journal du jour en mots simples, « comment ça marche ? » dépliable).
    *
-   * Montre la SIMULATION (ce que le planificateur prédictif décide) ⇄ le CONTRÔLE
-   * (l'état réel). Le planificateur NE PILOTE RIEN : observation pure. Données
-   * lues du store cumulus (plan, E_avail) + forecast (courbe PV du jour).
-   *
-   * Lecture seule ; les stores sont connectés par la page (refcount), pas ici.
+   * SHADOW : le système propose, il ne commande pas encore le relais.
+   * Lecture seule ; stores connectés par la page (refcount).
    */
   import { cumulus } from '$stores/cumulus.svelte';
+  import { em50 } from '$stores/em50.svelte';
   import { forecast } from '$stores/forecast.svelte';
-  import { smoothLinePath, smoothAreaPath, type XY } from '$utils/chart';
 
-  const plan = $derived(cumulus.plan);
+  let showHelp = $state(false);
+
+  const showersRaw = $derived(cumulus.showers);
+  const showers = $derived(showersRaw != null ? Math.max(0, Math.round(showersRaw)) : null);
   const eAvail = $derived(cumulus.eAvailWh);
   const eFull = $derived(cumulus.eFullWh);
-  const showers = $derived(cumulus.showers);
-  const sonde = $derived(cumulus.waterTempC);
-  const lastFull = $derived(cumulus.lastAnchorTs);
+  const plan = $derived(cumulus.plan);
+  const heatingNow = $derived(em50.cumulusPowerW > 500);
 
-  // ── Libellé + couleur de l'action ──
-  const ACTIONS = {
-    heat_now: { label: 'Chauffe solaire', color: 'var(--color-solar)' },
-    wait_solar: { label: 'Attend le pic solaire', color: 'var(--color-solar)' },
-    heat_hc: { label: 'Chauffe heures creuses', color: 'var(--color-hc)' },
-    wait: { label: 'En veille', color: 'var(--color-muted-fg)' }
-  } as const;
-  const act = $derived(plan ? ACTIONS[plan.action] : null);
+  // Barre « niveau d'eau chaude » (par rapport au plein).
+  const fillPct = $derived(
+    eAvail && eFull && eFull > 0 ? Math.min(100, Math.max(0, (eAvail / eFull) * 100)) : 0
+  );
 
-  // heat_hc hors hiver = anormal (le solaire devrait suffire) → on le signale.
-  const isWinter = $derived.by(() => {
-    const m = new Date().getMonth(); // 0=janv
-    return m <= 1 || m >= 10; // nov–fév
+  // ── Phrase d'état (état réel + ce que le système déciderait) ──
+  const status = $derived.by(() => {
+    if (heatingNow)
+      return {
+        emoji: '🔥',
+        title: 'Le chauffe-eau chauffe en ce moment',
+        text: "Il refait le plein d'eau chaude."
+      };
+    switch (plan?.action) {
+      case 'heat_now':
+        return {
+          emoji: '☀️',
+          title: 'C’est le bon moment pour chauffer',
+          text: 'Le soleil produit : on rechargerait gratuitement, avec les panneaux.'
+        };
+      case 'wait_solar':
+        return {
+          emoji: '⏳',
+          title: 'On attend le soleil',
+          text: 'Il reste assez d’eau chaude ; on rechargera gratuitement dès que les panneaux produiront.'
+        };
+      case 'heat_hc':
+        return {
+          emoji: '🌙',
+          title: 'Recharge prévue cette nuit',
+          text: 'Peu de soleil attendu : on rechargera la nuit, quand l’électricité est moins chère.'
+        };
+      default:
+        return {
+          emoji: '😴',
+          title: 'Le chauffe-eau se repose',
+          text: 'Il reste assez d’eau chaude. Rien à faire pour l’instant.'
+        };
+    }
   });
-  const hcAlert = $derived(plan?.action === 'heat_hc' && !isWinter);
 
-  // ── Réserve (douches) : barre + marqueur plancher ──
-  const fullShowers = $derived(
-    eAvail && eAvail > 0 && showers ? (showers * (eFull ?? 0)) / eAvail : (showers ?? 0)
-  );
-  const floor = $derived(plan?.floorShowers ?? 3);
-  const showerPct = $derived(
-    fullShowers > 0 ? Math.min(100, ((showers ?? 0) / fullShowers) * 100) : 0
-  );
-  const floorPct = $derived(fullShowers > 0 ? Math.min(100, (floor / fullShowers) * 100) : 0);
-
-  // ── Courbe PV du jour ──
-  const W = 240;
-  const H = 64;
-  const PAD = 6;
-  const pv = $derived.by(() => {
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    return forecast.points.filter((p) => p.time.slice(0, 10) === today);
+  // ── Prochaine chauffe prévue (en clair) ──
+  const nextSolar = $derived.by(() => {
+    const now = Date.now();
+    const chrono = forecast.points
+      .map((p) => ({ d: new Date(p.time), kw: p.kw }))
+      .filter((x) => x.d.getTime() > now && x.kw >= 1.5)
+      .sort((a, b) => a.d.getTime() - b.d.getTime());
+    if (!chrono.length) return null;
+    const f = chrono[0];
+    const sameDay = f.d.getDate() === new Date().getDate();
+    return `${sameDay ? 'aujourd’hui' : 'demain'} vers ${f.d.getHours()} h`;
   });
-  const maxKw = $derived(Math.max(1, ...pv.map((p) => p.kw)));
-  const hourOf = (t: string) => Number(t.slice(11, 13)) + Number(t.slice(14, 16)) / 60;
-  const xy = $derived.by((): XY[] =>
-    pv.map((p) => ({ x: (hourOf(p.time) / 24) * W, y: H - PAD - (p.kw / maxKw) * (H - 2 * PAD) }))
-  );
-  const areaPath = $derived(smoothAreaPath(xy, H - PAD));
-  const linePath = $derived(smoothLinePath(xy));
-  const peak = $derived.by(() =>
-    pv.reduce<(typeof pv)[number] | null>((m, p) => (!m || p.kw > m.kw ? p : m), null)
-  );
-  const peakPct = $derived(peak ? (hourOf(peak.time) / 24) * 100 : null);
-  const nowPct = $derived.by(() => {
-    const n = new Date();
-    return ((n.getHours() + n.getMinutes() / 60) / 24) * 100;
+  const nextHeat = $derived.by(() => {
+    if (heatingNow) return null;
+    if (plan?.action === 'heat_hc')
+      return { emoji: '🌙', text: 'cette nuit (électricité moins chère)' };
+    if (plan?.targetHour != null)
+      return { emoji: '☀️', text: `aujourd’hui vers ${plan.targetHour} h — gratuit, au soleil` };
+    if (nextSolar) return { emoji: '☀️', text: `${nextSolar} — gratuit, au soleil` };
+    return null;
   });
-  const targetPct = $derived(plan?.targetHour != null ? (plan.targetHour / 24) * 100 : null);
 
-  const hhmm = (ts: number | null) =>
-    ts ? new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—';
-  const kwh = (wh: number | null) => (wh == null ? '—' : (wh / 1000).toFixed(1));
-
-  // ── Timeline du jour (transitions de plan, chauffes, puisages, pleins) ──
-  const KIND: Record<string, { icon: string; color: string }> = {
-    plan: { icon: '◈', color: 'var(--color-primary)' },
-    heat_start: { icon: '▶', color: 'var(--color-hp)' },
-    heat_end: { icon: '■', color: 'var(--color-muted-fg)' },
-    draw: { icon: '↓', color: 'var(--color-hc)' },
-    full: { icon: '✓', color: 'var(--color-success)' }
-  };
-  const planLabel = (a: string) => (a in ACTIONS ? ACTIONS[a as keyof typeof ACTIONS].label : a);
+  // ── Journal du jour, en mots simples (on cache les détails techniques) ──
+  const hhmm = (ts: number) =>
+    new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   const events = $derived.by(() => {
     const n = new Date();
     const start = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
     return cumulus.shadowLog
-      .filter((e) => e.ts >= start)
+      .filter(
+        (e) => e.ts >= start && (e.kind === 'heat_end' || e.kind === 'draw' || e.kind === 'full')
+      )
       .slice()
-      .reverse();
+      .reverse()
+      .map((e) => {
+        if (e.kind === 'heat_end') {
+          const free = e.detail.includes('soleil');
+          return { ts: e.ts, emoji: free ? '☀️' : '🔌', text: `Chauffé — ${e.detail}` };
+        }
+        if (e.kind === 'draw')
+          return { ts: e.ts, emoji: '🚿', text: 'Eau chaude utilisée (douche / robinet)' };
+        return { ts: e.ts, emoji: '✓', text: 'Ballon plein' };
+      });
   });
 </script>
 
 <section
-  class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-4"
+  class="flex flex-col gap-4 rounded-[var(--radius-2xl)] border p-4"
   style="background: var(--color-card); border-color: var(--color-border);"
 >
   <!-- En-tête -->
   <div class="flex items-center justify-between">
-    <h3 class="text-sm font-semibold tracking-tight" style="color: var(--color-fg);">
-      Planificateur
+    <h3 class="text-base font-semibold tracking-tight" style="color: var(--color-fg);">
+      Eau chaude
     </h3>
-    <span
-      class="rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase"
-      style="background: color-mix(in oklch, var(--color-muted-fg) 18%, transparent); color: var(--color-muted-fg);"
+    <button
+      type="button"
+      onclick={() => (showHelp = !showHelp)}
+      class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold"
+      style="background: color-mix(in oklch, var(--color-muted-fg) 16%, transparent); color: var(--color-muted-fg);"
+      aria-label="Comment ça marche"
     >
-      observation · ne pilote pas
-    </span>
+      ?
+    </button>
   </div>
 
-  <!-- Action courante -->
-  <div class="flex items-baseline gap-2">
-    <span
-      class="h-2.5 w-2.5 shrink-0 rounded-full"
-      style="background: {act?.color ?? 'var(--color-muted-fg)'};"
-    ></span>
-    <div class="min-w-0">
-      <div class="text-lg leading-tight font-semibold" style="color: var(--color-fg);">
-        {act?.label ?? '—'}
-        {#if plan?.targetHour != null}
-          <span class="text-sm font-normal" style="color: var(--color-muted-fg);"
-            >· cible {plan.targetHour}h</span
-          >
-        {/if}
-      </div>
-      <div class="truncate text-xs" style="color: var(--color-muted-fg);">
-        {plan?.reason ?? 'en attente du moteur…'}
-      </div>
-    </div>
-  </div>
-
-  <!-- Réserve (douches) -->
-  <div class="flex flex-col gap-1">
-    <div class="flex justify-between text-xs" style="color: var(--color-muted-fg);">
-      <span>Réserve</span>
-      <span
-        ><strong style="color: var(--color-fg);"
-          >{showers != null ? showers.toFixed(1) : '—'}</strong
-        >
-        / plancher {floor} douches</span
+  <!-- Réserve d'eau chaude -->
+  <div class="flex flex-col gap-1.5">
+    <div class="flex items-baseline gap-2">
+      <span class="text-2xl font-bold" style="color: var(--color-fg);"
+        >{showers != null ? `≈ ${showers}` : '—'}</span
       >
+      <span class="text-sm" style="color: var(--color-muted-fg);">douches d'eau chaude</span>
     </div>
     <div
-      class="relative h-2 overflow-hidden rounded-full"
+      class="h-2.5 overflow-hidden rounded-full"
       style="background: color-mix(in oklch, var(--color-muted-fg) 15%, transparent);"
     >
       <div
         class="h-full rounded-full"
-        style="width: {showerPct}%; background: var(--color-success);"
-      ></div>
-      <!-- marqueur plancher -->
-      <div
-        class="absolute top-0 h-full w-0.5"
-        style="left: {floorPct}%; background: var(--color-hp);"
+        style="width: {fillPct}%; background: var(--color-success);"
       ></div>
     </div>
   </div>
 
-  <!-- Courbe PV du jour -->
-  <div class="flex flex-col gap-1">
-    <div class="flex justify-between text-xs" style="color: var(--color-muted-fg);">
-      <span>Prévision PV — aujourd'hui</span>
-      {#if peak}<span>pic {peak.kw.toFixed(1)} kW à {peak.time.slice(11, 13)}h</span>{/if}
-    </div>
-    <div class="relative h-16 w-full overflow-hidden">
-      <svg viewBox="0 0 {W} {H}" preserveAspectRatio="none" class="absolute inset-0 h-full w-full">
-        {#if areaPath}
-          <path d={areaPath} fill="color-mix(in oklch, var(--color-solar) 22%, transparent)" />
-          <path
-            d={linePath}
-            fill="none"
-            stroke="var(--color-solar)"
-            stroke-width="1.5"
-            vector-effect="non-scaling-stroke"
-          />
-        {/if}
-        <!-- maintenant -->
-        <line
-          x1={(nowPct / 100) * W}
-          y1="0"
-          x2={(nowPct / 100) * W}
-          y2={H}
-          stroke="var(--color-fg)"
-          stroke-width="1"
-          stroke-dasharray="2 2"
-          vector-effect="non-scaling-stroke"
-          opacity="0.5"
-        />
-        {#if targetPct != null}
-          <line
-            x1={(targetPct / 100) * W}
-            y1="0"
-            x2={(targetPct / 100) * W}
-            y2={H}
-            stroke="var(--color-primary)"
-            stroke-width="1.5"
-            vector-effect="non-scaling-stroke"
-          />
-        {/if}
-      </svg>
-      {#if peakPct != null}
-        <div
-          class="absolute -translate-x-1/2 text-[10px] font-medium"
-          style="left: {peakPct}%; top: 0; color: var(--color-solar);"
-        >
-          ▾
+  <!-- État + raison, en clair -->
+  <div class="flex gap-3">
+    <span class="text-2xl leading-none">{status.emoji}</span>
+    <div class="min-w-0">
+      <div class="font-semibold" style="color: var(--color-fg);">{status.title}</div>
+      <div class="text-sm" style="color: var(--color-muted-fg);">{status.text}</div>
+      {#if nextHeat}
+        <div class="mt-1 text-sm" style="color: var(--color-fg);">
+          {nextHeat.emoji} Prochaine chauffe : {nextHeat.text}
         </div>
       {/if}
     </div>
   </div>
 
-  <!-- État réel + concordance -->
-  <div class="grid grid-cols-3 gap-2 text-center">
-    <div
-      class="rounded-lg p-2"
-      style="background: color-mix(in oklch, var(--color-muted-fg) 10%, transparent);"
-    >
-      <div class="text-sm font-semibold" style="color: var(--color-fg);">
-        {kwh(eAvail)}/{kwh(eFull)}
-      </div>
-      <div class="text-[10px]" style="color: var(--color-muted-fg);">kWh dispo</div>
-    </div>
-    <div
-      class="rounded-lg p-2"
-      style="background: color-mix(in oklch, var(--color-muted-fg) 10%, transparent);"
-    >
-      <div class="text-sm font-semibold" style="color: var(--color-fg);">
-        {sonde != null ? Math.round(sonde) + '°' : '—'}
-      </div>
-      <div class="text-[10px]" style="color: var(--color-muted-fg);">sonde eau</div>
-    </div>
-    <div
-      class="rounded-lg p-2"
-      style="background: color-mix(in oklch, var(--color-muted-fg) 10%, transparent);"
-    >
-      <div class="text-sm font-semibold" style="color: var(--color-fg);">{hhmm(lastFull)}</div>
-      <div class="text-[10px]" style="color: var(--color-muted-fg);">dernier plein</div>
-    </div>
-  </div>
-
-  <!-- Timeline du jour (simulation ⇄ contrôle) -->
+  <!-- Journal du jour -->
   {#if events.length}
-    <div class="flex flex-col gap-1">
-      <div class="text-xs" style="color: var(--color-muted-fg);">Aujourd'hui</div>
-      <div class="flex max-h-44 flex-col gap-1.5 overflow-y-auto pr-1">
-        {#each events as e (e.ts + '-' + e.kind)}
-          <div class="flex items-start gap-2 text-xs">
-            <span class="shrink-0 tabular-nums" style="color: var(--color-muted-fg);"
-              >{hhmm(e.ts)}</span
-            >
-            <span class="shrink-0" style="color: {KIND[e.kind]?.color ?? 'var(--color-muted-fg)'};"
-              >{KIND[e.kind]?.icon ?? '·'}</span
-            >
-            <span class="min-w-0 flex-1" style="color: var(--color-fg);">
-              {e.kind === 'plan' ? planLabel(e.label) : e.label}{#if e.detail}<span
-                  style="color: var(--color-muted-fg);"
-                >
-                  · {e.detail}</span
-                >{/if}
-            </span>
-          </div>
-        {/each}
+    <div class="flex flex-col gap-2">
+      <div
+        class="text-xs font-medium tracking-wide uppercase"
+        style="color: var(--color-muted-fg);"
+      >
+        Aujourd'hui
       </div>
+      {#each events as e (e.ts + e.text)}
+        <div class="flex items-center gap-2 text-sm">
+          <span class="w-10 shrink-0 tabular-nums" style="color: var(--color-muted-fg);"
+            >{hhmm(e.ts)}</span
+          >
+          <span class="shrink-0">{e.emoji}</span>
+          <span class="min-w-0 flex-1" style="color: var(--color-fg);">{e.text}</span>
+        </div>
+      {/each}
+    </div>
+  {:else}
+    <div class="text-sm" style="color: var(--color-muted-fg);">
+      Rien à signaler aujourd'hui — la journée s'affichera ici (chauffes, douches…).
     </div>
   {/if}
 
-  {#if hcAlert}
+  <!-- Mention « en test » -->
+  <div class="text-xs" style="color: var(--color-muted-fg);">
+    🧪 En test : le système propose la meilleure décision, mais c'est encore vous qui allumez le
+    chauffe-eau.
+  </div>
+
+  <!-- Comment ça marche ? (dépliable) -->
+  {#if showHelp}
     <div
-      class="rounded-lg px-3 py-2 text-xs"
-      style="background: color-mix(in oklch, var(--color-hp) 18%, transparent); color: var(--color-hp);"
+      class="flex flex-col gap-2 rounded-xl p-3 text-sm"
+      style="background: color-mix(in oklch, var(--color-muted-fg) 8%, transparent); color: var(--color-muted-fg);"
     >
-      ⚠️ Chauffe payée recommandée hors hiver — le solaire devrait suffire. À vérifier (réglage
-      réserve / pic PV).
+      <p style="color: var(--color-fg);" class="font-semibold">Comment marche votre eau chaude</p>
+      <p>
+        🛢️ Un grand réservoir (300 L) garde de l'eau chaude d'avance — de quoi prendre plusieurs
+        douches sans rien faire.
+      </p>
+      <p>
+        🚿 Quand on tire de l'eau chaude, la réserve baisse. Quand elle est basse, il faut
+        réchauffer.
+      </p>
+      <p>
+        ☀️ Réchauffer coûte de l'électricité — sauf en pleine journée avec vos <strong
+          >panneaux solaires</strong
+        >, qui produisent gratuitement. C'est le meilleur moment.
+      </p>
+      <p>
+        🌙 S'il fait gris plusieurs jours, on recharge la nuit, quand l'électricité est moins chère.
+      </p>
+      <p>
+        🧪 Pour l'instant le système ne fait que <strong>proposer</strong> le meilleur moment : on vérifie
+        qu'il choisit bien avant de le laisser piloter tout seul.
+      </p>
     </div>
   {/if}
 </section>

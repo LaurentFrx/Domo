@@ -162,8 +162,15 @@ async function runTick(apply: boolean): Promise<TickResult> {
     }
     const heatingNow = inputs.em50Available && inputs.cumulusPowerW > SHADOW_HEAT_W;
     if (heatingNow && state.shadowHeat === null) {
-      next.shadowHeat = { sinceTs: now, sinceInjWh: er.injWhDay };
-      evs.push({ ts: now, kind: 'heat_start', label: 'chauffe', detail: '' });
+      // « gratuit » si on n'importe quasi rien du réseau (solaire + batterie couvrent).
+      const solar = inputs.gridPowerW < SHADOW_HEAT_W;
+      next.shadowHeat = { sinceTs: now, sinceInjWh: er.injWhDay, solar };
+      evs.push({
+        ts: now,
+        kind: 'heat_start',
+        label: 'chauffe',
+        detail: solar ? 'soleil' : 'réseau'
+      });
     } else if (!heatingNow && state.shadowHeat !== null) {
       const durMin = Math.round((now - state.shadowHeat.sinceTs) / 60_000);
       const kwh = ((er.injWhDay - state.shadowHeat.sinceInjWh) / 1000).toFixed(2);
@@ -171,7 +178,7 @@ async function runTick(apply: boolean): Promise<TickResult> {
         ts: now,
         kind: 'heat_end',
         label: 'chauffe finie',
-        detail: `${durMin} min · ${kwh} kWh`
+        detail: `${durMin} min · ${kwh} kWh · ${state.shadowHeat.solar ? 'gratuit (soleil)' : 'réseau'}`
       });
       next.shadowHeat = null;
     }

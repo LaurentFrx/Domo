@@ -291,8 +291,8 @@ export interface CumulusRuntimeState {
   plan: HeatPlan | null;
   /** ÉTAPE 2a — timeline du jour (transitions de plan, chauffes, puisages, pleins). */
   shadowLog: ShadowEvent[];
-  /** Suivi interne de la chauffe en cours pour la timeline (sinceTs + injWhDay au début). */
-  shadowHeat: { sinceTs: number; sinceInjWh: number } | null;
+  /** Suivi interne de la chauffe en cours pour la timeline (début + énergie + gratuit/réseau). */
+  shadowHeat: { sinceTs: number; sinceInjWh: number; solar: boolean } | null;
   log: DecisionLogEntry[];
 }
 

@@ -168,11 +168,17 @@ function normShadowLog(v: unknown): ShadowEvent[] {
     .slice(-80);
 }
 
-function normShadowHeat(v: unknown): { sinceTs: number; sinceInjWh: number } | null {
+function normShadowHeat(
+  v: unknown
+): { sinceTs: number; sinceInjWh: number; solar: boolean } | null {
   if (!v || typeof v !== 'object') return null;
   const o = v as Record<string, unknown>;
   if (typeof o.sinceTs !== 'number' || typeof o.sinceInjWh !== 'number') return null;
-  return { sinceTs: o.sinceTs, sinceInjWh: o.sinceInjWh };
+  return {
+    sinceTs: o.sinceTs,
+    sinceInjWh: o.sinceInjWh,
+    solar: typeof o.solar === 'boolean' ? o.solar : false
+  };
 }
 
 function normEnergyView(v: unknown): EnergyView | null {
