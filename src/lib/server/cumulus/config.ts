@@ -7,7 +7,12 @@
  */
 
 import { readSettings, writeSettings } from '../settings-store';
-import type { CumulusConfig, EnergyModelConfig, OutdoorSourcesConfig } from './types';
+import type {
+  CumulusConfig,
+  EnergyModelConfig,
+  OutdoorSourcesConfig,
+  PlannerConfig
+} from './types';
 
 const PROFILES = ['solar_first', 'balanced', 'comfort_first'] as const;
 type Profile = (typeof PROFILES)[number];
@@ -43,7 +48,21 @@ export function defaultCumulusConfig(): CumulusConfig {
     observationMode: true, // ÉTAPE 1a : démarre en observation — zéro chauffe automatique
     batteryMaxDischargeW: 2400, // réservé (réflexe de délestage à venir) — non utilisé pour l'instant
 
-    energyModel: defaultEnergyModel()
+    energyModel: defaultEnergyModel(),
+    planner: defaultPlannerConfig()
+  };
+}
+
+/** Défauts du planificateur prédictif (ÉTAPE 2a) — stratégie « pic PV + réserve 3 douches ». */
+export function defaultPlannerConfig(): PlannerConfig {
+  return {
+    enabled: true,
+    reserveShowers: 3, // garder ≥ 3 douches avant chauffe payée (choix Laurent)
+    fullFraction: 0.95, // E_avail ≥ 95% E_full → ballon plein
+    horizonH: 18, // horizon : jusqu'à ~fin de journée / prochain créneau
+    peakFraction: 0.6, // « pic » = ≥ 60% du pic PV du jour
+    peakMinW: 1800, // … et au moins 1,8 kW (de quoi vraiment chauffer)
+    socFloorPct: 50 // marge batterie : pas de chauffe solaire sous 50% de SoC
   };
 }
 
@@ -120,7 +139,23 @@ export function normalizeCumulusConfig(raw: unknown): CumulusConfig {
     observationMode: typeof o.observationMode === 'boolean' ? o.observationMode : d.observationMode,
     batteryMaxDischargeW: asNum(o.batteryMaxDischargeW, d.batteryMaxDischargeW, 500, 10000),
 
-    energyModel: normalizeEnergyModel(o.energyModel)
+    energyModel: normalizeEnergyModel(o.energyModel),
+    planner: normalizePlannerConfig(o.planner)
+  };
+}
+
+/** Normalise la sous-config planner (complète par les défauts + bornes saines). */
+export function normalizePlannerConfig(raw: unknown): PlannerConfig {
+  const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const d = defaultPlannerConfig();
+  return {
+    enabled: typeof o.enabled === 'boolean' ? o.enabled : d.enabled,
+    reserveShowers: asNum(o.reserveShowers, d.reserveShowers, 0, 10),
+    fullFraction: asNum(o.fullFraction, d.fullFraction, 0.5, 1),
+    horizonH: asNum(o.horizonH, d.horizonH, 1, 48),
+    peakFraction: asNum(o.peakFraction, d.peakFraction, 0.1, 1),
+    peakMinW: asNum(o.peakMinW, d.peakMinW, 200, 5000),
+    socFloorPct: asNum(o.socFloorPct, d.socFloorPct, 0, 100)
   };
 }
 

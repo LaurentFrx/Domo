@@ -17,6 +17,7 @@
     "lint": "prettier --check .",
     "test:cumulus": "node --experimental-strip-types --test scripts/cumulus-decide.test.ts",
     "test:energy": "node --experimental-strip-types --test scripts/cumulus-energy.test.ts",
+    "test:plan": "node --experimental-strip-types --test scripts/cumulus-plan.test.ts",
     "test:atomic": "node --experimental-strip-types --test scripts/atomic-store.test.ts"
   },
   "devDependencies": {

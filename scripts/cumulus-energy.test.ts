@@ -71,7 +71,16 @@ function cfg(em: Partial<EnergyModelConfig> = {}): CumulusConfig {
     faultConfirmSec: 300,
     observationMode: true,
     batteryMaxDischargeW: 2400,
-    energyModel: energyModel(em)
+    energyModel: energyModel(em),
+    planner: {
+      enabled: true,
+      reserveShowers: 3,
+      fullFraction: 0.95,
+      horizonH: 18,
+      peakFraction: 0.6,
+      peakMinW: 1800,
+      socFloorPct: 50
+    }
   };
 }
 

@@ -145,6 +145,9 @@ export interface CumulusConfig {
 
   /** ÉTAPE 1b — estimateur d'énergie du ballon (observation, ne pilote rien). */
   energyModel: EnergyModelConfig;
+
+  /** ÉTAPE 2a — planificateur prédictif (shadow : calcule un plan, ne pilote pas encore). */
+  planner: PlannerConfig;
 }
 
 /**
@@ -182,6 +185,30 @@ export interface OutdoorSourcesConfig {
   daikin: boolean; // temp ext. du bridge Daikin (:8096)
   thermoExtTopic: string; // sonde MQTT extérieure (terrasse) ; '' pour désactiver
   forecast: boolean; // temp horaire du provider météo (:8098)
+}
+
+/** Action recommandée par le planificateur prédictif (ÉTAPE 2a). */
+export type PlanAction = 'heat_now' | 'heat_hc' | 'wait_solar' | 'wait';
+
+/** Plan de chauffe calculé par le planificateur (shadow : journalisé, non commandé). */
+export interface HeatPlan {
+  action: PlanAction;
+  reason: string;
+  targetHour: number | null; // heure locale Paris visée (pic PV / créneau), si pertinent
+  showers: number; // réserve actuelle estimée (douches)
+  floorShowers: number; // plancher de réserve configuré (douches)
+  computedAt: number; // epoch ms
+}
+
+/** Paramètres du planificateur prédictif (ÉTAPE 2a). */
+export interface PlannerConfig {
+  enabled: boolean; // calcule le plan (shadow) ; n'affecte pas encore le pilotage
+  reserveShowers: number; // réserve mini avant chauffe payée (douches)
+  fullFraction: number; // E_avail ≥ fullFraction·E_full → « plein »
+  horizonH: number; // horizon de prévision considéré (h)
+  peakFraction: number; // « pic » = pvW ≥ peakFraction · pic du jour
+  peakMinW: number; // … ET au moins cette puissance absolue (W)
+  socFloorPct: number; // marge batterie : pas de chauffe solaire si SoC < ce seuil (%)
 }
 
 /** Une entrée du journal de décisions (ring buffer). */
