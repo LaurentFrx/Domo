@@ -40,6 +40,7 @@ function energyModel(o: Partial<EnergyModelConfig> = {}): EnergyModelConfig {
     eDoucheWhWinter: 2800,
     drawDropThresholdC: 2.0,
     drawWindowMin: 20,
+    drawStratFactor: 2.8,
     probeFullRestC: 55,
     indoorTopics: ['zigbee2mqtt/Thermo SdB', 'zigbee2mqtt/Thermo Salon'],
     outdoorSources: { daikin: true, thermoExtTopic: 'zigbee2mqtt/Thermo_ext', forecast: true },
@@ -258,8 +259,36 @@ test('puisage : marche −6°C sur la fenêtre → détecté + E_avail décréme
   assert.ok(result.drawEvent !== null, 'événement attendu');
   assert.equal(result.drawEvent?.dropC, 6);
   assert.equal(energy.drawEvents, 1);
-  assert.ok(result.drawEvent!.eDrawnWh > 1800, `eDrawn=${result.drawEvent?.eDrawnWh}`);
-  assert.ok(energy.eAvailWh < 8200, `eAvail=${energy.eAvailWh}`); // ~−2000
+  // amplitude corrigée du facteur de stratification (÷2,8) : ~724 Wh au lieu de ~2027
+  assert.ok(
+    result.drawEvent!.eDrawnWh > 690 && result.drawEvent!.eDrawnWh < 760,
+    `eDrawn=${result.drawEvent?.eDrawnWh}`
+  );
+  assert.ok(energy.eAvailWh > 9250 && energy.eAvailWh < 9290, `eAvail=${energy.eAvailWh}`); // ~−724
+});
+
+test('drawStratFactor : l’amplitude du puisage est divisée par le facteur (stratification)', () => {
+  const energy0 = {
+    lastUpdateTs: NOW - 60_000,
+    eAvailWh: 10000,
+    lastProbeC: 48,
+    lastProbeTs: NOW - 60_000,
+    drawRefC: 48,
+    drawRefTs: NOW - hours(1)
+  };
+  const f1 = updateEnergyModel(
+    inp({ tempC: 42, relayOn: false }),
+    cfg({ drawStratFactor: 1 }),
+    st(energy0)
+  );
+  const f28 = updateEnergyModel(
+    inp({ tempC: 42, relayOn: false }),
+    cfg({ drawStratFactor: 2.8 }),
+    st(energy0)
+  );
+  assert.ok(f1.result.drawEvent !== null && f28.result.drawEvent !== null);
+  const ratio = f1.result.drawEvent!.eDrawnWh / f28.result.drawEvent!.eDrawnWh;
+  assert.ok(ratio > 2.6 && ratio < 3.0, `ratio=${ratio}`); // ~2,8
 });
 
 test('déclin lent (pertes seules) sur la fenêtre → AUCUN faux positif', () => {

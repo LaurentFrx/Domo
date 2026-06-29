@@ -169,6 +169,7 @@ export interface EnergyModelConfig {
   eDoucheWhWinter: number; // … hiver
   drawDropThresholdC: number; // chute sonde (au-delà des pertes) sur la fenêtre → puisage
   drawWindowMin: number; // fenêtre glissante de détection de puisage (minutes, sonde lente)
+  drawStratFactor: number; // la sonde de point bas surlit l'amplitude des puisages (~×2,8, stratification) → énergie puisée divisée par ce facteur
   probeFullRestC: number; // sonde ≥ ce seuil, relais off → ballon considéré plein (anchor)
 
   // Sources de température de référence (moyennées) — configurables.

@@ -166,10 +166,14 @@ export function updateEnergyModel(
       const expLossC = (em.lossCoeffWhPerCh * Math.max(0, tTank - tRoom) * capInt) / em.tankWhPerC;
       const dropC = energy.drawRefC - probeC;
       if (intervalH * 60 >= em.drawWindowMin && dropC > expLossC + em.drawDropThresholdC) {
-        // chute nette au-delà des pertes, sur la fenêtre → PUISAGE. Énergie ≈ (chute
-        // hors pertes) × capacité ; la sonde basse SATURE sur gros tirage → estimateur,
-        // pas débitmètre (clamp ≥ 0 en aval).
-        drawWh = Math.max(0, dropC - expLossC) * em.tankWhPerC;
+        // chute nette au-delà des pertes, sur la fenêtre → PUISAGE. La sonde de point
+        // bas SUR-REPRÉSENTE l'amplitude (~×drawStratFactor) : l'eau froide entre par
+        // le bas → la sonde chute plus vite que la température MOYENNE du ballon.
+        // Facteur calibré par calorimétrie EM-50 (replay 14→29/06 : puisé corrigé ≈
+        // E_recharge − pertes). On divise l'énergie « vue » par drawStratFactor pour
+        // approcher l'énergie réellement puisée (estimateur, pas débitmètre ; clamp ≥ 0
+        // en aval ; l'erreur résiduelle est bornée par les recalages au plein).
+        drawWh = (Math.max(0, dropC - expLossC) * em.tankWhPerC) / em.drawStratFactor;
         drawEvent = { ts: now, dropC: +dropC.toFixed(2), eDrawnWh: Math.round(drawWh) };
         energy.drawEvents += 1;
         energy.drawRefC = probeC; // consommé : nouvelle référence au point bas
