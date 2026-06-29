@@ -232,6 +232,15 @@ export interface DecisionLogEntry {
   anomaly: Anomaly;
 }
 
+/** Évènement de la timeline SHADOW (observation 2a) — un point du journal du jour. */
+export type ShadowEventKind = 'plan' | 'heat_start' | 'heat_end' | 'draw' | 'full';
+export interface ShadowEvent {
+  ts: number;
+  kind: ShadowEventKind;
+  label: string;
+  detail: string;
+}
+
 /** État runtime persistant (data/cumulus-state.json). */
 export interface CumulusRuntimeState {
   autoMode: AutoMode;
@@ -280,6 +289,10 @@ export interface CumulusRuntimeState {
   energyView: EnergyView | null;
   /** ÉTAPE 2a — dernier plan du planificateur (shadow : journalisé, ne pilote pas). */
   plan: HeatPlan | null;
+  /** ÉTAPE 2a — timeline du jour (transitions de plan, chauffes, puisages, pleins). */
+  shadowLog: ShadowEvent[];
+  /** Suivi interne de la chauffe en cours pour la timeline (sinceTs + injWhDay au début). */
+  shadowHeat: { sinceTs: number; sinceInjWh: number } | null;
   log: DecisionLogEntry[];
 }
 

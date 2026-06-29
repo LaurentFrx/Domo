@@ -22,9 +22,11 @@ import { setRelay } from './relay';
 import { ensureTempSensor } from './temp-sensor';
 import { updateEnergyModel, type EnergyTickResult } from './energy-model';
 import { planHeating } from './plan';
-import type { AutoMode, DecisionLogEntry } from './types';
+import type { AutoMode, DecisionLogEntry, ShadowEvent } from './types';
 
 const TICK_TIMEOUT_MS = 45_000; // < intervalle timer (60 s)
+const SHADOW_HEAT_W = 500; // conso EM-50 voie cumulus au-dessus → « en chauffe » (timeline)
+const SHADOW_LOG_MAX = 80; // taille du journal shadow (timeline du jour)
 const LOG_MAX = 60;
 
 export interface TickResult {
@@ -150,6 +152,41 @@ async function runTick(apply: boolean): Promise<TickResult> {
         ` (réserve ${p.showers}/${p.floorShowers} douches` +
         `${p.targetHour !== null ? `, cible ${p.targetHour}h` : ''})`
     );
+  }
+
+  // ── Timeline SHADOW (journal du jour : plan / chauffe / puisage / plein) ──
+  {
+    const evs: ShadowEvent[] = [];
+    if (next.plan && state.plan?.action !== next.plan.action) {
+      evs.push({ ts: now, kind: 'plan', label: next.plan.action, detail: next.plan.reason });
+    }
+    const heatingNow = inputs.em50Available && inputs.cumulusPowerW > SHADOW_HEAT_W;
+    if (heatingNow && state.shadowHeat === null) {
+      next.shadowHeat = { sinceTs: now, sinceInjWh: er.injWhDay };
+      evs.push({ ts: now, kind: 'heat_start', label: 'chauffe', detail: '' });
+    } else if (!heatingNow && state.shadowHeat !== null) {
+      const durMin = Math.round((now - state.shadowHeat.sinceTs) / 60_000);
+      const kwh = ((er.injWhDay - state.shadowHeat.sinceInjWh) / 1000).toFixed(2);
+      evs.push({
+        ts: now,
+        kind: 'heat_end',
+        label: 'chauffe finie',
+        detail: `${durMin} min · ${kwh} kWh`
+      });
+      next.shadowHeat = null;
+    }
+    if (er.drawEvent) {
+      evs.push({
+        ts: now,
+        kind: 'draw',
+        label: 'puisage',
+        detail: `−${er.drawEvent.eDrawnWh} Wh (${er.drawEvent.dropC}°C)`
+      });
+    }
+    if (er.anchored && next.energy.lastAnchorTs !== state.energy.lastAnchorTs) {
+      evs.push({ ts: now, kind: 'full', label: 'ballon plein', detail: 'recalage E_avail' });
+    }
+    if (evs.length) next.shadowLog = [...state.shadowLog, ...evs].slice(-SHADOW_LOG_MAX);
   }
 
   const fmtSrc = (s: { name: string; tempC: number }[]) =>

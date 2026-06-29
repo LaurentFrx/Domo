@@ -74,6 +74,24 @@
   const hhmm = (ts: number | null) =>
     ts ? new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—';
   const kwh = (wh: number | null) => (wh == null ? '—' : (wh / 1000).toFixed(1));
+
+  // ── Timeline du jour (transitions de plan, chauffes, puisages, pleins) ──
+  const KIND: Record<string, { icon: string; color: string }> = {
+    plan: { icon: '◈', color: 'var(--color-primary)' },
+    heat_start: { icon: '▶', color: 'var(--color-hp)' },
+    heat_end: { icon: '■', color: 'var(--color-muted-fg)' },
+    draw: { icon: '↓', color: 'var(--color-hc)' },
+    full: { icon: '✓', color: 'var(--color-success)' }
+  };
+  const planLabel = (a: string) => (a in ACTIONS ? ACTIONS[a as keyof typeof ACTIONS].label : a);
+  const events = $derived.by(() => {
+    const n = new Date();
+    const start = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
+    return cumulus.shadowLog
+      .filter((e) => e.ts >= start)
+      .slice()
+      .reverse();
+  });
 </script>
 
 <section
@@ -222,6 +240,32 @@
       <div class="text-[10px]" style="color: var(--color-muted-fg);">dernier plein</div>
     </div>
   </div>
+
+  <!-- Timeline du jour (simulation ⇄ contrôle) -->
+  {#if events.length}
+    <div class="flex flex-col gap-1">
+      <div class="text-xs" style="color: var(--color-muted-fg);">Aujourd'hui</div>
+      <div class="flex max-h-44 flex-col gap-1.5 overflow-y-auto pr-1">
+        {#each events as e (e.ts + '-' + e.kind)}
+          <div class="flex items-start gap-2 text-xs">
+            <span class="shrink-0 tabular-nums" style="color: var(--color-muted-fg);"
+              >{hhmm(e.ts)}</span
+            >
+            <span class="shrink-0" style="color: {KIND[e.kind]?.color ?? 'var(--color-muted-fg)'};"
+              >{KIND[e.kind]?.icon ?? '·'}</span
+            >
+            <span class="min-w-0 flex-1" style="color: var(--color-fg);">
+              {e.kind === 'plan' ? planLabel(e.label) : e.label}{#if e.detail}<span
+                  style="color: var(--color-muted-fg);"
+                >
+                  · {e.detail}</span
+                >{/if}
+            </span>
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   {#if hcAlert}
     <div

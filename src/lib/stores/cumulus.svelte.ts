@@ -149,6 +149,8 @@ class CumulusState {
     floorShowers: number;
     computedAt: number;
   } | null>(null);
+  /** ÉTAPE 2a — timeline du jour (transitions de plan, chauffes, puisages, pleins). */
+  shadowLog = $state<{ ts: number; kind: string; label: string; detail: string }[]>([]);
   #orchTimer: ReturnType<typeof setInterval> | null = null;
   #orchVis: (() => void) | null = null;
 
@@ -325,6 +327,7 @@ class CumulusState {
                 computedAt: typeof pl.computedAt === 'number' ? pl.computedAt : 0
               }
             : null;
+        this.shadowLog = Array.isArray(s.shadowLog) ? s.shadowLog : [];
       }
       if (d?.config) this.config = d.config as CumulusConfigClient;
       this.orchestratorConnected = true;

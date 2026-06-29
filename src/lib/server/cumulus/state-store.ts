@@ -20,7 +20,8 @@ import type {
   EnergyState,
   EnergyView,
   HeatPlan,
-  PlanAction
+  PlanAction,
+  ShadowEvent
 } from './types';
 import type { CumulusMode } from '$theme/tokens';
 
@@ -57,6 +58,8 @@ export function defaultCumulusState(): CumulusRuntimeState {
     energy: defaultEnergyState(),
     energyView: null,
     plan: null,
+    shadowLog: [],
+    shadowHeat: null,
     log: []
   };
 }
@@ -145,8 +148,31 @@ export function normalizeCumulusState(raw: unknown): CumulusRuntimeState {
     energy: normEnergy(o.energy),
     energyView: normEnergyView(o.energyView),
     plan: normPlan(o.plan),
+    shadowLog: normShadowLog(o.shadowLog),
+    shadowHeat: normShadowHeat(o.shadowHeat),
     log: normLog(o.log)
   };
+}
+
+const SHADOW_KINDS = ['plan', 'heat_start', 'heat_end', 'draw', 'full'];
+function normShadowLog(v: unknown): ShadowEvent[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter(
+      (e): e is ShadowEvent =>
+        !!e &&
+        typeof e === 'object' &&
+        typeof (e as ShadowEvent).ts === 'number' &&
+        SHADOW_KINDS.includes((e as ShadowEvent).kind)
+    )
+    .slice(-80);
+}
+
+function normShadowHeat(v: unknown): { sinceTs: number; sinceInjWh: number } | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.sinceTs !== 'number' || typeof o.sinceInjWh !== 'number') return null;
+  return { sinceTs: o.sinceTs, sinceInjWh: o.sinceInjWh };
 }
 
 function normEnergyView(v: unknown): EnergyView | null {
