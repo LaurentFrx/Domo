@@ -10,17 +10,18 @@
 
 **6 panneaux, 3 340 Wc crête, sur 3 onduleurs**, deux orientations :
 
-| Onduleur            | Panneaux        | Orientation | Crête   | Écrêtage AC (sortie) |
-| ------------------- | --------------- | ----------- | ------- | -------------------- |
-| **APsystems EZ1**   | 2 × 585 Wc      | **Sud**     | 1 170 Wc | **900 W**            |
-| **SolarBank #1**    | 2 × 585 Wc      | **Sud**     | 1 170 Wc | **1 200 W**          |
-| **SolarBank #2**    | 2 × 500 Wc      | **Ouest**   | 1 000 Wc | **1 200 W**          |
-| **Total**           | 6 panneaux      | Sud + Ouest | 3 340 Wc | **3 300 W** (somme)  |
+| Onduleur          | Panneaux   | Orientation | Crête    | Écrêtage AC (sortie) |
+| ----------------- | ---------- | ----------- | -------- | -------------------- |
+| **APsystems EZ1** | 2 × 585 Wc | **Sud**     | 1 170 Wc | **900 W**            |
+| **SolarBank #1**  | 2 × 585 Wc | **Sud**     | 1 170 Wc | **1 200 W**          |
+| **SolarBank #2**  | 2 × 500 Wc | **Ouest**   | 1 000 Wc | **1 200 W**          |
+| **Total**         | 6 panneaux | Sud + Ouest | 3 340 Wc | **3 300 W** (somme)  |
 
 - **Sud** = 4 × 585 = 2 340 Wc (EZ1 + SB#1, côte à côte) → produit surtout en milieu de journée.
 - **Ouest** = 2 × 500 = 1 000 Wc (SB#2) → produit surtout en fin d'après-midi / soir.
 
 **Implications clés pour le pilotage :**
+
 - La puissance AC max **simultanée** (3 300 W) n'est **jamais atteinte** : le Sud pique à midi, l'Ouest l'après-midi. Pic réel observé ≈ **2 300–2 600 W** vers 13–15 h (concorde avec le forecast).
 - ⚠️ **Le chauffe-eau tire 3 000 W**, soit **plus que la production solaire maximale**. Donc chauffer au cumulus implique **toujours** un appoint batterie et/ou réseau — il n'y a quasi jamais « 3 kW de soleil pur » disponible. → le « surplus » doit être calculé finement (PV − conso maison), pas supposé.
 - L'EZ1 est **écrêté à 900 W** : au-delà, la production des 2 panneaux Sud est perdue (intéressant pour décider de consommer ce surplus plutôt que de l'écrêter).
@@ -45,6 +46,7 @@
 - ⚠️ **Sortie AC max de TOUT le système ≈ 3 300 W** (EZ1 900 + SB1 1 200 + SB2 1 200), **batterie comprise** — plafond physique. Le cumulus tire 3 000 W : dès que la maison consomme ≥ ~300 W en parallèle, **on dépasse 3 300 W → import réseau inévitable** pendant la chauffe. Chauffer le cumulus n'est donc **jamais 100 % gratuit** s'il y a de la conso maison simultanée.
 - ⚠️ **La batterie est la réserve du soir/nuit de la maison.** Mettre un kWh de batterie dans le cumulus = un kWh que la maison **rachètera au réseau plus tard** (elle se vide à 2,4 kW → 4,82 kWh épuisés en ~2 h). → le planificateur doit traiter la batterie comme **précieuse, pas gratuite**.
 - Conséquence : le seul créneau vraiment **gratuit** pour le cumulus = **surplus PV réel instantané** (PV − conso maison), batterie déjà pleine. C'est précisément ce que le 2b doit mesurer.
+
 ## 3. Réseau & compteur ✅ (verrouillée 2026-06-30)
 
 - **Abonnement EDF : 6 kVA** → limite d'import ≈ **6 000 W**. Au-delà → **disjonction**.
@@ -57,6 +59,7 @@
 - ⚠️ **Limite 6 000 W d'import** : cumulus 3 kW + induction 2,4 kW + maison ≈ 5,8 kW (sans soleil ni batterie) — **au ras du seuil**. Ajouter le four (~2 kW) ferait **disjoncter**. → le délestage du cumulus est aussi une **protection contre la coupure générale**.
 - ✅ **Surplus perdu si non consommé** → mettre le surplus dans le cumulus vaut **toujours mieux que l'injecter** (perdu). MAIS c'est en **concurrence avec la charge batterie** (réserve du soir) : remplir le cumulus quand la batterie est ~pleine, sinon prioriser la batterie.
 - La mesure **voie 0 − voie 1** est la donnée centrale du délestage (« surplus réel »).
+
 ## 4. Chauffe-eau ✅ (verrouillée 2026-06-30)
 
 - **Atlantic réf 154330**, **300 L** vertical sur socle, résistance **3 000 W**, classe C.
@@ -68,18 +71,19 @@
 **Implication MAJEURE :**
 
 - ✅ **Le chauffe-eau est pilotable à TOUT MOMENT par le Shelly** (plus d'asservissement aux heures creuses du Linky). → la **chauffe solaire de midi est possible** ; chauffer la nuit en HC est un **choix économique**, pas une contrainte matérielle. Le planificateur a la **main complète** sur le « quand ».
+
 ## 5. Gros consommateurs ✅ (verrouillée 2026-06-30)
 
-| Appareil                                              | Puissance typique         | Mesuré par Domo ?           |
-| ----------------------------------------------------- | ------------------------- | --------------------------- |
-| **Plaque induction**                                  | jusqu'à ~3–7 kW (vue 2,4) | ❌ non (câblée)             |
-| **Four**                                              | ~2–3 kW                   | ❌ non (câblé)              |
-| **Lave-linge / sèche-linge** (combiné)                | ~2–2,5 kW (chauffe)       | ✅ prise Zigbee `Lave-linge`|
-| **Lave-vaisselle**                                    | ~1,8–2,2 kW (chauffe)     | ✅ prise Zigbee `Lave_vaisselle` |
-| **Bouilloire**                                        | ~2 kW                     | ❌ non                     |
-| **Micro-ondes**                                       | ~1 kW                     | ❌ non                     |
-| **Clim réversible** Daikin (split salon) + Airzone (chambres) | variable, saisonnier | ❌ non                     |
-| Voiture électrique                                    | —                         | aucune                      |
+| Appareil                                                      | Puissance typique         | Mesuré par Domo ?                |
+| ------------------------------------------------------------- | ------------------------- | -------------------------------- |
+| **Plaque induction**                                          | jusqu'à ~3–7 kW (vue 2,4) | ❌ non (câblée)                  |
+| **Four**                                                      | ~2–3 kW                   | ❌ non (câblé)                   |
+| **Lave-linge / sèche-linge** (combiné)                        | ~2–2,5 kW (chauffe)       | ✅ prise Zigbee `Lave-linge`     |
+| **Lave-vaisselle**                                            | ~1,8–2,2 kW (chauffe)     | ✅ prise Zigbee `Lave_vaisselle` |
+| **Bouilloire**                                                | ~2 kW                     | ❌ non                           |
+| **Micro-ondes**                                               | ~1 kW                     | ❌ non                           |
+| **Clim réversible** Daikin (split salon) + Airzone (chambres) | variable, saisonnier      | ❌ non                           |
+| Voiture électrique                                            | —                         | aucune                           |
 
 **Implications clés (capitales pour le 2b) :**
 
@@ -87,6 +91,7 @@
 - ✅ Donc le délestage **DOIT** s'appuyer sur la **conso maison réelle = voie 0 − voie 1** : elle capte TOUT (induction, four, clim, LL, LV…). C'est la grandeur fiable — pas besoin de connaître chaque appareil pour bien délester.
 - La carte pourra **nommer** le lave-linge et le lave-vaisselle (mesurés) ; pour le reste, elle dira « forte consommation maison » sans détailler.
 - ⚠️ **Clim réversible saisonnière** (été froid / hiver chaud) = poste lourd non mesuré → en été et en hiver la conso de base est nettement plus haute qu'à la mi-saison. Le délestage, basé sur le réel, s'y adapte tout seul.
+
 ## 6. Règles & contraintes d'usage ✅ (verrouillée 2026-06-30)
 
 - **Besoin d'eau chaude** : 2 personnes, **2 douches/jour, le MATIN** (~7–8 h) en règle générale.
