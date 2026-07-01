@@ -314,6 +314,29 @@ export function applicableBaseline(t: Date): {
 }
 
 /**
+ * Baseline du MOIS D'ANCHOR (part pré-recorder du mois où le recorder a démarré),
+ * rattachée à SA date d'anchor — indépendante de `now`. Le mois d'anchor est un
+ * mois SPLIT (pré-recorder + recorder) : sa cellule du « Tableau mensuel » doit
+ * TOUJOURS inclure cette part, même une fois le mois passé. C'est la différence
+ * avec `applicableBaseline`, calée sur le mois COURANT pour l'héro live (qui, lui,
+ * bascule sur le mois suivant au changement de mois). Renvoie `null` si aucun
+ * anchor n'est configuré (baseline zéro / déploiement neuf).
+ */
+export function anchorMonthBaseline(): {
+  year: number;
+  monthIndex: number;
+  eur: number;
+  kwh: number;
+} | null {
+  const b = loadConfig().baseline;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(b.anchor)) return null;
+  const year = Number(b.anchor.slice(0, 4));
+  const monthIndex = Number(b.anchor.slice(5, 7)) - 1; // 0..11
+  if (!Number.isFinite(year) || monthIndex < 0 || monthIndex > 11) return null;
+  return { year, monthIndex, eur: b.month_eur, kwh: b.month_kwh };
+}
+
+/**
  * Économies mensuelles importées de HA (pré-recorder), `'YYYY-MM' → €`. Sert à
  * remplir le « Tableau mensuel » pour les mois antérieurs au recorder (qui n'a
  * aucune ligne `savings_daily` avant son ancrage). Affichage seul — déjà comptées

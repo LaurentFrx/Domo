@@ -25,7 +25,7 @@ import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import Database from 'better-sqlite3';
 import {
-  applicableBaseline,
+  anchorMonthBaseline,
   monthlyImportHcHistory,
   monthlyImportHpHistory,
   monthlySavingsHistory,
@@ -71,18 +71,18 @@ function emptyMonths(): MonthAgg[] {
   return Array.from({ length: 12 }, zeroMonth);
 }
 
-/** Replie la baseline applicable (€/kWh acquis hors période enregistrée) dans le
- * mois courant — uniquement si l'année demandée est l'année courante. Miroir de
- * /api/savings : applicableBaseline(now).month n'est non nul que tant qu'on est
- * dans le mois d'ancrage (qui est alors le mois courant), donc on le range à
- * l'index du mois courant Paris. */
-function foldBaseline(months: MonthAgg[], year: number, curYear: number, now: Date): void {
-  if (year !== curYear) return;
-  const b = applicableBaseline(now);
-  const curMonthIdx = Number(parisDate(now).slice(5, 7)) - 1; // 0..11 (Paris)
-  if (curMonthIdx < 0 || curMonthIdx > 11) return;
-  months[curMonthIdx].savings_eur += b.month.eur;
-  months[curMonthIdx].autoconso_kwh += b.month.kwh; // 0 aujourd'hui, mais correct
+/** Replie la baseline du MOIS D'ANCHOR (part pré-recorder du mois où le recorder a
+ * démarré) dans la cellule de CE mois-là — de façon PERMANENTE, pas seulement le
+ * mois où on s'y trouve. Le mois d'anchor est un mois split (ex. juin 2026 :
+ * 1→5 pré-recorder = baseline.month_eur, 5→30 = savings_daily) ; sans ce report,
+ * la cellule perd la part pré-recorder dès qu'on passe au mois suivant (juin
+ * retombait de ~102 € à 89,47 €). N'affecte que l'année de l'anchor. Le total de
+ * l'année du tableau recolle alors à /api/savings.year (source de vérité). */
+function foldBaseline(months: MonthAgg[], year: number): void {
+  const a = anchorMonthBaseline();
+  if (!a || a.year !== year) return;
+  months[a.monthIndex].savings_eur += a.eur;
+  months[a.monthIndex].autoconso_kwh += a.kwh; // 0 aujourd'hui (month_kwh=0), mais correct
 }
 
 export const GET: RequestHandler = async ({ url }) => {
@@ -227,7 +227,7 @@ export const GET: RequestHandler = async ({ url }) => {
       if (Number.isFinite(y) && y >= 2000 && y < minYear) minYear = y;
     }
 
-    foldBaseline(months, year, curYear, now);
+    foldBaseline(months, year);
 
     const payload: MonthlyPayload = { year, months, min_year: minYear };
     return json(payload);
