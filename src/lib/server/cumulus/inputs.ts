@@ -7,7 +7,7 @@
  */
 
 import { env } from '$env/dynamic/private';
-import { isHC, nextTariffSwitch, parisDate } from '../tariffs';
+import { isHC, nextTariffSwitch, parisDate, regimeAt } from '../tariffs';
 import type { CumulusConfig, CumulusInputs, TempSource, PlanForecastPoint } from './types';
 import { readRelay } from './relay';
 import { averageTemp } from './energy-model';
@@ -161,8 +161,25 @@ async function readForecastNextDaylight(now: Date): Promise<{
   }
 }
 
-// ── Anker SolarBank (PV, batterie, réseau) — COLLECTE seule (ÉTAPE 1a) ──
-// Lu mais AUCUNE décision ne s'en sert encore ; posé pour le modèle E_avail (1b).
+// ── APsystems EZ1 (pan Sud) — invisible côté Anker, lu séparément (bridge :8100) ──
+const apsystemsUrl = () =>
+  (env.APSYSTEMS_BRIDGE_URL || 'http://127.0.0.1:8100').replace(/\/+$/, '');
+
+/** Production instantanée du micro-onduleur APS EZ1 (pan Sud), W. 0 si indispo. */
+async function readApsystems(): Promise<number> {
+  try {
+    const r = await fetch(`${apsystemsUrl()}/api/apsystems/status`, {
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    });
+    if (!r.ok) return 0;
+    const d = (await r.json()) as { available?: boolean; power_w?: number };
+    return d.available === false ? 0 : Math.max(0, Math.round(num(d.power_w)));
+  } catch {
+    return 0;
+  }
+}
+
+// ── Anker SolarBank (PV, batterie, réseau) ──
 const ankerUrl = () => (env.ANKER_URL || 'http://127.0.0.1:8095').replace(/\/+$/, '');
 
 interface AnkerRead {
@@ -171,6 +188,9 @@ interface AnkerRead {
   gridPowerW: number;
   sbOutputPowerW: number;
   batteryDischargeW: number;
+  batteryChargeW: number;
+  batteryEnergyWh: number;
+  batteryCapacityWh: number;
   socPct: number[];
 }
 
@@ -181,6 +201,9 @@ async function readAnker(): Promise<AnkerRead> {
     gridPowerW: 0,
     sbOutputPowerW: 0,
     batteryDischargeW: 0,
+    batteryChargeW: 0,
+    batteryEnergyWh: 0,
+    batteryCapacityWh: 0,
     socPct: []
   };
   try {
@@ -192,15 +215,24 @@ async function readAnker(): Promise<AnkerRead> {
       grid_power_w?: number;
       sb_output_power_w?: number;
       battery_discharge_power_w?: number;
-      batteries?: { soc?: number }[];
+      batteries?: {
+        soc?: number;
+        battery_energy_wh?: number;
+        battery_capacity_wh?: number;
+        charging_power_w?: number;
+      }[];
     };
+    const bats = Array.isArray(d.batteries) ? d.batteries : [];
     return {
       available: d.connected !== false,
       pvPowerW: Math.round(num(d.solar_power_w)),
       gridPowerW: Math.round(num(d.grid_power_w)),
       sbOutputPowerW: Math.round(num(d.sb_output_power_w)),
       batteryDischargeW: Math.round(num(d.battery_discharge_power_w)),
-      socPct: Array.isArray(d.batteries) ? d.batteries.map((b) => Math.round(num(b?.soc))) : []
+      batteryChargeW: Math.round(bats.reduce((s, b) => s + num(b?.charging_power_w), 0)),
+      batteryEnergyWh: Math.round(bats.reduce((s, b) => s + num(b?.battery_energy_wh), 0)),
+      batteryCapacityWh: Math.round(bats.reduce((s, b) => s + num(b?.battery_capacity_wh), 0)),
+      socPct: bats.map((b) => Math.round(num(b?.soc)))
     };
   } catch {
     return fail;
@@ -239,12 +271,13 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
   if (em.outdoorSources.thermoExtTopic) ensureTempTopic(em.outdoorSources.thermoExtTopic);
   const now = new Date();
 
-  const [relay, em50, forecast, anker, daikinOut] = await Promise.all([
+  const [relay, em50, forecast, anker, daikinOut, pvApsW] = await Promise.all([
     readRelay(),
     readEm50(),
     readForecastNextDaylight(now),
     readAnker(),
-    em.outdoorSources.daikin ? readDaikinOutdoor() : Promise.resolve(null)
+    em.outdoorSources.daikin ? readDaikinOutdoor() : Promise.resolve(null),
+    readApsystems()
   ]);
 
   const t = getCumulusTemp();
@@ -283,6 +316,7 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
 
   const isHCnow = isHC(now);
   const sw = nextTariffSwitch(now);
+  const reg = regimeAt(now);
 
   return {
     now: now.getTime(),
@@ -295,6 +329,8 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     cumulusKwh: em50.cumulusKwh,
     isHC: isHCnow,
     minutesToHcEnd: isHCnow ? sw.inMinutes : -1,
+    priceHp: reg.hp_eur_kwh,
+    priceHc: reg.hc_eur_kwh,
     forecastAvailable: forecast.available,
     solNextDaylightKwh: forecast.kwh,
     forecastHourly: forecast.hourly,
@@ -306,6 +342,10 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     sbOutputPowerW: anker.sbOutputPowerW,
     batteryDischargeW: anker.batteryDischargeW,
     batterySocPct: anker.socPct,
+    batteryEnergyWh: anker.batteryEnergyWh,
+    batteryCapacityWh: anker.batteryCapacityWh,
+    batteryChargeW: anker.batteryChargeW,
+    pvApsW,
     indoorC,
     outdoorC,
     indoorSources,

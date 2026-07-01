@@ -147,6 +147,13 @@ class CumulusState {
     targetHour: number | null;
     showers: number;
     floorShowers: number;
+    deficitWh: number;
+    surplusFreeW: number;
+    surplusConfidence: 'haute' | 'moyenne' | 'nulle';
+    applianceW: number;
+    costNowEur: number;
+    costHcEur: number;
+    backstopHcHour: number | null;
     computedAt: number;
   } | null>(null);
   /** ÉTAPE 2a — timeline du jour (transitions de plan, chauffes, puisages, pleins). */
@@ -324,6 +331,13 @@ class CumulusState {
                 targetHour: typeof pl.targetHour === 'number' ? pl.targetHour : null,
                 showers: typeof pl.showers === 'number' ? pl.showers : 0,
                 floorShowers: typeof pl.floorShowers === 'number' ? pl.floorShowers : 0,
+                deficitWh: typeof pl.deficitWh === 'number' ? pl.deficitWh : 0,
+                surplusFreeW: typeof pl.surplusFreeW === 'number' ? pl.surplusFreeW : -1,
+                surplusConfidence: pl.surplusConfidence ?? 'nulle',
+                applianceW: typeof pl.applianceW === 'number' ? pl.applianceW : 0,
+                costNowEur: typeof pl.costNowEur === 'number' ? pl.costNowEur : 0,
+                costHcEur: typeof pl.costHcEur === 'number' ? pl.costHcEur : 0,
+                backstopHcHour: typeof pl.backstopHcHour === 'number' ? pl.backstopHcHour : null,
                 computedAt: typeof pl.computedAt === 'number' ? pl.computedAt : 0
               }
             : null;

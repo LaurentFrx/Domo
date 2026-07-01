@@ -57,12 +57,14 @@ export function defaultCumulusConfig(): CumulusConfig {
 export function defaultPlannerConfig(): PlannerConfig {
   return {
     enabled: true,
-    reserveShowers: 3, // garder ≥ 3 douches avant chauffe payée (choix Laurent)
+    reserveShowers: 2, // fiche installation-energie.md : garantir 2 douches au matin (était 3)
     fullFraction: 0.95, // E_avail ≥ 95% E_full → ballon plein
-    horizonH: 18, // horizon : jusqu'à ~fin de journée / prochain créneau
-    peakFraction: 0.6, // « pic » = ≥ 60% du pic PV du jour
-    peakMinW: 1800, // … et au moins 1,8 kW (de quoi vraiment chauffer)
-    socFloorPct: 50 // marge batterie : pas de chauffe solaire sous 50% de SoC
+    horizonH: 18, // horizon de prévision (jusqu'au prochain matin)
+    peakMinW: 1500, // seuil « pic solaire exploitable » à venir (W)
+    heatPowerW: 2955, // puissance de chauffe RÉELLE mesurée (EM-50 voie 1)
+    freeSurplusSocPct: 98, // batterie ~pleine → surplus PV probablement écrêté (gratuit)
+    eveningReserveWh: 3000, // énergie batterie à préserver pour le soir/nuit
+    maxImportW: 5500 // (import + chauffe) au-delà → délestage (garde 6 kVA)
   };
 }
 
@@ -153,9 +155,11 @@ export function normalizePlannerConfig(raw: unknown): PlannerConfig {
     reserveShowers: asNum(o.reserveShowers, d.reserveShowers, 0, 10),
     fullFraction: asNum(o.fullFraction, d.fullFraction, 0.5, 1),
     horizonH: asNum(o.horizonH, d.horizonH, 1, 48),
-    peakFraction: asNum(o.peakFraction, d.peakFraction, 0.1, 1),
     peakMinW: asNum(o.peakMinW, d.peakMinW, 200, 5000),
-    socFloorPct: asNum(o.socFloorPct, d.socFloorPct, 0, 100)
+    heatPowerW: asNum(o.heatPowerW, d.heatPowerW, 1000, 5000),
+    freeSurplusSocPct: asNum(o.freeSurplusSocPct, d.freeSurplusSocPct, 50, 100),
+    eveningReserveWh: asNum(o.eveningReserveWh, d.eveningReserveWh, 0, 10000),
+    maxImportW: asNum(o.maxImportW, d.maxImportW, 2000, 6000)
   };
 }
 

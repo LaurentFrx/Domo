@@ -70,6 +70,8 @@ export interface CumulusInputs {
   isHC: boolean;
   /** Minutes avant la fin de la fenêtre HC (si en HC), sinon -1. */
   minutesToHcEnd: number;
+  priceHp: number; // €/kWh heures pleines
+  priceHc: number; // €/kWh heures creuses
 
   // ── Prévision PV ──
   forecastAvailable: boolean;
@@ -90,6 +92,10 @@ export interface CumulusInputs {
   sbOutputPowerW: number; // sortie du système SolarBank vers la maison (W)
   batteryDischargeW: number; // puissance de décharge batterie (W, ≥ 0)
   batterySocPct: number[]; // niveau de charge de chaque batterie (%)
+  batteryEnergyWh: number; // énergie stockée RÉELLE (Wh, somme des SolarBank) — pour la réserve du soir
+  batteryCapacityWh: number; // capacité batterie totale (Wh)
+  batteryChargeW: number; // puissance de CHARGE batterie (W, ≥ 0 = surplus en cours d'absorption)
+  pvApsW: number; // prod du micro-onduleur APsystems EZ1 (pan Sud), W — invisible côté Anker
 
   // ── Températures ambiantes (modèle d'énergie ballon, ÉTAPE 1b+) ──
   // Moyennes des sources disponibles ; null si aucune source.
@@ -192,25 +198,34 @@ export interface OutdoorSourcesConfig {
 /** Action recommandée par le planificateur prédictif (ÉTAPE 2a). */
 export type PlanAction = 'heat_now' | 'heat_hc' | 'wait_solar' | 'wait';
 
-/** Plan de chauffe calculé par le planificateur (shadow : journalisé, non commandé). */
+/** Plan de chauffe calculé par le modèle économique (shadow : journalisé, non commandé). */
 export interface HeatPlan {
   action: PlanAction;
   reason: string;
-  targetHour: number | null; // heure locale Paris visée (pic PV / créneau), si pertinent
+  targetHour: number | null; // heure locale Paris visée (créneau), si pertinent
   showers: number; // réserve actuelle estimée (douches)
-  floorShowers: number; // plancher de réserve configuré (douches)
+  floorShowers: number; // douches à garantir au matin
+  deficitWh: number; // énergie manquante pour garantir le matin
+  surplusFreeW: number; // surplus PV libre estimé (W) ; -1 si non détecté
+  surplusConfidence: 'haute' | 'moyenne' | 'nulle'; // confiance de l'inférence de surplus
+  applianceW: number; // appoint batterie/réseau si on chauffe maintenant (W)
+  costNowEur: number; // coût estimé de chauffer maintenant (€/kWh)
+  costHcEur: number; // coût de la recharge en heures creuses (€/kWh, référence)
+  backstopHcHour: number | null; // heure calculée de bascule HC (filet de fin de nuit)
   computedAt: number; // epoch ms
 }
 
-/** Paramètres du planificateur prédictif (ÉTAPE 2a). */
+/** Paramètres du modèle économique (ÉTAPE 2b). */
 export interface PlannerConfig {
   enabled: boolean; // calcule le plan (shadow) ; n'affecte pas encore le pilotage
-  reserveShowers: number; // réserve mini avant chauffe payée (douches)
+  reserveShowers: number; // douches à garantir au matin (fiche : 2)
   fullFraction: number; // E_avail ≥ fullFraction·E_full → « plein »
   horizonH: number; // horizon de prévision considéré (h)
-  peakFraction: number; // « pic » = pvW ≥ peakFraction · pic du jour
-  peakMinW: number; // … ET au moins cette puissance absolue (W)
-  socFloorPct: number; // marge batterie : pas de chauffe solaire si SoC < ce seuil (%)
+  peakMinW: number; // seuil « pic solaire exploitable » à venir (W)
+  heatPowerW: number; // puissance de chauffe RÉELLE mesurée (W)
+  freeSurplusSocPct: number; // SoC ≥ ce seuil → batterie pleine → surplus probablement écrêté (gratuit)
+  eveningReserveWh: number; // énergie batterie à préserver pour le soir/nuit (Wh)
+  maxImportW: number; // (import + chauffe) au-delà → délestage (garde 6 kVA)
 }
 
 /** Un point horaire de la courbe de prévision PV à venir (≥ heure courante). */

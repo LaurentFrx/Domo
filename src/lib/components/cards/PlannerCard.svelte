@@ -13,6 +13,7 @@
   import { forecast } from '$stores/forecast.svelte';
 
   let showHelp = $state(false);
+  let showEco = $state(false);
 
   const showersRaw = $derived(cumulus.showers);
   const showers = $derived(showersRaw != null ? Math.max(0, Math.round(showersRaw)) : null);
@@ -87,6 +88,12 @@
   // ── Journal du jour, en mots simples (on cache les détails techniques) ──
   const hhmm = (ts: number) =>
     new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  // Heure fractionnaire (7.1) → « 7 h 06 »
+  const fmtHour = (h: number) => {
+    const hh = Math.floor(h);
+    const mm = Math.round((h - hh) * 60);
+    return `${hh} h${mm ? ' ' + String(mm).padStart(2, '0') : ''}`;
+  };
   const events = $derived.by(() => {
     const n = new Date();
     const start = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
@@ -117,15 +124,26 @@
     <h3 class="text-base font-semibold tracking-tight" style="color: var(--color-fg);">
       Eau chaude
     </h3>
-    <button
-      type="button"
-      onclick={() => (showHelp = !showHelp)}
-      class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold"
-      style="background: color-mix(in oklch, var(--color-muted-fg) 16%, transparent); color: var(--color-muted-fg);"
-      aria-label="Comment ça marche"
-    >
-      ?
-    </button>
+    <div class="flex items-center gap-1.5">
+      <button
+        type="button"
+        onclick={() => (showEco = !showEco)}
+        class="flex h-6 items-center justify-center rounded-full px-2.5 text-xs font-semibold"
+        style="background: color-mix(in oklch, var(--color-primary) 16%, transparent); color: var(--color-primary);"
+        aria-label="Détail de la décision"
+      >
+        détail
+      </button>
+      <button
+        type="button"
+        onclick={() => (showHelp = !showHelp)}
+        class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold"
+        style="background: color-mix(in oklch, var(--color-muted-fg) 16%, transparent); color: var(--color-muted-fg);"
+        aria-label="Comment ça marche"
+      >
+        ?
+      </button>
+    </div>
   </div>
 
   <!-- Réserve d'eau chaude -->
@@ -183,6 +201,68 @@
   {:else}
     <div class="text-sm" style="color: var(--color-muted-fg);">
       Rien à signaler aujourd'hui — la journée s'affichera ici (chauffes, douches…).
+    </div>
+  {/if}
+
+  <!-- Détail économique (comprendre / valider la décision) -->
+  {#if showEco && plan}
+    <div
+      class="flex flex-col gap-2 rounded-xl p-3 text-sm"
+      style="background: color-mix(in oklch, var(--color-primary) 8%, transparent);"
+    >
+      <p class="font-semibold" style="color: var(--color-fg);">Le raisonnement, en détail</p>
+      <p style="color: var(--color-muted-fg);">{plan.reason}</p>
+
+      <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
+        <dt style="color: var(--color-muted-fg);">Réserve visée</dt>
+        <dd class="text-right tabular-nums" style="color: var(--color-fg);">
+          {plan.showers} / {plan.floorShowers} douches
+        </dd>
+
+        <dt style="color: var(--color-muted-fg);">Manque pour le matin</dt>
+        <dd class="text-right tabular-nums" style="color: var(--color-fg);">
+          {plan.deficitWh > 0 ? `${(plan.deficitWh / 1000).toFixed(1)} kWh` : 'rien ✓'}
+        </dd>
+
+        <dt style="color: var(--color-muted-fg);">Surplus solaire gratuit</dt>
+        <dd class="text-right tabular-nums" style="color: var(--color-fg);">
+          {plan.surplusFreeW < 0
+            ? 'non détecté'
+            : `≈ ${plan.surplusFreeW} W · confiance ${plan.surplusConfidence}`}
+        </dd>
+
+        <dt style="color: var(--color-muted-fg);">Si on chauffe maintenant</dt>
+        <dd class="text-right tabular-nums" style="color: var(--color-fg);">
+          appoint {plan.applianceW} W
+        </dd>
+
+        <dt style="color: var(--color-muted-fg);">Coût maintenant</dt>
+        <dd
+          class="text-right font-semibold tabular-nums"
+          style="color: {plan.costNowEur <= plan.costHcEur
+            ? 'var(--color-success)'
+            : 'var(--color-fg)'};"
+        >
+          {plan.costNowEur.toFixed(3)} €/kWh
+        </dd>
+
+        <dt style="color: var(--color-muted-fg);">Coût en heures creuses</dt>
+        <dd
+          class="text-right font-semibold tabular-nums"
+          style="color: {plan.costHcEur < plan.costNowEur
+            ? 'var(--color-success)'
+            : 'var(--color-fg)'};"
+        >
+          {plan.costHcEur.toFixed(3)} €/kWh
+        </dd>
+
+        {#if plan.backstopHcHour != null}
+          <dt style="color: var(--color-muted-fg);">Filet nuit (au plus tard)</dt>
+          <dd class="text-right tabular-nums" style="color: var(--color-fg);">
+            {fmtHour(plan.backstopHcHour)}
+          </dd>
+        {/if}
+      </dl>
     </div>
   {/if}
 

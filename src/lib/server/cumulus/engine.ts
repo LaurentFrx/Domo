@@ -27,6 +27,18 @@ import type { AutoMode, DecisionLogEntry, ShadowEvent } from './types';
 const TICK_TIMEOUT_MS = 45_000; // < intervalle timer (60 s)
 const SHADOW_HEAT_W = 500; // conso EM-50 voie cumulus au-dessus → « en chauffe » (timeline)
 const SHADOW_LOG_MAX = 80; // taille du journal shadow (timeline du jour)
+
+// Heure locale Paris fractionnaire (0–24) — pour le modèle éco (deadline matin, HC).
+const PARIS_HM = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Paris',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23'
+});
+function parisHourFrac(ts: number): number {
+  const parts = PARIS_HM.format(new Date(ts)).split(':');
+  return Number(parts[0]) + Number(parts[1]) / 60;
+}
 const LOG_MAX = 60;
 
 export interface TickResult {
@@ -131,26 +143,53 @@ async function runTick(apply: boolean): Promise<TickResult> {
     tTankC: er.tTankC
   };
 
-  // ── Planificateur prédictif (ÉTAPE 2a — SHADOW : calcule + journalise, ne pilote pas) ──
+  // ── Modèle économique (ÉTAPE 2b — SHADOW : calcule + journalise, ne pilote pas) ──
   if (config.planner.enabled) {
     const socs = inputs.batterySocPct.filter((s) => Number.isFinite(s));
+    const pvTotalW = Math.max(0, inputs.pvPowerW) + Math.max(0, inputs.pvApsW);
+    // Conso maison HORS ballon, par bilan de puissance (PV + décharge − charge + réseau − ballon).
+    const houseW = Math.max(
+      0,
+      Math.round(
+        pvTotalW +
+          inputs.batteryDischargeW -
+          inputs.batteryChargeW +
+          inputs.gridPowerW -
+          inputs.cumulusPowerW
+      )
+    );
     next.plan = planHeating(
       {
         now,
+        hourOfDay: parisHourFrac(now),
         eAvailWh: er.eAvailWh,
         eFullWh: er.eFullWh,
         eDoucheWh: er.eDoucheWh,
-        isHC: inputs.isHC,
+        tTankC: er.tTankC,
+        tRoomC: er.tRoomC,
+        lossCoeffWhPerCh: config.energyModel.lossCoeffWhPerCh,
+        pvTotalW,
+        houseW,
+        gridPowerW: inputs.gridPowerW,
+        cumulusPowerW: inputs.cumulusPowerW,
+        batteryEnergyWh: inputs.batteryEnergyWh,
+        batteryChargeW: inputs.batteryChargeW,
+        batteryDischargeW: inputs.batteryDischargeW,
         socPct: socs.length ? socs.reduce((a, b) => a + b, 0) / socs.length : null,
+        isHC: inputs.isHC,
+        priceHp: inputs.priceHp,
+        priceHc: inputs.priceHc,
         forecast: inputs.forecastHourly
       },
       config.planner
     );
     const p = next.plan;
     console.log(
-      `[plan] ${p.action} — ${p.reason}` +
-        ` (réserve ${p.showers}/${p.floorShowers} douches` +
-        `${p.targetHour !== null ? `, cible ${p.targetHour}h` : ''})`
+      `[plan] ${p.action} — ${p.reason} |` +
+        ` réserve ${p.showers}/${p.floorShowers} déficit ${p.deficitWh}Wh` +
+        ` surplus_libre ${p.surplusFreeW < 0 ? 'non' : p.surplusFreeW + 'W'} (${p.surplusConfidence})` +
+        ` coût_now ${p.costNowEur}€/kWh vs HC ${p.costHcEur}€` +
+        (p.backstopHcHour !== null ? ` backstop ${p.backstopHcHour}h` : '')
     );
   }
 

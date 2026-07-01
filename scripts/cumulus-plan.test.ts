@@ -1,14 +1,12 @@
 /**
- * Tests unitaires du planificateur prédictif (planHeating — PUR, ÉTAPE 2a).
- *
+ * Tests du modèle économique du chauffe-eau (planHeating — PUR, ÉTAPE 2b).
  *   pnpm test:plan
- *   # ou : node --experimental-strip-types --test scripts/cumulus-plan.test.ts
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { planHeating } from '../src/lib/server/cumulus/plan.ts';
-import type { PlanInput, PlanForecastPoint } from '../src/lib/server/cumulus/plan.ts';
+import type { PlanInput } from '../src/lib/server/cumulus/plan.ts';
 import type { PlannerConfig } from '../src/lib/server/cumulus/types.ts';
 
 const NOW = 1_700_000_000_000;
@@ -16,12 +14,14 @@ const NOW = 1_700_000_000_000;
 function planner(o: Partial<PlannerConfig> = {}): PlannerConfig {
   return {
     enabled: true,
-    reserveShowers: 3,
+    reserveShowers: 2,
     fullFraction: 0.95,
     horizonH: 18,
-    peakFraction: 0.6,
-    peakMinW: 1800,
-    socFloorPct: 50,
+    peakMinW: 1500,
+    heatPowerW: 2955,
+    freeSurplusSocPct: 98,
+    eveningReserveWh: 3000,
+    maxImportW: 5500,
     ...o
   };
 }
@@ -29,21 +29,28 @@ function planner(o: Partial<PlannerConfig> = {}): PlannerConfig {
 function inp(o: Partial<PlanInput> = {}): PlanInput {
   return {
     now: NOW,
+    hourOfDay: 14,
     eAvailWh: 8000,
     eFullWh: 15000,
-    eDoucheWh: 2000, // → réserve plancher = 3 × 2000 = 6000 Wh
+    eDoucheWh: 2000,
+    tTankC: 45,
+    tRoomC: 22,
+    lossCoeffWhPerCh: 2.1,
+    pvTotalW: 0,
+    houseW: 400,
+    gridPowerW: 0,
+    cumulusPowerW: 0,
+    batteryEnergyWh: 4000,
+    batteryChargeW: 0,
+    batteryDischargeW: 0,
+    socPct: 60,
     isHC: false,
-    socPct: 70,
+    priceHp: 0.2318,
+    priceHc: 0.1812,
     forecast: [],
     ...o
   };
 }
-
-/** Pic PV à l'heure courante (W). */
-const peakNow = (pvW: number): PlanForecastPoint[] => [
-  { hoursAhead: 0, hour: 13, pvW },
-  { hoursAhead: 1, hour: 14, pvW: pvW * 0.8 }
-];
 
 test('ballon plein → wait', () => {
   const p = planHeating(inp({ eAvailWh: 14500, eFullWh: 15000 }), planner());
@@ -51,54 +58,71 @@ test('ballon plein → wait', () => {
   assert.match(p.reason, /plein/);
 });
 
-test('pic PV + batterie OK → heat_now (chauffe solaire)', () => {
-  const p = planHeating(inp({ eAvailWh: 8000, socPct: 70, forecast: peakNow(4000) }), planner());
+test('surplus solaire libre (batterie pleine + PV + pas d’import) → heat_now, confiance haute', () => {
+  const p = planHeating(
+    inp({ eAvailWh: 8000, pvTotalW: 2400, houseW: 400, gridPowerW: -10, socPct: 100 }),
+    planner()
+  );
   assert.equal(p.action, 'heat_now');
-  assert.equal(p.targetHour, 13);
+  assert.equal(p.surplusConfidence, 'haute');
+  assert.ok(p.surplusFreeW > 0);
+  assert.ok(p.costNowEur < p.costHcEur, 'chauffer sur surplus doit coûter moins que la HC');
 });
 
-test('pic PV mais batterie basse → wait (priorité recharge batterie)', () => {
-  const p = planHeating(inp({ eAvailWh: 8000, socPct: 30, forecast: peakNow(4000) }), planner());
-  assert.equal(p.action, 'wait');
-  assert.match(p.reason, /batterie/);
-});
-
-test('réserve basse + pic PV à venir → wait_solar (attend le pic)', () => {
-  const fc: PlanForecastPoint[] = [
-    { hoursAhead: 0, hour: 9, pvW: 600 },
-    { hoursAhead: 4, hour: 13, pvW: 4000 }
-  ];
-  const p = planHeating(inp({ eAvailWh: 4000, forecast: fc }), planner());
-  assert.equal(p.action, 'wait_solar');
-  assert.equal(p.targetHour, 13);
-});
-
-test('réserve basse + pas de soleil + HC → heat_hc', () => {
-  const fc: PlanForecastPoint[] = [{ hoursAhead: 0, hour: 3, pvW: 0 }];
-  const p = planHeating(inp({ eAvailWh: 4000, isHC: true, forecast: fc }), planner());
-  assert.equal(p.action, 'heat_hc');
-});
-
-test('réserve basse + pas de soleil + HP → wait (jusqu’aux creuses)', () => {
-  const fc: PlanForecastPoint[] = [{ hoursAhead: 0, hour: 17, pvW: 200 }];
-  const p = planHeating(inp({ eAvailWh: 4000, isHC: false, forecast: fc }), planner());
-  assert.equal(p.action, 'wait');
-});
-
-test('réserve OK hors pic → wait (garde la place pour le solaire)', () => {
-  const fc: PlanForecastPoint[] = [{ hoursAhead: 0, hour: 10, pvW: 800 }];
-  const p = planHeating(inp({ eAvailWh: 10000, forecast: fc }), planner());
-  assert.equal(p.action, 'wait');
-  assert.match(p.reason, /OK/);
-});
-
-test('batterie indisponible (socPct null) → marge batterie non bloquante', () => {
-  const p = planHeating(inp({ eAvailWh: 8000, socPct: null, forecast: peakNow(4000) }), planner());
-  assert.equal(p.action, 'heat_now');
-});
-
-test('le pic doit dépasser peakMinW absolu (pas de chauffe pour un petit pic)', () => {
-  // pic du jour à 1000 W : 0,6×1000 = 600 mais peakMinW = 1800 → pas un « pic »
-  const p = planHeating(inp({ eAvailWh: 4000, forecast: peakNow(1000), isHC: false }), planner());
+test('PV mais batterie en charge (pas pleine) → PAS de surplus libre → pas heat_now', () => {
+  const p = planHeating(
+    inp({
+      eAvailWh: 8000,
+      pvTotalW: 2000,
+      houseW: 400,
+      gridPowerW: 0,
+      socPct: 60,
+      batteryChargeW: 1500
+    }),
+    planner()
+  );
   assert.notEqual(p.action, 'heat_now');
+  assert.equal(p.surplusConfidence, 'nulle');
+  assert.equal(p.surplusFreeW, -1);
+});
+
+test('réserve basse + pic solaire à venir → wait_solar (moins cher que HC)', () => {
+  const fc = [{ hoursAhead: 3, hour: 14, pvW: 2200 }];
+  const p = planHeating(inp({ eAvailWh: 4000, hourOfDay: 10, forecast: fc }), planner());
+  assert.equal(p.action, 'wait_solar');
+  assert.ok(p.deficitWh > 0);
+});
+
+test('nuit HC + déficit + backstop atteint → heat_hc', () => {
+  const p = planHeating(inp({ eAvailWh: 3000, hourOfDay: 7, isHC: true }), planner());
+  assert.equal(p.action, 'heat_hc');
+  assert.ok(p.backstopHcHour !== null);
+});
+
+test('nuit HC + déficit mais AVANT le backstop → wait (finir juste à temps)', () => {
+  const p = planHeating(inp({ eAvailWh: 3000, hourOfDay: 2, isHC: true }), planner());
+  assert.equal(p.action, 'wait');
+});
+
+test('conso maison élevée (induction) → délestage → wait (garde 6 kVA)', () => {
+  const p = planHeating(
+    inp({ eAvailWh: 5000, pvTotalW: 2000, houseW: 2800, gridPowerW: 3200, socPct: 100 }),
+    planner()
+  );
+  assert.equal(p.action, 'wait');
+  assert.match(p.reason, /conso|kVA|différée/i);
+});
+
+test('réserve OK, pas de surplus → wait (on garde la place pour le gratuit)', () => {
+  const p = planHeating(inp({ eAvailWh: 10000, pvTotalW: 0, hourOfDay: 16 }), planner());
+  assert.equal(p.action, 'wait');
+  assert.equal(p.deficitWh, 0);
+});
+
+test('le plan chiffre toujours la valeur économique (coûts, appoint, backstop)', () => {
+  const p = planHeating(inp({ eAvailWh: 4000, hourOfDay: 6, isHC: true }), planner());
+  assert.ok(p.costHcEur > 0);
+  assert.equal(typeof p.costNowEur, 'number');
+  assert.equal(typeof p.applianceW, 'number');
+  assert.ok(p.backstopHcHour !== null);
 });
