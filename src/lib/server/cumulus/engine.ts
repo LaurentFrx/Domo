@@ -27,6 +27,7 @@ import type { AutoMode, DecisionLogEntry, ShadowEvent } from './types';
 const TICK_TIMEOUT_MS = 45_000; // < intervalle timer (60 s)
 const SHADOW_HEAT_W = 500; // conso EM-50 voie cumulus au-dessus → « en chauffe » (timeline)
 const SHADOW_LOG_MAX = 80; // taille du journal shadow (timeline du jour)
+const APPLIANCE_OFF_GRACE_MS = 10 * 60_000; // sous le seuil > 10 min → cycle terminé (tolère les pauses)
 
 // Heure locale Paris fractionnaire (0–24) — pour le modèle éco (deadline matin, HC).
 const PARIS_HM = new Intl.DateTimeFormat('en-GB', {
@@ -232,6 +233,74 @@ async function runTick(apply: boolean): Promise<TickResult> {
     if (er.anchored && next.energy.lastAnchorTs !== state.energy.lastAnchorTs) {
       evs.push({ ts: now, kind: 'full', label: 'ballon plein', detail: 'recalage E_avail' });
     }
+
+    // ── Cycles des gros appareils (lave-vaisselle / lave-linge) : nommer la conso
+    //    + expliquer ce que le pilotage aurait fait (délestage 6 kVA). OBSERVATION. ──
+    {
+      const dtH = Math.min(0.1, Math.max(0, (now - (state.lastTickTs ?? now)) / 3_600_000));
+      // Le chauffe-eau AURAIT-il voulu chauffer, mais le délestage 6 kVA l'en empêche ?
+      const interlockFired = next.plan?.action === 'wait' && next.plan.reason.includes('6 kVA');
+      const heatIntent = (next.plan?.deficitWh ?? 0) > 0 || (next.plan?.surplusFreeW ?? -1) >= 0;
+
+      const nextCycles: Record<string, (typeof state.applianceCycles)[string]> = {};
+      for (const ap of inputs.appliances) {
+        let cyc = state.applianceCycles[ap.topic] ? { ...state.applianceCycles[ap.topic] } : null;
+        const fresh = ap.powerW !== null;
+        const p = ap.powerW ?? 0;
+
+        if (fresh && p >= ap.onW) {
+          if (!cyc || !cyc.running) {
+            cyc = {
+              running: true,
+              startTs: now,
+              startEnergyKwh: ap.energyKwh,
+              energyWh: 0,
+              peakW: p,
+              lastAboveTs: now,
+              coHeatTicks: 0,
+              deferTicks: 0
+            };
+          } else {
+            cyc.lastAboveTs = now;
+            cyc.peakW = Math.max(cyc.peakW, p);
+          }
+        }
+
+        if (cyc && cyc.running) {
+          if (fresh) cyc.energyWh += p * dtH;
+          if (heatingNow) cyc.coHeatTicks++;
+          else if (interlockFired && heatIntent) cyc.deferTicks++;
+
+          // Clôture : plus rien au-dessus du seuil depuis la fenêtre de grâce.
+          if (now - cyc.lastAboveTs > APPLIANCE_OFF_GRACE_MS) {
+            const endKwh =
+              cyc.startEnergyKwh !== null &&
+              ap.energyKwh !== null &&
+              ap.energyKwh >= cyc.startEnergyKwh
+                ? ap.energyKwh - cyc.startEnergyKwh
+                : cyc.energyWh / 1000;
+            const durMin = Math.max(1, Math.round((cyc.lastAboveTs - cyc.startTs) / 60_000));
+            const note =
+              cyc.coHeatTicks > 0
+                ? 'le chauffe-eau a chauffé en même temps (marge 6 kVA OK)'
+                : cyc.deferTicks > 0
+                  ? "l'automatisation aurait attendu la fin pour rester sous 6 kVA"
+                  : 'sans effet sur le chauffe-eau';
+            evs.push({
+              ts: cyc.lastAboveTs,
+              kind: 'appliance',
+              label: ap.name,
+              detail: `${endKwh.toFixed(2).replace('.', ',')} kWh · ${durMin} min · ${note}`
+            });
+            cyc.running = false; // clos → non repris dans nextCycles
+          }
+        }
+
+        if (cyc && cyc.running) nextCycles[ap.topic] = cyc;
+      }
+      next.applianceCycles = nextCycles;
+    }
+
     if (evs.length) next.shadowLog = [...state.shadowLog, ...evs].slice(-SHADOW_LOG_MAX);
   }
 

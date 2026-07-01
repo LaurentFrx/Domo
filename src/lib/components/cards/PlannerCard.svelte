@@ -99,7 +99,12 @@
     const start = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
     return cumulus.shadowLog
       .filter(
-        (e) => e.ts >= start && (e.kind === 'heat_end' || e.kind === 'draw' || e.kind === 'full')
+        (e) =>
+          e.ts >= start &&
+          (e.kind === 'heat_end' ||
+            e.kind === 'draw' ||
+            e.kind === 'full' ||
+            e.kind === 'appliance')
       )
       .slice()
       .reverse()
@@ -110,6 +115,11 @@
         }
         if (e.kind === 'draw')
           return { ts: e.ts, emoji: '🚿', text: 'Eau chaude utilisée (douche / robinet)' };
+        if (e.kind === 'appliance') {
+          const emoji =
+            e.label === 'Lave-vaisselle' ? '🍽️' : e.label === 'Lave-linge' ? '👕' : '🔌';
+          return { ts: e.ts, emoji, text: `${e.label} — ${e.detail}` };
+        }
         return { ts: e.ts, emoji: '✓', text: 'Ballon plein' };
       });
   });

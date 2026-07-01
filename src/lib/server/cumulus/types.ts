@@ -103,12 +103,26 @@ export interface CumulusInputs {
   outdoorC: number | null; // moyenne des sources extérieures
   indoorSources: TempSource[]; // sondes effectivement retenues dans la moyenne (pour le log)
   outdoorSources: TempSource[];
+
+  // ── Gros consommateurs électriques (prises Zigbee mesurées) — pour la timeline ──
+  // Journalisés (cycles nommés + effet sur le pilotage) ; le modèle ne s'appuie PAS
+  // dessus pour décider (il voit déjà la conso globale via gridPowerW).
+  appliances: ApplianceInput[];
 }
 
 /** Une source de température retenue dans une moyenne (nom court + valeur °C). */
 export interface TempSource {
   name: string;
   tempC: number;
+}
+
+/** Instantané d'une prise électroménager mesurée (lecture MQTT côté serveur). */
+export interface ApplianceInput {
+  name: string; // libellé lisible (« Lave-vaisselle »)
+  topic: string; // topic MQTT (clé de suivi de cycle)
+  onW: number; // seuil « en marche » (W)
+  powerW: number | null; // puissance instantanée (null si mesure absente/périmée)
+  energyKwh: number | null; // compteur d'énergie cumulé de la prise (kWh, monotone)
 }
 
 /** Configuration (réglages) — persistée dans la section `cumulus` de settings.json. */
@@ -248,7 +262,7 @@ export interface DecisionLogEntry {
 }
 
 /** Évènement de la timeline SHADOW (observation 2a) — un point du journal du jour. */
-export type ShadowEventKind = 'plan' | 'heat_start' | 'heat_end' | 'draw' | 'full';
+export type ShadowEventKind = 'plan' | 'heat_start' | 'heat_end' | 'draw' | 'full' | 'appliance';
 export interface ShadowEvent {
   ts: number;
   kind: ShadowEventKind;
@@ -308,7 +322,21 @@ export interface CumulusRuntimeState {
   shadowLog: ShadowEvent[];
   /** Suivi interne de la chauffe en cours pour la timeline (début + énergie + gratuit/réseau). */
   shadowHeat: { sinceTs: number; sinceInjWh: number; solar: boolean } | null;
+  /** Cycles de gros appareils EN COURS (clé = topic MQTT) — clos → journal + retiré. */
+  applianceCycles: Record<string, ApplianceCycle>;
   log: DecisionLogEntry[];
+}
+
+/** Cycle d'un gros appareil en cours de suivi (détection début→fin pour la timeline). */
+export interface ApplianceCycle {
+  running: boolean;
+  startTs: number; // début du cycle (1er tick au-dessus du seuil)
+  startEnergyKwh: number | null; // compteur de la prise au début (pour un kWh exact)
+  energyWh: number; // intégration de secours (power×dt) si le compteur manque
+  peakW: number; // pic de puissance observé
+  lastAboveTs: number; // dernier tick au-dessus du seuil (fin effective + grâce)
+  coHeatTicks: number; // ticks où le chauffe-eau chauffait pendant le cycle
+  deferTicks: number; // ticks où le délestage 6 kVA aurait bloqué une chauffe voulue
 }
 
 /** Valeurs dérivées du modèle d'énergie, persistées pour l'UI (carte Cumulus). */

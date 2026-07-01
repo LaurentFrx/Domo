@@ -21,7 +21,8 @@ import type {
   EnergyView,
   HeatPlan,
   PlanAction,
-  ShadowEvent
+  ShadowEvent,
+  ApplianceCycle
 } from './types';
 import type { CumulusMode } from '$theme/tokens';
 
@@ -60,6 +61,7 @@ export function defaultCumulusState(): CumulusRuntimeState {
     plan: null,
     shadowLog: [],
     shadowHeat: null,
+    applianceCycles: {},
     log: []
   };
 }
@@ -150,11 +152,33 @@ export function normalizeCumulusState(raw: unknown): CumulusRuntimeState {
     plan: normPlan(o.plan),
     shadowLog: normShadowLog(o.shadowLog),
     shadowHeat: normShadowHeat(o.shadowHeat),
+    applianceCycles: normApplianceCycles(o.applianceCycles),
     log: normLog(o.log)
   };
 }
 
-const SHADOW_KINDS = ['plan', 'heat_start', 'heat_end', 'draw', 'full'];
+function normApplianceCycles(v: unknown): Record<string, ApplianceCycle> {
+  if (!v || typeof v !== 'object') return {};
+  const out: Record<string, ApplianceCycle> = {};
+  for (const [topic, raw] of Object.entries(v as Record<string, unknown>)) {
+    if (!raw || typeof raw !== 'object') continue;
+    const o = raw as Record<string, unknown>;
+    if (typeof o.startTs !== 'number' || o.running !== true) continue; // on ne garde que les cycles EN COURS
+    out[topic] = {
+      running: true,
+      startTs: o.startTs,
+      startEnergyKwh: numOrNull(o.startEnergyKwh),
+      energyWh: numOr(o.energyWh, 0),
+      peakW: numOr(o.peakW, 0),
+      lastAboveTs: numOr(o.lastAboveTs, o.startTs),
+      coHeatTicks: numOr(o.coHeatTicks, 0),
+      deferTicks: numOr(o.deferTicks, 0)
+    };
+  }
+  return out;
+}
+
+const SHADOW_KINDS = ['plan', 'heat_start', 'heat_end', 'draw', 'full', 'appliance'];
 function normShadowLog(v: unknown): ShadowEvent[] {
   if (!Array.isArray(v)) return [];
   return v

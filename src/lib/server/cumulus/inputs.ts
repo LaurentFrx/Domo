@@ -8,14 +8,22 @@
 
 import { env } from '$env/dynamic/private';
 import { isHC, nextTariffSwitch, parisDate, regimeAt } from '../tariffs';
-import type { CumulusConfig, CumulusInputs, TempSource, PlanForecastPoint } from './types';
+import type {
+  CumulusConfig,
+  CumulusInputs,
+  TempSource,
+  ApplianceInput,
+  PlanForecastPoint
+} from './types';
 import { readRelay } from './relay';
 import { averageTemp } from './energy-model';
 import { ensureTempSensor, getCumulusTemp, ensureTempTopic, getTempTopic } from './temp-sensor';
+import { ensureApplianceSensors, getAppliancePower, TRACKED_APPLIANCES } from './appliance-sensor';
 
 const TIMEOUT_MS = 8_000;
 const FORECAST_TIMEOUT_MS = 12_000;
 const INDOOR_STALE_MS = 3 * 3_600_000; // sonde intérieure périmée au-delà de 3 h
+const APPLIANCE_STALE_MS = 10 * 60_000; // prise périmée au-delà de 10 min (plug offline)
 const FORECAST_HORIZON_H = 30; // courbe PV à venir conservée pour le planificateur (h)
 
 const num = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) ? n : 0);
@@ -267,6 +275,7 @@ const topicLabel = (t: string): string =>
 export async function collectInputs(config: CumulusConfig): Promise<CumulusInputs> {
   const em = config.energyModel;
   ensureTempSensor();
+  ensureApplianceSensors();
   em.indoorTopics.forEach((topic) => ensureTempTopic(topic));
   if (em.outdoorSources.thermoExtTopic) ensureTempTopic(em.outdoorSources.thermoExtTopic);
   const now = new Date();
@@ -314,6 +323,19 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
   }
   const outdoorC = averageTemp(outdoorSources);
 
+  // ── Gros consommateurs mesurés (prises Zigbee) : puissance + compteur si frais ──
+  const appliances: ApplianceInput[] = TRACKED_APPLIANCES.map((a) => {
+    const r = getAppliancePower(a.topic);
+    const fresh = r.powerW !== null && r.ageMs !== null && r.ageMs <= APPLIANCE_STALE_MS;
+    return {
+      name: a.name,
+      topic: a.topic,
+      onW: a.onW,
+      powerW: fresh ? r.powerW : null,
+      energyKwh: r.energyKwh
+    };
+  });
+
   const isHCnow = isHC(now);
   const sw = nextTariffSwitch(now);
   const reg = regimeAt(now);
@@ -349,6 +371,7 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     indoorC,
     outdoorC,
     indoorSources,
-    outdoorSources
+    outdoorSources,
+    appliances
   };
 }
