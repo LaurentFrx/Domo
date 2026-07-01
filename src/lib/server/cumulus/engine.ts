@@ -197,6 +197,47 @@ async function runTick(apply: boolean): Promise<TickResult> {
     );
   }
 
+  // ── Boucle de REGRET : accumuler la chauffe VENTILÉE par source, noter le jour ──
+  {
+    const emptyDay = (date: string) => ({
+      date,
+      injWh: 0,
+      pvWh: 0,
+      battWh: 0,
+      gridHpWh: 0,
+      gridHcWh: 0,
+      costRealEur: 0,
+      costRefHcEur: 0,
+      gainEur: 0
+    });
+    let reg = next.regret ?? { day: emptyDay(inputs.todayParis), days: [] };
+    // Clôture au changement de jour : le jour écoulé rejoint l'historique (≤ 30 j).
+    if (reg.day.date !== inputs.todayParis) {
+      const days = reg.day.injWh > 0 ? [...reg.days, reg.day].slice(-30) : reg.days;
+      reg = { day: emptyDay(inputs.todayParis), days };
+    } else {
+      reg = { day: { ...reg.day }, days: reg.days };
+    }
+    // Accumulation : uniquement quand le ballon chauffe (décomposition MESURÉE du plan).
+    const p = next.plan;
+    if (p && p.measured) {
+      const dtH = Math.min(0.1, Math.max(0, (now - (state.lastTickTs ?? now)) / 3_600_000));
+      reg.day.pvWh += p.pvCoverW * dtH;
+      reg.day.battWh += p.batteryCoverW * dtH;
+      if (inputs.isHC) reg.day.gridHcWh += p.gridDrawW * dtH;
+      else reg.day.gridHpWh += p.gridDrawW * dtH;
+    }
+    // Notes du jour (recalculées au tick — cash EDF réel vs référence tout-HC).
+    reg.day.injWh = Math.round(reg.day.pvWh + reg.day.battWh + reg.day.gridHpWh + reg.day.gridHcWh);
+    reg.day.costRealEur = +(
+      (reg.day.gridHpWh / 1000) * inputs.priceHp +
+      (reg.day.gridHcWh / 1000) * inputs.priceHc
+    ).toFixed(3);
+    reg.day.costRefHcEur = +((reg.day.injWh / 1000) * inputs.priceHc).toFixed(3);
+    reg.day.gainEur = +(reg.day.costRefHcEur - reg.day.costRealEur).toFixed(3);
+    next.regret = reg;
+  }
+
   // ── Timeline SHADOW (journal du jour : plan / chauffe / puisage / plein) ──
   {
     const evs: ShadowEvent[] = [];

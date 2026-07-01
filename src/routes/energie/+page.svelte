@@ -24,7 +24,6 @@
   import KpiCard from '$components/cards/KpiCard.svelte';
   import ChartHoverLayer from '$components/charts/ChartHoverLayer.svelte';
   import ApplianceCard from '$components/tiles/ApplianceCard.svelte';
-  import CumulusCard from '$components/cards/CumulusCard.svelte';
   import PlannerCard from '$components/cards/PlannerCard.svelte';
   import HpHcSplitCard from '$components/cards/HpHcSplitCard.svelte';
 
@@ -44,7 +43,7 @@
       acquire(forecast),
       acquire(productionHistory),
       acquire(energyMonthly), // ventilation mensuelle (tableau + KPI)
-      // Relais cumulus RÉEL (Shelly Pro 1) — état + on/off dans CumulusCard.
+      // Relais cumulus RÉEL (Shelly Pro 1) — état + pilotage dans la carte Eau chaude.
       acquireFns(
         'cumulus:relay',
         () => cumulus.connectRelay(),
@@ -433,10 +432,7 @@
     </span>
   </header>
 
-  <!-- ═══ Chauffe-eau (ECS) — carte en tête de page ═══ -->
-  <CumulusCard />
-
-  <!-- ═══ Planificateur prédictif (observation / shadow) ═══ -->
+  <!-- ═══ Eau chaude (ECS) — carte unique pilotage + journal, en tête de page ═══ -->
   <PlannerCard />
 
   <!-- ═══ Paysage (iPad/desktop) : production + prévisions côte à côte ═══ -->

@@ -22,7 +22,8 @@ import type {
   HeatPlan,
   PlanAction,
   ShadowEvent,
-  ApplianceCycle
+  ApplianceCycle,
+  RegretDay
 } from './types';
 import type { CumulusMode } from '$theme/tokens';
 
@@ -62,7 +63,22 @@ export function defaultCumulusState(): CumulusRuntimeState {
     shadowLog: [],
     shadowHeat: null,
     applianceCycles: {},
+    regret: { day: defaultRegretDay(), days: [] },
     log: []
+  };
+}
+
+function defaultRegretDay(date = ''): RegretDay {
+  return {
+    date,
+    injWh: 0,
+    pvWh: 0,
+    battWh: 0,
+    gridHpWh: 0,
+    gridHcWh: 0,
+    costRealEur: 0,
+    costRefHcEur: 0,
+    gainEur: 0
   };
 }
 
@@ -153,8 +169,39 @@ export function normalizeCumulusState(raw: unknown): CumulusRuntimeState {
     shadowLog: normShadowLog(o.shadowLog),
     shadowHeat: normShadowHeat(o.shadowHeat),
     applianceCycles: normApplianceCycles(o.applianceCycles),
+    regret: normRegret(o.regret),
     log: normLog(o.log)
   };
+}
+
+function normRegretDay(v: unknown): RegretDay | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.date !== 'string') return null;
+  const d = defaultRegretDay(o.date);
+  return {
+    date: o.date,
+    injWh: numOr(o.injWh, d.injWh),
+    pvWh: numOr(o.pvWh, d.pvWh),
+    battWh: numOr(o.battWh, d.battWh),
+    gridHpWh: numOr(o.gridHpWh, d.gridHpWh),
+    gridHcWh: numOr(o.gridHcWh, d.gridHcWh),
+    costRealEur: numOr(o.costRealEur, d.costRealEur),
+    costRefHcEur: numOr(o.costRefHcEur, d.costRefHcEur),
+    gainEur: numOr(o.gainEur, d.gainEur)
+  };
+}
+
+function normRegret(v: unknown): { day: RegretDay; days: RegretDay[] } {
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  const day = normRegretDay(o.day) ?? defaultRegretDay();
+  const days = Array.isArray(o.days)
+    ? o.days
+        .map(normRegretDay)
+        .filter((x): x is RegretDay => x !== null)
+        .slice(-30)
+    : [];
+  return { day, days };
 }
 
 function normApplianceCycles(v: unknown): Record<string, ApplianceCycle> {

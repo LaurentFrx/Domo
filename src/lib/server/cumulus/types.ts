@@ -284,6 +284,29 @@ export interface ShadowEvent {
   detail: string;
 }
 
+/**
+ * Boucle de REGRET (rapport §IV.6) — le système se note lui-même, en euros.
+ * Accumulé au fil des ticks (décomposition MESURÉE des chauffes), clôturé par jour.
+ *   - costRealEur : cash EDF réellement payé (HP + HC). L'opportunité batterie n'est
+ *     PAS comptée en v1 : l'été elle se re-remplit sur de l'écrêtage qui serait perdu
+ *     (coût ~0) — la compter au prix HC surestimerait le coût. Ventilation conservée
+ *     pour affiner quand les profils appris arriveront.
+ *   - costRefHcEur : la même énergie injectée, payée entièrement au tarif HC =
+ *     stratégie de référence « tout-HC finissant 7 h » (le filet bête et fiable).
+ *   - gainEur = référence − réel : ce que le pilotage a fait gagner ce jour-là.
+ */
+export interface RegretDay {
+  date: string; // 'YYYY-MM-DD' (Paris)
+  injWh: number; // énergie totale injectée dans le ballon
+  pvWh: number; // part solaire (gratuite)
+  battWh: number; // part batterie (autoconsommation)
+  gridHpWh: number; // part EDF heures pleines
+  gridHcWh: number; // part EDF heures creuses
+  costRealEur: number;
+  costRefHcEur: number;
+  gainEur: number;
+}
+
 /** État runtime persistant (data/cumulus-state.json). */
 export interface CumulusRuntimeState {
   autoMode: AutoMode;
@@ -338,6 +361,8 @@ export interface CumulusRuntimeState {
   shadowHeat: { sinceTs: number; sinceInjWh: number; solar: boolean } | null;
   /** Cycles de gros appareils EN COURS (clé = topic MQTT) — clos → journal + retiré. */
   applianceCycles: Record<string, ApplianceCycle>;
+  /** Boucle de regret : jour en cours (coûts recalculés au tick) + historique (≤ 30 j). */
+  regret: { day: RegretDay; days: RegretDay[] };
   log: DecisionLogEntry[];
 }
 

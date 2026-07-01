@@ -43,6 +43,19 @@ export interface CumulusConfigClient {
 
 export type CumulusAutoMode = 'auto' | 'manual' | 'off';
 
+/** Un jour de la boucle de regret (gain € du pilotage vs stratégie tout-HC). */
+export interface RegretDayClient {
+  date: string;
+  injWh: number;
+  pvWh: number;
+  battWh: number;
+  gridHpWh: number;
+  gridHcWh: number;
+  costRealEur: number;
+  costRefHcEur: number;
+  gainEur: number;
+}
+
 /** Libellés FR des raisons de décision (affichage carte). */
 export const CUMULUS_REASON_LABELS: Record<string, string> = {
   cold_start: 'Initialisation',
@@ -166,6 +179,14 @@ class CumulusState {
   } | null>(null);
   /** ÉTAPE 2a — timeline du jour (transitions de plan, chauffes, puisages, pleins). */
   shadowLog = $state<{ ts: number; kind: string; label: string; detail: string }[]>([]);
+  /** Boucle de regret — jour en cours + historique (≤ 30 j) : gain € vs stratégie tout-HC. */
+  regretDay = $state<RegretDayClient | null>(null);
+  regretDays = $state<RegretDayClient[]>([]);
+  /** Gain cumulé des 7 derniers jours (jour en cours inclus), €. */
+  get gainWeekEur(): number {
+    const past = this.regretDays.slice(-6).reduce((s, d) => s + d.gainEur, 0);
+    return +(past + (this.regretDay?.gainEur ?? 0)).toFixed(2);
+  }
   #orchTimer: ReturnType<typeof setInterval> | null = null;
   #orchVis: (() => void) | null = null;
 
@@ -355,6 +376,10 @@ class CumulusState {
               }
             : null;
         this.shadowLog = Array.isArray(s.shadowLog) ? s.shadowLog : [];
+        // Boucle de regret : gain € du jour + historique.
+        const rg = s.regret as { day?: RegretDayClient; days?: RegretDayClient[] } | undefined;
+        this.regretDay = rg?.day && typeof rg.day.date === 'string' ? rg.day : null;
+        this.regretDays = Array.isArray(rg?.days) ? rg.days : [];
       }
       if (d?.config) this.config = d.config as CumulusConfigClient;
       this.orchestratorConnected = true;
