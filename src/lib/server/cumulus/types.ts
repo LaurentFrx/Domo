@@ -220,10 +220,11 @@ export interface HeatPlan {
   showers: number; // réserve actuelle estimée (douches)
   floorShowers: number; // douches à garantir au matin
   deficitWh: number; // énergie manquante pour garantir le matin
-  surplusFreeW: number; // surplus PV libre estimé (W) ; -1 si non détecté
-  surplusConfidence: 'haute' | 'moyenne' | 'nulle'; // confiance de l'inférence de surplus
-  applianceW: number; // appoint batterie/réseau si on chauffe maintenant (W)
-  costNowEur: number; // coût estimé de chauffer maintenant (€/kWh)
+  pvCoverW: number; // part de la chauffe couverte par le PV net (gratuit), W
+  batteryCoverW: number; // part couverte par la batterie (autoconso), W
+  gridDrawW: number; // part PONCTIONNÉE sur EDF si on chauffe maintenant, W — à MINIMISER
+  autoconsoPct: number; // % de la chauffe couvert sans EDF ((pv+batt)/chauffe)
+  costNowEur: number; // coût CASH de chauffer maintenant (€/kWh) = seule la part EDF
   costHcEur: number; // coût de la recharge en heures creuses (€/kWh, référence)
   backstopHcHour: number | null; // heure calculée de bascule HC (filet de fin de nuit)
   computedAt: number; // epoch ms
@@ -237,9 +238,11 @@ export interface PlannerConfig {
   horizonH: number; // horizon de prévision considéré (h)
   peakMinW: number; // seuil « pic solaire exploitable » à venir (W)
   heatPowerW: number; // puissance de chauffe RÉELLE mesurée (W)
-  freeSurplusSocPct: number; // SoC ≥ ce seuil → batterie pleine → surplus probablement écrêté (gratuit)
-  eveningReserveWh: number; // énergie batterie à préserver pour le soir/nuit (Wh)
-  maxImportW: number; // (import + chauffe) au-delà → délestage (garde 6 kVA)
+  // ── Autoconsommation (objectif : ne PAS ponctionner EDF ; étaler les charges) ──
+  sbOutMaxW: number; // plafond de sortie du système SolarBank (PV+batterie), W — mesuré ~2400
+  socReservePct: number; // SoC en dessous duquel la batterie NE couvre PLUS la chauffe (réserve du soir)
+  gridTolW: number; // soutirage EDF toléré pour considérer la chauffe « couverte par le solaire » (W)
+  purePvFraction: number; // le PV SEUL doit couvrir cette fraction de la chauffe → opportunité gratuite franche
 }
 
 /** Un point horaire de la courbe de prévision PV à venir (≥ heure courante). */

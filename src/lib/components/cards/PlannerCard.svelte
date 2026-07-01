@@ -234,19 +234,35 @@
           {plan.deficitWh > 0 ? `${(plan.deficitWh / 1000).toFixed(1)} kWh` : 'rien ✓'}
         </dd>
 
-        <dt style="color: var(--color-muted-fg);">Surplus solaire gratuit</dt>
-        <dd class="text-right tabular-nums" style="color: var(--color-fg);">
-          {plan.surplusFreeW < 0
-            ? 'non détecté'
-            : `≈ ${plan.surplusFreeW} W · confiance ${plan.surplusConfidence}`}
+        <dt style="color: var(--color-muted-fg);">Si on chauffe : autoconso</dt>
+        <dd
+          class="text-right font-semibold tabular-nums"
+          style="color: {plan.autoconsoPct >= 90
+            ? 'var(--color-success)'
+            : plan.autoconsoPct >= 60
+              ? 'var(--color-fg)'
+              : 'var(--color-warning)'};"
+        >
+          {plan.autoconsoPct} %
         </dd>
 
-        <dt style="color: var(--color-muted-fg);">Si on chauffe maintenant</dt>
+        <dt style="color: var(--color-muted-fg);">· dont solaire (gratuit)</dt>
+        <dd class="text-right tabular-nums" style="color: var(--color-fg);">{plan.pvCoverW} W</dd>
+
+        <dt style="color: var(--color-muted-fg);">· dont batterie</dt>
         <dd class="text-right tabular-nums" style="color: var(--color-fg);">
-          appoint {plan.applianceW} W
+          {plan.batteryCoverW} W
         </dd>
 
-        <dt style="color: var(--color-muted-fg);">Coût maintenant</dt>
+        <dt style="color: var(--color-muted-fg);">· dont réseau EDF</dt>
+        <dd
+          class="text-right font-semibold tabular-nums"
+          style="color: {plan.gridDrawW <= 300 ? 'var(--color-success)' : 'var(--color-warning)'};"
+        >
+          {plan.gridDrawW} W
+        </dd>
+
+        <dt style="color: var(--color-muted-fg);">Coût maintenant (EDF)</dt>
         <dd
           class="text-right font-semibold tabular-nums"
           style="color: {plan.costNowEur <= plan.costHcEur

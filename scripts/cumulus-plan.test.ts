@@ -1,5 +1,6 @@
 /**
- * Tests du modèle économique du chauffe-eau (planHeating — PUR, ÉTAPE 2b).
+ * Tests du modèle AUTOCONSOMMATION du chauffe-eau (planHeating — PUR, ÉTAPE 2b).
+ * Objectif : ne PAS ponctionner EDF ; décomposer la chauffe en PV / batterie / EDF.
  *   pnpm test:plan
  */
 
@@ -19,9 +20,10 @@ function planner(o: Partial<PlannerConfig> = {}): PlannerConfig {
     horizonH: 18,
     peakMinW: 1500,
     heatPowerW: 2955,
-    freeSurplusSocPct: 98,
-    eveningReserveWh: 3000,
-    maxImportW: 5500,
+    sbOutMaxW: 2400,
+    socReservePct: 30,
+    gridTolW: 300,
+    purePvFraction: 0.8,
     ...o
   };
 }
@@ -36,8 +38,9 @@ function inp(o: Partial<PlanInput> = {}): PlanInput {
     tTankC: 45,
     tRoomC: 22,
     lossCoeffWhPerCh: 2.1,
-    pvTotalW: 0,
-    houseW: 400,
+    pvOnSbW: 0,
+    pvApsW: 0,
+    houseW: 300,
     gridPowerW: 0,
     cumulusPowerW: 0,
     batteryEnergyWh: 4000,
@@ -58,44 +61,58 @@ test('ballon plein → wait', () => {
   assert.match(p.reason, /plein/);
 });
 
-test('surplus solaire libre (batterie pleine + PV + pas d’import) → heat_now, confiance haute', () => {
+test('surplus solaire franc (le PV seul couvre) → heat_now, ~0 EDF, moins cher que la HC', () => {
   const p = planHeating(
-    inp({ eAvailWh: 8000, pvTotalW: 2400, houseW: 400, gridPowerW: -10, socPct: 100 }),
+    inp({ eAvailWh: 8000, pvOnSbW: 2000, pvApsW: 900, houseW: 200, socPct: 100 }),
     planner()
   );
   assert.equal(p.action, 'heat_now');
-  assert.equal(p.surplusConfidence, 'haute');
-  assert.ok(p.surplusFreeW > 0);
-  assert.ok(p.costNowEur < p.costHcEur, 'chauffer sur surplus doit coûter moins que la HC');
+  assert.ok(p.gridDrawW <= 300, `EDF attendu ~0, obtenu ${p.gridDrawW} W`);
+  assert.ok(p.autoconsoPct >= 90);
+  assert.ok(p.costNowEur < p.costHcEur, 'chauffer sur solaire doit coûter moins que la HC');
 });
 
-test('PV mais batterie en charge (pas pleine) → PAS de surplus libre → pas heat_now', () => {
+test('déficit + solaire+batterie couvrent (EDF propre) → heat_now (autoconsommation)', () => {
   const p = planHeating(
-    inp({
-      eAvailWh: 8000,
-      pvTotalW: 2000,
-      houseW: 400,
-      gridPowerW: 0,
-      socPct: 60,
-      batteryChargeW: 1500
-    }),
+    inp({ eAvailWh: 3000, pvOnSbW: 800, pvApsW: 700, houseW: 200, socPct: 80 }),
     planner()
   );
-  assert.notEqual(p.action, 'heat_now');
-  assert.equal(p.surplusConfidence, 'nulle');
-  assert.equal(p.surplusFreeW, -1);
-});
-
-test('réserve basse + pic solaire à venir → wait_solar (moins cher que HC)', () => {
-  const fc = [{ hoursAhead: 3, hour: 14, pvW: 2200 }];
-  const p = planHeating(inp({ eAvailWh: 4000, hourOfDay: 10, forecast: fc }), planner());
-  assert.equal(p.action, 'wait_solar');
+  assert.equal(p.action, 'heat_now');
   assert.ok(p.deficitWh > 0);
+  assert.ok(p.batteryCoverW > 0, 'la batterie participe le jour');
+  assert.ok(p.gridDrawW <= 300);
 });
 
-test('nuit HC + déficit + backstop atteint → heat_hc', () => {
-  const p = planHeating(inp({ eAvailWh: 3000, hourOfDay: 7, isHC: true }), planner());
+test('déficit + gros consommateur (conso maison élevée) + solaire à venir → wait_solar', () => {
+  const fc = [{ hoursAhead: 3, hour: 14, pvW: 2200 }];
+  const p = planHeating(
+    inp({ eAvailWh: 3000, hourOfDay: 10, houseW: 2500, pvOnSbW: 500, pvApsW: 200, forecast: fc }),
+    planner()
+  );
+  assert.equal(p.action, 'wait_solar');
+  assert.ok(p.gridDrawW > 300, 'chauffer maintenant ponctionnerait EDF');
+});
+
+test('gros consommateur en journée, sans solaire suffisant ni à venir → wait (éviter EDF)', () => {
+  const p = planHeating(
+    inp({ eAvailWh: 3000, hourOfDay: 17, houseW: 2800, pvOnSbW: 300, pvApsW: 100 }),
+    planner()
+  );
+  assert.equal(p.action, 'wait');
+  assert.ok(p.gridDrawW > 300);
+});
+
+test('nuit HC + déficit + backstop atteint → heat_hc, batterie NON puisée', () => {
+  const p = planHeating(
+    inp({ eAvailWh: 3000, hourOfDay: 7, isHC: true, pvOnSbW: 0, pvApsW: 0 }),
+    planner()
+  );
   assert.equal(p.action, 'heat_hc');
+  assert.equal(
+    p.batteryCoverW,
+    0,
+    'la nuit, la batterie est la réserve du soir — pas pour le ballon'
+  );
   assert.ok(p.backstopHcHour !== null);
 });
 
@@ -104,25 +121,30 @@ test('nuit HC + déficit mais AVANT le backstop → wait (finir juste à temps)'
   assert.equal(p.action, 'wait');
 });
 
-test('conso maison élevée (induction) → délestage → wait (garde 6 kVA)', () => {
-  const p = planHeating(
-    inp({ eAvailWh: 5000, pvTotalW: 2000, houseW: 2800, gridPowerW: 3200, socPct: 100 }),
-    planner()
-  );
-  assert.equal(p.action, 'wait');
-  assert.match(p.reason, /conso|kVA|différée/i);
-});
-
-test('réserve OK, pas de surplus → wait (on garde la place pour le gratuit)', () => {
-  const p = planHeating(inp({ eAvailWh: 10000, pvTotalW: 0, hourOfDay: 16 }), planner());
+test('réserve OK, pas de surplus → wait (ne pas vider la batterie pour rien)', () => {
+  const p = planHeating(inp({ eAvailWh: 10000, pvOnSbW: 0, hourOfDay: 16 }), planner());
   assert.equal(p.action, 'wait');
   assert.equal(p.deficitWh, 0);
 });
 
-test('le plan chiffre toujours la valeur économique (coûts, appoint, backstop)', () => {
-  const p = planHeating(inp({ eAvailWh: 4000, hourOfDay: 6, isHC: true }), planner());
+test('la nuit, la batterie n’est jamais comptée pour la chauffe (réserve du soir)', () => {
+  const p = planHeating(
+    inp({ eAvailWh: 3000, hourOfDay: 3, isHC: true, socPct: 90, pvOnSbW: 0 }),
+    planner()
+  );
+  assert.equal(p.batteryCoverW, 0);
+  assert.equal(p.gridDrawW, 2955, 'toute la chauffe viendrait d’EDF (HC) la nuit');
+});
+
+test('le plan chiffre toujours la décomposition (PV / batterie / EDF / autoconso / coûts)', () => {
+  const p = planHeating(
+    inp({ eAvailWh: 4000, pvOnSbW: 1000, pvApsW: 400, houseW: 300 }),
+    planner()
+  );
+  assert.equal(typeof p.pvCoverW, 'number');
+  assert.equal(typeof p.batteryCoverW, 'number');
+  assert.equal(typeof p.gridDrawW, 'number');
+  assert.ok(p.autoconsoPct >= 0 && p.autoconsoPct <= 100);
+  assert.equal(p.pvCoverW + p.batteryCoverW + p.gridDrawW, 2955, 'la somme = puissance de chauffe');
   assert.ok(p.costHcEur > 0);
-  assert.equal(typeof p.costNowEur, 'number');
-  assert.equal(typeof p.applianceW, 'number');
-  assert.ok(p.backstopHcHour !== null);
 });

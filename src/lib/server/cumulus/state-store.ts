@@ -221,7 +221,6 @@ function normPlan(v: unknown): HeatPlan | null {
   if (!v || typeof v !== 'object') return null;
   const o = v as Record<string, unknown>;
   if (!PLAN_ACTIONS.includes(o.action as PlanAction)) return null;
-  const conf = ['haute', 'moyenne', 'nulle'];
   return {
     action: o.action as PlanAction,
     reason: typeof o.reason === 'string' ? o.reason : '',
@@ -229,11 +228,10 @@ function normPlan(v: unknown): HeatPlan | null {
     showers: numOr(o.showers, 0),
     floorShowers: numOr(o.floorShowers, 0),
     deficitWh: numOr(o.deficitWh, 0),
-    surplusFreeW: numOr(o.surplusFreeW, -1),
-    surplusConfidence: conf.includes(o.surplusConfidence as string)
-      ? (o.surplusConfidence as HeatPlan['surplusConfidence'])
-      : 'nulle',
-    applianceW: numOr(o.applianceW, 0),
+    pvCoverW: numOr(o.pvCoverW, 0),
+    batteryCoverW: numOr(o.batteryCoverW, 0),
+    gridDrawW: numOr(o.gridDrawW, 0),
+    autoconsoPct: numOr(o.autoconsoPct, 0),
     costNowEur: numOr(o.costNowEur, 0),
     costHcEur: numOr(o.costHcEur, 0),
     backstopHcHour: numOrNull(o.backstopHcHour),

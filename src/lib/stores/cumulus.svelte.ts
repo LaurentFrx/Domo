@@ -148,9 +148,10 @@ class CumulusState {
     showers: number;
     floorShowers: number;
     deficitWh: number;
-    surplusFreeW: number;
-    surplusConfidence: 'haute' | 'moyenne' | 'nulle';
-    applianceW: number;
+    pvCoverW: number;
+    batteryCoverW: number;
+    gridDrawW: number;
+    autoconsoPct: number;
     costNowEur: number;
     costHcEur: number;
     backstopHcHour: number | null;
@@ -332,9 +333,10 @@ class CumulusState {
                 showers: typeof pl.showers === 'number' ? pl.showers : 0,
                 floorShowers: typeof pl.floorShowers === 'number' ? pl.floorShowers : 0,
                 deficitWh: typeof pl.deficitWh === 'number' ? pl.deficitWh : 0,
-                surplusFreeW: typeof pl.surplusFreeW === 'number' ? pl.surplusFreeW : -1,
-                surplusConfidence: pl.surplusConfidence ?? 'nulle',
-                applianceW: typeof pl.applianceW === 'number' ? pl.applianceW : 0,
+                pvCoverW: typeof pl.pvCoverW === 'number' ? pl.pvCoverW : 0,
+                batteryCoverW: typeof pl.batteryCoverW === 'number' ? pl.batteryCoverW : 0,
+                gridDrawW: typeof pl.gridDrawW === 'number' ? pl.gridDrawW : 0,
+                autoconsoPct: typeof pl.autoconsoPct === 'number' ? pl.autoconsoPct : 0,
                 costNowEur: typeof pl.costNowEur === 'number' ? pl.costNowEur : 0,
                 costHcEur: typeof pl.costHcEur === 'number' ? pl.costHcEur : 0,
                 backstopHcHour: typeof pl.backstopHcHour === 'number' ? pl.backstopHcHour : null,

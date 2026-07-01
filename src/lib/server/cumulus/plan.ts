@@ -1,24 +1,25 @@
 /**
- * Planificateur du chauffe-eau — MODÈLE ÉCONOMIQUE (ÉTAPE 2b, SHADOW).
+ * Planificateur du chauffe-eau — MODÈLE AUTOCONSOMMATION (ÉTAPE 2b, SHADOW).
  *
- * `planHeating(input, config)` est PUR. Il ne pose PAS de seuils empilés : il
- * RAISONNE EN COÛT. À chaque tick il compare le coût d'obtenir l'énergie qu'il
- * faut dans le ballon (chauffer maintenant sur surplus solaire vs plus tard vs
- * heures creuses de fin de nuit), sous les contraintes réelles de l'installation
- * (fiche docs/installation-energie.md), et retourne l'action + sa valeur économique.
+ * Objectif (recadré 2026-07-01 par Laurent) : NE PAS ponctionner le réseau EDF, ou
+ * le moins possible. L'apport instantané du système — sortie SolarBank plafonnée
+ * ~2400 W (PV + batterie confondus) + APS EZ1 (injection directe, HORS plafond) —
+ * doit couvrir la conso maison, CHAUFFE-EAU COMPRIS. Le levier : ÉTALER les charges
+ * dans la journée pour qu'à chaque instant la conso reste sous ce que le solaire+
+ * batterie peut fournir (ne pas empiler cumulus + induction + lave-vaisselle).
  *
- * Principes (fiche) :
- *   - Pas de revente → tout surplus PV non consommé est PERDU. L'autoconsommer
- *     dans le ballon vaut toujours mieux que le perdre (coût ≈ 0 €).
- *   - Le ballon (~2955 W réels) > production solaire max (~2,6 kW) → chauffer « au
- *     solaire » ponctionne toujours un peu de batterie/réseau : c'est chiffré, pas masqué.
- *   - La batterie est la réserve du soir : un kWh batterie mis dans le ballon = un
- *     kWh racheté plus tard (coût d'opportunité ≈ HC).
- *   - Besoin daté : garantir 2 douches à ~7 h 30. La HC de fin de nuit (fin 08 h 06)
- *     est le FILET quasi parfait (eau fraîche à temps, tarif bas, pertes ~nulles).
- *   - Angle mort : le surplus libre n'est pas mesurable directement (batterie pleine
- *     + PV écrêté → import ≈ 0). On l'INFÈRE (batterie pleine/idle + pas d'import +
- *     PV actif) avec un niveau de CONFIANCE ; on ne le masque pas.
+ * À chaque tick on DÉCOMPOSE la chauffe (fiche docs/installation-energie.md) en :
+ *   - pvCoverW      : PV net (production − conso maison) → GRATUIT (sinon écrêté : pas de revente)
+ *   - batteryCoverW : batterie, dans la limite du PLAFOND de sortie SB, et SEULEMENT le
+ *                     jour (PV actif → elle se recharge) au-dessus de la réserve du soir
+ *                     → autoconsommation (~gratuit)
+ *   - gridDrawW     : le RESTE = EDF ponctionné → le SEUL coût cash, à MINIMISER
+ *
+ * Vérifié sur mesure (01/07, chauffe réelle) : PV 806 W + batterie 1739 W + EDF 410 W
+ * = 2955 W (reproduit les 430 W EDF / 1738 W batterie relevés ; sortie SB plafonnée 2399 W).
+ *
+ * La NUIT (PV inactif) la batterie EST la réserve du soir → on ne la puise PAS pour le
+ * ballon : le repli passe par la HC de fin de nuit (EDF bon marché), pas par la batterie.
  *
  * NE PILOTE RIEN : shadow (journalisé + carte). Le relais reste manuel.
  */
@@ -41,9 +42,10 @@ export interface PlanInput {
   lossCoeffWhPerCh: number; // pertes Wh/h par °C
 
   // ── Flux réels (EM-50 = autoritaire ; Anker = ~60 s de latence) ──
-  pvTotalW: number; // production PV TOTALE (SolarBank + APS Sud)
+  pvOnSbW: number; // PV sur SolarBank (soumis au plafond de sortie SB) — Anker solar_power_w
+  pvApsW: number; // PV du micro-onduleur APS EZ1 (injection directe, HORS plafond)
   houseW: number; // conso maison HORS chauffe-eau (W, ≥ 0)
-  gridPowerW: number; // réseau signé (+ import / − export) — EM-50 voie 0
+  gridPowerW: number; // réseau signé (+ import EDF / − export) — EM-50 voie 0
   cumulusPowerW: number; // conso chauffe-eau mesurée (> ~500 = en chauffe)
   batteryEnergyWh: number; // énergie batterie réelle
   batteryChargeW: number; // charge batterie (W ≥ 0 = surplus absorbé)
@@ -60,7 +62,7 @@ export interface PlanInput {
 }
 
 const MORNING_H = 7.5; // deadline besoin : 2 douches à ~7 h 30
-const HC_END_H = 8.1; // fin des heures creuses (08 h 06)
+const PV_ACTIVE_W = 300; // PV total au-dessus → « il fait jour » (batterie rechargeable → puisable)
 
 /** Heures (positives) jusqu'au prochain 7 h 30. */
 function hoursUntil(hour: number, target: number): number {
@@ -68,6 +70,8 @@ function hoursUntil(hour: number, target: number): number {
   if (d < 0) d += 24;
   return d;
 }
+
+const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 
 export function planHeating(input: PlanInput, config: PlannerConfig): HeatPlan {
   const {
@@ -79,13 +83,9 @@ export function planHeating(input: PlanInput, config: PlannerConfig): HeatPlan {
     tTankC,
     tRoomC,
     lossCoeffWhPerCh,
-    pvTotalW,
+    pvOnSbW,
+    pvApsW,
     houseW,
-    gridPowerW,
-    cumulusPowerW,
-    batteryEnergyWh,
-    batteryChargeW,
-    batteryDischargeW,
     socPct,
     isHC,
     priceHp,
@@ -94,6 +94,7 @@ export function planHeating(input: PlanInput, config: PlannerConfig): HeatPlan {
   } = input;
 
   const HEAT_W = config.heatPowerW; // ~2955 W réels
+  const pvTotalW = Math.max(0, pvOnSbW) + Math.max(0, pvApsW);
   const showers = eDoucheWh > 0 ? eAvailWh / eDoucheWh : 0;
 
   // ── 1. Besoin daté : énergie à garantir à 7 h 30 (2 douches) + pertes d'ici là ──
@@ -104,46 +105,34 @@ export function planHeating(input: PlanInput, config: PlannerConfig): HeatPlan {
   const eAvailMorning = Math.max(0, eAvailWh - lossToMorning); // été : pas de puisage nocturne
   const deficitWh = Math.max(0, targetMorningWh - eAvailMorning);
 
-  // ── 2. Surplus libre : inférence binaire + confiance (angle mort n°1) ──
-  const pvActive = pvTotalW > 200;
-  const noImport = gridPowerW <= 60;
-  const socFull = socPct !== null && socPct >= config.freeSurplusSocPct;
-  const chargeIdle = batteryChargeW < 120; // la batterie ne stocke (quasi) plus
-  const surplusFree = pvActive && noImport && (socFull || (chargeIdle && (socPct ?? 0) >= 90));
-  const confidence: HeatPlan['surplusConfidence'] = surplusFree
-    ? socFull && gridPowerW <= 0
-      ? 'haute'
-      : 'moyenne'
-    : 'nulle';
-  // Marge PV visible (le surplus réel écrêté est ≥ ça, non mesurable).
-  const freeMarginW = surplusFree ? Math.max(0, pvTotalW - houseW) : 0;
+  // ── 2. Décomposition de la chauffe : PV gratuit / batterie autoconso / EDF ──
+  //   (validé sur mesure : la sortie SB plafonne à sbOutMaxW, le PV sur SB en occupe une part.)
+  const pvCoverW = clamp(pvTotalW - houseW, 0, HEAT_W); // PV net (gratuit, sinon écrêté)
+  const daytime = pvTotalW > PV_ACTIVE_W;
+  const socOk = socPct !== null && socPct > config.socReservePct;
+  // La batterie ne couvre la chauffe QUE le jour (elle se recharge) et au-dessus de la réserve.
+  const batteryHeadroomW =
+    socOk && daytime ? Math.max(0, config.sbOutMaxW - Math.max(0, pvOnSbW)) : 0;
+  const batteryCoverW = clamp(HEAT_W - pvCoverW, 0, batteryHeadroomW);
+  const gridDrawW = Math.max(0, HEAT_W - pvCoverW - batteryCoverW); // EDF — à minimiser
+  const autoconsoPct = Math.round(((HEAT_W - gridDrawW) / HEAT_W) * 100);
 
-  // ── 3. Coût de chauffer MAINTENANT vs HC (par kWh chauffé) ──
-  const pvCoverW = Math.max(0, Math.min(HEAT_W, pvTotalW - houseW));
-  const applianceW = Math.max(0, HEAT_W - pvCoverW); // appoint batterie/réseau
-  // Sur surplus libre : le PV écrêté (sinon perdu) alimente le ballon → ~0 € ;
-  // hors surplus : l'appoint vient de la batterie (coût d'opportunité ≈ HC) ou du réseau.
+  // ── 3. Coûts : SEULE la part EDF coûte cash (PV + batterie = autoconsommation) ──
   const priceNow = isHC ? priceHc : priceHp;
-  const costNowPerKwh = surplusFree
-    ? (applianceW / HEAT_W) * priceHc * 0.3 // appoint marginal, batterie rechargée par l'écrêté
-    : (pvCoverW * 0 + applianceW * (isHC ? priceHc : priceNow)) / HEAT_W;
+  const costNowPerKwh = (gridDrawW / HEAT_W) * priceNow;
   const costHcPerKwh = priceHc; // référence : recharge HC de fin de nuit
 
-  // ── 4. Réserve batterie du soir (remplace socFloorPct brut) ──
-  const batteryOkForHeat = batteryEnergyWh > config.eveningReserveWh || surplusFree;
+  // ── 4. Signaux de décision ──
+  const gridClean = gridDrawW <= config.gridTolW; // chauffer ne ponctionne (presque) pas EDF
+  const purePv = pvCoverW >= HEAT_W * config.purePvFraction && socOk; // PV seul couvre → surplus franc
 
-  // ── 5. Interlock 6 kVA (délestage) : ajouter la chauffe frôlerait-il le plafond ? ──
-  const projectedImportW = gridPowerW + applianceW;
-  const overload = projectedImportW > config.maxImportW;
-
-  // ── 6. Backstop HC : heure au plus tard pour démarrer et finir ~7 h 30 ──
-  const heatHoursForDeficit = deficitWh / HEAT_W; // durée de chauffe nécessaire
-  const backstopHour = MORNING_H - heatHoursForDeficit - 0.25; // marge 15 min
+  // ── 5. Backstop HC : heure au plus tard pour démarrer et finir ~7 h 30 ──
+  const backstopHour = MORNING_H - deficitWh / HEAT_W - 0.25; // marge 15 min
   const solarComingToday =
     hourOfDay < 18 &&
     forecast.some((p) => p.hoursAhead > 0 && p.hour < 19 && p.pvW >= config.peakMinW);
 
-  // ── 7. Décision (pile pondérée, priorité décroissante) ──
+  // ── 6. Décision (priorité décroissante) ──
   const mk = (action: PlanAction, reason: string, targetHour: number | null = null): HeatPlan => ({
     action,
     reason,
@@ -151,9 +140,10 @@ export function planHeating(input: PlanInput, config: PlannerConfig): HeatPlan {
     showers: +showers.toFixed(1),
     floorShowers: config.reserveShowers,
     deficitWh: Math.round(deficitWh),
-    surplusFreeW: surplusFree ? Math.round(freeMarginW) : -1,
-    surplusConfidence: confidence,
-    applianceW: Math.round(applianceW),
+    pvCoverW: Math.round(pvCoverW),
+    batteryCoverW: Math.round(batteryCoverW),
+    gridDrawW: Math.round(gridDrawW),
+    autoconsoPct,
     costNowEur: +costNowPerKwh.toFixed(3),
     costHcEur: +costHcPerKwh.toFixed(3),
     backstopHcHour: deficitWh > 0 ? +backstopHour.toFixed(1) : null,
@@ -162,43 +152,47 @@ export function planHeating(input: PlanInput, config: PlannerConfig): HeatPlan {
 
   const full = eFullWh > 0 && eAvailWh >= eFullWh * config.fullFraction;
 
-  // a) Sécurités / évidences
+  // a) Évidence : ballon plein → rien à faire
   if (full) return mk('wait', 'ballon plein — rien à faire');
-  if (overload)
-    return mk('wait', `conso maison élevée (${Math.round(houseW)} W) — chauffe différée (6 kVA)`);
 
-  // b) Opportunité gratuite : surplus libre + place dans le ballon → autoconsommer (sinon perdu)
-  if (surplusFree && batteryOkForHeat) {
+  // b) Surplus solaire FRANC : le PV seul couvre l'essentiel → gratuit (sinon écrêté) → autoconsommer
+  if (purePv)
     return mk(
       'heat_now',
-      `surplus solaire ~gratuit (confiance ${confidence}, appoint ${Math.round(applianceW)} W) — autoconsommation`,
+      `surplus solaire (${autoconsoPct} % autoconso, EDF ${Math.round(gridDrawW)} W) — on remplit gratuitement`,
       Math.floor(hourOfDay)
     );
-  }
 
-  // c) Besoin daté : garantir les 2 douches du matin, au moindre coût
+  // c) Besoin daté : garantir les 2 douches du matin, au MOINDRE soutirage EDF
   if (deficitWh > 0) {
+    // Solaire + batterie couvrent déjà (≈ pas d'EDF) → chauffer maintenant (autoconsommation)
+    if (gridClean && socOk)
+      return mk(
+        'heat_now',
+        `besoin ${Math.round(deficitWh)} Wh couvert par le solaire (${autoconsoPct} % autoconso) — chauffe`,
+        Math.floor(hourOfDay)
+      );
+    // Pas couvert maintenant, mais du solaire arrive → attendre le pic (EDF minimal)
     if (solarComingToday) {
       const peak = forecast.find((p) => p.hoursAhead > 0 && p.pvW >= config.peakMinW) ?? null;
       return mk(
         'wait_solar',
-        `déficit ${Math.round(deficitWh)} Wh — attendre le solaire (moins cher que HC)`,
+        `déficit ${Math.round(deficitWh)} Wh — attendre le solaire (chauffer maintenant = ${Math.round(gridDrawW)} W EDF)`,
         peak ? peak.hour : null
       );
     }
-    if (isHC && hourOfDay >= backstopHour) {
+    // Ni couverture solaire ni solaire à venir → filet HC de fin de nuit (EDF bon marché)
+    if (isHC && hourOfDay >= backstopHour)
       return mk('heat_hc', `recharge heures creuses — ${Math.round(deficitWh)} Wh pour le matin`);
-    }
-    if (isHC) {
+    if (isHC)
       return mk(
         'wait',
         `creuses — on attend ${backstopHour.toFixed(1)} h pour finir juste à temps (pertes mini)`,
         Math.ceil(backstopHour)
       );
-    }
-    return mk('wait', `déficit ${Math.round(deficitWh)} Wh — ni soleil ni HC pour l'instant`);
+    return mk('wait', `déficit ${Math.round(deficitWh)} Wh — ni solaire ni HC pour l'instant`);
   }
 
-  // d) Réserve suffisante, pas de gratuit dispo → garder la place pour le solaire à venir
-  return mk('wait', `réserve ${showers.toFixed(1)} douches OK — on garde la place pour le gratuit`);
+  // d) Réserve suffisante et pas de surplus franc → attendre (ne pas vider la batterie pour rien)
+  return mk('wait', `réserve ${showers.toFixed(1)} douches OK — on attend le surplus solaire`);
 }

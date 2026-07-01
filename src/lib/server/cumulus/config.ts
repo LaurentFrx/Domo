@@ -62,9 +62,10 @@ export function defaultPlannerConfig(): PlannerConfig {
     horizonH: 18, // horizon de prévision (jusqu'au prochain matin)
     peakMinW: 1500, // seuil « pic solaire exploitable » à venir (W)
     heatPowerW: 2955, // puissance de chauffe RÉELLE mesurée (EM-50 voie 1)
-    freeSurplusSocPct: 98, // batterie ~pleine → surplus PV probablement écrêté (gratuit)
-    eveningReserveWh: 3000, // énergie batterie à préserver pour le soir/nuit
-    maxImportW: 5500 // (import + chauffe) au-delà → délestage (garde 6 kVA)
+    sbOutMaxW: 2400, // plafond sortie SolarBank mesuré (2×1200 W, PV+batterie confondus)
+    socReservePct: 30, // sous 30 % → la batterie ne couvre plus la chauffe (réserve du soir)
+    gridTolW: 300, // ≤ 300 W soutirés EDF → chauffe considérée « couverte par le solaire »
+    purePvFraction: 0.8 // PV seul couvre ≥ 80 % → surplus franc (sinon écrêté) → chauffe gratuite
   };
 }
 
@@ -157,9 +158,10 @@ export function normalizePlannerConfig(raw: unknown): PlannerConfig {
     horizonH: asNum(o.horizonH, d.horizonH, 1, 48),
     peakMinW: asNum(o.peakMinW, d.peakMinW, 200, 5000),
     heatPowerW: asNum(o.heatPowerW, d.heatPowerW, 1000, 5000),
-    freeSurplusSocPct: asNum(o.freeSurplusSocPct, d.freeSurplusSocPct, 50, 100),
-    eveningReserveWh: asNum(o.eveningReserveWh, d.eveningReserveWh, 0, 10000),
-    maxImportW: asNum(o.maxImportW, d.maxImportW, 2000, 6000)
+    sbOutMaxW: asNum(o.sbOutMaxW, d.sbOutMaxW, 500, 6000),
+    socReservePct: asNum(o.socReservePct, d.socReservePct, 0, 100),
+    gridTolW: asNum(o.gridTolW, d.gridTolW, 0, 2000),
+    purePvFraction: asNum(o.purePvFraction, d.purePvFraction, 0.3, 1)
   };
 }
 

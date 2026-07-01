@@ -169,7 +169,8 @@ async function runTick(apply: boolean): Promise<TickResult> {
         tTankC: er.tTankC,
         tRoomC: er.tRoomC,
         lossCoeffWhPerCh: config.energyModel.lossCoeffWhPerCh,
-        pvTotalW,
+        pvOnSbW: Math.max(0, inputs.pvPowerW),
+        pvApsW: Math.max(0, inputs.pvApsW),
         houseW,
         gridPowerW: inputs.gridPowerW,
         cumulusPowerW: inputs.cumulusPowerW,
@@ -188,7 +189,7 @@ async function runTick(apply: boolean): Promise<TickResult> {
     console.log(
       `[plan] ${p.action} — ${p.reason} |` +
         ` réserve ${p.showers}/${p.floorShowers} déficit ${p.deficitWh}Wh` +
-        ` surplus_libre ${p.surplusFreeW < 0 ? 'non' : p.surplusFreeW + 'W'} (${p.surplusConfidence})` +
+        ` chauffe: PV ${p.pvCoverW}W + batt ${p.batteryCoverW}W + EDF ${p.gridDrawW}W (${p.autoconsoPct}% autoconso)` +
         ` coût_now ${p.costNowEur}€/kWh vs HC ${p.costHcEur}€` +
         (p.backstopHcHour !== null ? ` backstop ${p.backstopHcHour}h` : '')
     );
@@ -235,12 +236,12 @@ async function runTick(apply: boolean): Promise<TickResult> {
     }
 
     // ── Cycles des gros appareils (lave-vaisselle / lave-linge) : nommer la conso
-    //    + expliquer ce que le pilotage aurait fait (délestage 6 kVA). OBSERVATION. ──
+    //    + expliquer ce que le pilotage aurait fait (autoconso / soutirage EDF). OBSERVATION. ──
     {
       const dtH = Math.min(0.1, Math.max(0, (now - (state.lastTickTs ?? now)) / 3_600_000));
-      // Le chauffe-eau AURAIT-il voulu chauffer, mais le délestage 6 kVA l'en empêche ?
-      const interlockFired = next.plan?.action === 'wait' && next.plan.reason.includes('6 kVA');
-      const heatIntent = (next.plan?.deficitWh ?? 0) > 0 || (next.plan?.surplusFreeW ?? -1) >= 0;
+      // Le chauffe-eau AURAIT-il voulu chauffer, mais chauffer maintenant ponctionnerait EDF ?
+      const wouldDrawEdf = (next.plan?.gridDrawW ?? 0) > config.planner.gridTolW;
+      const heatIntent = (next.plan?.deficitWh ?? 0) > 0;
 
       const nextCycles: Record<string, (typeof state.applianceCycles)[string]> = {};
       for (const ap of inputs.appliances) {
@@ -269,7 +270,7 @@ async function runTick(apply: boolean): Promise<TickResult> {
         if (cyc && cyc.running) {
           if (fresh) cyc.energyWh += p * dtH;
           if (heatingNow) cyc.coHeatTicks++;
-          else if (interlockFired && heatIntent) cyc.deferTicks++;
+          else if (wouldDrawEdf && heatIntent) cyc.deferTicks++;
 
           // Clôture : plus rien au-dessus du seuil depuis la fenêtre de grâce.
           if (now - cyc.lastAboveTs > APPLIANCE_OFF_GRACE_MS) {
@@ -282,9 +283,9 @@ async function runTick(apply: boolean): Promise<TickResult> {
             const durMin = Math.max(1, Math.round((cyc.lastAboveTs - cyc.startTs) / 60_000));
             const note =
               cyc.coHeatTicks > 0
-                ? 'le chauffe-eau a chauffé en même temps (marge 6 kVA OK)'
+                ? 'le chauffe-eau a chauffé en même temps (couvert par le solaire)'
                 : cyc.deferTicks > 0
-                  ? "l'automatisation aurait attendu la fin pour rester sous 6 kVA"
+                  ? "l'automatisation aurait attendu la fin (sinon la chauffe ponctionnait EDF)"
                   : 'sans effet sur le chauffe-eau';
             evs.push({
               ts: cyc.lastAboveTs,
