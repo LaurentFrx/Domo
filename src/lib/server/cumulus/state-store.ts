@@ -228,6 +228,8 @@ function normPlan(v: unknown): HeatPlan | null {
     showers: numOr(o.showers, 0),
     floorShowers: numOr(o.floorShowers, 0),
     deficitWh: numOr(o.deficitWh, 0),
+    gridNowW: numOr(o.gridNowW, 0),
+    measured: typeof o.measured === 'boolean' ? o.measured : false,
     pvCoverW: numOr(o.pvCoverW, 0),
     batteryCoverW: numOr(o.batteryCoverW, 0),
     gridDrawW: numOr(o.gridDrawW, 0),

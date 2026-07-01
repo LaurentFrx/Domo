@@ -148,6 +148,8 @@ class CumulusState {
     showers: number;
     floorShowers: number;
     deficitWh: number;
+    gridNowW: number;
+    measured: boolean;
     pvCoverW: number;
     batteryCoverW: number;
     gridDrawW: number;
@@ -333,6 +335,8 @@ class CumulusState {
                 showers: typeof pl.showers === 'number' ? pl.showers : 0,
                 floorShowers: typeof pl.floorShowers === 'number' ? pl.floorShowers : 0,
                 deficitWh: typeof pl.deficitWh === 'number' ? pl.deficitWh : 0,
+                gridNowW: typeof pl.gridNowW === 'number' ? pl.gridNowW : 0,
+                measured: typeof pl.measured === 'boolean' ? pl.measured : false,
                 pvCoverW: typeof pl.pvCoverW === 'number' ? pl.pvCoverW : 0,
                 batteryCoverW: typeof pl.batteryCoverW === 'number' ? pl.batteryCoverW : 0,
                 gridDrawW: typeof pl.gridDrawW === 'number' ? pl.gridDrawW : 0,

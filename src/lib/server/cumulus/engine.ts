@@ -189,6 +189,7 @@ async function runTick(apply: boolean): Promise<TickResult> {
     console.log(
       `[plan] ${p.action} — ${p.reason} |` +
         ` réserve ${p.showers}/${p.floorShowers} déficit ${p.deficitWh}Wh` +
+        ` EDF_réel ${p.gridNowW}W${p.measured ? ' [MESURÉ]' : ' [proj]'} |` +
         ` chauffe: PV ${p.pvCoverW}W + batt ${p.batteryCoverW}W + EDF ${p.gridDrawW}W (${p.autoconsoPct}% autoconso)` +
         ` coût_now ${p.costNowEur}€/kWh vs HC ${p.costHcEur}€` +
         (p.backstopHcHour !== null ? ` backstop ${p.backstopHcHour}h` : '')

@@ -86,6 +86,9 @@ export function planHeating(input: PlanInput, config: PlannerConfig): HeatPlan {
     pvOnSbW,
     pvApsW,
     houseW,
+    gridPowerW,
+    cumulusPowerW,
+    batteryDischargeW,
     socPct,
     isHC,
     priceHp,
@@ -106,25 +109,40 @@ export function planHeating(input: PlanInput, config: PlannerConfig): HeatPlan {
   const deficitWh = Math.max(0, targetMorningWh - eAvailMorning);
 
   // ── 2. Décomposition de la chauffe : PV gratuit / batterie autoconso / EDF ──
-  //   (validé sur mesure : la sortie SB plafonne à sbOutMaxW, le PV sur SB en occupe une part.)
-  const pvCoverW = clamp(pvTotalW - houseW, 0, HEAT_W); // PV net (gratuit, sinon écrêté)
+  //   Le SIGNAL AUTORITAIRE du soutirage EDF est l'EM-50 (LOCAL, instantané ~180 ms),
+  //   PAS une projection via l'Anker (cloud, ~60 s de retard).
+  const heatingNow = cumulusPowerW > 500; // le ballon chauffe DÉJÀ → on LIT le réel
+  const gridNowW = Math.round(gridPowerW); // soutirage EDF RÉEL instantané (EM-50 voie 0)
   const daytime = pvTotalW > PV_ACTIVE_W;
   const socOk = socPct !== null && socPct > config.socReservePct;
-  // La batterie ne couvre la chauffe QUE le jour (elle se recharge) et au-dessus de la réserve.
-  const batteryHeadroomW =
-    socOk && daytime ? Math.max(0, config.sbOutMaxW - Math.max(0, pvOnSbW)) : 0;
-  const batteryCoverW = clamp(HEAT_W - pvCoverW, 0, batteryHeadroomW);
-  const gridDrawW = Math.max(0, HEAT_W - pvCoverW - batteryCoverW); // EDF — à minimiser
-  const autoconsoPct = Math.round(((HEAT_W - gridDrawW) / HEAT_W) * 100);
+
+  let base: number, pvCoverW: number, batteryCoverW: number, gridDrawW: number;
+  if (heatingNow) {
+    // Ballon en chauffe → décomposition MESURÉE : EDF = grid EM-50 réel, batterie = décharge réelle.
+    base = cumulusPowerW;
+    gridDrawW = Math.max(0, gridNowW);
+    batteryCoverW = clamp(batteryDischargeW, 0, base - gridDrawW);
+    pvCoverW = Math.max(0, base - gridDrawW - batteryCoverW); // le reste = PV (par différence)
+  } else {
+    // Ballon à l'arrêt → PROJECTION « si on démarrait » (le grid réel ne voit pas le surplus
+    // qui charge la batterie, faute de revente) : sortie SB plafonnée + APS hors plafond.
+    base = HEAT_W;
+    pvCoverW = clamp(pvTotalW - houseW, 0, HEAT_W); // PV net (gratuit, sinon écrêté)
+    const batteryHeadroomW =
+      socOk && daytime ? Math.max(0, config.sbOutMaxW - Math.max(0, pvOnSbW)) : 0;
+    batteryCoverW = clamp(HEAT_W - pvCoverW, 0, batteryHeadroomW);
+    gridDrawW = Math.max(0, HEAT_W - pvCoverW - batteryCoverW);
+  }
+  const autoconsoPct = base > 0 ? Math.round(((base - gridDrawW) / base) * 100) : 0;
 
   // ── 3. Coûts : SEULE la part EDF coûte cash (PV + batterie = autoconsommation) ──
   const priceNow = isHC ? priceHc : priceHp;
-  const costNowPerKwh = (gridDrawW / HEAT_W) * priceNow;
+  const costNowPerKwh = base > 0 ? (gridDrawW / base) * priceNow : 0;
   const costHcPerKwh = priceHc; // référence : recharge HC de fin de nuit
 
   // ── 4. Signaux de décision ──
   const gridClean = gridDrawW <= config.gridTolW; // chauffer ne ponctionne (presque) pas EDF
-  const purePv = pvCoverW >= HEAT_W * config.purePvFraction && socOk; // PV seul couvre → surplus franc
+  const purePv = pvCoverW >= base * config.purePvFraction && socOk; // PV seul couvre → surplus franc
 
   // ── 5. Backstop HC : heure au plus tard pour démarrer et finir ~7 h 30 ──
   const backstopHour = MORNING_H - deficitWh / HEAT_W - 0.25; // marge 15 min
@@ -140,6 +158,8 @@ export function planHeating(input: PlanInput, config: PlannerConfig): HeatPlan {
     showers: +showers.toFixed(1),
     floorShowers: config.reserveShowers,
     deficitWh: Math.round(deficitWh),
+    gridNowW,
+    measured: heatingNow,
     pvCoverW: Math.round(pvCoverW),
     batteryCoverW: Math.round(batteryCoverW),
     gridDrawW: Math.round(gridDrawW),

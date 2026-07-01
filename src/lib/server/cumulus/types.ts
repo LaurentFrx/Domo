@@ -220,9 +220,11 @@ export interface HeatPlan {
   showers: number; // réserve actuelle estimée (douches)
   floorShowers: number; // douches à garantir au matin
   deficitWh: number; // énergie manquante pour garantir le matin
+  gridNowW: number; // soutirage EDF RÉEL instantané (EM-50 voie 0, + soutiré / − injecté)
+  measured: boolean; // true = le ballon chauffe → décompo MESURÉE ; false = projection (ballon à l'arrêt)
   pvCoverW: number; // part de la chauffe couverte par le PV net (gratuit), W
   batteryCoverW: number; // part couverte par la batterie (autoconso), W
-  gridDrawW: number; // part PONCTIONNÉE sur EDF si on chauffe maintenant, W — à MINIMISER
+  gridDrawW: number; // EDF ponctionné par la chauffe (RÉEL si measured, sinon projeté), W — à MINIMISER
   autoconsoPct: number; // % de la chauffe couvert sans EDF ((pv+batt)/chauffe)
   costNowEur: number; // coût CASH de chauffer maintenant (€/kWh) = seule la part EDF
   costHcEur: number; // coût de la recharge en heures creuses (€/kWh, référence)

@@ -136,6 +136,38 @@ test('la nuit, la batterie n’est jamais comptée pour la chauffe (réserve du 
   assert.equal(p.gridDrawW, 2955, 'toute la chauffe viendrait d’EDF (HC) la nuit');
 });
 
+test('ballon EN CHAUFFE → décompo MESURÉE sur le grid EM-50 réel (injection → 0 EDF)', () => {
+  const p = planHeating(
+    inp({
+      cumulusPowerW: 2900,
+      gridPowerW: -30,
+      batteryDischargeW: 256,
+      pvOnSbW: 1900,
+      pvApsW: 960,
+      houseW: 120,
+      socPct: 48,
+      eAvailWh: 13000
+    }),
+    planner()
+  );
+  assert.equal(p.measured, true);
+  assert.equal(p.gridNowW, -30);
+  assert.equal(p.gridDrawW, 0, 'injection réseau → 0 EDF réel (pas de projection)');
+  assert.equal(p.batteryCoverW, 256, 'batterie = décharge réelle mesurée');
+  assert.equal(p.autoconsoPct, 100);
+  assert.equal(p.costNowEur, 0);
+});
+
+test('ballon EN CHAUFFE qui soutire → gridDrawW = grid EM-50 réel mesuré', () => {
+  const p = planHeating(
+    inp({ cumulusPowerW: 2900, gridPowerW: 600, batteryDischargeW: 1500 }),
+    planner()
+  );
+  assert.equal(p.measured, true);
+  assert.equal(p.gridDrawW, 600, 'EDF = grid EM-50 réel, pas une projection');
+  assert.ok(p.costNowEur > 0);
+});
+
 test('le plan chiffre toujours la décomposition (PV / batterie / EDF / autoconso / coûts)', () => {
   const p = planHeating(
     inp({ eAvailWh: 4000, pvOnSbW: 1000, pvApsW: 400, houseW: 300 }),

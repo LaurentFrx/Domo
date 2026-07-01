@@ -224,6 +224,18 @@
       <p style="color: var(--color-muted-fg);">{plan.reason}</p>
 
       <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
+        <dt style="color: var(--color-muted-fg);">Réseau EDF (mesuré)</dt>
+        <dd
+          class="text-right font-semibold tabular-nums"
+          style="color: {plan.gridNowW <= 0
+            ? 'var(--color-success)'
+            : plan.gridNowW <= 300
+              ? 'var(--color-fg)'
+              : 'var(--color-warning)'};"
+        >
+          {plan.gridNowW <= 0 ? `${-plan.gridNowW} W injectés` : `${plan.gridNowW} W soutirés`}
+        </dd>
+
         <dt style="color: var(--color-muted-fg);">Réserve visée</dt>
         <dd class="text-right tabular-nums" style="color: var(--color-fg);">
           {plan.showers} / {plan.floorShowers} douches
@@ -234,7 +246,9 @@
           {plan.deficitWh > 0 ? `${(plan.deficitWh / 1000).toFixed(1)} kWh` : 'rien ✓'}
         </dd>
 
-        <dt style="color: var(--color-muted-fg);">Si on chauffe : autoconso</dt>
+        <dt style="color: var(--color-muted-fg);">
+          {plan.measured ? 'Chauffe en cours : autoconso' : 'Si on chauffe : autoconso (est.)'}
+        </dt>
         <dd
           class="text-right font-semibold tabular-nums"
           style="color: {plan.autoconsoPct >= 90
