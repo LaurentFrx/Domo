@@ -57,7 +57,10 @@ export const CUMULUS_REASON_LABELS: Record<string, string> = {
   offpeak_boost: 'Heures creuses (renfort)',
   tank_full: 'Ballon plein',
   idle: 'En veille',
-  anticycle_hold: 'Maintien (anti-cycle)'
+  anticycle_hold: 'Maintien (anti-cycle)',
+  plan_solar: 'Chauffe solaire (auto)',
+  plan_hc: 'Recharge heures creuses (auto)',
+  plan_wait: 'Attente du meilleur moment (auto)'
 };
 
 /** Libellés FR des anomalies (bandeau d'alerte). '' = rien à signaler. */
@@ -154,6 +157,8 @@ class CumulusState {
     batteryCoverW: number;
     gridDrawW: number;
     autoconsoPct: number;
+    eveningNeedWh: number;
+    storageLossWh: number;
     costNowEur: number;
     costHcEur: number;
     backstopHcHour: number | null;
@@ -341,6 +346,8 @@ class CumulusState {
                 batteryCoverW: typeof pl.batteryCoverW === 'number' ? pl.batteryCoverW : 0,
                 gridDrawW: typeof pl.gridDrawW === 'number' ? pl.gridDrawW : 0,
                 autoconsoPct: typeof pl.autoconsoPct === 'number' ? pl.autoconsoPct : 0,
+                eveningNeedWh: typeof pl.eveningNeedWh === 'number' ? pl.eveningNeedWh : 0,
+                storageLossWh: typeof pl.storageLossWh === 'number' ? pl.storageLossWh : 0,
                 costNowEur: typeof pl.costNowEur === 'number' ? pl.costNowEur : 0,
                 costHcEur: typeof pl.costHcEur === 'number' ? pl.costHcEur : 0,
                 backstopHcHour: typeof pl.backstopHcHour === 'number' ? pl.backstopHcHour : null,

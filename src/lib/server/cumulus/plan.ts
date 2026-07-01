@@ -40,6 +40,7 @@ export interface PlanInput {
   tTankC: number; // température moyenne estimée du ballon
   tRoomC: number; // température du local
   lossCoeffWhPerCh: number; // pertes Wh/h par °C
+  setpointC: number; // consigne du thermostat (~59 °C) — pour le péage de stockage
 
   // ── Flux réels (EM-50 = autoritaire ; Anker = ~60 s de latence) ──
   pvOnSbW: number; // PV sur SolarBank (soumis au plafond de sortie SB) — Anker solar_power_w
@@ -83,11 +84,13 @@ export function planHeating(input: PlanInput, config: PlannerConfig): HeatPlan {
     tTankC,
     tRoomC,
     lossCoeffWhPerCh,
+    setpointC,
     pvOnSbW,
     pvApsW,
     houseW,
     gridPowerW,
     cumulusPowerW,
+    batteryEnergyWh,
     batteryDischargeW,
     socPct,
     isHC,
@@ -133,16 +136,49 @@ export function planHeating(input: PlanInput, config: PlannerConfig): HeatPlan {
     batteryCoverW = clamp(HEAT_W - pvCoverW, 0, batteryHeadroomW);
     gridDrawW = Math.max(0, HEAT_W - pvCoverW - batteryCoverW);
   }
+
+  // ── 3. Signaux de décision ──
+  const purePv = pvCoverW >= base * config.purePvFraction && socOk; // PV seul couvre → surplus franc
+
+  // ── 3bis. Réserve du soir CALCULÉE (remplace tout % fixe) : la batterie doit
+  //    couvrir la maison entre la fin du solaire (~17 h au plus tôt) et 00 h 06.
+  //    Le matin (< 8 h) le PV du jour va la recharger → seul le plancher SoC dur s'applique.
+  const eveningHours = hourOfDay >= 8 ? Math.max(0, 24.1 - Math.max(hourOfDay, 17)) : 0;
+  const dinnerAhead = hourOfDay >= 8 && hourOfDay < 20.5;
+  const eveningNeedWh = Math.round(
+    config.eveningBaseW * eveningHours + (dinnerAhead ? config.dinnerWh : 0)
+  );
+  // Une chauffe type puiserait batteryCoverW × durée : si la batterie n'y survit pas
+  // avec sa réserve du soir, cette part bascule sur EDF (et la décision suivra le coût).
+  const heatH = Math.min(2, Math.max(0.5, (deficitWh > 0 ? deficitWh : 2000) / HEAT_W));
+  if (!heatingNow && !purePv && batteryCoverW > 0) {
+    const batteryAfterHeatWh = batteryEnergyWh - batteryCoverW * heatH;
+    if (batteryAfterHeatWh < eveningNeedWh) {
+      gridDrawW += batteryCoverW; // la batterie est réservée au soir → l'appoint serait de l'EDF
+      batteryCoverW = 0;
+    }
+  }
   const autoconsoPct = base > 0 ? Math.round(((base - gridDrawW) / base) * 100) : 0;
 
-  // ── 3. Coûts : SEULE la part EDF coûte cash (PV + batterie = autoconsommation) ──
-  const priceNow = isHC ? priceHc : priceHp;
-  const costNowPerKwh = base > 0 ? (gridDrawW / base) * priceNow : 0;
-  const costHcPerKwh = priceHc; // référence : recharge HC de fin de nuit
+  // ── 3ter. Péage de stockage : chauffer tôt = pertes jusqu'à l'usage (7 h 30) ──
+  const lossAfterHeatPerH = Math.max(0, lossCoeffWhPerCh * Math.max(0, setpointC - tRoomC)); // Wh/h ballon chaud
+  const storageLossWh = Math.round(lossAfterHeatPerH * hToMorning);
+  const refHeatWh = Math.max(2000, deficitWh); // taille de chauffe de référence
+  const lossFracNow = Math.min(0.4, storageLossWh / (refHeatWh + storageLossWh));
+  const lossFracHc = Math.min(0.4, (lossAfterHeatPerH * 0.75) / refHeatWh); // HC finit ~45 min avant l'usage
 
-  // ── 4. Signaux de décision ──
+  // ── 4. Coûts du kWh UTILE (celui qui sort du mitigeur) ──
+  //   EDF au tarif de l'heure + batterie à son COÛT D'OPPORTUNITÉ (le kWh qu'il faudra
+  //   racheter en HC pour la remplacer — ~0 si l'écrêtage la re-remplit gratuitement),
+  //   le tout grevé du péage de stockage.
+  const priceNow = isHC ? priceHc : priceHp;
+  const battOppEurPerKwh = purePv ? 0 : priceHc;
+  const costAcqNow =
+    base > 0 ? (gridDrawW * priceNow + batteryCoverW * battOppEurPerKwh) / base : 0;
+  const costNowPerKwh = costAcqNow / (1 - lossFracNow);
+  const costHcPerKwh = priceHc / (1 - lossFracHc); // référence : recharge HC de fin de nuit
+
   const gridClean = gridDrawW <= config.gridTolW; // chauffer ne ponctionne (presque) pas EDF
-  const purePv = pvCoverW >= base * config.purePvFraction && socOk; // PV seul couvre → surplus franc
 
   // ── 5. Backstop HC : heure au plus tard pour démarrer et finir ~7 h 30 ──
   const backstopHour = MORNING_H - deficitWh / HEAT_W - 0.25; // marge 15 min
@@ -164,6 +200,8 @@ export function planHeating(input: PlanInput, config: PlannerConfig): HeatPlan {
     batteryCoverW: Math.round(batteryCoverW),
     gridDrawW: Math.round(gridDrawW),
     autoconsoPct,
+    eveningNeedWh,
+    storageLossWh,
     costNowEur: +costNowPerKwh.toFixed(3),
     costHcEur: +costHcPerKwh.toFixed(3),
     backstopHcHour: deficitWh > 0 ? +backstopHour.toFixed(1) : null,

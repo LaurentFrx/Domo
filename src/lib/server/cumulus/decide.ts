@@ -29,15 +29,26 @@ import type {
 const SEC = 1000;
 
 /** Branches de chauffe AUTOMATIQUE débrayées en mode observation (manuel/boost exclus). */
-const OBSERVE_NEUTRALISES = new Set<DecisionReason>(['comfort_min', 'solar', 'offpeak_boost']);
+const OBSERVE_NEUTRALISES = new Set<DecisionReason>([
+  'comfort_min',
+  'solar',
+  'offpeak_boost',
+  'plan_solar',
+  'plan_hc'
+]);
+
+/** Fraîcheur max du plan économique pour piloter (il est recalculé à chaque tick 60 s). */
+const PLAN_FRESH_MS = 5 * 60_000;
 
 /** Sous-mode (couleur UI) déduit de la raison + de l'état du relais. */
 function subModeFor(reason: DecisionReason, on: boolean): CumulusMode {
   switch (reason) {
     case 'solar':
+    case 'plan_solar':
       return 'PV';
     case 'offpeak':
     case 'offpeak_boost':
+    case 'plan_hc':
       return 'HC';
     case 'comfort_min':
     case 'legionella':
@@ -50,6 +61,7 @@ function subModeFor(reason: DecisionReason, on: boolean): CumulusMode {
     case 'manual_off':
     case 'observe_only':
     case 'idle':
+    case 'plan_wait':
       return 'OFF';
     default: // cold_start, anticycle_hold
       return on ? 'FORCE' : 'OFF';
@@ -160,12 +172,23 @@ export function decide(
     // eau froide + conso nulle depuis < faultConfirmSec : on patiente (ni plein ni panne)
   }
 
-  // ── « Wants » des différentes branches (profil Solaire d'abord) ──
-  // Confort : déclenche sous Tmin, puis MAINTIENT jusqu'à ce que le cumulus coupe
-  // (comme les autres modes : c'est le cumulus qui décide la fin, pas une cible).
+  // ── Plan économique (ÉTAPE 2b, EXPLOITATION) : décideur AUTO quand il est frais ──
+  // Calculé au tick précédent (60 s) sur les mesures EM-50 réelles. Les invariants
+  // (manuel, vacances, sécurité, tank_full, boost, confort, anti-cycle) restent au-dessus.
+  const plan =
+    config.planner?.enabled === true && state.plan && now - state.plan.computedAt < PLAN_FRESH_MS
+      ? state.plan
+      : null;
+
+  // ── « Wants » des différentes branches ──
+  // Confort : filet famille. Avec le plan actif, le critère est la RÉSERVE réelle
+  // (< 1 douche → chauffe immédiate, toutes conditions) et non la sonde basse : celle-ci
+  // chute mécaniquement à chaque douche (stratification) et déclencherait des chauffes
+  // plein tarif alors que le haut du ballon reste chaud. Sans plan : seuil sonde legacy.
   const comfortHold = relayOn === true && state.lastReason === 'comfort_min' && !next.ballonCharged;
   const comfortWants =
-    !next.ballonCharged && ((tKnown && (T as number) < config.tminConfortC) || comfortHold);
+    !next.ballonCharged &&
+    (comfortHold || (plan ? plan.showers < 1 : tKnown && (T as number) < config.tminConfortC));
 
   // Prévision : « peu de soleil demain » (< seuil) autorise la chauffe nocturne en HC.
   // Sinon (beau temps prévu), AUCUNE chauffe nocturne au-delà du confort mini : le
@@ -233,9 +256,25 @@ export function decide(
     desired = true;
     reason = 'comfort_min';
     bypass = true;
-    note = tKnown
-      ? `confort : ${Math.round(T as number)}°C < ${config.tminConfortC}°C`
-      : 'confort (sonde HS)';
+    note = plan
+      ? `confort : réserve ${plan.showers} douche(s) — filet famille`
+      : tKnown
+        ? `confort : ${Math.round(T as number)}°C < ${config.tminConfortC}°C`
+        : 'confort (sonde HS)';
+  } else if (plan) {
+    // ── EXPLOITATION : le plan économique décide (autoconso max, mesures EM-50) ──
+    if ((plan.action === 'heat_now' || plan.action === 'heat_hc') && !next.ballonCharged) {
+      desired = true;
+      reason = plan.action === 'heat_now' ? 'plan_solar' : 'plan_hc';
+      note = plan.reason;
+    } else {
+      desired = false;
+      reason = 'plan_wait';
+      note =
+        next.ballonCharged && (plan.action === 'heat_now' || plan.action === 'heat_hc')
+          ? 'ballon plein (thermostat coupé) — chauffe sans objet'
+          : plan.reason;
+    }
   } else if (solarWants) {
     desired = true;
     reason = 'solar';

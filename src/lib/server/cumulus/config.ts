@@ -65,7 +65,9 @@ export function defaultPlannerConfig(): PlannerConfig {
     sbOutMaxW: 2400, // plafond sortie SolarBank mesuré (2×1200 W, PV+batterie confondus)
     socReservePct: 30, // sous 30 % → la batterie ne couvre plus la chauffe (réserve du soir)
     gridTolW: 300, // ≤ 300 W soutirés EDF → chauffe considérée « couverte par le solaire »
-    purePvFraction: 0.8 // PV seul couvre ≥ 80 % → surplus franc (sinon écrêté) → chauffe gratuite
+    purePvFraction: 0.8, // PV seul couvre ≥ 80 % → surplus franc (sinon écrêté) → chauffe gratuite
+    eveningBaseW: 250, // talon de conso du soir (W) — à recaler par l'apprentissage (étape B)
+    dinnerWh: 800 // forfait dîner/cuisson (Wh) si le dîner est encore à venir
   };
 }
 
@@ -161,7 +163,9 @@ export function normalizePlannerConfig(raw: unknown): PlannerConfig {
     sbOutMaxW: asNum(o.sbOutMaxW, d.sbOutMaxW, 500, 6000),
     socReservePct: asNum(o.socReservePct, d.socReservePct, 0, 100),
     gridTolW: asNum(o.gridTolW, d.gridTolW, 0, 2000),
-    purePvFraction: asNum(o.purePvFraction, d.purePvFraction, 0.3, 1)
+    purePvFraction: asNum(o.purePvFraction, d.purePvFraction, 0.3, 1),
+    eveningBaseW: asNum(o.eveningBaseW, d.eveningBaseW, 0, 2000),
+    dinnerWh: asNum(o.dinnerWh, d.dinnerWh, 0, 5000)
   };
 }
 

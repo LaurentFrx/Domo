@@ -234,6 +234,8 @@ function normPlan(v: unknown): HeatPlan | null {
     batteryCoverW: numOr(o.batteryCoverW, 0),
     gridDrawW: numOr(o.gridDrawW, 0),
     autoconsoPct: numOr(o.autoconsoPct, 0),
+    eveningNeedWh: numOr(o.eveningNeedWh, 0),
+    storageLossWh: numOr(o.storageLossWh, 0),
     costNowEur: numOr(o.costNowEur, 0),
     costHcEur: numOr(o.costHcEur, 0),
     backstopHcHour: numOrNull(o.backstopHcHour),

@@ -24,6 +24,8 @@ function planner(o: Partial<PlannerConfig> = {}): PlannerConfig {
     socReservePct: 30,
     gridTolW: 300,
     purePvFraction: 0.8,
+    eveningBaseW: 250,
+    dinnerWh: 800,
     ...o
   };
 }
@@ -38,6 +40,7 @@ function inp(o: Partial<PlanInput> = {}): PlanInput {
     tTankC: 45,
     tRoomC: 22,
     lossCoeffWhPerCh: 2.1,
+    setpointC: 59,
     pvOnSbW: 0,
     pvApsW: 0,
     houseW: 300,
@@ -166,6 +169,33 @@ test('ballon EN CHAUFFE qui soutire → gridDrawW = grid EM-50 réel mesuré', (
   assert.equal(p.measured, true);
   assert.equal(p.gridDrawW, 600, 'EDF = grid EM-50 réel, pas une projection');
   assert.ok(p.costNowEur > 0);
+});
+
+test('réserve du soir : fin d’après-midi + batterie basse → la batterie est réservée, pas de heat_now', () => {
+  const p = planHeating(
+    inp({
+      eAvailWh: 3000, // déficit réel
+      hourOfDay: 17.5,
+      pvOnSbW: 700,
+      pvApsW: 300,
+      houseW: 300,
+      batteryEnergyWh: 1500, // sous le besoin du soir (~2,4 kWh)
+      socPct: 35
+    }),
+    planner()
+  );
+  assert.notEqual(p.action, 'heat_now');
+  assert.equal(p.batteryCoverW, 0, 'batterie réservée au soir → réattribuée à EDF');
+  assert.ok(p.eveningNeedWh > 1000);
+  assert.ok(p.gridDrawW > 300);
+});
+
+test('péage de stockage : coûts « kWh utile » chiffrés (pertes d’ici 7 h 30)', () => {
+  const p = planHeating(inp({ eAvailWh: 4000, hourOfDay: 15 }), planner());
+  assert.ok(p.storageLossWh > 500, 'chauffer à 15 h → pertes sensibles jusqu’au matin');
+  assert.ok(p.costHcEur > 0.181, 'le coût HC du kWh utile inclut un petit péage');
+  const pNight = planHeating(inp({ eAvailWh: 4000, hourOfDay: 6, isHC: true }), planner());
+  assert.ok(pNight.storageLossWh < p.storageLossWh, 'chauffer au petit matin perd moins');
 });
 
 test('le plan chiffre toujours la décomposition (PV / batterie / EDF / autoconso / coûts)', () => {

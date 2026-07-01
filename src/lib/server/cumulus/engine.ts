@@ -169,6 +169,7 @@ async function runTick(apply: boolean): Promise<TickResult> {
         tTankC: er.tTankC,
         tRoomC: er.tRoomC,
         lossCoeffWhPerCh: config.energyModel.lossCoeffWhPerCh,
+        setpointC: config.energyModel.setpointC,
         pvOnSbW: Math.max(0, inputs.pvPowerW),
         pvApsW: Math.max(0, inputs.pvApsW),
         houseW,

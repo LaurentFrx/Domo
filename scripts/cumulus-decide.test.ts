@@ -481,3 +481,161 @@ test('observation : tank_full (le cumulus a coupé) détecté normalement', () =
   assert.equal(d.reason, 'tank_full');
   assert.equal(d.nextState.ballonCharged, true);
 });
+
+// ─── EXPLOITATION : le plan économique pilote le relais (étape 2b) ───────────
+
+import type { HeatPlan } from '../src/lib/server/cumulus/types.ts';
+
+function mkplan(o: Partial<HeatPlan> = {}): HeatPlan {
+  return {
+    action: 'wait',
+    reason: 'test',
+    targetHour: null,
+    showers: 5,
+    floorShowers: 2,
+    deficitWh: 0,
+    gridNowW: 0,
+    measured: false,
+    pvCoverW: 0,
+    batteryCoverW: 0,
+    gridDrawW: 0,
+    autoconsoPct: 0,
+    eveningNeedWh: 0,
+    storageLossWh: 0,
+    costNowEur: 0,
+    costHcEur: 0.181,
+    backstopHcHour: null,
+    computedAt: NOW - 60_000, // plan du tick précédent (frais)
+    ...o
+  };
+}
+
+const PLANNER = {
+  enabled: true,
+  reserveShowers: 2,
+  fullFraction: 0.95,
+  horizonH: 18,
+  peakMinW: 1500,
+  heatPowerW: 2955,
+  sbOutMaxW: 2400,
+  socReservePct: 30,
+  gridTolW: 300,
+  purePvFraction: 0.8,
+  eveningBaseW: 250,
+  dinnerWh: 800
+};
+
+test('plan heat_now + auto + exploitation → relais ON (plan_solar)', () => {
+  const d = decide(
+    inp({ tempC: 50, relayOn: false }),
+    cfg({ observationMode: false, planner: PLANNER } as never),
+    st({ plan: mkplan({ action: 'heat_now', reason: 'surplus solaire' }) } as never)
+  );
+  assert.equal(d.relayDesired, true);
+  assert.equal(d.reason, 'plan_solar');
+  assert.equal(d.subMode, 'PV');
+});
+
+test('plan heat_hc + auto + exploitation → relais ON (plan_hc)', () => {
+  const d = decide(
+    inp({ tempC: 48, relayOn: false, isHC: true }),
+    cfg({ observationMode: false, planner: PLANNER } as never),
+    st({ plan: mkplan({ action: 'heat_hc', reason: 'recharge heures creuses' }) } as never)
+  );
+  assert.equal(d.relayDesired, true);
+  assert.equal(d.reason, 'plan_hc');
+  assert.equal(d.subMode, 'HC');
+});
+
+test('plan wait → relais OFF (plan_wait), le legacy à seuils ne reprend PAS la main', () => {
+  const d = decide(
+    // surplus legacy énorme (2500 W) qui aurait déclenché solarWants — le plan prime
+    inp({ tempC: 50, relayOn: false, cumulusPowerW: 0, gridPowerW: -2500 }),
+    cfg({ observationMode: false, planner: PLANNER } as never),
+    st({ plan: mkplan({ action: 'wait', reason: 'on attend le surplus' }) } as never)
+  );
+  assert.equal(d.relayDesired, false);
+  assert.equal(d.reason, 'plan_wait');
+});
+
+test('observation : plan heat_now → observe_only (relais NON commandé)', () => {
+  const d = decide(
+    inp({ tempC: 50, relayOn: false }),
+    cfg({ observationMode: true, planner: PLANNER } as never),
+    st({ plan: mkplan({ action: 'heat_now' }) } as never)
+  );
+  assert.equal(d.relayDesired, false);
+  assert.equal(d.reason, 'observe_only');
+});
+
+test('plan heat_now mais ballonCharged (thermostat coupé) → plan_wait sans objet', () => {
+  const d = decide(
+    inp({ tempC: 59, relayOn: false }),
+    cfg({ observationMode: false, planner: PLANNER } as never),
+    st({
+      plan: mkplan({ action: 'heat_now' }),
+      ballonCharged: true,
+      chargedAtTempC: 60
+    } as never)
+  );
+  assert.equal(d.relayDesired, false);
+  assert.equal(d.reason, 'plan_wait');
+  assert.match(d.note, /sans objet|plein/);
+});
+
+test('plan PÉRIMÉ (> 5 min) → repli sur le chemin legacy', () => {
+  const d = decide(
+    inp({ tempC: 50, relayOn: false, cumulusPowerW: 0, gridPowerW: 100 }),
+    cfg({ observationMode: false, planner: PLANNER } as never),
+    st({ plan: mkplan({ action: 'heat_now', computedAt: NOW - min(10) }) } as never)
+  );
+  assert.notEqual(d.reason, 'plan_solar'); // le plan périmé n'a pas piloté
+});
+
+test('filet famille : réserve < 1 douche → comfort_min (bypass), même si plan dit wait', () => {
+  const d = decide(
+    inp({ tempC: 50, relayOn: false }),
+    cfg({ observationMode: false, planner: PLANNER } as never),
+    st({ plan: mkplan({ action: 'wait', showers: 0.6 }) } as never)
+  );
+  assert.equal(d.relayDesired, true);
+  assert.equal(d.reason, 'comfort_min');
+});
+
+test('sonde basse froide (46→38°C après douche) mais réserve OK → PAS de chauffe confort', () => {
+  const d = decide(
+    inp({ tempC: 38, relayOn: false }),
+    cfg({ observationMode: false, planner: PLANNER } as never),
+    st({ plan: mkplan({ action: 'wait', showers: 5.5 }) } as never)
+  );
+  assert.equal(d.relayDesired, false);
+  assert.equal(d.reason, 'plan_wait'); // la sonde basse ne déclenche plus de chauffe HP inutile
+});
+
+test('anti-court-cycle : plan veut ON juste après un OFF → anticycle_hold', () => {
+  const d = decide(
+    inp({ tempC: 50, relayOn: false }),
+    cfg({ observationMode: false, planner: PLANNER } as never),
+    st({
+      plan: mkplan({ action: 'heat_now' }),
+      lastOffTs: NOW - min(2),
+      lastTransitionTs: NOW - min(2)
+    } as never)
+  );
+  assert.equal(d.relayDesired, false);
+  assert.equal(d.reason, 'anticycle_hold');
+});
+
+test('manuel prime sur le plan', () => {
+  const d = decide(
+    inp({ tempC: 50, relayOn: true }),
+    cfg({ observationMode: false, planner: PLANNER } as never),
+    st({
+      autoMode: 'manual',
+      manualRelayOn: true,
+      plan: mkplan({ action: 'wait' })
+    } as never)
+  );
+  assert.equal(d.relayDesired, true);
+  assert.equal(d.reason, 'manual_on');
+});

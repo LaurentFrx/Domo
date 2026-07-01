@@ -31,7 +31,10 @@ export type DecisionReason =
   | 'tank_full' // coupure mécanique détectée (ballon plein) → OFF
   | 'idle' // veille : ni surplus, ni HC → OFF
   | 'observe_only' // mode observation : chauffe AUTO neutralisée (collecte seule, ÉTAPE 1a)
-  | 'anticycle_hold'; // transition bloquée par l'anti-court-cycle → maintien
+  | 'anticycle_hold' // transition bloquée par l'anti-court-cycle → maintien
+  | 'plan_solar' // EXPLOITATION : le plan économique chauffe sur le solaire → ON
+  | 'plan_hc' // EXPLOITATION : le plan économique recharge en heures creuses → ON
+  | 'plan_wait'; // EXPLOITATION : le plan économique attend (surplus/HC à venir) → OFF
 
 /** Anomalie détectée (visible dans l'UI, non bloquante sauf heater_fault). */
 export type Anomaly =
@@ -226,8 +229,10 @@ export interface HeatPlan {
   batteryCoverW: number; // part couverte par la batterie (autoconso), W
   gridDrawW: number; // EDF ponctionné par la chauffe (RÉEL si measured, sinon projeté), W — à MINIMISER
   autoconsoPct: number; // % de la chauffe couvert sans EDF ((pv+batt)/chauffe)
-  costNowEur: number; // coût CASH de chauffer maintenant (€/kWh) = seule la part EDF
-  costHcEur: number; // coût de la recharge en heures creuses (€/kWh, référence)
+  eveningNeedWh: number; // réserve batterie du soir CALCULÉE (talon×heures + dîner), Wh
+  storageLossWh: number; // péage de stockage : pertes d'ici l'usage (7 h 30) si on chauffe maintenant, Wh
+  costNowEur: number; // coût du kWh UTILE maintenant (EDF + opportunité batterie + péage), €/kWh
+  costHcEur: number; // coût du kWh UTILE en heures creuses (tarif HC + péage court), €/kWh
   backstopHcHour: number | null; // heure calculée de bascule HC (filet de fin de nuit)
   computedAt: number; // epoch ms
 }
@@ -242,9 +247,13 @@ export interface PlannerConfig {
   heatPowerW: number; // puissance de chauffe RÉELLE mesurée (W)
   // ── Autoconsommation (objectif : ne PAS ponctionner EDF ; étaler les charges) ──
   sbOutMaxW: number; // plafond de sortie du système SolarBank (PV+batterie), W — mesuré ~2400
-  socReservePct: number; // SoC en dessous duquel la batterie NE couvre PLUS la chauffe (réserve du soir)
+  socReservePct: number; // SoC plancher DUR sous lequel la batterie ne couvre jamais la chauffe
   gridTolW: number; // soutirage EDF toléré pour considérer la chauffe « couverte par le solaire » (W)
   purePvFraction: number; // le PV SEUL doit couvrir cette fraction de la chauffe → opportunité gratuite franche
+  // ── Réserve du soir CALCULÉE (remplace tout % fixe) : conso maison attendue
+  //    entre la fin du solaire et l'ouverture des HC (00 h 06) ──
+  eveningBaseW: number; // talon de conso du soir (W) — sera APPRIS (étape B), défaut prudent
+  dinnerWh: number; // forfait cuisson/dîner (Wh) si le dîner est encore à venir
 }
 
 /** Un point horaire de la courbe de prévision PV à venir (≥ heure courante). */

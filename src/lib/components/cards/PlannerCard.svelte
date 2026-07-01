@@ -276,7 +276,17 @@
           {plan.gridDrawW} W
         </dd>
 
-        <dt style="color: var(--color-muted-fg);">Coût maintenant (EDF)</dt>
+        <dt style="color: var(--color-muted-fg);">Réserve batterie du soir</dt>
+        <dd class="text-right tabular-nums" style="color: var(--color-fg);">
+          {(plan.eveningNeedWh / 1000).toFixed(1)} kWh à garder
+        </dd>
+
+        <dt style="color: var(--color-muted-fg);">Pertes d'ici le matin</dt>
+        <dd class="text-right tabular-nums" style="color: var(--color-fg);">
+          {(plan.storageLossWh / 1000).toFixed(1)} kWh
+        </dd>
+
+        <dt style="color: var(--color-muted-fg);">Coût du kWh utile — maintenant</dt>
         <dd
           class="text-right font-semibold tabular-nums"
           style="color: {plan.costNowEur <= plan.costHcEur
@@ -286,7 +296,7 @@
           {plan.costNowEur.toFixed(3)} €/kWh
         </dd>
 
-        <dt style="color: var(--color-muted-fg);">Coût en heures creuses</dt>
+        <dt style="color: var(--color-muted-fg);">Coût du kWh utile — heures creuses</dt>
         <dd
           class="text-right font-semibold tabular-nums"
           style="color: {plan.costHcEur < plan.costNowEur
@@ -306,11 +316,18 @@
     </div>
   {/if}
 
-  <!-- Mention « en test » -->
-  <div class="text-xs" style="color: var(--color-muted-fg);">
-    🧪 En test : le système propose la meilleure décision, mais c'est encore vous qui allumez le
-    chauffe-eau.
-  </div>
+  <!-- Statut du pilotage -->
+  {#if cumulus.autoMode === 'auto'}
+    <div class="text-xs" style="color: var(--color-muted-fg);">
+      🤖 Pilotage automatique actif — le système allume et éteint le chauffe-eau au meilleur moment.
+      Reprendre la main : carte Cumulus (Manuel / Chauffer maintenant).
+    </div>
+  {:else}
+    <div class="text-xs" style="color: var(--color-muted-fg);">
+      🧪 Mode manuel : le système propose la meilleure décision, mais c'est vous qui allumez le
+      chauffe-eau.
+    </div>
+  {/if}
 
   <!-- Comment ça marche ? (dépliable) -->
   {#if showHelp}
