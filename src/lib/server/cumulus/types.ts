@@ -250,6 +250,9 @@ export interface PlannerConfig {
   socReservePct: number; // SoC plancher DUR sous lequel la batterie ne couvre jamais la chauffe
   gridTolW: number; // soutirage EDF toléré pour considérer la chauffe « couverte par le solaire » (W)
   purePvFraction: number; // le PV SEUL doit couvrir cette fraction de la chauffe → opportunité gratuite franche
+  // ⚠️ ANGLE MORT n°1 (écrêtage) : batteries pleines → les SolarBank ne produisent QUE la
+  // demande → solar_power_w s'effondre PILE quand le surplus est maximal. Signaux d'inférence :
+  clipSocPct: number; // SoC ≥ ce seuil + charge ~nulle + jour → écrêtage probable → surplus libre
   // ── Réserve du soir CALCULÉE (remplace tout % fixe) : conso maison attendue
   //    entre la fin du solaire et l'ouverture des HC (00 h 06) ──
   eveningBaseW: number; // talon de conso du soir (W) — sera APPRIS (étape B), défaut prudent
@@ -324,6 +327,9 @@ export interface CumulusRuntimeState {
 
   // Hystérésis surplus (grâce anti-nuage)
   surplusBelowSinceTs: number | null;
+  /** EXPLOITATION : depuis quand le plan demande l'arrêt d'une chauffe en cours (hystérésis
+   *  d'arrêt — la régulation SolarBank oscille ~2-4 min, un creux d'un tick ne coupe pas). */
+  planStopSinceTs: number | null;
 
   // Fin de chauffe / niveau de charge
   lowPowerSinceTs: number | null;

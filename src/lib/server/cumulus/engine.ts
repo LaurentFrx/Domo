@@ -175,6 +175,7 @@ async function runTick(apply: boolean): Promise<TickResult> {
         houseW,
         gridPowerW: inputs.gridPowerW,
         cumulusPowerW: inputs.cumulusPowerW,
+        heatingSinceMin: next.onSinceTs !== null ? (now - next.onSinceTs) / 60_000 : 0,
         batteryEnergyWh: inputs.batteryEnergyWh,
         batteryChargeW: inputs.batteryChargeW,
         batteryDischargeW: inputs.batteryDischargeW,

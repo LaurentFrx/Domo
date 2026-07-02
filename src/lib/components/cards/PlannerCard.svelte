@@ -100,24 +100,28 @@
   });
 
   // ── Prochaine chauffe prévue (en clair) ──
-  const nextSolar = $derived.by(() => {
+  // Pas d'heure inventée : le déclencheur réel de la chauffe solaire est « batteries
+  // pleines / production jetée au réseau », pas une heure de prévision météo.
+  const solarTomorrow = $derived.by(() => {
     const now = Date.now();
-    const chrono = forecast.points
-      .map((p) => ({ d: new Date(p.time), kw: p.kw }))
-      .filter((x) => x.d.getTime() > now && x.kw >= 1.5)
-      .sort((a, b) => a.d.getTime() - b.d.getTime());
-    if (!chrono.length) return null;
-    const f = chrono[0];
-    const sameDay = f.d.getDate() === new Date().getDate();
-    return `${sameDay ? 'aujourd’hui' : 'demain'} vers ${f.d.getHours()} h`;
+    return forecast.points.some(
+      (p) => new Date(p.time).getTime() > now && p.kw >= 1.5 // du solaire exploitable à venir
+    );
   });
   const nextHeat = $derived.by(() => {
     if (heatingNow) return null;
     if (plan?.action === 'heat_hc')
       return { emoji: '🌙', text: 'cette nuit (électricité moins chère)' };
-    if (plan?.targetHour != null)
-      return { emoji: '☀️', text: `aujourd’hui vers ${plan.targetHour} h — gratuit, au soleil` };
-    if (nextSolar) return { emoji: '☀️', text: `${nextSolar} — gratuit, au soleil` };
+    if (plan?.action === 'wait_solar')
+      return {
+        emoji: '☀️',
+        text:
+          plan.targetHour != null
+            ? `au retour du soleil (vers ${plan.targetHour} h) — gratuit`
+            : 'au retour du soleil — gratuit'
+      };
+    if (plan?.action === 'wait' && solarTomorrow)
+      return { emoji: '☀️', text: 'dès que les batteries seront pleines — gratuit, au soleil' };
     return null;
   });
 

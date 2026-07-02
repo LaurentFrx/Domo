@@ -57,6 +57,7 @@ function st(o: Partial<CumulusRuntimeState> = {}): CumulusRuntimeState {
     lastOffTs: null,
     lastTransitionTs: null,
     surplusBelowSinceTs: null,
+    planStopSinceTs: null,
     lowPowerSinceTs: null,
     ballonCharged: false,
     chargedAtTempC: null,
@@ -521,6 +522,7 @@ const PLANNER = {
   socReservePct: 30,
   gridTolW: 300,
   purePvFraction: 0.8,
+  clipSocPct: 97,
   eveningBaseW: 250,
   dinnerWh: 800
 };
@@ -638,4 +640,53 @@ test('manuel prime sur le plan', () => {
   );
   assert.equal(d.relayDesired, true);
   assert.equal(d.reason, 'manual_on');
+});
+
+test('hystérésis d’arrêt : creux SolarBank (plan wait, 1 tick) → chauffe MAINTENUE', () => {
+  const d = decide(
+    inp({ tempC: 45, relayOn: true, cumulusPowerW: 2900 }),
+    cfg({ observationMode: false, planner: PLANNER } as never),
+    st({
+      plan: mkplan({ action: 'wait', reason: 'creux transitoire' }),
+      lastReason: 'plan_solar',
+      onSinceTs: NOW - min(10),
+      lastOnTs: NOW - min(10)
+    } as never)
+  );
+  assert.equal(d.relayDesired, true);
+  assert.equal(d.reason, 'plan_solar');
+  assert.match(d.note, /différé|instable/);
+  assert.equal(typeof d.nextState.planStopSinceTs, 'number');
+});
+
+test('hystérésis d’arrêt : la demande d’arrêt PERSISTE (> 150 s) → coupure', () => {
+  const d = decide(
+    inp({ tempC: 45, relayOn: true, cumulusPowerW: 2900 }),
+    cfg({ observationMode: false, planner: PLANNER } as never),
+    st({
+      plan: mkplan({ action: 'wait', reason: 'nuage durable' }),
+      lastReason: 'plan_solar',
+      planStopSinceTs: NOW - min(3), // l'arrêt est demandé depuis 3 min
+      onSinceTs: NOW - min(10),
+      lastOnTs: NOW - min(10)
+    } as never)
+  );
+  assert.equal(d.relayDesired, false);
+  assert.equal(d.reason, 'plan_wait');
+});
+
+test('hystérésis d’arrêt : le plan repasse heat → chronomètre d’arrêt désarmé', () => {
+  const d = decide(
+    inp({ tempC: 45, relayOn: true, cumulusPowerW: 2900 }),
+    cfg({ observationMode: false, planner: PLANNER } as never),
+    st({
+      plan: mkplan({ action: 'heat_now', reason: 'surplus revenu' }),
+      lastReason: 'plan_solar',
+      planStopSinceTs: NOW - min(1),
+      onSinceTs: NOW - min(10),
+      lastOnTs: NOW - min(10)
+    } as never)
+  );
+  assert.equal(d.relayDesired, true);
+  assert.equal(d.nextState.planStopSinceTs, null);
 });

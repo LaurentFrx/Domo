@@ -24,6 +24,7 @@ function planner(o: Partial<PlannerConfig> = {}): PlannerConfig {
     socReservePct: 30,
     gridTolW: 300,
     purePvFraction: 0.8,
+    clipSocPct: 97,
     eveningBaseW: 250,
     dinnerWh: 800,
     ...o
@@ -46,6 +47,7 @@ function inp(o: Partial<PlanInput> = {}): PlanInput {
     houseW: 300,
     gridPowerW: 0,
     cumulusPowerW: 0,
+    heatingSinceMin: 0,
     batteryEnergyWh: 4000,
     batteryChargeW: 0,
     batteryDischargeW: 0,
@@ -196,6 +198,179 @@ test('péage de stockage : coûts « kWh utile » chiffrés (pertes d’ici 7 h 
   assert.ok(p.costHcEur > 0.181, 'le coût HC du kWh utile inclut un petit péage');
   const pNight = planHeating(inp({ eAvailWh: 4000, hourOfDay: 6, isHC: true }), planner());
   assert.ok(pNight.storageLossWh < p.storageLossWh, 'chauffer au petit matin perd moins');
+});
+
+// ─── ANGLE MORT n°1 : l'écrêtage (bug du 02/07 — injection jetée, plan « wait ») ───
+
+test('BUG 02/07 : injection massive + PV mesuré effondré (écrêtage) → heat_now', () => {
+  // Batteries pleines → solar_power_w ≈ 0 alors que la maison JETTE 790 W au réseau.
+  const p = planHeating(
+    inp({
+      eAvailWh: 13000, // réserve confortable (6,5 douches) — le ballon doit QUAND MÊME se remplir
+      hourOfDay: 13,
+      pvOnSbW: 50, // écrêté : les SB ne produisent que la demande
+      pvApsW: 900,
+      houseW: 150,
+      gridPowerW: -790, // injection = énergie PERDUE (pas de revente)
+      socPct: 100,
+      batteryChargeW: 0
+    }),
+    planner()
+  );
+  assert.equal(p.action, 'heat_now');
+  assert.match(p.reason, /jetés|écrêt/);
+});
+
+test('écrêtage inféré SANS injection franche (SoC 100, charge 0, jour) → heat_now', () => {
+  const p = planHeating(
+    inp({
+      eAvailWh: 13000,
+      hourOfDay: 14,
+      pvOnSbW: 300,
+      pvApsW: 400,
+      houseW: 650, // la maison absorbe presque tout → injection ~0, mais l'écrêtage est là
+      gridPowerW: -50,
+      socPct: 100,
+      batteryChargeW: 0
+    }),
+    planner()
+  );
+  assert.equal(p.action, 'heat_now');
+  assert.match(p.reason, /écrêt|batteries pleines/);
+});
+
+test('PAS de faux positif : matin, batteries en charge (60 %) + réserve OK → wait', () => {
+  const p = planHeating(
+    inp({
+      eAvailWh: 13000,
+      hourOfDay: 10,
+      pvOnSbW: 2000,
+      pvApsW: 0,
+      houseW: 300,
+      gridPowerW: 0,
+      socPct: 60,
+      batteryChargeW: 1500 // le PV remplit la batterie : pas de surplus libre
+    }),
+    planner()
+  );
+  assert.equal(p.action, 'wait');
+});
+
+test('MAINTIEN en chauffe : EDF réel ~0 + batterie modérée → heat_now (on continue)', () => {
+  const p = planHeating(
+    inp({
+      cumulusPowerW: 2900,
+      gridPowerW: 40,
+      batteryDischargeW: 900,
+      socPct: 70,
+      batteryEnergyWh: 3500,
+      hourOfDay: 15,
+      eAvailWh: 9000
+    }),
+    planner()
+  );
+  assert.equal(p.measured, true);
+  assert.equal(p.action, 'heat_now');
+  assert.match(p.reason, /continue/);
+});
+
+test('STOP en chauffe : nuage → EDF réel 800 W → pas de maintien', () => {
+  const p = planHeating(
+    inp({
+      cumulusPowerW: 2900,
+      gridPowerW: 800, // le nuage fait basculer la chauffe sur EDF
+      batteryDischargeW: 1500,
+      socPct: 70,
+      hourOfDay: 15,
+      eAvailWh: 9000
+    }),
+    planner()
+  );
+  assert.notEqual(p.action, 'heat_now');
+});
+
+test('STOP en chauffe : la batterie entame sa réserve du soir → pas de maintien', () => {
+  const p = planHeating(
+    inp({
+      cumulusPowerW: 2900,
+      gridPowerW: 20, // EDF propre… mais c'est la batterie qui paie
+      batteryDischargeW: 2400,
+      socPct: 34,
+      batteryEnergyWh: 1400, // sous le besoin du soir (~2,3 kWh à 18 h)
+      hourOfDay: 18,
+      eAvailWh: 9000
+    }),
+    planner()
+  );
+  assert.notEqual(p.action, 'heat_now');
+});
+
+test('GRÂCE de démarrage : SolarBank en régulation (2 min, grid encore haut) → on ne coupe pas', () => {
+  // Mesuré 02/07 : les SB mettent ~2-3 min à monter (ON 12:59:23 → 2400 W à 13:02).
+  const p = planHeating(
+    inp({
+      cumulusPowerW: 3000,
+      gridPowerW: 2430, // les SB n'ont pas encore réagi
+      heatingSinceMin: 1.5,
+      pvOnSbW: 500,
+      pvApsW: 900,
+      socPct: 100,
+      hourOfDay: 15,
+      eAvailWh: 13000
+    }),
+    planner()
+  );
+  assert.equal(p.action, 'heat_now');
+  assert.match(p.reason, /régulation|lancée/);
+});
+
+test('MAINTIEN économique : 430 W EDF sur 2960 (0,05 €/kWh utile) → on continue', () => {
+  // Couper jetterait ~2,5 kW de solaire pour économiser 0,10 €/h.
+  const p = planHeating(
+    inp({
+      cumulusPowerW: 2960,
+      gridPowerW: 430,
+      batteryDischargeW: 0,
+      heatingSinceMin: 10,
+      socPct: 100,
+      hourOfDay: 15,
+      eAvailWh: 13000
+    }),
+    planner()
+  );
+  assert.equal(p.action, 'heat_now');
+  assert.ok(p.costNowEur < p.costHcEur);
+});
+
+test('STOP économique : nuage total (2600 W EDF, ~10 % autoconso) → on coupe', () => {
+  const p = planHeating(
+    inp({
+      cumulusPowerW: 2900,
+      gridPowerW: 2600,
+      batteryDischargeW: 200,
+      heatingSinceMin: 10,
+      pvOnSbW: 100,
+      socPct: 60,
+      hourOfDay: 15,
+      eAvailWh: 13000
+    }),
+    planner()
+  );
+  assert.notEqual(p.action, 'heat_now');
+});
+
+test('chauffe HC nocturne en cours : maintenue tant que le déficit persiste (via besoin daté)', () => {
+  const p = planHeating(
+    inp({
+      cumulusPowerW: 2900,
+      gridPowerW: 2900, // la nuit, tout vient d'EDF (HC) — gridClean est faux, (d) maintient
+      hourOfDay: 6.5,
+      isHC: true,
+      eAvailWh: 3000
+    }),
+    planner()
+  );
+  assert.equal(p.action, 'heat_hc');
 });
 
 test('le plan chiffre toujours la décomposition (PV / batterie / EDF / autoconso / coûts)', () => {

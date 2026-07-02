@@ -40,6 +40,11 @@ const OBSERVE_NEUTRALISES = new Set<DecisionReason>([
 /** Fraîcheur max du plan économique pour piloter (il est recalculé à chaque tick 60 s). */
 const PLAN_FRESH_MS = 5 * 60_000;
 
+/** Hystérésis d'ARRÊT d'une chauffe pilotée par le plan : la régulation SolarBank oscille
+ *  (mesuré 02/07 : 2400 W → 0 → 2400 W en ~3 min) — un creux d'un ou deux ticks ne doit pas
+ *  couper une chauffe à 90 % autoconso. On ne coupe que si le plan demande l'arrêt en continu. */
+const PLAN_STOP_GRACE_MS = 150_000;
+
 /** Sous-mode (couleur UI) déduit de la raison + de l'état du relais. */
 function subModeFor(reason: DecisionReason, on: boolean): CumulusMode {
   switch (reason) {
@@ -263,11 +268,33 @@ export function decide(
         : 'confort (sonde HS)';
   } else if (plan) {
     // ── EXPLOITATION : le plan économique décide (autoconso max, mesures EM-50) ──
-    if ((plan.action === 'heat_now' || plan.action === 'heat_hc') && !next.ballonCharged) {
+    const planWantsHeat =
+      (plan.action === 'heat_now' || plan.action === 'heat_hc') && !next.ballonCharged;
+    if (planWantsHeat) {
+      next.planStopSinceTs = null;
       desired = true;
       reason = plan.action === 'heat_now' ? 'plan_solar' : 'plan_hc';
       note = plan.reason;
+    } else if (
+      relayOn === true &&
+      (state.lastReason === 'plan_solar' || state.lastReason === 'plan_hc')
+    ) {
+      // Chauffe pilotée en cours et le plan demande l'arrêt : HYSTÉRÉSIS — on ne coupe
+      // que si la demande d'arrêt PERSISTE (les creux de régulation SolarBank durent
+      // ~1-2 ticks ; couper sur un creux jette 10 min de surplus via l'anti-cycle).
+      if (next.planStopSinceTs == null) next.planStopSinceTs = now; // == : couvre null ET undefined (état partiel)
+      if (now - next.planStopSinceTs < PLAN_STOP_GRACE_MS) {
+        desired = true;
+        reason = state.lastReason;
+        note = 'arrêt différé — mesure instable (régulation SolarBank)';
+      } else {
+        next.planStopSinceTs = null;
+        desired = false;
+        reason = 'plan_wait';
+        note = plan.reason;
+      }
     } else {
+      next.planStopSinceTs = null;
       desired = false;
       reason = 'plan_wait';
       note =
