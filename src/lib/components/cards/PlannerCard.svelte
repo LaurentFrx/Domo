@@ -1,18 +1,18 @@
 <script lang="ts">
   /**
    * Carte « Eau chaude » — LA carte unique du chauffe-eau : pilotage + visualisation.
-   * (Fusion des ex-cartes « Chauffe-eau » (contrôles) et « Eau chaude » (plan/journal).)
    *
-   * En langage de tous les jours (compréhensible sans connaître le système) :
-   *   - voyant d'état réel (chauffe / alimenté / éteint) calé sur la puissance EM-50 ;
-   *   - réserve « ≈ N douches » + jauge ;
-   *   - phrase d'état du pilote automatique + prochaine chauffe prévue ;
-   *   - pilotage : Auto / Manuel / Vacances, marche-arrêt manuel, « Chauffer maintenant » ;
-   *   - économies (boucle de regret) : gain € du jour et des 7 derniers jours vs tout-HC ;
-   *   - journal du jour (chauffes, douches, gros appareils, plein) ;
-   *   - détail économique dépliable (le raisonnement chiffré du pilote).
+   * Ergonomie en 3 niveaux de lecture (refonte 2026-07-02, « c'était fouillis ») :
+   *   1. COUP D'ŒIL  — héros : « ≈ N douches » + jauge + UNE ligne d'état (l'intention
+   *      du pilote + prochaine chauffe fusionnées — plus de pavé redondant) ;
+   *   2. AGIR        — segmented Auto/Manuel/Vacances + contrôle contextuel
+   *      (interrupteur en manuel, « Chauffer maintenant » en auto) ;
+   *   3. COMPRENDRE  — économies (1 ligne), mini-stats horizontales (signature Yeldra :
+   *      libellés uppercase + valeurs fortes), journal du jour PLIÉ à 4 événements,
+   *      détail économique et aide dépliables.
    *
-   * Lecture via stores connectés par la page (refcount) ; commandes = méthodes store.
+   * Zéro jargon (lisible par toute la famille) ; l'état machine (LED + statut coloré)
+   * vit dans le header, l'intention du pilote dans le héros — dits UNE seule fois.
    */
   import { cumulus, CUMULUS_ANOMALY_LABELS } from '$stores/cumulus.svelte';
   import { em50 } from '$stores/em50.svelte';
@@ -22,8 +22,10 @@
 
   let showHelp = $state(false);
   let showEco = $state(false);
+  let showAllEvents = $state(false);
 
   const HEATING_W = 500; // au-dessus → le cumulus chauffe (EM-50 voie cumulus)
+  const EVENTS_FOLDED = 4; // journal plié : les N plus récents
 
   const online = $derived(cumulus.relayConnected);
   const relayOn = $derived(cumulus.relayOn === true);
@@ -63,66 +65,40 @@
     eAvail && eFull && eFull > 0 ? Math.min(100, Math.max(0, (eAvail / eFull) * 100)) : 0
   );
 
-  // ── Phrase d'état (état réel + décision du pilote) ──
-  const status = $derived.by(() => {
-    if (heatingNow)
+  // ── L'état du pilote, en UNE ligne (+ sous-ligne éventuelle) ──
+  const solarAhead = $derived.by(() => {
+    const now = Date.now();
+    return forecast.points.some((p) => new Date(p.time).getTime() > now && p.kw >= 1.5);
+  });
+  const status = $derived.by((): { line: string; sub: string | null } => {
+    if (heatingNow) {
+      const free = plan?.measured && plan.autoconsoPct >= 80;
       return {
-        emoji: '🔥',
-        title: 'Le chauffe-eau chauffe en ce moment',
-        text: "Il refait le plein d'eau chaude."
+        line: `🔥 Refait le plein d'eau chaude${free ? ' — gratuit, au soleil' : ''}`,
+        sub: null
       };
+    }
     switch (plan?.action) {
       case 'heat_now':
-        return {
-          emoji: '☀️',
-          title: 'C’est le bon moment pour chauffer',
-          text: 'Le soleil produit : recharge gratuite avec les panneaux.'
-        };
+        return { line: '☀️ Chauffe imminente — surplus solaire disponible', sub: null };
       case 'wait_solar':
         return {
-          emoji: '⏳',
-          title: 'On attend le soleil',
-          text: 'Il reste assez d’eau chaude ; la recharge gratuite viendra avec les panneaux.'
+          line: '⏳ On attend le soleil pour recharger gratuitement',
+          sub: plan.targetHour != null ? `Prochaine chauffe : vers ${plan.targetHour} h` : null
         };
       case 'heat_hc':
         return {
-          emoji: '🌙',
-          title: 'Recharge de nuit en cours de préparation',
-          text: 'Peu de soleil attendu : recharge la nuit, quand l’électricité est moins chère.'
+          line: '🌙 Recharge prévue cette nuit (électricité moins chère)',
+          sub: null
         };
       default:
         return {
-          emoji: '😴',
-          title: 'Le chauffe-eau se repose',
-          text: 'Il reste assez d’eau chaude. Rien à faire pour l’instant.'
+          line: '😴 Se repose — il reste assez d’eau chaude',
+          sub: solarAhead
+            ? 'Prochaine chauffe : dès que les batteries seront pleines — gratuit'
+            : null
         };
     }
-  });
-
-  // ── Prochaine chauffe prévue (en clair) ──
-  // Pas d'heure inventée : le déclencheur réel de la chauffe solaire est « batteries
-  // pleines / production jetée au réseau », pas une heure de prévision météo.
-  const solarTomorrow = $derived.by(() => {
-    const now = Date.now();
-    return forecast.points.some(
-      (p) => new Date(p.time).getTime() > now && p.kw >= 1.5 // du solaire exploitable à venir
-    );
-  });
-  const nextHeat = $derived.by(() => {
-    if (heatingNow) return null;
-    if (plan?.action === 'heat_hc')
-      return { emoji: '🌙', text: 'cette nuit (électricité moins chère)' };
-    if (plan?.action === 'wait_solar')
-      return {
-        emoji: '☀️',
-        text:
-          plan.targetHour != null
-            ? `au retour du soleil (vers ${plan.targetHour} h) — gratuit`
-            : 'au retour du soleil — gratuit'
-      };
-    if (plan?.action === 'wait' && solarTomorrow)
-      return { emoji: '☀️', text: 'dès que les batteries seront pleines — gratuit, au soleil' };
-    return null;
   });
 
   // ── Pilotage ──
@@ -145,13 +121,14 @@
   // ── Économies (boucle de regret) : gain vs « tout recharger la nuit » ──
   const gainToday = $derived(cumulus.regretDay?.gainEur ?? 0);
   const gainWeek = $derived(cumulus.gainWeekEur);
-  const fmtEur = (v: number) => `${v >= 0 ? '' : '−'}${Math.abs(v).toFixed(2).replace('.', ',')} €`;
+  const fmtEur = (v: number) =>
+    `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(2).replace('.', ',')} €`;
 
-  // ── Stats ──
+  // ── Mini-stats ──
   const ballonTemp = $derived(
     cumulus.waterTempC !== null ? `${cumulus.waterTempC.toFixed(0)} °C` : '—'
   );
-  const consoToday = $derived(`${cumulus.energyTodayKwh.toFixed(2)} kWh`);
+  const consoToday = $derived(`${cumulus.energyTodayKwh.toFixed(1)} kWh`);
   function fmtSince(ts: number | null): string {
     if (ts === null) return 'jamais';
     const h = (Date.now() - ts) / 3_600_000;
@@ -161,7 +138,7 @@
   }
   const lastFull = $derived(fmtSince(cumulus.lastAnchorTs));
 
-  // ── Journal du jour, en mots simples ──
+  // ── Journal du jour, en mots simples (plié à EVENTS_FOLDED) ──
   const hhmm = (ts: number) =>
     new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   // Heure fractionnaire (7.1) → « 7 h 06 »
@@ -199,13 +176,15 @@
         return { ts: e.ts, emoji: '✓', text: 'Ballon plein' };
       });
   });
+  const visibleEvents = $derived(showAllEvents ? events : events.slice(0, EVENTS_FOLDED));
+  const hiddenCount = $derived(Math.max(0, events.length - EVENTS_FOLDED));
 </script>
 
 <section
   class="flex flex-col gap-4 rounded-[var(--radius-2xl)] border p-4"
   style="background: var(--color-card); border-color: var(--color-border);"
 >
-  <!-- En-tête : voyant + titre/statut + boutons détail/aide -->
+  <!-- ═══ Header : état machine (LED + statut) + actions ═══ -->
   <div class="flex items-start justify-between gap-3">
     <div class="flex min-w-0 items-center gap-2.5">
       <span class="led" class:blink={voyant === 'supplied'} style="--led: {voyantColor};"></span>
@@ -226,6 +205,7 @@
         class="flex h-6 items-center justify-center rounded-full px-2.5 text-xs font-semibold"
         style="background: color-mix(in oklch, var(--color-primary) 16%, transparent); color: var(--color-primary);"
         aria-label="Détail de la décision"
+        aria-expanded={showEco}
       >
         détail
       </button>
@@ -235,6 +215,7 @@
         class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold"
         style="background: color-mix(in oklch, var(--color-muted-fg) 16%, transparent); color: var(--color-muted-fg);"
         aria-label="Comment ça marche"
+        aria-expanded={showHelp}
       >
         ?
       </button>
@@ -248,10 +229,10 @@
     </div>
   {/if}
 
-  <!-- Réserve d'eau chaude -->
-  <div class="flex flex-col gap-1.5">
+  <!-- ═══ 1. COUP D'ŒIL : réserve + intention du pilote ═══ -->
+  <div class="flex flex-col gap-2">
     <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold" style="color: var(--color-fg);"
+      <span class="text-[34px] leading-none font-bold" style="color: var(--color-fg);"
         >{showers != null ? `≈ ${showers}` : '—'}</span
       >
       <span class="text-sm" style="color: var(--color-muted-fg);">douches d'eau chaude</span>
@@ -262,27 +243,17 @@
     >
       <div
         class="h-full rounded-full"
-        style="width: {fillPct}%; background: var(--color-success);"
+        style="width: {fillPct}%; background: var(--color-success); transition: width 700ms var(--ease-out);"
       ></div>
     </div>
+    <div class="text-sm font-medium" style="color: var(--color-fg);">{status.line}</div>
+    {#if status.sub}
+      <div class="text-[12.5px]" style="color: var(--color-muted-fg);">{status.sub}</div>
+    {/if}
   </div>
 
-  <!-- État + raison, en clair -->
-  <div class="flex gap-3">
-    <span class="text-2xl leading-none">{status.emoji}</span>
-    <div class="min-w-0">
-      <div class="font-semibold" style="color: var(--color-fg);">{status.title}</div>
-      <div class="text-sm" style="color: var(--color-muted-fg);">{status.text}</div>
-      {#if nextHeat}
-        <div class="mt-1 text-sm" style="color: var(--color-fg);">
-          {nextHeat.emoji} Prochaine chauffe : {nextHeat.text}
-        </div>
-      {/if}
-    </div>
-  </div>
-
-  <!-- Pilotage -->
-  <div class="flex flex-col gap-2.5">
+  <!-- ═══ 2. AGIR : mode + contrôle contextuel ═══ -->
+  <div class="flex flex-col gap-2">
     <div class="seg" role="radiogroup" aria-label="Mode de pilotage">
       <button
         type="button"
@@ -305,8 +276,10 @@
     </div>
 
     {#if mode === 'manual'}
-      <div class="flex items-center justify-between">
-        <span class="text-sm" style="color: var(--color-muted-fg);">Chauffe-eau</span>
+      <div class="flex items-center justify-between px-0.5">
+        <span class="text-sm" style="color: var(--color-muted-fg);"
+          >Allumer / éteindre vous-même</span
+        >
         <button
           type="button"
           data-no-haptic
@@ -333,32 +306,33 @@
           : '🔥 Chauffer maintenant (jusqu’au plein)'}
       </button>
     {:else}
-      <div class="text-xs" style="color: var(--color-muted-fg);">
-        Mode vacances : le chauffe-eau reste éteint jusqu'au retour en Auto.
+      <div class="px-0.5 text-[12.5px]" style="color: var(--color-muted-fg);">
+        Le chauffe-eau reste éteint jusqu'au retour en Auto.
       </div>
     {/if}
   </div>
 
-  <!-- Économies (boucle de regret) -->
+  <!-- ═══ 3. COMPRENDRE ═══ -->
+  <!-- Économies (boucle de regret) — 1 ligne -->
   <div class="gain">
-    <span class="gain-label">💶 Économisé vs « tout recharger la nuit »</span>
-    <span class="gain-vals">
+    <span class="gain-label">💶 Économies vs recharge de nuit</span>
+    <span class="gain-vals tabular-nums">
       <strong style="color: {gainToday >= 0 ? 'var(--color-success)' : 'var(--color-warning)'};"
         >{fmtEur(gainToday)}</strong
       >
-      <span> aujourd'hui</span>
+      <span class="gain-unit">auj.</span>
       <span class="gain-sep">·</span>
       <strong style="color: {gainWeek >= 0 ? 'var(--color-success)' : 'var(--color-warning)'};"
         >{fmtEur(gainWeek)}</strong
       >
-      <span> / 7 j</span>
+      <span class="gain-unit">/ 7 j</span>
     </span>
   </div>
 
-  <!-- Stats -->
-  <div class="stats">
-    <div class="stat">
-      <span>Température du ballon</span>
+  <!-- Mini-stats horizontales (libellés uppercase + valeurs fortes) -->
+  <div class="ministats">
+    <div class="ministat">
+      <span class="ministat-label">Ballon</span>
       {#if cumulus.waterTempC !== null}
         <button
           type="button"
@@ -366,42 +340,58 @@
           aria-label="Historique 4 h — eau chaude (ballon)"
           onclick={() => openTempHistory('thermo_cumulus', 'Eau chaude (ballon)')}
         >
-          <strong>{ballonTemp}</strong>
+          <strong class="ministat-value">{ballonTemp}</strong>
         </button>
       {:else}
-        <strong>{ballonTemp}</strong>
+        <strong class="ministat-value">{ballonTemp}</strong>
       {/if}
     </div>
-    <div class="stat"><span>Dernier plein</span><strong>{lastFull}</strong></div>
-    <div class="stat"><span>Consommé aujourd'hui</span><strong>{consoToday}</strong></div>
+    <div class="ministat">
+      <span class="ministat-label">Dernier plein</span>
+      <strong class="ministat-value">{lastFull}</strong>
+    </div>
+    <div class="ministat">
+      <span class="ministat-label">Consommé auj.</span>
+      <strong class="ministat-value">{consoToday}</strong>
+    </div>
   </div>
 
-  <!-- Journal du jour -->
-  {#if events.length}
-    <div class="flex flex-col gap-2">
-      <div
-        class="text-xs font-medium tracking-wide uppercase"
-        style="color: var(--color-muted-fg);"
-      >
-        Aujourd'hui
-      </div>
-      {#each events as e (e.ts + e.text)}
+  <!-- Journal du jour (plié à 4) -->
+  <div class="flex flex-col gap-2">
+    <div
+      class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+      style="color: var(--color-muted-fg);"
+    >
+      Aujourd'hui
+    </div>
+    {#if events.length}
+      {#each visibleEvents as e (e.ts + e.text)}
         <div class="flex items-center gap-2 text-sm">
           <span class="w-10 shrink-0 tabular-nums" style="color: var(--color-muted-fg);"
             >{hhmm(e.ts)}</span
           >
           <span class="shrink-0">{e.emoji}</span>
-          <span class="min-w-0 flex-1" style="color: var(--color-fg);">{e.text}</span>
+          <span class="min-w-0 flex-1 truncate" style="color: var(--color-fg);">{e.text}</span>
         </div>
       {/each}
-    </div>
-  {:else}
-    <div class="text-sm" style="color: var(--color-muted-fg);">
-      Rien à signaler aujourd'hui — la journée s'affichera ici (chauffes, douches…).
-    </div>
-  {/if}
+      {#if hiddenCount > 0 || showAllEvents}
+        <button
+          type="button"
+          class="fold-btn"
+          onclick={() => (showAllEvents = !showAllEvents)}
+          aria-expanded={showAllEvents}
+        >
+          {showAllEvents ? 'Réduire' : `Afficher les ${hiddenCount} autres`}
+        </button>
+      {/if}
+    {:else}
+      <div class="text-sm" style="color: var(--color-muted-fg);">
+        Rien à signaler — la journée s'affichera ici (chauffes, douches…).
+      </div>
+    {/if}
+  </div>
 
-  <!-- Détail économique (comprendre / vérifier la décision du pilote) -->
+  <!-- Détail économique (dépliable via « détail ») -->
   {#if showEco && plan}
     <div
       class="flex flex-col gap-2 rounded-xl p-3 text-sm"
@@ -515,19 +505,7 @@
     </div>
   {/if}
 
-  <!-- Statut du pilotage -->
-  {#if mode === 'auto'}
-    <div class="text-xs" style="color: var(--color-muted-fg);">
-      🤖 Pilotage automatique actif — le système allume et éteint le chauffe-eau au meilleur moment.
-    </div>
-  {:else}
-    <div class="text-xs" style="color: var(--color-muted-fg);">
-      ✋ Pilotage {mode === 'off' ? 'coupé (vacances)' : 'manuel'} — repassez en Auto pour laisser le
-      système optimiser.
-    </div>
-  {/if}
-
-  <!-- Comment ça marche ? (dépliable) -->
+  <!-- Comment ça marche ? (dépliable via « ? ») -->
   {#if showHelp}
     <div
       class="flex flex-col gap-2 rounded-xl p-3 text-sm"
@@ -539,21 +517,15 @@
         douches sans rien faire.
       </p>
       <p>
-        🚿 Quand on tire de l'eau chaude, la réserve baisse. Quand elle est basse, il faut
-        réchauffer.
-      </p>
-      <p>
-        ☀️ Réchauffer coûte de l'électricité — sauf en pleine journée avec vos <strong
-          >panneaux solaires</strong
-        >, qui produisent gratuitement. C'est le meilleur moment, et le système le choisit tout
-        seul.
+        ☀️ Réchauffer coûte de l'électricité — sauf quand vos <strong>panneaux solaires</strong>
+        produisent plus que la maison ne consomme. Le système choisit ce moment tout seul.
       </p>
       <p>
         🌙 S'il fait gris plusieurs jours, il recharge la nuit, quand l'électricité est moins chère
         — juste à temps pour les douches du matin.
       </p>
       <p>
-        💶 La ligne « Économisé » compare chaque jour ce qui a été payé à ce qu'aurait coûté une
+        💶 La ligne « Économies » compare chaque jour ce qui a été payé à ce qu'aurait coûté une
         recharge de nuit systématique : c'est le gain réel du pilotage.
       </p>
       <p>
@@ -633,11 +605,11 @@
   .boost-btn {
     appearance: none;
     border: 1px solid var(--color-border);
-    padding: 0.55rem 0.8rem;
+    padding: 0.5rem 0.8rem;
     border-radius: var(--radius-lg);
     background: transparent;
     color: var(--color-fg);
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 600;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
@@ -650,14 +622,14 @@
     border-color: oklch(0.66 0.14 40 / 0.55);
   }
 
-  /* ── Ligne économies ── */
+  /* ── Ligne économies (compacte) ── */
   .gain {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: 0.6rem;
     flex-wrap: wrap;
-    padding: 0.55rem 0.7rem;
+    padding: 0.45rem 0.7rem;
     border-radius: var(--radius-lg);
     background: color-mix(in oklch, var(--color-success) 10%, transparent);
   }
@@ -667,7 +639,7 @@
     color: var(--color-muted-fg);
   }
   .gain-vals {
-    font-size: 13px;
+    font-size: 12.5px;
     color: var(--color-muted-fg);
     white-space: nowrap;
   }
@@ -675,33 +647,40 @@
     font-size: 14px;
     font-weight: 700;
   }
+  .gain-unit {
+    font-size: 11.5px;
+  }
   .gain-sep {
-    margin: 0 0.3rem;
+    margin: 0 0.25rem;
   }
 
-  /* ── Stats ── */
-  .stats {
+  /* ── Mini-stats horizontales (signature Yeldra : label uppercase + valeur forte) ── */
+  .ministats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid var(--color-border);
+  }
+  .ministat {
     display: flex;
     flex-direction: column;
-    border-top: 1px solid var(--color-border);
+    gap: 0.15rem;
+    min-width: 0;
   }
-  .stat {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.5rem 0;
-  }
-  .stat + .stat {
-    border-top: 1px solid var(--color-border);
-  }
-  .stat span {
-    font-size: 13px;
-    color: var(--color-muted-fg);
-  }
-  .stat strong {
-    font-size: 13.5px;
+  .ministat-label {
+    font-size: 10px;
     font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--color-muted-fg);
+    white-space: nowrap;
+  }
+  .ministat-value {
+    font-size: 13.5px;
+    font-weight: 650;
     color: var(--color-fg);
+    white-space: nowrap;
   }
   .temp-link {
     appearance: none;
@@ -710,9 +689,24 @@
     margin: 0;
     padding: 0;
     cursor: pointer;
+    text-align: left;
     text-decoration: underline;
     text-decoration-style: dotted;
     text-underline-offset: 2px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ── Bouton plier/déplier le journal ── */
+  .fold-btn {
+    appearance: none;
+    border: none;
+    background: transparent;
+    align-self: flex-start;
+    padding: 0.1rem 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--color-primary);
+    cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
 
