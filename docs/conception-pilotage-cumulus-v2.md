@@ -1,239 +1,381 @@
-# Conception v2 — Pilotage du chauffe-eau « comme la main de Laurent »
+# Le pilotage automatique du chauffe-eau — proposition à valider
 
-> **Statut : PROPOSITION à valider — rien n'est implémenté ni activé.**
-> Le pilotage est en MANUEL + observation depuis le 02/07/2026 (échec v1 : le
-> « maintien économique » tolérait 400-600 W d'import EDF permanent).
-
-## 0. La règle constitutionnelle
-
-**Le chauffe-eau ne crée JAMAIS de soutirage EDF.** Aucun critère économique
-(« c'est moins cher que la HC ») ne peut la contourner. Les deux seules exceptions,
-délibérées et bornées :
-
-1. la **latence physique de démarrage** des SolarBank (~2-3 min de montée en
-   puissance, ~80-150 Wh — la même qu'en pilotage manuel) ;
-2. le **filet HC nocturne** (choix explicite : tarif bas, juste avant les douches).
-
-La v1 a échoué en inversant la logique : elle optimisait un coût. La v2 imite un
-geste : _allumer quand l'énergie est en train d'être jetée, couper dès que la maison
-a besoin de la puissance._
+> **Statut : simple proposition.** Rien de ce qui est décrit ici n'est en service.
+> Depuis le 2 juillet 2026, le chauffe-eau est repassé en commande entièrement
+> manuelle, et il y restera tant que ce document n'aura pas été relu, corrigé et
+> approuvé par Laurent.
 
 ---
 
-## 1. Les paramètres d'entrée — exhaustif, par source
+## Pourquoi ce document
 
-### 1.1 EM-50 (local, ~180 ms — LA vérité instantanée)
+La première version du pilotage automatique a échoué. Elle raisonnait comme un
+comptable : elle acceptait d'acheter du courant à EDF pendant une chauffe dès lors
+que ce courant revenait moins cher que celui des heures creuses. Résultat : quatre
+cents à six cents watts achetés en continu à EDF en plein été, pendant que le soleil
+donnait à plein. C'est exactement ce que le pilotage manuel ne faisait jamais.
 
-| Signal                                      | Usage                                                       | Fiabilité   |
-| ------------------------------------------- | ----------------------------------------------------------- | ----------- |
-| voie 0 : réseau signé (+ import / − export) | **Tout déclenchement et toute coupure**                     | Autoritaire |
-| voie 1 : puissance cumulus                  | chauffe effective, détection thermostat (fin), calorimétrie | Autoritaire |
+Cette nouvelle version repose sur un principe unique, sans exception économique :
 
-### 1.2 Anker SolarBank (cloud, **~60 s de retard** — jamais pour l'instantané)
+> **Le chauffe-eau ne doit jamais être la cause d'un achat de courant à EDF.**
+>
+> On l'allume uniquement quand la maison est en train de donner gratuitement de
+> l'électricité au réseau (puisqu'elle n'est pas payée pour cela, cette électricité
+> est perdue). On l'éteint dès que la maison a besoin de sa puissance pour autre
+> chose. Autrement dit : le système doit reproduire le geste que vous faites à la
+> main, ni plus, ni moins.
 
-| Signal              | Usage                                                                           | Piège                                       |
-| ------------------- | ------------------------------------------------------------------------------- | ------------------------------------------- |
-| SoC par batterie    | conditions de démarrage + garde batterie                                        | retard 60 s (acceptable : varie lentement)  |
-| charging_power_w    | « les batteries n'absorbent plus »                                              | idem                                        |
-| discharging_power_w | diagnostic (pas décisionnel)                                                    | idem                                        |
-| solar_power_w       | **MENT quand les batteries sont pleines** (écrêtage : ne montre que la demande) | ne JAMAIS s'en servir pour juger le surplus |
-| sb_output_power_w   | information (plafond 2400 W)                                                    | oscille ~2-4 min après un à-coup            |
+Il n'existe que deux moments où le système acceptera, en toute connaissance de
+cause, de prendre un peu de courant à EDF :
 
-### 1.3 APS EZ1 (local, 10 s)
+1. **Les toutes premières minutes d'une chauffe.** Quand le chauffe-eau s'allume,
+   les deux stations solaires Anker mettent deux à trois minutes à comprendre que
+   la maison réclame de la puissance et à monter leur débit. Pendant ce court
+   délai, le courant vient du réseau. C'est une réalité physique de votre
+   installation : elle se produit exactement de la même façon quand vous allumez le
+   chauffe-eau à la main. Cela représente environ cent wattheures par allumage,
+   soit à peu près deux centimes d'euro.
 
-`power_w` (pan Sud, écrêté 900 W) — injection directe, jamais stockée. Information.
-
-### 1.4 Sondes température (Zigbee)
-
-- `thermo_cumulus` (point bas, 0,2 °C/5 min) → E_avail calorimétrique (biais
-  stratification ×2,8 corrigé — acquis v1 à conserver).
-- T_room / T_ext moyennées multi-sources → pertes.
-
-### 1.5 Dérivés du modèle (conservés de la v1)
-
-- **E_avail** (Wh) et **réserve en douches** — jauge validée, recalée à chaque plein.
-- **deficitWh** = ce qui manque pour 2 douches à 7 h 30 (pertes comprises).
-- houseW (bilan) : **indicatif seulement** — dépend de l'Anker retardé, jamais décisionnel.
-
-### 1.6 Tarifs & temps
-
-HP 0,2318 / HC 0,1812 €/kWh ; HC 00 h 06 → 08 h 06 ; deadline douches ~7 h 30 ;
-heure locale Paris.
-
-### 1.7 Prévision PV (Météo-France, 30 min)
-
-Utilisée UNIQUEMENT pour : (a) le filet HC (chauffer la nuit seulement si demain est
-gris), (b) l'affichage. **Jamais pour déclencher une chauffe solaire** (la v1 a
-montré que l'annonce météo ≠ le surplus réel).
-
-### 1.8 Prises électroménager (Zigbee, MQTT)
-
-Lave-vaisselle / lave-linge `power` → condition « maison calme » au démarrage +
-journal. Le four/induction/bouilloire ne sont PAS mesurés individuellement → c'est
-l'import EM-50 qui les représente (et il suffit).
-
-### 1.9 État interne (mémoire de la machine)
-
-Relais ON/OFF + depuis quand · anti-cycle (minOn 300 s / minOff 300 s /
-antiCycling 600 s) · ballonCharged (thermostat) · **budget de démarrages solaires du
-jour** · phase de la chauffe · compteurs regret (conservés).
+2. **La recharge de fin de nuit**, pendant les heures creuses, quand le soleil de la
+   veille n'a pas suffi. C'est un choix assumé : le courant y est au tarif le plus
+   bas, et l'eau finit de chauffer juste avant les douches du matin.
 
 ---
 
-## 2. La machine à états (remplace la décision sans mémoire)
+## Première partie — Ce que le système voit, et à quelle vitesse
 
-```
-                    ┌────────────────────────────────────────────┐
-                    ▼                                            │
- REPOS ──(conditions §3 tenues 5 min)──► DÉMARRAGE ──(4 min)──► ÉTABLI
-   ▲                                        │                    │
-   │                                        │ import persiste    │ import dur >90s → CÉDÉ ─┐
-   │                                        ▼                    │ SoC −5 pts     → CÉDÉ   │
-   │                                      CÉDÉ ◄─────────────────┘ thermostat     → PLEIN  │
-   │                                        │                                              │
-   └──(anti-cycle purgé + conditions §3)────┴──────────────◄───────────────────────────────┘
+Pour décider, le système dispose de plusieurs sources d'information. Elles n'ont
+pas toutes la même rapidité ni la même fiabilité, et c'est une des leçons de
+l'échec précédent : il faut savoir laquelle croire, et quand.
 
- PLEIN ──(sonde −5 °C : puisage)──► REPOS
- FILET_HC : nuit, si déficit (indépendant du cycle solaire)
- MANUEL / VACANCES / BOOST : overrides absolus, à tout moment
-```
+**Le compteur principal** (le boîtier Shelly installé dans le tableau électrique)
+est la seule source instantanée et digne de confiance. Il répond en une fraction de
+seconde et mesure deux choses : d'une part **l'échange avec le réseau EDF** — la
+maison est-elle en train d'acheter du courant, ou d'en donner gratuitement au
+réseau ? — et d'autre part **la consommation du chauffe-eau lui-même**, ce qui
+permet notamment de détecter l'instant précis où son thermostat mécanique coupe la
+résistance, c'est-à-dire l'instant où le ballon est plein.
 
-| État                       | Relais | Ce qui s'y passe                                                                           |
-| -------------------------- | ------ | ------------------------------------------------------------------------------------------ |
-| **REPOS**                  | off    | Surveille les conditions de démarrage (§3)                                                 |
-| **ARMÉ** (interne à REPOS) | off    | Les conditions sont réunies : fenêtre d'observation de 5 min — un instantané ne suffit pas |
-| **DÉMARRAGE**              | ON     | 0-4 min : latence SolarBank tolérée ; à 4 min, si l'import ne redescend pas → CÉDÉ         |
-| **ÉTABLI**                 | ON     | Règle zéro import stricte (§5) jusqu'au thermostat                                         |
-| **CÉDÉ**                   | off    | La maison a eu besoin de la puissance ; retour à REPOS après purge anti-cycle              |
-| **PLEIN**                  | off    | Le thermostat a coupé (conso < 250 W confirmée) ; E_avail recalé = E_full                  |
-| **FILET_HC**               | ON     | Nuit : chauffe dimensionnée au déficit, finit ~7 h 15                                      |
+> Toute décision d'allumer ou d'éteindre s'appuiera sur ce compteur, et sur lui
+> seul. C'est la règle qui découle de l'échec précédent.
 
----
+**Les deux stations solaires Anker** (les batteries) donnent leurs informations par
+Internet, avec **environ une minute de retard**. On y lit le niveau de remplissage
+des batteries, la puissance avec laquelle elles se chargent ou se déchargent, et la
+production des panneaux qui leur sont raccordés. Ce retard d'une minute interdit de
+s'en servir pour des décisions instantanées ; en revanche, ces informations
+conviennent très bien pour des conditions qui évoluent lentement, comme « les
+batteries sont-elles pleines ? ».
 
-## 3. Conditions de DÉMARRAGE solaire — TOUTES cumulées, tenues 5 min
+Il faut signaler un piège important, découvert le 2 juillet : **quand les batteries
+sont pleines, la production solaire affichée par les stations Anker devient
+mensongère.** Les stations réduisent alors volontairement leur production au strict
+niveau de la demande de la maison — c'est ce qu'on appelle le bridage. Les panneaux
+pourraient produire deux mille cinq cents watts, mais l'affichage n'en montre que
+cent, parce que la maison n'en demande pas plus. La première version du pilotage
+s'est fait piéger : elle attendait de « voir » une grande production avant
+d'allumer, production qui ne pouvait précisément plus se voir. Le surplus était là,
+invisible, et partait au réseau en pure perte.
 
-| #   | Condition                     | Valeur proposée                                         | Pourquoi (le geste manuel imité)                                                                             |
-| --- | ----------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| 1   | Ballon pas plein              | E_avail < 95 % E_full ET !ballonCharged                 | inutile sinon                                                                                                |
-| 2   | **Injection franche mesurée** | grid EM-50 ≤ **−300 W en continu 5 min**                | la preuve directe que l'énergie est JETÉE ; la persistance filtre les pauses d'appareils et les instabilités |
-| 3   | **Batteries pleines**         | SoC moyen ≥ 97 % ET charge < 120 W                      | on ne vole jamais la recharge ; batteries pleines = le surplus n'a plus d'autre destination                  |
-| 4   | **Maison calme**              | prises LV/LL < 100 W ET l'injection franche le confirme | ne pas démarrer juste avant/pendant un cycle ; l'import EM-50 couvre le non-mesuré (four, plaques)           |
-| 5   | **Fenêtre horaire**           | 10 h 30 – 16 h 30                                       | la chauffe démarrée doit avoir des heures de soleil devant elle — pas de chauffe qui finirait sur batterie   |
-| 6   | **Budget du jour**            | ≤ 2 démarrages solaires                                 | protège la régulation SolarBank (les à-coups la font osciller) et le contacteur                              |
-| 7   | Anti-cycle purgé              | minOff 300 s + antiCycling 600 s                        | inchangé v1                                                                                                  |
+**Le petit onduleur APsystems** (les deux panneaux du pan Sud qui injectent
+directement, sans batterie) est lu localement toutes les dix secondes. Il produit
+toujours son maximum ; ce qui n'est pas consommé par la maison part au réseau.
 
-**Déclencheur secondaire (écrêtage invisible)** — cas réel du 02/07 : batteries
-pleines, l'APS couvre juste la maison, grid ≈ 0, le potentiel SolarBank est écrêté
-_sans injection visible_. Option proposée : les conditions 3+4+5+6+7 tenues 5 min
-avec grid borné [−300 ; +50 W] déclenchent aussi. **→ question ouverte n° 2.**
+**La sonde de température du ballon**, complétée par les thermomètres de la maison,
+alimente le calcul de **la réserve d'eau chaude**, exprimée en « nombre de douches
+disponibles ». Ce calcul, mis au point et vérifié ces dernières semaines, est
+conservé tel quel : il s'est montré fiable. Il permet aussi de savoir chaque soir
+s'il manquera de l'eau chaude pour les deux douches du matin, vers sept heures
+trente.
 
-## 4. Phase DÉMARRAGE (0 – 4 min)
+**Les prises connectées du lave-vaisselle et du lave-linge** signalent quand un de
+ces appareils tourne. Le four, les plaques et la bouilloire ne sont pas mesurés
+individuellement, mais ce n'est pas un problème : dès qu'ils tirent du courant, le
+compteur principal le voit immédiatement dans l'échange avec le réseau.
 
-Physique mesurée le 02/07 : les SolarBank mettent **2-3 min** à monter en puissance
-(ON 12:59:23 → 2400 W à 13:02) ; l'import transitoire (~80-150 Wh) est inévitable —
-**le pilotage manuel a exactement la même physique**. Surveillance : à 4 min, si
-l'import reste > seuil dur → CÉDÉ immédiat (gros nuage pile au démarrage — rare si
-la condition d'entrée « 5 min d'injection franche » était vraie).
+**La prévision météorologique** (Météo-France) ne servira plus jamais à déclencher
+une chauffe — l'échec précédent a montré qu'une annonce de beau temps ne dit rien
+du surplus réellement disponible à un instant donné. Elle ne sert plus qu'à une
+chose : décider, la nuit, s'il est raisonnable de compter sur le soleil du
+lendemain ou s'il faut recharger en heures creuses.
 
-## 5. Phase ÉTABLIE — la règle zéro import, opérationnalisée
+Enfin, le système garde en mémoire son propre état : le chauffe-eau est-il allumé
+et depuis quand, combien d'allumages ont déjà eu lieu aujourd'hui, le thermostat
+a-t-il coupé, et les délais de protection du matériel sont-ils écoulés (un
+contacteur ne doit pas claquer toutes les cinq minutes).
 
-| Événement mesuré                                                 | Réaction         | Délai                             | Justification                                                                                                                                              |
-| ---------------------------------------------------------------- | ---------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Import > 150 W**                                               | CÉDÉ (coupe)     | après **90 s** continus (2 ticks) | la maison prime, TOUJOURS ; les 90 s absorbent les oscillations SolarBank mesurées (~1-2 ticks) sans tolérer un vrai pic (four, bouilloire, LV)            |
-| Import ≤ 150 W                                                   | on continue      | —                                 | zéro import respecté                                                                                                                                       |
-| **SoC chute de 5 points** depuis le début de chauffe (ou < 93 %) | CÉDÉ             | ~3 min de confirmation            | le PV ne couvre plus la chauffe : elle « tourne sur batterie » sans que le grid le voie (l'import reste nul !) — c'est la protection de ta réserve du soir |
-| **Conso cumulus < 250 W** (relais ON) confirmée 2 min            | PLEIN            | —                                 | le thermostat mécanique a coupé : mission accomplie, E_avail = E_full                                                                                      |
-| Sonde ≥ 70 °C                                                    | coupe (sécurité) | immédiat                          | filet ultime, inchangé                                                                                                                                     |
+### Les trois réalités physiques qui commandent tout le reste
 
-Nuage intermittent en ÉTABLI : le PV chute → les SolarBank (pleins) compensent →
-l'import reste ~0 → **pas de coupure** (correct : rien n'est soutiré). Si le nuage
-dure, c'est le garde SoC (−5 pts) qui coupe proprement. Fini le ping-pong de la v1.
+Les mesures faites le 2 juillet, pendant les essais, ont établi trois faits :
 
-## 6. FILET_HC (nuit) — inchangé v1, il était bon
-
-- Déclenchement : déficit > 0 pour 7 h 30 ET pas de couverture solaire possible.
-- Démarrage au **backstop calculé** (7 h 30 − durée du déficit − 15 min) → l'eau
-  finit de chauffer juste avant les douches (pertes minimales).
-- Coupure : déficit couvert OU thermostat OU 7 h 30. Jamais la batterie la nuit.
-- Modulation météo : rien à faire — si demain est radieux, le déficit résiduel est
-  petit et la chauffe HC courte ; le dimensionnement au déficit s'en charge seul.
-
-## 7. Overrides et filets (inchangés, hors de portée de l'optimiseur)
-
-- **MANUEL** : l'interrupteur de la carte, priorité absolue. **VACANCES** : tout coupé.
-- **BOOST** (« Chauffer maintenant ») : chauffe immédiate jusqu'au plein — l'EDF est
-  accepté car c'est un choix humain explicite (invités, etc.).
-- **Filet famille** : réserve < 1 douche → chauffe immédiate quelle que soit l'heure.
-  **→ question ouverte n° 1** (ou préférer attendre la HC ?).
-- Sécurité 70 °C · anti-cycle · watchdog Shelly (coupure auto si Domo meurt) ·
-  relais injoignable → aucun ordre.
-
-## 8. Modes dégradés (aucune donnée n'est indispensable)
-
-| Panne               | Comportement                                                                                                                                                      |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **EM-50 muet**      | AUCUNE chauffe solaire (le signal de vérité manque) ; filet HC seul                                                                                               |
-| **Anker muet**      | démarrage possible sur injection franche EM-50 seule (elle n'en dépend pas) ; garde SoC indisponible → fenêtre horaire resserrée (10 h 30 – 15 h) en compensation |
-| Sonde ballon muette | E_avail dérive bornée (recalages impossibles) → filet HC conservateur, pas de solaire au-delà de 48 h sans sonde                                                  |
-| Relais injoignable  | aucun ordre ; anomalie affichée                                                                                                                                   |
-| MQTT down           | comme sonde muette + prises invisibles (l'import EM-50 couvre)                                                                                                    |
-
-Le pire système possible reste « chauffe HC finissant 7 h 15 » — déjà correct.
-
-## 9. Matrice de scénarios (les interactions, de bout en bout)
-
-| #   | Scénario                                             | Déroulé v2                                                                                                                                                                         |
-| --- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| S1  | **Été radieux, maison calme**                        | Batteries pleines ~11 h → injection franche 5 min → 1 chauffe ~11 h 15 → thermostat ~13-14 h → PLEIN. Import total : la seule montée SB (~100 Wh). C'est ta journée manuelle type. |
-| S2  | **Lave-vaisselle pendant la chauffe**                | LV tire 2 kW → import > 150 W → 90 s → CÉDÉ. Fin du cycle LV → injection franche revient 5 min → 2ᵉ démarrage (budget 2/2) → thermostat.                                           |
-| S3  | **Nuages intermittents**                             | En ÉTABLI : les SB compensent, import ~0 → pas de coupure. Nuage long → SoC −5 pts → CÉDÉ propre. Pas de ping-pong.                                                                |
-| S4  | **Journée grise**                                    | Jamais 5 min d'injection franche → zéro chauffe solaire → FILET_HC à l'aube, dimensionné au déficit. Douches garanties, EDF au tarif plancher.                                     |
-| S5  | **Matin, batteries à 60 % en charge**                | Pas de démarrage (le surplus va dans les batteries, rien n'est perdu). On attend le plein.                                                                                         |
-| S6  | **17 h 30, injection franche**                       | Fenêtre horaire fermée → pas de démarrage (la chauffe finirait sur batterie). Le surplus du soir est perdu — comme en manuel. **→ question ouverte n° 3.**                         |
-| S7  | **Douches d'invités à 20 h**                         | Réserve chute → rien la nuit (batterie intouchable) → FILET_HC à l'aube couvre. Réserve < 1 douche → filet famille (selon q. n° 1).                                                |
-| S8  | **Repas (four + plaques) pendant la chauffe**        | Import massif → CÉDÉ en 90 s. Toute la puissance à la maison.                                                                                                                      |
-| S9  | **Ballon plein à 13 h 30**                           | PLEIN (thermostat), tout s'arrête ; le surplus repart en injection — mission accomplie.                                                                                            |
-| S10 | **Chauffe manuelle par toi**                         | MANUEL prime ; le moteur observe, journalise, compte le regret — il n'interfère jamais.                                                                                            |
-| S11 | **Hiver**                                            | Batteries rarement pleines → conditions solaires rares → le FILET_HC porte la charge (eDouche 2800 Wh, tInlet 9 °C déjà saisonniers) ; chauffe solaire les beaux jours seulement.  |
-| S12 | **Écrêtage invisible** (batteries pleines, grid ≈ 0) | Selon la question ouverte n° 2 : soit on rate ce surplus (conservateur), soit le déclencheur secondaire le capte avec les mêmes garde-fous.                                        |
-
-## 10. Ce qui est conservé de la v1 (acquis validés)
-
-E_avail calorimétrique + réserve en douches · filet HC dimensionné/backstop ·
-boucle de regret (le juge, en €) · journal du jour + appareils nommés · carte
-« Eau chaude » (hiérarchie 3 niveaux) · invariants decide.ts · sondes/latences
-documentées (EM-50 180 ms, Anker 60 s, montée SB 2-3 min, oscillation SB 2-4 min).
-
-## 11. Récapitulatif des paramètres (tous ajustables dans /reglages ensuite)
-
-| Paramètre                     | Valeur proposée                                              |
-| ----------------------------- | ------------------------------------------------------------ |
-| Injection franche (démarrage) | ≥ 300 W pendant 5 min                                        |
-| Batteries pleines             | SoC ≥ 97 % et charge < 120 W                                 |
-| Maison calme                  | prises LV/LL < 100 W                                         |
-| Fenêtre horaire solaire       | 10 h 30 – 16 h 30                                            |
-| Budget démarrages solaires    | 2 / jour                                                     |
-| Grâce de démarrage            | 4 min                                                        |
-| Import dur (coupure)          | > 150 W pendant 90 s                                         |
-| Garde batterie                | SoC −5 points depuis le début (ou < 93 %)                    |
-| Ballon plein                  | E_avail ≥ 95 % E_full, ou thermostat (conso < 250 W / 2 min) |
-| Filet HC                      | backstop = 7 h 30 − durée déficit − 15 min                   |
-| Filet famille                 | réserve < 1 douche (question n° 1)                           |
-
-## 12. Questions ouvertes (à trancher AVANT le code)
-
-1. **Filet famille** — réserve < 1 douche un après-midi gris : chauffer immédiatement
-   en HP (eau garantie, ~0,60 €) ou attendre le filet HC de la nuit (risque : douche
-   du soir froide) ?
-2. **Écrêtage invisible** — activer le déclencheur secondaire (batteries pleines +
-   grid ≈ 0 + mêmes garde-fous) pour capter le surplus que l'injection ne montre
-   pas ? Recommandation : oui, il est aussi sûr que le principal.
-3. **Fenêtre horaire** — 10 h 30–16 h 30 te convient ? (le pan Ouest produit tard
-   l'été : on peut élargir à 17 h en plein été.)
-4. **Budget** — 2 démarrages solaires/jour, c'est ton geste ?
-5. **Seuils** — injection franche 300 W/5 min ; import dur 150 W/90 s : à ajuster ?
+1. **Les stations Anker mettent deux à trois minutes à réagir** quand une grosse
+   consommation démarre. Il faut donc accorder un délai de grâce à chaque allumage,
+   et ne pas juger une chauffe sur ses premières minutes.
+2. **Après un choc (allumage ou coupure), leur régulation oscille pendant deux à
+   quatre minutes** : leur débit peut retomber à zéro puis remonter à pleine
+   puissance sans raison apparente. Conclusion : ne jamais prendre de décision sur
+   une mesure isolée ; exiger qu'une situation persiste avant d'agir.
+3. **Chaque allumage et chaque coupure ont un coût caché** (le délai de réaction,
+   l'oscillation, l'usure du contacteur). Conclusion : allumer rarement, aux
+   moments les plus sûrs, et tenir longtemps — plutôt qu'essayer souvent.
 
 ---
 
-_Validation attendue de Laurent avant toute implémentation. Le pilotage reste en
-MANUEL + observation d'ici là._
+## Deuxième partie — Comment le système raisonne : les phases
+
+Le pilotage fonctionne comme une suite de phases clairement nommées, chacune avec
+sa règle propre. À tout moment, le système est dans une et une seule de ces phases.
+
+**Le repos.** Le chauffe-eau est éteint. Le système surveille en permanence les
+sept conditions d'allumage décrites plus bas. Quand elles sont toutes réunies, il
+ne se précipite pas : il attend qu'elles **restent** réunies pendant cinq minutes
+d'affilée. Une embellie de trente secondes entre deux nuages ne déclenche rien.
+
+**L'allumage** (les quatre premières minutes d'une chauffe). Le contacteur vient de
+se fermer, la résistance chauffe, et les stations Anker n'ont pas encore réagi :
+pendant deux à trois minutes, le courant vient du réseau — c'est le passage obligé
+décrit plus haut. Le système surveille sans juger. Si au bout de quatre minutes le
+courant continue de venir du réseau au lieu du soleil (par exemple parce qu'un
+grand nuage est arrivé pile à ce moment), il renonce et coupe.
+
+**La chauffe établie.** C'est le régime de croisière, et c'est ici que s'applique
+la règle d'or dans toute sa rigueur :
+
+- Si la maison se met à acheter plus de **cent cinquante watts** au réseau, et que
+  cela dure plus d'**une minute et demie**, le système coupe le chauffe-eau,
+  immédiatement et sans état d'âme. La maison a besoin de sa puissance — four,
+  plaques, bouilloire, lave-vaisselle, peu importe — elle passe avant le ballon.
+  Le délai d'une minute et demie sert uniquement à ne pas confondre un vrai besoin
+  avec une des oscillations passagères des stations Anker.
+- Un passage nuageux ordinaire ne coupe rien : les batteries, qui sont pleines,
+  prennent le relais des panneaux, et la maison n'achète rien au réseau. C'est le
+  comportement voulu.
+- En revanche, si le mauvais temps s'installe, les batteries se vident peu à peu
+  pour nourrir le ballon — et cela, le compteur ne le voit pas, puisque rien n'est
+  acheté au réseau. C'est pourquoi une seconde protection veille : si **le niveau
+  des batteries a baissé de cinq points** depuis le début de la chauffe, le système
+  coupe. Vos batteries sont la réserve de la soirée ; le ballon n'a pas le droit de
+  les vider.
+- La fin normale d'une chauffe, c'est le **thermostat mécanique du ballon** qui la
+  décide, comme toujours : quand l'eau atteint sa température, il coupe la
+  résistance de lui-même. Le système le détecte (la consommation du chauffe-eau
+  tombe à presque rien alors que le contacteur est fermé), en conclut que le ballon
+  est plein, et remet sa jauge de réserve d'eau chaude à son maximum.
+
+**La cession.** C'est la phase où arrive le système quand il a coupé pour laisser
+la puissance à la maison. Il y reste le temps que les protections du matériel
+imposent (au moins cinq minutes éteint, et au moins dix minutes entre deux
+manœuvres), puis retourne au repos, où il attendra de nouveau que les sept
+conditions soient réunies cinq minutes durant.
+
+**Le plein.** Le thermostat a coupé : il n'y a plus rien à faire jusqu'à ce que de
+l'eau chaude soit utilisée. Quand une douche fait baisser la température du ballon
+de quelques degrés, le système retourne au repos.
+
+**La recharge de fin de nuit** (le garde-fou). Indépendamment de tout ce qui
+précède, le système calcule chaque soir ce qui manquera pour assurer deux douches
+à sept heures trente, en tenant compte du refroidissement naturel du ballon pendant
+la nuit. S'il manque quelque chose, il programme une chauffe en heures creuses,
+calée pour se **terminer** vers sept heures et quart : commencer plus tôt ne ferait
+que payer des pertes de chaleur inutiles. Cette chauffe s'arrête dès que le
+nécessaire est atteint — pas besoin de remplir le ballon à ras bord à l'aube quand
+le soleil s'en chargera gratuitement trois heures plus tard. Les batteries, elles,
+ne sont **jamais** mises à contribution la nuit pour le ballon.
+
+**Vos commandes, toujours prioritaires.** Le mode **Manuel** vous rend
+l'interrupteur : le système n'y touche plus. Le mode **Vacances** coupe tout. Le
+bouton **« Chauffer maintenant »** lance une chauffe immédiate jusqu'au plein, quel
+que soit le prix du courant à cet instant — c'est votre choix, le système
+l'exécute sans discuter. Et dans tous les cas, les protections de fond demeurent :
+coupure de sécurité si l'eau dépasse soixante-dix degrés, délais anti-usure du
+contacteur, et coupure automatique du boîtier Shelly si jamais le système
+informatique cessait de répondre.
+
+---
+
+## Troisième partie — Les sept conditions pour allumer au soleil
+
+Le système n'allume la chauffe solaire que si les sept conditions suivantes sont
+**toutes** vraies, **en même temps**, et le restent **pendant cinq minutes**.
+
+1. **Le ballon n'est pas déjà plein.** Sa réserve est en dessous de quatre-vingt-
+   quinze pour cent, et le thermostat n'a pas coupé récemment.
+
+2. **La maison donne du courant au réseau, franchement et durablement.** Le
+   compteur principal mesure plus de **trois cents watts** qui partent vers EDF, en
+   continu depuis cinq minutes. C'est la preuve directe, indiscutable, que de
+   l'énergie est en train d'être perdue — puisqu'elle n'est pas payée. C'est le
+   signal de référence.
+
+3. **Les batteries sont pleines.** Leur niveau dépasse quatre-vingt-dix-sept pour
+   cent et elles n'absorbent presque plus rien. Tant qu'elles se remplissent, le
+   surplus a une meilleure destination que le ballon : on ne leur vole jamais leur
+   recharge.
+
+4. **La maison est tranquille.** Ni le lave-vaisselle ni le lave-linge ne tournent
+   (leurs prises connectées font foi). Quant au four ou aux plaques, s'ils étaient
+   allumés, la maison ne serait pas en train de donner du courant au réseau — la
+   condition numéro deux les couvre donc naturellement.
+
+5. **Il reste des heures de soleil devant soi.** L'allumage n'est autorisé
+   qu'entre dix heures trente et seize heures trente. Une chauffe lancée en fin
+   d'après-midi finirait inévitablement sur les batteries, au détriment de la
+   soirée.
+
+6. **Le quota du jour n'est pas épuisé.** Deux allumages solaires par jour, pas
+   davantage. Multiplier les essais, c'est secouer la régulation des stations Anker
+   et user le contacteur — l'échec du 2 juillet l'a démontré.
+
+7. **Les délais de protection du matériel sont écoulés** (cinq minutes minimum
+   depuis la dernière coupure, dix minutes entre deux manœuvres).
+
+### Le cas particulier du surplus invisible
+
+Il existe une situation, observée le 2 juillet, où du surplus se perd **sans**
+que le compteur montre un don franc au réseau : les batteries sont pleines, les
+stations Anker ont bridé leurs panneaux, et l'échange avec le réseau reste proche
+de zéro. Les panneaux pourraient produire deux mille watts de plus ; rien ne le
+montre. Pour ce cas, la proposition est un déclencheur de secours : si les
+batteries sont pleines, qu'elles n'absorbent plus rien, qu'il fait grand jour et
+que la maison n'achète rien au réseau — le tout pendant cinq minutes — alors
+l'allumage est permis lui aussi. Toutes les autres conditions (maison tranquille,
+fenêtre horaire, quota, délais) restent exigées. C'est la **question numéro deux**
+posée à la fin de ce document.
+
+---
+
+## Quatrième partie — Douze journées racontées
+
+**1. Une belle journée d'été, maison tranquille.** Les batteries atteignent cent
+pour cent vers onze heures. La maison se met à donner plusieurs centaines de watts
+au réseau. Au bout de cinq minutes de ce régime, le chauffe-eau s'allume. Les
+stations Anker mettent leurs deux ou trois minutes à monter, puis la chauffe se
+poursuit entièrement au soleil, jusqu'à ce que le thermostat coupe, vers treize ou
+quatorze heures. Le seul courant acheté à EDF aura été celui du délai de réaction
+initial — environ deux centimes. C'est très exactement votre journée type en
+pilotage manuel.
+
+**2. Le lave-vaisselle démarre pendant la chauffe.** Il tire deux mille watts ; les
+stations, déjà à pleine puissance pour le ballon, ne peuvent pas suivre ; la maison
+se met à acheter au réseau. Au bout d'une minute et demie, le système coupe le
+chauffe-eau : la vaisselle passe d'abord. Une fois le cycle terminé, si le don au
+réseau reprend franchement pendant cinq minutes, le système utilise son deuxième et
+dernier allumage de la journée pour finir le ballon.
+
+**3. Des nuages qui vont et viennent.** Pendant la chauffe, chaque passage nuageux
+fait chuter les panneaux, mais les batteries pleines prennent le relais : la maison
+n'achète rien, le système ne coupe pas. Si le ciel se couvre durablement, les
+batteries s'entament ; dès qu'elles ont perdu cinq points, le système coupe
+proprement et rend la main. Fini les allumages-coupures en cascade de la première
+version.
+
+**4. Une journée entièrement grise.** Le don franc au réseau ne se produit jamais ;
+le chauffe-eau reste éteint toute la journée. Le soir, le système constate qu'il
+manquera de l'eau pour les douches du matin et programme la recharge de fin de
+nuit, au tarif le plus bas, calée pour finir vers sept heures et quart. Les douches
+sont garanties.
+
+**5. Le matin, batteries à moitié.** Tout le surplus solaire va dans les batteries ;
+rien n'est perdu ; le chauffe-eau ne s'allume pas. Il attendra qu'elles soient
+pleines.
+
+**6. Dix-sept heures trente, grand soleil, don franc au réseau.** La fenêtre
+horaire est passée : pas d'allumage. Une chauffe commencée si tard finirait sur les
+batteries, au détriment de la soirée. Ce surplus de fin de journée est perdu —
+comme il l'était en pilotage manuel. (Voir la **question numéro trois** : faut-il
+élargir la fenêtre en plein été ?)
+
+**7. Des invités prennent des douches à vingt heures.** La réserve d'eau chaude
+chute. Le système ne fait rien la nuit (les batteries sont intouchables), mais la
+recharge de fin de nuit couvrira le manque avant le matin. Si la réserve tombait en
+dessous d'une seule douche, la **question numéro un** (ci-dessous) décidera du
+comportement.
+
+**8. Le repas de midi se prépare pendant une chauffe.** Four et plaques s'allument ;
+la maison achète au réseau ; en une minute et demie, le chauffe-eau s'efface.
+Toute la puissance revient à la cuisine.
+
+**9. Le ballon est plein à treize heures trente.** Le thermostat coupe de lui-même,
+le système l'enregistre, tout s'arrête. Le surplus repart au réseau : la mission du
+jour est accomplie, le ballon est plein.
+
+**10. Vous pilotez à la main.** Le mode Manuel est prioritaire sur tout. Le système
+se contente d'observer et de tenir le journal ; il ne touche à rien.
+
+**11. En hiver.** Les batteries n'atteignent que rarement le plein ; les conditions
+d'allumage solaire sont donc rarement réunies, et c'est la recharge de fin de nuit
+qui porte l'essentiel — avec des besoins d'eau chaude recalculés pour la saison
+(l'eau froide arrive à neuf degrés au lieu de quinze). Les beaux jours d'hiver, la
+chauffe solaire reprend ses droits.
+
+**12. Le surplus invisible.** Batteries pleines, panneaux bridés, échange avec le
+réseau proche de zéro : selon la réponse à la question numéro deux, le déclencheur
+de secours capte cette énergie perdue, ou bien on choisit de la laisser filer par
+prudence.
+
+---
+
+## Cinquième partie — Et si quelque chose tombe en panne ?
+
+- **Le compteur principal ne répond plus** : plus aucune chauffe solaire (la seule
+  source de vérité manque). Seule la recharge de fin de nuit reste active.
+- **Les stations Anker ne répondent plus** : l'allumage sur don franc au réseau
+  reste possible (il ne dépend que du compteur principal), mais la protection du
+  niveau des batteries devient aveugle ; en compensation, la fenêtre horaire se
+  resserre (fin à quinze heures).
+- **La sonde du ballon se tait** : la jauge de réserve dérive lentement ; au-delà
+  de deux jours sans nouvelles, plus de chauffe solaire, et une recharge de nuit
+  prudente.
+- **Le boîtier du contacteur ne répond plus** : aucun ordre n'est envoyé, et la
+  carte affiche l'anomalie.
+
+Dans le pire des cas imaginable, le système dégénère toujours vers le même
+comportement : « une recharge en heures creuses qui se termine à sept heures et
+quart » — c'est-à-dire un chauffe-eau ordinaire bien réglé. Il n'existe aucun
+scénario de panne où les douches du matin sont menacées ou la facture aggravée.
+
+---
+
+## Sixième partie — Les valeurs proposées (toutes modifiables)
+
+| Ce que la valeur règle                         | Proposition                                                     |
+| ---------------------------------------------- | --------------------------------------------------------------- |
+| Don au réseau considéré comme franc            | plus de trois cents watts                                       |
+| Durée d'observation avant d'allumer            | cinq minutes                                                    |
+| Batteries considérées comme pleines            | niveau au-dessus de quatre-vingt-dix-sept pour cent             |
+| Fenêtre d'allumage solaire                     | de dix heures trente à seize heures trente                      |
+| Nombre maximal d'allumages solaires par jour   | deux                                                            |
+| Délai de grâce au démarrage                    | quatre minutes                                                  |
+| Achat au réseau qui déclenche la coupure       | plus de cent cinquante watts pendant plus d'une minute et demie |
+| Baisse des batteries qui déclenche la coupure  | cinq points depuis le début de la chauffe                       |
+| Heure visée pour la fin de la recharge de nuit | sept heures et quart                                            |
+
+---
+
+## Septième partie — Les cinq questions qui vous appartiennent
+
+1. **S'il ne reste plus qu'une seule douche en réserve, un après-midi gris**, que
+   doit faire le système : chauffer immédiatement au tarif plein (l'eau chaude est
+   garantie, pour environ soixante centimes), ou attendre les heures creuses de la
+   nuit (au risque qu'une douche du soir soit froide) ?
+
+2. **Le surplus invisible** (batteries pleines, panneaux bridés, rien d'apparent au
+   compteur) : faut-il activer le déclencheur de secours décrit plus haut pour
+   capter cette énergie perdue ? Je le recommande — il est entouré des mêmes
+   garde-fous que le déclencheur principal.
+
+3. **La fenêtre d'allumage** (dix heures trente à seize heures trente) vous
+   convient-elle ? Vos panneaux orientés à l'ouest produisent tard en plein été :
+   on peut prolonger jusqu'à dix-sept heures en juillet-août.
+
+4. **Deux allumages solaires par jour au maximum** : est-ce fidèle à votre façon de
+   faire ?
+
+5. **Les seuils** — trois cents watts pendant cinq minutes pour allumer, cent
+   cinquante watts pendant une minute et demie pour couper : ces valeurs
+   correspondent-elles à votre expérience de l'installation ?
+
+---
+
+_Document soumis à la relecture et à l'annotation de Laurent. Aucune ligne de code
+ne sera écrite avant son accord. Le chauffe-eau reste en commande manuelle._
