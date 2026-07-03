@@ -1,0 +1,702 @@
+/**
+ * Tests du PILOTE V2 (pilotStep — machine à phases « règle zéro achat EDF »).
+ * Spec validée par Laurent le 03/07/2026.
+ *   pnpm test:pilot
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { pilotStep, defaultPilotState, type PilotCtx } from '../src/lib/server/cumulus/pilot.ts';
+import { sunPosition } from '../src/lib/server/cumulus/sun.ts';
+import type {
+  CumulusInputs,
+  CumulusConfig,
+  CumulusRuntimeState,
+  PilotState
+} from '../src/lib/server/cumulus/types.ts';
+
+// 3 juillet 2026, 12:00 UTC = 14:00 locale (Paris, été) — plein soleil à Sanguinet.
+const NOON = Date.parse('2026-07-03T12:00:00Z');
+// 3 juillet 2026, 02:00 UTC = 04:00 locale — nuit, heures creuses.
+const NIGHT = Date.parse('2026-07-03T02:00:00Z');
+const min = (m: number) => m * 60_000;
+
+function cfg(o: Record<string, unknown> = {}, pilotO: Record<string, unknown> = {}): CumulusConfig {
+  return {
+    profile: 'solar_first',
+    tminConfortC: 45,
+    tmaxSondeC: 70,
+    rechargeHysteresisC: 5,
+    tempOffsetC: 0,
+    minOnSec: 300,
+    minOffSec: 300,
+    antiCyclingSec: 600,
+    forecastFaibleKwh: 7,
+    autoOffDelaySec: 600,
+    tempStaleSec: 1800,
+    tankFullPowerW: 250,
+    tankFullConfirmSec: 120,
+    faultConfirmSec: 300,
+    observationMode: false,
+    batteryMaxDischargeW: 2400,
+    energyModel: { etaHeat: 0.98, eDoucheWhSummer: 2000 } as never,
+    pilot: {
+      exportOnW: 200,
+      observationBeforeOnSec: 180,
+      battFullPct: 98,
+      chargeIdleW: 120,
+      solarStartsPerDay: 2,
+      apsMinW: 300,
+      minUsefulHeatMin: 45,
+      invisibleSurplusMinW: 2000,
+      graceStartupSec: 240,
+      cutBuyW: 150,
+      cutBuySustainSec: 30,
+      cutBuyHardW: 500,
+      batteryDropCutPts: 20,
+      batteryFloorCutPct: 40,
+      sunElevStartDeg: 20,
+      sunAzStartDeg: 120,
+      sunElevEndDeg: 30,
+      sunAzEndDeg: 252,
+      degradedWindowEndH: 15,
+      hcEndTarget: '07:15',
+      hcPlanHour: 22,
+      hcMorningReservePct: 30,
+      hcGrey1Factor: 1.3,
+      hcGrey2Factor: 1.6,
+      reserveShowers: 2,
+      fullFraction: 0.95,
+      heatPowerW: 2900,
+      sb1BatteryIndex: 0,
+      latDeg: 44.4792,
+      lonDeg: -1.0835,
+      apsStaleSec: 300,
+      apsMuteFloorW: 30,
+      apsMuteConfirmSec: 600,
+      apsTwinMinW: 200,
+      ...pilotO
+    },
+    ...o
+  } as CumulusConfig;
+}
+
+function st(
+  o: Partial<CumulusRuntimeState> = {},
+  pilotO: Partial<PilotState> = {}
+): CumulusRuntimeState {
+  return {
+    autoMode: 'auto',
+    manualRelayOn: false,
+    boostUntilFull: false,
+    relayDesired: null,
+    lastOnTs: null,
+    lastOffTs: null,
+    lastTransitionTs: null,
+    lowPowerSinceTs: null,
+    ballonCharged: false,
+    chargedAtTempC: null,
+    onSinceTs: null,
+    energyDayDate: '2026-07-03',
+    energyTodayKwh: 0,
+    lastCumulusKwh: null,
+    lastDisinfectTs: null,
+    lastTickTs: null,
+    lastTempC: 50,
+    lastReason: 'idle',
+    lastSubMode: 'OFF',
+    anomaly: 'none',
+    pilot: { ...defaultPilotState(), startsDate: '2026-07-03', ...pilotO },
+    log: [],
+    ...o
+  } as CumulusRuntimeState;
+}
+
+function inp(o: Partial<CumulusInputs> = {}): CumulusInputs {
+  return {
+    now: NOON,
+    todayParis: '2026-07-03',
+    tempC: 50,
+    tempAgeMs: 10_000,
+    em50Available: true,
+    gridPowerW: 0,
+    cumulusPowerW: 0,
+    cumulusKwh: 100,
+    isHC: false,
+    minutesToHcEnd: -1,
+    priceHp: 0.2318,
+    priceHc: 0.1812,
+    forecastAvailable: true,
+    solNextDaylightKwh: 20,
+    forecastD1Kwh: 18,
+    forecastD2Kwh: 18,
+    relayAvailable: true,
+    relayOn: false,
+    ankerAvailable: true,
+    pvPowerW: 500,
+    ankerGridPowerW: 0,
+    sbOutputPowerW: 0,
+    batteryDischargeW: 0,
+    batterySocPct: [99, 99],
+    batteryEnergyWh: 5000,
+    batteryCapacityWh: 5360,
+    batteryChargeW: 0,
+    sbInputW: [null, null],
+    pvApsW: 800,
+    apsAvailable: true,
+    apsAgeSec: 5,
+    indoorC: 24,
+    outdoorC: 25,
+    indoorSources: [],
+    outdoorSources: [],
+    appliances: [],
+    ...o
+  } as CumulusInputs;
+}
+
+function ctx(o: Partial<PilotCtx> = {}): PilotCtx {
+  return {
+    eAvailWh: 8000,
+    eFullWh: 16000,
+    eDoucheWh: 2000,
+    lossPerHWh: 70,
+    hourLocal: 14,
+    minuteOfDay: 840,
+    tomorrowParis: '2026-07-04',
+    potential: {
+      potSb1W: 800,
+      potSb2W: 500,
+      potTotalW: 2100,
+      invisibleSurplusW: 0,
+      geoRatioWest: 0.7,
+      calibUpdated: false
+    },
+    ...o
+  };
+}
+
+// ─── Sanity des éphémérides ───────────────────────────────────────────────────
+
+test('éphémérides : soleil haut à midi local, sous l’horizon la nuit (Sanguinet)', () => {
+  const noon = sunPosition(NOON, 44.4792, -1.0835);
+  assert.ok(noon.elevationDeg > 55, `élévation midi = ${noon.elevationDeg}`);
+  const night = sunPosition(NIGHT, 44.4792, -1.0835);
+  assert.ok(night.elevationDeg < 0, `élévation nuit = ${night.elevationDeg}`);
+});
+
+// ─── Allumage solaire : les 7 conditions + persistance 3 min ─────────────────
+
+test('don franc au réseau : les conditions démarrent le chrono, PAS d’allumage immédiat', () => {
+  const r = pilotStep(inp({ gridPowerW: -450 }), cfg(), st(), ctx());
+  assert.equal(r.wantOn, false); // le chrono de 3 min vient de démarrer
+  assert.equal(typeof r.pilot.condsSinceTs, 'number');
+});
+
+test('don franc tenu 3 min → allumage (wantOn, raison solaire)', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: -450 }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx()
+  );
+  assert.equal(r.wantOn, true);
+  assert.equal(r.reason, 'solar');
+  assert.equal(r.pilot.solarStartsToday, 1); // allumage spontané compté
+});
+
+test('batteries PAS pleines (en charge) → pas d’allumage même avec don franc', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: -450, batterySocPct: [70, 72], batteryChargeW: 900 }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx()
+  );
+  assert.equal(r.wantOn, false); // on ne vole jamais leur recharge
+});
+
+test('lave-vaisselle en marche → maison PAS tranquille → pas d’allumage', () => {
+  const r = pilotStep(
+    inp({
+      gridPowerW: -450,
+      appliances: [{ name: 'Lave-vaisselle', topic: 't', onW: 100, powerW: 1800, energyKwh: null }]
+    }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx()
+  );
+  assert.equal(r.wantOn, false);
+});
+
+test('nuit : fenêtre solaire fermée → pas d’allumage solaire', () => {
+  const r = pilotStep(
+    inp({ now: NIGHT, gridPowerW: -450 }),
+    cfg(),
+    st({}, { condsSinceTs: NIGHT - min(4) }),
+    ctx({ hourLocal: 4, minuteOfDay: 240 })
+  );
+  assert.equal(r.wantOn, false);
+});
+
+test('quota épuisé (2 spontanés) → pas d’allumage', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: -450 }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4), solarStartsToday: 2 }),
+    ctx()
+  );
+  assert.equal(r.wantOn, false);
+});
+
+test('reprise après cession-achat : HORS quota (réponse Laurent Q4)', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: -450 }),
+    cfg(),
+    st(
+      { lastOffTs: NOON - min(12), lastTransitionTs: NOON - min(12) },
+      { condsSinceTs: NOON - min(4), solarStartsToday: 2, lastCessionCause: 'buy' }
+    ),
+    ctx()
+  );
+  assert.equal(r.wantOn, true); // le quota est plein mais la reprise est autorisée
+  assert.equal(r.pilot.resumesToday, 1);
+  assert.equal(r.pilot.solarStartsToday, 2); // inchangé
+});
+
+test('ballon plein (95 %) → pas d’allumage', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: -450 }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx({ eAvailWh: 15500, eFullWh: 16000 })
+  );
+  assert.equal(r.wantOn, false);
+});
+
+// ─── Déclencheur de secours : surplus invisible (réponse Laurent Q2) ─────────
+
+test('surplus invisible ≥ 2000 W (batteries pleines, réseau ≈ 0) → allumage', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: -20, pvPowerW: 150 }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx({
+      potential: {
+        potSb1W: 1600,
+        potSb2W: 900,
+        potTotalW: 3300,
+        invisibleSurplusW: 2350,
+        geoRatioWest: 0.7,
+        calibUpdated: false
+      }
+    })
+  );
+  assert.equal(r.wantOn, true);
+  assert.match(r.view.note, /invisible/);
+});
+
+test('surplus invisible SOUS le seuil → pas d’allumage', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: -20, pvPowerW: 150 }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx({
+      potential: {
+        potSb1W: 700,
+        potSb2W: 400,
+        potTotalW: 1900,
+        invisibleSurplusW: 950,
+        geoRatioWest: 0.7,
+        calibUpdated: false
+      }
+    })
+  );
+  assert.equal(r.wantOn, false);
+});
+
+// ─── Chauffe en cours : grâce, coupures ───────────────────────────────────────
+
+test('GRÂCE de démarrage : achat 2400 W à 2 min → AUCUN jugement, on continue', () => {
+  const r = pilotStep(
+    inp({ relayOn: true, cumulusPowerW: 2900, gridPowerW: 2400 }),
+    cfg(),
+    st({ onSinceTs: NOON - min(2), lastOnTs: NOON - min(2) }),
+    ctx()
+  );
+  assert.equal(r.wantOn, true);
+  assert.equal(r.view.phase, 'allumage');
+});
+
+test('fin de grâce : l’achat persiste → on renonce (grace_fail)', () => {
+  const r = pilotStep(
+    inp({ relayOn: true, cumulusPowerW: 2900, gridPowerW: 2400 }),
+    cfg(),
+    st({ onSinceTs: NOON - min(4.5), lastOnTs: NOON - min(4.5) }),
+    ctx()
+  );
+  assert.equal(r.wantOn, false);
+  assert.equal(r.pilot.lastCessionCause, 'grace_fail');
+});
+
+test('chauffe établie : achat 300 W depuis 40 s (> 30 s Laurent) → coupure, cause buy', () => {
+  const r = pilotStep(
+    inp({ relayOn: true, cumulusPowerW: 2900, gridPowerW: 300 }),
+    cfg(),
+    st(
+      { onSinceTs: NOON - min(20), lastOnTs: NOON - min(20) },
+      { buyOverSinceTs: NOON - 40_000, socStartOfHeat: 99 }
+    ),
+    ctx()
+  );
+  assert.equal(r.wantOn, false);
+  assert.equal(r.pilot.lastCessionCause, 'buy');
+});
+
+test('chauffe établie : achat 300 W depuis 10 s seulement → on attend encore', () => {
+  const r = pilotStep(
+    inp({ relayOn: true, cumulusPowerW: 2900, gridPowerW: 300 }),
+    cfg(),
+    st(
+      { onSinceTs: NOON - min(20), lastOnTs: NOON - min(20) },
+      { buyOverSinceTs: NOON - 10_000, socStartOfHeat: 99 }
+    ),
+    ctx()
+  );
+  assert.equal(r.wantOn, true); // oscillation SolarBank possible — 30 s de confirmation
+});
+
+test('achat FRANC 800 W (> 500) → coupure IMMÉDIATE (la cuisine d’abord)', () => {
+  const r = pilotStep(
+    inp({ relayOn: true, cumulusPowerW: 2900, gridPowerW: 800 }),
+    cfg(),
+    st({ onSinceTs: NOON - min(20), lastOnTs: NOON - min(20) }, { socStartOfHeat: 99 }),
+    ctx()
+  );
+  assert.equal(r.wantOn, false);
+  assert.equal(r.pilot.lastCessionCause, 'hard_buy');
+});
+
+test('protection batterie : SoC −20 points depuis l’allumage → coupure (cause battery)', () => {
+  const r = pilotStep(
+    inp({ relayOn: true, cumulusPowerW: 2900, gridPowerW: 10, batterySocPct: [78, 78] }),
+    cfg(),
+    st({ onSinceTs: NOON - min(60), lastOnTs: NOON - min(60) }, { socStartOfHeat: 99 }),
+    ctx()
+  );
+  assert.equal(r.wantOn, false);
+  assert.equal(r.pilot.lastCessionCause, 'battery');
+});
+
+test('protection batterie : plancher 40 % → coupure même sans grosse chute', () => {
+  const r = pilotStep(
+    inp({ relayOn: true, cumulusPowerW: 2900, gridPowerW: 10, batterySocPct: [38, 39] }),
+    cfg(),
+    st({ onSinceTs: NOON - min(60), lastOnTs: NOON - min(60) }, { socStartOfHeat: 50 }),
+    ctx()
+  );
+  assert.equal(r.wantOn, false);
+  assert.equal(r.pilot.lastCessionCause, 'battery');
+});
+
+test('nuage ordinaire : les batteries compensent, achat ≈ 0 → ON NE COUPE PAS', () => {
+  const r = pilotStep(
+    inp({
+      relayOn: true,
+      cumulusPowerW: 2900,
+      gridPowerW: 25,
+      batteryDischargeW: 1200,
+      batterySocPct: [95, 96]
+    }),
+    cfg(),
+    st({ onSinceTs: NOON - min(30), lastOnTs: NOON - min(30) }, { socStartOfHeat: 99 }),
+    ctx()
+  );
+  assert.equal(r.wantOn, true);
+  assert.equal(r.view.phase, 'chauffe');
+});
+
+// ─── Recharge HC nocturne ─────────────────────────────────────────────────────
+
+test('plan HC calculé à 22 h : déficit → départ calé pour finir à 07:15', () => {
+  const eveningTs = Date.parse('2026-07-03T20:30:00Z'); // 22:30 locale
+  const r = pilotStep(
+    inp({ now: eveningTs, gridPowerW: 100, pvApsW: 0 }),
+    cfg(),
+    st(),
+    ctx({ eAvailWh: 2000, hourLocal: 22.5, minuteOfDay: 1350 })
+  );
+  assert.ok(r.pilot.hcPlan, 'un plan HC doit être calculé');
+  assert.equal(r.pilot.hcPlan!.forDate, '2026-07-04');
+  assert.ok(r.pilot.hcPlan!.startMin > 6, 'départ après 00:06');
+  assert.ok(r.pilot.hcPlan!.startMin < 435, 'départ avant 07:15');
+});
+
+test('réserve confortable le soir → PAS de plan HC (rien à recharger)', () => {
+  const eveningTs = Date.parse('2026-07-03T20:30:00Z');
+  const r = pilotStep(
+    inp({ now: eveningTs, gridPowerW: 100, pvApsW: 0 }),
+    cfg(),
+    st(),
+    ctx({ eAvailWh: 15000, hourLocal: 22.5, minuteOfDay: 1350 })
+  );
+  assert.equal(r.pilot.hcPlan, null);
+});
+
+test('modulation météo : J+1 ET J+2 gris → cible augmentée (facteur 1,6)', () => {
+  const eveningTs = Date.parse('2026-07-03T20:30:00Z');
+  const r = pilotStep(
+    inp({ now: eveningTs, gridPowerW: 100, pvApsW: 0, forecastD1Kwh: 3, forecastD2Kwh: 4 }),
+    cfg(),
+    st(),
+    ctx({ eAvailWh: 2000, hourLocal: 22.5, minuteOfDay: 1350 })
+  );
+  assert.ok(r.pilot.hcPlan);
+  assert.equal(r.pilot.hcPlan!.targetWh, Math.round(2 * 2000 * 1.6)); // besoin × hcGrey2Factor
+});
+
+test('fenêtre HC active + déficit → wantOn (raison hc)', () => {
+  const r = pilotStep(
+    inp({ now: NIGHT, isHC: true, gridPowerW: 50, pvApsW: 0 }),
+    cfg(),
+    st(
+      {},
+      {
+        hcPlan: {
+          forDate: '2026-07-03',
+          targetWh: 5000,
+          minWh: 4000,
+          startMin: 230, // 03:50
+          endMin: 450,
+          reason: 'test',
+          computedAt: NIGHT - min(300)
+        }
+      }
+    ),
+    ctx({ eAvailWh: 2000, hourLocal: 4, minuteOfDay: 240 })
+  );
+  assert.equal(r.wantOn, true);
+  assert.equal(r.reason, 'hc');
+});
+
+test('recharge HC en cours : besoin atteint → coupure (le soleil fera le reste)', () => {
+  const r = pilotStep(
+    inp({ now: NIGHT, isHC: true, relayOn: true, cumulusPowerW: 2900, gridPowerW: 2900 }),
+    cfg(),
+    st(
+      { onSinceTs: NIGHT - min(45), lastOnTs: NIGHT - min(45) },
+      {
+        hcPlan: {
+          forDate: '2026-07-03',
+          targetWh: 5000,
+          minWh: 4000,
+          startMin: 130,
+          endMin: 450,
+          reason: 'test',
+          computedAt: NIGHT - min(300)
+        }
+      }
+    ),
+    ctx({ eAvailWh: 5200, hourLocal: 4, minuteOfDay: 240 })
+  );
+  assert.equal(r.wantOn, false);
+  assert.match(r.view.note, /atteint/);
+});
+
+test('recharge HC : SoC ≤ 30 % ET besoin strict atteint → coupure (réserve du matin)', () => {
+  const r = pilotStep(
+    inp({
+      now: NIGHT,
+      isHC: true,
+      relayOn: true,
+      cumulusPowerW: 2900,
+      gridPowerW: 600,
+      batterySocPct: [28, 29]
+    }),
+    cfg(),
+    st(
+      { onSinceTs: NIGHT - min(45), lastOnTs: NIGHT - min(45) },
+      {
+        hcPlan: {
+          forDate: '2026-07-03',
+          targetWh: 6000,
+          minWh: 4000,
+          startMin: 130,
+          endMin: 450,
+          reason: 'test',
+          computedAt: NIGHT - min(300)
+        }
+      }
+    ),
+    ctx({ eAvailWh: 4500, hourLocal: 4, minuteOfDay: 240 }) // strict (4000) atteint, cible (6000) non
+  );
+  assert.equal(r.wantOn, false);
+});
+
+// ─── Observation ──────────────────────────────────────────────────────────────
+
+test('observation : conditions réunies → « aurait allumé » journalisé UNE fois, compteur incrémenté', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: -450 }),
+    cfg({ observationMode: true }),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx()
+  );
+  assert.equal(r.wantOn, true); // le pilote VEUT allumer (decide neutralisera)
+  assert.ok(r.events.some((e) => e.label === 'aurait allumé'));
+  assert.equal(r.pilot.solarStartsToday, 1);
+  // Deuxième tick : pas de re-journalisation
+  const r2 = pilotStep(
+    inp({ now: NOON + min(1), gridPowerW: -450 }),
+    cfg({ observationMode: true }),
+    st({}, { ...r.pilot }),
+    ctx()
+  );
+  assert.ok(!r2.events.some((e) => e.label === 'aurait allumé'));
+  assert.equal(r2.pilot.solarStartsToday, 1);
+});
+
+// ─── Modes dégradés ───────────────────────────────────────────────────────────
+
+test('EM50 muet → pas de don franc mesurable → pas d’allumage solaire', () => {
+  const r = pilotStep(
+    inp({ em50Available: false, gridPowerW: 0 }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx()
+  );
+  assert.equal(r.wantOn, false);
+});
+
+test('Anker muet : don franc EM50 seul suffit (condition batteries neutralisée)', () => {
+  const r = pilotStep(
+    inp({ ankerAvailable: false, batterySocPct: [], gridPowerW: -450 }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx()
+  );
+  assert.equal(r.wantOn, true);
+});
+
+test('Anker muet APRÈS 15 h → fenêtre resserrée, pas d’allumage', () => {
+  const late = Date.parse('2026-07-03T14:30:00Z'); // 16:30 locale
+  const r = pilotStep(
+    inp({ now: late, ankerAvailable: false, batterySocPct: [], gridPowerW: -450 }),
+    cfg(),
+    st({}, { condsSinceTs: late - min(4) }),
+    ctx({ hourLocal: 16.5, minuteOfDay: 990 })
+  );
+  assert.equal(r.wantOn, false);
+});
+
+// ─── Bloc « déclencheur de secours » (voie alternative, pas une 8e condition) ────
+
+test('la liste des conditions fait EXACTEMENT 7 lignes (le secours est à part)', () => {
+  const r = pilotStep(inp(), cfg(), st(), ctx());
+  assert.equal(r.view.conds.length, 7);
+  assert.ok(!r.view.conds.some((c) => c.key === 'invisible'));
+});
+
+test('secours « en veille (don franc présent) » quand la voie principale exporte', () => {
+  const r = pilotStep(inp({ gridPowerW: -450 }), cfg(), st(), ctx());
+  assert.equal(r.view.rescue.state, 'standby_export');
+});
+
+test('secours « en veille — X W / seuil » quand réseau ≈ 0 et surplus sous le seuil', () => {
+  const r = pilotStep(inp({ gridPowerW: -10, pvPowerW: 150 }), cfg(), st(), ctx());
+  assert.equal(r.view.rescue.state, 'standby_below');
+  assert.match(r.view.rescue.detail, /seuil 2000/);
+});
+
+test('secours « ARMÉ » quand les conditions bridage sont réunies', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: -20, pvPowerW: 150 }),
+    cfg(),
+    st(),
+    ctx({
+      potential: {
+        potSb1W: 1600,
+        potSb2W: 900,
+        potTotalW: 3300,
+        invisibleSurplusW: 2350,
+        geoRatioWest: 0.7,
+        calibUpdated: false
+      }
+    })
+  );
+  assert.equal(r.view.rescue.state, 'armed');
+});
+
+// ─── Alerte « APS muet » ─────────────────────────────────────────────────────
+
+test('APS injoignable + fenêtre ouverte → alerte « unreachable » + secours indisponible + journal', () => {
+  const r = pilotStep(inp({ apsAvailable: false, pvApsW: 0 }), cfg(), st(), ctx());
+  assert.equal(r.pilot.apsAlert, 'unreachable');
+  assert.equal(r.view.apsAlert, 'unreachable');
+  assert.equal(r.view.rescue.state, 'unavailable');
+  assert.ok(r.events.some((e) => e.label === 'alerte APS'));
+});
+
+test('APS injoignable la NUIT → pas d’alerte (fenêtre fermée, extinction normale)', () => {
+  const r = pilotStep(
+    inp({ now: NIGHT, apsAvailable: false, pvApsW: 0 }),
+    cfg(),
+    st(),
+    ctx({ hourLocal: 4, minuteOfDay: 240 })
+  );
+  assert.equal(r.pilot.apsAlert, 'none');
+});
+
+test('données APS périmées (> apsStaleSec) → « unreachable » même si le bridge répond', () => {
+  const r = pilotStep(inp({ apsAvailable: true, apsAgeSec: 900 }), cfg(), st(), ctx());
+  assert.equal(r.pilot.apsAlert, 'unreachable');
+});
+
+test('panne probable : APS ~0 W pendant que les jumeaux SB1 chargent — armement puis alerte', () => {
+  // Batteries PAS pleines (elles chargent) : l'entrée SB1 est significative.
+  const covered = inp({
+    pvApsW: 10,
+    sbInputW: [400, 200],
+    batterySocPct: [60, 62],
+    batteryChargeW: 800
+  });
+  // 1er tick : le chrono s'arme, pas encore d'alerte
+  const r1 = pilotStep(covered, cfg(), st(), ctx());
+  assert.equal(r1.pilot.apsAlert, 'none');
+  assert.equal(typeof r1.pilot.apsLowSinceTs, 'number');
+  // 2e tick, 11 min plus tard : soutenu > apsMuteConfirmSec → panne probable
+  const r2 = pilotStep({ ...covered, now: NOON + min(11) }, cfg(), st({}, { ...r1.pilot }), ctx());
+  assert.equal(r2.pilot.apsAlert, 'fault');
+  assert.ok(r2.events.some((e) => e.label === 'alerte APS' && /jumeaux/.test(e.detail)));
+});
+
+test('CIEL COUVERT : APS bas ET jumeaux SB1 bas → aucune alerte (pas de discriminant)', () => {
+  const r = pilotStep(
+    inp({ pvApsW: 15, sbInputW: [25, 10], batterySocPct: [60, 62], batteryChargeW: 60 }),
+    cfg(),
+    st(),
+    ctx()
+  );
+  assert.equal(r.pilot.apsAlert, 'none');
+  assert.equal(r.pilot.apsLowSinceTs, null);
+});
+
+test('BRIDAGE (batteries pleines) : entrée SB1 non significative → aucune alerte panne', () => {
+  const r = pilotStep(
+    inp({ pvApsW: 10, sbInputW: [250, 100], batterySocPct: [100, 100], batteryChargeW: 0 }),
+    cfg(),
+    st(),
+    ctx()
+  );
+  assert.equal(r.pilot.apsAlert, 'none');
+  assert.equal(r.pilot.apsLowSinceTs, null);
+});
+
+test('résorption : l’APS revient → alerte levée + journal', () => {
+  const r = pilotStep(
+    inp({ pvApsW: 520, sbInputW: [480, 200] }),
+    cfg(),
+    st({}, { apsAlert: 'fault', apsLowSinceTs: null }),
+    ctx()
+  );
+  assert.equal(r.pilot.apsAlert, 'none');
+  assert.ok(r.events.some((e) => e.label === 'alerte APS levée'));
+});

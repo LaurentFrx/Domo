@@ -7,12 +7,7 @@
  */
 
 import { readSettings, writeSettings } from '../settings-store';
-import type {
-  CumulusConfig,
-  EnergyModelConfig,
-  OutdoorSourcesConfig,
-  PlannerConfig
-} from './types';
+import type { CumulusConfig, EnergyModelConfig, OutdoorSourcesConfig, PilotConfig } from './types';
 
 const PROFILES = ['solar_first', 'balanced', 'comfort_first'] as const;
 type Profile = (typeof PROFILES)[number];
@@ -22,15 +17,10 @@ export function defaultCumulusConfig(): CumulusConfig {
   return {
     profile: 'solar_first',
 
-    tminConfortC: 45,
+    tminConfortC: 45, // « eau au moins tiède » (détection tank_full vs panne) — plus de chauffe de confort
     tmaxSondeC: 70, // sécurité anti-emballement, AU-DESSUS de la consigne molette (~62-65) → n'interfère pas
-    comfortHysteresisC: 4,
     rechargeHysteresisC: 5, // l'eau doit baisser de 5°C sous la dernière charge complète pour relancer
     tempOffsetC: 0,
-
-    surplusOnW: 1800,
-    surplusOffW: 0,
-    surplusOffGraceSec: 90,
 
     minOnSec: 300,
     minOffSec: 300,
@@ -45,30 +35,63 @@ export function defaultCumulusConfig(): CumulusConfig {
     tankFullConfirmSec: 120,
     faultConfirmSec: 300,
 
-    observationMode: true, // ÉTAPE 1a : démarre en observation — zéro chauffe automatique
-    batteryMaxDischargeW: 2400, // réservé (réflexe de délestage à venir) — non utilisé pour l'instant
+    observationMode: true, // V2 : démarre en OBSERVATION — le pilote journalise, ne commande pas
+    batteryMaxDischargeW: 2400, // réservé — non utilisé
 
     energyModel: defaultEnergyModel(),
-    planner: defaultPlannerConfig()
+    pilot: defaultPilotConfig()
   };
 }
 
-/** Défauts du planificateur prédictif (ÉTAPE 2a) — stratégie « pic PV + réserve 3 douches ». */
-export function defaultPlannerConfig(): PlannerConfig {
+/** Défauts du PILOTE V2 — valeurs de la spec annotée par Laurent (03/07/2026). */
+export function defaultPilotConfig(): PilotConfig {
   return {
-    enabled: true,
-    reserveShowers: 2, // fiche installation-energie.md : garantir 2 douches au matin (était 3)
-    fullFraction: 0.95, // E_avail ≥ 95% E_full → ballon plein
-    horizonH: 18, // horizon de prévision (jusqu'au prochain matin)
-    peakMinW: 1500, // seuil « pic solaire exploitable » à venir (W)
-    heatPowerW: 2955, // puissance de chauffe RÉELLE mesurée (EM-50 voie 1)
-    sbOutMaxW: 2400, // plafond sortie SolarBank mesuré (2×1200 W, PV+batterie confondus)
-    socReservePct: 30, // sous 30 % → la batterie ne couvre plus la chauffe (réserve du soir)
-    gridTolW: 300, // ≤ 300 W soutirés EDF → chauffe considérée « couverte par le solaire »
-    purePvFraction: 0.8, // PV seul couvre ≥ 80 % → surplus franc (sinon écrêté) → chauffe gratuite
-    clipSocPct: 97, // SoC ≥ 97 % + charge ~0 + jour → écrêtage (le PV mesuré MENT) → surplus libre
-    eveningBaseW: 250, // talon de conso du soir (W) — à recaler par l'apprentissage (étape B)
-    dinnerWh: 800 // forfait dîner/cuisson (Wh) si le dîner est encore à venir
+    // Allumage solaire
+    exportOnW: 200, // don franc au réseau exigé (valeur Laurent)
+    observationBeforeOnSec: 180, // conditions tenues 3 min avant d'allumer (valeur Laurent)
+    battFullPct: 98, // batteries « pleines » (valeur Laurent)
+    chargeIdleW: 120, // charge résiduelle « quasi nulle »
+    solarStartsPerDay: 2, // quota d'allumages SPONTANÉS (reprises après cession-achat HORS quota)
+    apsMinW: 300, // soleil RÉEL exigé (production APS minimale)
+    minUsefulHeatMin: 45, // jamais d'allumage à moins de 45 min de la fin de fenêtre
+    invisibleSurplusMinW: 2000, // déclencheur de secours : surplus invisible estimé minimal
+
+    // Grâce et coupures
+    graceStartupSec: 240, // latence SolarBank tolérée au démarrage (4 min)
+    cutBuyW: 150, // achat réseau déclenchant la coupure
+    cutBuySustainSec: 30, // soutenu 30 s (VALEUR CORRIGÉE PAR LAURENT — pas 90)
+    cutBuyHardW: 500, // achat franc → coupure immédiate (four/plaques : la cuisine d'abord)
+    batteryDropCutPts: 20, // SoC −20 points depuis le début de chauffe → coupure (valeur Laurent)
+    batteryFloorCutPct: 40, // plancher absolu de SoC en chauffe (valeur Laurent)
+
+    // Fenêtre solaire par éphémérides (défauts ≈ 10 h 30 – 16 h 30/17 h aux équinoxes,
+    // s'étend naturellement l'été — c'est l'élévation qui suit la saison, pas des dates)
+    sunElevStartDeg: 20,
+    sunAzStartDeg: 120,
+    sunElevEndDeg: 30,
+    sunAzEndDeg: 252,
+    degradedWindowEndH: 15, // cloud Anker muet → fin resserrée à 15 h
+
+    // Recharge HC de fin de nuit
+    hcEndTarget: '07:15',
+    hcPlanHour: 22,
+    hcMorningReservePct: 30, // réserve batterie pour les consos matinales
+    hcGrey1Factor: 1.3, // J+1 gris → besoin × 1,3
+    hcGrey2Factor: 1.6, // J+1 ET J+2 gris → besoin × 1,6
+
+    // Alerte « APS muet » (l'étalon de toute la détection solaire)
+    apsStaleSec: 300, // données APS périmées au-delà (fenêtre ouverte) → « injoignable »
+    apsMuteFloorW: 30, // APS ≤ 30 W…
+    apsMuteConfirmSec: 600, // … pendant 10 min…
+    apsTwinMinW: 200, // … alors que les jumeaux SB1 chargent ≥ 200 W → « panne probable »
+
+    // Divers
+    reserveShowers: 2,
+    fullFraction: 0.95,
+    heatPowerW: 2900, // spec : durée = déficit / (2900 × etaHeat)
+    sb1BatteryIndex: 0, // index de la station SUD dans batteries[] (à confirmer en observation)
+    latDeg: 44.4792, // Sanguinet — coordonnées du forecast-bridge (FORECAST_LAT/LON)
+    lonDeg: -1.0835
   };
 }
 
@@ -121,13 +144,8 @@ export function normalizeCumulusConfig(raw: unknown): CumulusConfig {
 
     tminConfortC: asNum(o.tminConfortC, d.tminConfortC, 30, 60),
     tmaxSondeC: asNum(o.tmaxSondeC, d.tmaxSondeC, 50, 80),
-    comfortHysteresisC: asNum(o.comfortHysteresisC, d.comfortHysteresisC, 0, 15),
     rechargeHysteresisC: asNum(o.rechargeHysteresisC, d.rechargeHysteresisC, 0, 20),
     tempOffsetC: asNum(o.tempOffsetC, d.tempOffsetC, -20, 20),
-
-    surplusOnW: asNum(o.surplusOnW, d.surplusOnW, 200, 4000),
-    surplusOffW: asNum(o.surplusOffW, d.surplusOffW, -2000, 2000),
-    surplusOffGraceSec: asNum(o.surplusOffGraceSec, d.surplusOffGraceSec, 0, 600),
 
     minOnSec: asNum(o.minOnSec, d.minOnSec, 0, 3600),
     minOffSec: asNum(o.minOffSec, d.minOffSec, 0, 3600),
@@ -146,28 +164,55 @@ export function normalizeCumulusConfig(raw: unknown): CumulusConfig {
     batteryMaxDischargeW: asNum(o.batteryMaxDischargeW, d.batteryMaxDischargeW, 500, 10000),
 
     energyModel: normalizeEnergyModel(o.energyModel),
-    planner: normalizePlannerConfig(o.planner)
+    pilot: normalizePilotConfig(o.pilot)
   };
 }
 
-/** Normalise la sous-config planner (complète par les défauts + bornes saines). */
-export function normalizePlannerConfig(raw: unknown): PlannerConfig {
+/** Normalise la sous-config pilot (complète par les défauts + bornes saines). */
+export function normalizePilotConfig(raw: unknown): PilotConfig {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const d = defaultPlannerConfig();
+  const d = defaultPilotConfig();
+  const asHm = (v: unknown, dflt: string): string =>
+    typeof v === 'string' && /^\d{2}:\d{2}$/.test(v) ? v : dflt;
   return {
-    enabled: typeof o.enabled === 'boolean' ? o.enabled : d.enabled,
+    exportOnW: asNum(o.exportOnW, d.exportOnW, 50, 2000),
+    observationBeforeOnSec: asNum(o.observationBeforeOnSec, d.observationBeforeOnSec, 60, 1800),
+    battFullPct: asNum(o.battFullPct, d.battFullPct, 80, 100),
+    chargeIdleW: asNum(o.chargeIdleW, d.chargeIdleW, 0, 1000),
+    solarStartsPerDay: asNum(o.solarStartsPerDay, d.solarStartsPerDay, 1, 10),
+    apsMinW: asNum(o.apsMinW, d.apsMinW, 50, 900),
+    minUsefulHeatMin: asNum(o.minUsefulHeatMin, d.minUsefulHeatMin, 10, 240),
+    invisibleSurplusMinW: asNum(o.invisibleSurplusMinW, d.invisibleSurplusMinW, 300, 5000),
+
+    graceStartupSec: asNum(o.graceStartupSec, d.graceStartupSec, 60, 900),
+    cutBuyW: asNum(o.cutBuyW, d.cutBuyW, 50, 1000),
+    cutBuySustainSec: asNum(o.cutBuySustainSec, d.cutBuySustainSec, 0, 600),
+    cutBuyHardW: asNum(o.cutBuyHardW, d.cutBuyHardW, 200, 3000),
+    batteryDropCutPts: asNum(o.batteryDropCutPts, d.batteryDropCutPts, 2, 60),
+    batteryFloorCutPct: asNum(o.batteryFloorCutPct, d.batteryFloorCutPct, 10, 90),
+
+    sunElevStartDeg: asNum(o.sunElevStartDeg, d.sunElevStartDeg, 0, 60),
+    sunAzStartDeg: asNum(o.sunAzStartDeg, d.sunAzStartDeg, 60, 180),
+    sunElevEndDeg: asNum(o.sunElevEndDeg, d.sunElevEndDeg, 0, 60),
+    sunAzEndDeg: asNum(o.sunAzEndDeg, d.sunAzEndDeg, 180, 320),
+    degradedWindowEndH: asNum(o.degradedWindowEndH, d.degradedWindowEndH, 10, 20),
+
+    hcEndTarget: asHm(o.hcEndTarget, d.hcEndTarget),
+    hcPlanHour: asNum(o.hcPlanHour, d.hcPlanHour, 18, 23),
+    hcMorningReservePct: asNum(o.hcMorningReservePct, d.hcMorningReservePct, 5, 80),
+    hcGrey1Factor: asNum(o.hcGrey1Factor, d.hcGrey1Factor, 1, 3),
+    hcGrey2Factor: asNum(o.hcGrey2Factor, d.hcGrey2Factor, 1, 3),
+
+    apsStaleSec: asNum(o.apsStaleSec, d.apsStaleSec, 60, 3600),
+    apsMuteFloorW: asNum(o.apsMuteFloorW, d.apsMuteFloorW, 5, 300),
+    apsMuteConfirmSec: asNum(o.apsMuteConfirmSec, d.apsMuteConfirmSec, 60, 3600),
+    apsTwinMinW: asNum(o.apsTwinMinW, d.apsTwinMinW, 50, 1000),
     reserveShowers: asNum(o.reserveShowers, d.reserveShowers, 0, 10),
     fullFraction: asNum(o.fullFraction, d.fullFraction, 0.5, 1),
-    horizonH: asNum(o.horizonH, d.horizonH, 1, 48),
-    peakMinW: asNum(o.peakMinW, d.peakMinW, 200, 5000),
     heatPowerW: asNum(o.heatPowerW, d.heatPowerW, 1000, 5000),
-    sbOutMaxW: asNum(o.sbOutMaxW, d.sbOutMaxW, 500, 6000),
-    socReservePct: asNum(o.socReservePct, d.socReservePct, 0, 100),
-    gridTolW: asNum(o.gridTolW, d.gridTolW, 0, 2000),
-    purePvFraction: asNum(o.purePvFraction, d.purePvFraction, 0.3, 1),
-    clipSocPct: asNum(o.clipSocPct, d.clipSocPct, 80, 100),
-    eveningBaseW: asNum(o.eveningBaseW, d.eveningBaseW, 0, 2000),
-    dinnerWh: asNum(o.dinnerWh, d.dinnerWh, 0, 5000)
+    sb1BatteryIndex: asNum(o.sb1BatteryIndex, d.sb1BatteryIndex, 0, 1),
+    latDeg: asNum(o.latDeg, d.latDeg, -90, 90),
+    lonDeg: asNum(o.lonDeg, d.lonDeg, -180, 180)
   };
 }
 

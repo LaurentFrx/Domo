@@ -1,37 +1,35 @@
 <script lang="ts">
   /**
-   * Carte « Eau chaude » — LA carte unique du chauffe-eau : pilotage + visualisation.
+   * Carte « Eau chaude » — pilotage + visualisation du PILOTE V2 (règle zéro achat EDF).
    *
-   * Ergonomie en 3 niveaux de lecture (refonte 2026-07-02, « c'était fouillis ») :
-   *   1. COUP D'ŒIL  — héros : « ≈ N douches » + jauge + UNE ligne d'état (l'intention
-   *      du pilote + prochaine chauffe fusionnées — plus de pavé redondant) ;
-   *   2. AGIR        — segmented Auto/Manuel/Vacances + contrôle contextuel
-   *      (interrupteur en manuel, « Chauffer maintenant » en auto) ;
-   *   3. COMPRENDRE  — économies (1 ligne), mini-stats horizontales (signature Yeldra :
-   *      libellés uppercase + valeurs fortes), journal du jour PLIÉ à 4 événements,
-   *      détail économique et aide dépliables.
-   *
-   * Zéro jargon (lisible par toute la famille) ; l'état machine (LED + statut coloré)
-   * vit dans le header, l'intention du pilote dans le héros — dits UNE seule fois.
+   * Trois niveaux de lecture :
+   *   1. COUP D'ŒIL  — réserve « ≈ N douches » + jauge + phase du pilote en clair ;
+   *   2. AGIR        — Auto / Manuel / Vacances + « Chauffer maintenant » ;
+   *   3. COMPRENDRE  — économies, mini-stats, journal du jour (transitions de phase
+   *      incluses), et le panneau « détail » exigé par la spec : l'état VRAI/FAUX des
+   *      7 conditions d'allumage, le surplus invisible estimé, la production APS et
+   *      le potentiel total, le niveau des batteries (+ delta depuis le début de la
+   *      chauffe), le compteur d'allumages (spontanés vs reprises), la prochaine action.
    */
-  import { cumulus, CUMULUS_ANOMALY_LABELS } from '$stores/cumulus.svelte';
+  import { cumulus, CUMULUS_ANOMALY_LABELS, PILOT_PHASE_LABELS } from '$stores/cumulus.svelte';
   import { em50 } from '$stores/em50.svelte';
-  import { forecast } from '$stores/forecast.svelte';
   import { haptic } from '$utils/haptic';
   import { openTempHistory } from '$stores/temp-history.svelte';
 
+  let showPilot = $state(false);
   let showHelp = $state(false);
-  let showEco = $state(false);
   let showAllEvents = $state(false);
 
-  const HEATING_W = 500; // au-dessus → le cumulus chauffe (EM-50 voie cumulus)
-  const EVENTS_FOLDED = 4; // journal plié : les N plus récents
+  const HEATING_W = 500;
+  const EVENTS_FOLDED = 4;
 
   const online = $derived(cumulus.relayConnected);
   const relayOn = $derived(cumulus.relayOn === true);
   const anomalyLabel = $derived(CUMULUS_ANOMALY_LABELS[cumulus.anomaly] || '');
   const cumulusW = $derived(em50.cumulusPowerW);
   const heatingNow = $derived(cumulusW > HEATING_W);
+  const pilot = $derived(cumulus.pilotView);
+  const observation = $derived(cumulus.decisionReason === 'observe_only');
 
   // ── Voyant : priorité à la PUISSANCE mesurée ──
   type Voyant = 'heating' | 'supplied' | 'off' | 'offline';
@@ -60,45 +58,30 @@
   const showers = $derived(showersRaw != null ? Math.max(0, Math.round(showersRaw)) : null);
   const eAvail = $derived(cumulus.eAvailWh);
   const eFull = $derived(cumulus.eFullWh);
-  const plan = $derived(cumulus.plan);
   const fillPct = $derived(
     eAvail && eFull && eFull > 0 ? Math.min(100, Math.max(0, (eAvail / eFull) * 100)) : 0
   );
 
-  // ── L'état du pilote, en UNE ligne (+ sous-ligne éventuelle) ──
-  const solarAhead = $derived.by(() => {
-    const now = Date.now();
-    return forecast.points.some((p) => new Date(p.time).getTime() > now && p.kw >= 1.5);
-  });
+  // ── Phase du pilote, en une ligne ──
+  const phaseEmoji: Record<string, string> = {
+    repos: '😴',
+    allumage: '🚀',
+    chauffe: '☀️',
+    cession: '🤝',
+    plein: '✅',
+    recharge_hc: '🌙'
+  };
   const status = $derived.by((): { line: string; sub: string | null } => {
-    if (heatingNow) {
-      const free = plan?.measured && plan.autoconsoPct >= 80;
+    if (!pilot)
       return {
-        line: `🔥 Refait le plein d'eau chaude${free ? ' — gratuit, au soleil' : ''}`,
+        line: heatingNow ? '🔥 Le chauffe-eau chauffe' : '💤 Pilote en attente de données',
         sub: null
       };
-    }
-    switch (plan?.action) {
-      case 'heat_now':
-        return { line: '☀️ Chauffe imminente — surplus solaire disponible', sub: null };
-      case 'wait_solar':
-        return {
-          line: '⏳ On attend le soleil pour recharger gratuitement',
-          sub: plan.targetHour != null ? `Prochaine chauffe : vers ${plan.targetHour} h` : null
-        };
-      case 'heat_hc':
-        return {
-          line: '🌙 Recharge prévue cette nuit (électricité moins chère)',
-          sub: null
-        };
-      default:
-        return {
-          line: '😴 Se repose — il reste assez d’eau chaude',
-          sub: solarAhead
-            ? 'Prochaine chauffe : dès que les batteries seront pleines — gratuit'
-            : null
-        };
-    }
+    const label = PILOT_PHASE_LABELS[pilot.phase] ?? pilot.phase;
+    return {
+      line: `${phaseEmoji[pilot.phase] ?? ''} ${label}`,
+      sub: pilot.nextAction || null
+    };
   });
 
   // ── Pilotage ──
@@ -118,7 +101,7 @@
     cumulus.setBoost(!cumulus.boostUntilFull);
   }
 
-  // ── Économies (boucle de regret) : gain vs « tout recharger la nuit » ──
+  // ── Économies (boucle de regret) ──
   const gainToday = $derived(cumulus.regretDay?.gainEur ?? 0);
   const gainWeek = $derived(cumulus.gainWeekEur);
   const fmtEur = (v: number) =>
@@ -138,15 +121,9 @@
   }
   const lastFull = $derived(fmtSince(cumulus.lastAnchorTs));
 
-  // ── Journal du jour, en mots simples (plié à EVENTS_FOLDED) ──
+  // ── Journal du jour (transitions de phase incluses) ──
   const hhmm = (ts: number) =>
     new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  // Heure fractionnaire (7.1) → « 7 h 06 »
-  const fmtHour = (h: number) => {
-    const hh = Math.floor(h);
-    const mm = Math.round((h - hh) * 60);
-    return `${hh} h${mm ? ' ' + String(mm).padStart(2, '0') : ''}`;
-  };
   const events = $derived.by(() => {
     const n = new Date();
     const start = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
@@ -154,7 +131,8 @@
       .filter(
         (e) =>
           e.ts >= start &&
-          (e.kind === 'heat_end' ||
+          (e.kind === 'phase' ||
+            e.kind === 'heat_end' ||
             e.kind === 'draw' ||
             e.kind === 'full' ||
             e.kind === 'appliance')
@@ -162,6 +140,16 @@
       .slice()
       .reverse()
       .map((e) => {
+        if (e.kind === 'phase') {
+          const emoji = e.label.includes('allum')
+            ? e.label.includes('aurait')
+              ? '👁️'
+              : '▶️'
+            : e.label.includes('coupé') || e.label.includes('cession')
+              ? '⏹️'
+              : '🌙';
+          return { ts: e.ts, emoji, text: `${e.label} — ${e.detail}` };
+        }
         if (e.kind === 'heat_end') {
           const free = e.detail.includes('soleil');
           return { ts: e.ts, emoji: free ? '☀️' : '🔌', text: `Chauffé — ${e.detail}` };
@@ -184,7 +172,7 @@
   class="flex flex-col gap-4 rounded-[var(--radius-2xl)] border p-4"
   style="background: var(--color-card); border-color: var(--color-border);"
 >
-  <!-- ═══ Header : état machine (LED + statut) + actions ═══ -->
+  <!-- ═══ Header ═══ -->
   <div class="flex items-start justify-between gap-3">
     <div class="flex min-w-0 items-center gap-2.5">
       <span class="led" class:blink={voyant === 'supplied'} style="--led: {voyantColor};"></span>
@@ -201,13 +189,13 @@
     <div class="flex items-center gap-1.5">
       <button
         type="button"
-        onclick={() => (showEco = !showEco)}
+        onclick={() => (showPilot = !showPilot)}
         class="flex h-6 items-center justify-center rounded-full px-2.5 text-xs font-semibold"
         style="background: color-mix(in oklch, var(--color-primary) 16%, transparent); color: var(--color-primary);"
-        aria-label="Détail de la décision"
-        aria-expanded={showEco}
+        aria-label="Détail du pilote"
+        aria-expanded={showPilot}
       >
-        détail
+        pilote
       </button>
       <button
         type="button"
@@ -222,14 +210,29 @@
     </div>
   </div>
 
-  <!-- Anomalie : la carte ne ment pas si le moteur a perdu le contrôle -->
   {#if anomalyLabel}
     <div class="cc-anomaly" role="alert">
       ⚠️ {anomalyLabel} — le pilotage automatique peut être affecté.
     </div>
   {/if}
 
-  <!-- ═══ 1. COUP D'ŒIL : réserve + intention du pilote ═══ -->
+  {#if pilot && pilot.apsAlert !== 'none'}
+    <div class="cc-anomaly" role="alert">
+      ⚠️ {pilot.apsAlert === 'unreachable'
+        ? 'Panneaux APS injoignables (bridge muet)'
+        : 'Panne probable des panneaux APS (les jumeaux SB1 produisent, pas l’APS)'} — la détection solaire
+      est aveugle ; la recharge de nuit prend le relais.
+    </div>
+  {/if}
+
+  {#if observation && mode === 'auto'}
+    <div class="cc-observ">
+      🧪 Observation : le pilote journalise ses décisions mais NE commande PAS le chauffe-eau — vous
+      gardez la main pendant la validation.
+    </div>
+  {/if}
+
+  <!-- ═══ 1. COUP D'ŒIL ═══ -->
   <div class="flex flex-col gap-2">
     <div class="flex items-baseline gap-2">
       <span class="text-[34px] leading-none font-bold" style="color: var(--color-fg);"
@@ -252,7 +255,7 @@
     {/if}
   </div>
 
-  <!-- ═══ 2. AGIR : mode + contrôle contextuel ═══ -->
+  <!-- ═══ 2. AGIR ═══ -->
   <div class="flex flex-col gap-2">
     <div class="seg" role="radiogroup" aria-label="Mode de pilotage">
       <button
@@ -313,7 +316,6 @@
   </div>
 
   <!-- ═══ 3. COMPRENDRE ═══ -->
-  <!-- Économies (boucle de regret) — 1 ligne -->
   <div class="gain">
     <span class="gain-label">💶 Économies vs recharge de nuit</span>
     <span class="gain-vals tabular-nums">
@@ -329,7 +331,6 @@
     </span>
   </div>
 
-  <!-- Mini-stats horizontales (libellés uppercase + valeurs fortes) -->
   <div class="ministats">
     <div class="ministat">
       <span class="ministat-label">Ballon</span>
@@ -356,7 +357,7 @@
     </div>
   </div>
 
-  <!-- Journal du jour (plié à 4) -->
+  <!-- Journal du jour -->
   <div class="flex flex-col gap-2">
     <div
       class="text-[11px] font-semibold tracking-[0.08em] uppercase"
@@ -391,153 +392,112 @@
     {/if}
   </div>
 
-  <!-- Détail économique (dépliable via « détail ») -->
-  {#if showEco && plan}
+  <!-- ═══ Détail du PILOTE (spec : conditions, estimateur, compteurs, prochaine action) ═══ -->
+  {#if showPilot && pilot}
     <div
-      class="flex flex-col gap-2 rounded-xl p-3 text-sm"
+      class="flex flex-col gap-2.5 rounded-xl p-3 text-sm"
       style="background: color-mix(in oklch, var(--color-primary) 8%, transparent);"
     >
-      <p class="font-semibold" style="color: var(--color-fg);">Le raisonnement, en détail</p>
-      <p style="color: var(--color-muted-fg);">{plan.reason}</p>
+      <div class="flex items-baseline justify-between gap-2">
+        <p class="font-semibold" style="color: var(--color-fg);">
+          {PILOT_PHASE_LABELS[pilot.phase] ?? pilot.phase}
+        </p>
+        <span class="text-xs" style="color: var(--color-muted-fg);"
+          >depuis {fmtSince(pilot.phaseSinceTs)}</span
+        >
+      </div>
+      <p class="text-[12.5px]" style="color: var(--color-muted-fg);">{pilot.note}</p>
+
+      <!-- Les 7 conditions, VRAI/FAUX d'un coup d'œil -->
+      <div class="conds">
+        {#each pilot.conds as c (c.key)}
+          <div class="cond" class:cond-ok={c.ok}>
+            <span class="cond-dot">{c.ok ? '✓' : '✗'}</span>
+            <span class="cond-label">{c.label}</span>
+            <span class="cond-detail">{c.detail}</span>
+          </div>
+        {/each}
+      </div>
+
+      <!-- Déclencheur de SECOURS (bridage) : une voie d'allumage ALTERNATIVE, pas une
+           8e condition — état neutre, jamais de ✗ rouge -->
+      <div
+        class="rescue"
+        class:rescue-armed={pilot.rescue.state === 'armed'}
+        class:rescue-unavailable={pilot.rescue.state === 'unavailable'}
+      >
+        <div class="rescue-head">
+          <span class="rescue-title">Déclencheur de secours (bridage)</span>
+          <span class="rescue-state">{pilot.rescue.detail}</span>
+        </div>
+        <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+          <dt style="color: var(--color-muted-fg);">Surplus invisible estimé</dt>
+          <dd class="text-right tabular-nums" style="color: var(--color-fg);">
+            {pilot.invisibleSurplusW} W
+          </dd>
+          <dt style="color: var(--color-muted-fg);">Production APS (étalon)</dt>
+          <dd class="text-right tabular-nums" style="color: var(--color-fg);">{pilot.pApsW} W</dd>
+          <dt style="color: var(--color-muted-fg);">Potentiel solaire total</dt>
+          <dd class="text-right tabular-nums" style="color: var(--color-fg);">
+            {pilot.potTotalW} W
+          </dd>
+        </dl>
+      </div>
 
       <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
-        <dt style="color: var(--color-muted-fg);">Réseau EDF (mesuré)</dt>
-        <dd
-          class="text-right font-semibold tabular-nums"
-          style="color: {plan.gridNowW <= 0
-            ? 'var(--color-success)'
-            : plan.gridNowW <= 300
-              ? 'var(--color-fg)'
-              : 'var(--color-warning)'};"
-        >
-          {plan.gridNowW <= 0 ? `${-plan.gridNowW} W injectés` : `${plan.gridNowW} W soutirés`}
-        </dd>
-
-        <dt style="color: var(--color-muted-fg);">Réserve visée</dt>
+        <dt style="color: var(--color-muted-fg);">Batteries</dt>
         <dd class="text-right tabular-nums" style="color: var(--color-fg);">
-          {plan.showers} / {plan.floorShowers} douches
+          {pilot.socNow !== null ? `${pilot.socNow} %` : '—'}
+          {#if pilot.socStart !== null && pilot.socNow !== null}
+            <span style="color: var(--color-muted-fg);">
+              ({pilot.socNow - pilot.socStart >= 0 ? '+' : ''}{pilot.socNow - pilot.socStart} pts depuis
+              l'allumage)</span
+            >
+          {/if}
         </dd>
 
-        <dt style="color: var(--color-muted-fg);">Manque pour le matin</dt>
+        <dt style="color: var(--color-muted-fg);">Allumages aujourd'hui</dt>
         <dd class="text-right tabular-nums" style="color: var(--color-fg);">
-          {plan.deficitWh > 0 ? `${(plan.deficitWh / 1000).toFixed(1)} kWh` : 'rien ✓'}
+          {pilot.solarStartsToday}/{pilot.quota} spontanés · {pilot.resumesToday} reprises
         </dd>
 
-        <dt style="color: var(--color-muted-fg);">
-          {plan.measured ? 'Chauffe en cours : autoconso' : 'Si on chauffe : autoconso (est.)'}
-        </dt>
-        <dd
-          class="text-right font-semibold tabular-nums"
-          style="color: {plan.autoconsoPct >= 90
-            ? 'var(--color-success)'
-            : plan.autoconsoPct >= 60
-              ? 'var(--color-fg)'
-              : 'var(--color-warning)'};"
-        >
-          {plan.autoconsoPct} %
-        </dd>
-
-        <dt style="color: var(--color-muted-fg);">· dont solaire (gratuit)</dt>
-        <dd class="text-right tabular-nums" style="color: var(--color-fg);">{plan.pvCoverW} W</dd>
-
-        <dt style="color: var(--color-muted-fg);">· dont batterie</dt>
-        <dd class="text-right tabular-nums" style="color: var(--color-fg);">
-          {plan.batteryCoverW} W
-        </dd>
-
-        <dt style="color: var(--color-muted-fg);">· dont réseau EDF</dt>
-        <dd
-          class="text-right font-semibold tabular-nums"
-          style="color: {plan.gridDrawW <= 300 ? 'var(--color-success)' : 'var(--color-warning)'};"
-        >
-          {plan.gridDrawW} W
-        </dd>
-
-        <dt style="color: var(--color-muted-fg);">Réserve batterie du soir</dt>
-        <dd class="text-right tabular-nums" style="color: var(--color-fg);">
-          {(plan.eveningNeedWh / 1000).toFixed(1)} kWh à garder
-        </dd>
-
-        <dt style="color: var(--color-muted-fg);">Pertes d'ici le matin</dt>
-        <dd class="text-right tabular-nums" style="color: var(--color-fg);">
-          {(plan.storageLossWh / 1000).toFixed(1)} kWh
-        </dd>
-
-        <dt style="color: var(--color-muted-fg);">Coût du kWh utile — maintenant</dt>
-        <dd
-          class="text-right font-semibold tabular-nums"
-          style="color: {plan.costNowEur <= plan.costHcEur
-            ? 'var(--color-success)'
-            : 'var(--color-fg)'};"
-        >
-          {plan.costNowEur.toFixed(3)} €/kWh
-        </dd>
-
-        <dt style="color: var(--color-muted-fg);">Coût du kWh utile — heures creuses</dt>
-        <dd
-          class="text-right font-semibold tabular-nums"
-          style="color: {plan.costHcEur < plan.costNowEur
-            ? 'var(--color-success)'
-            : 'var(--color-fg)'};"
-        >
-          {plan.costHcEur.toFixed(3)} €/kWh
-        </dd>
-
-        {#if plan.backstopHcHour != null}
-          <dt style="color: var(--color-muted-fg);">Filet nuit (au plus tard)</dt>
-          <dd class="text-right tabular-nums" style="color: var(--color-fg);">
-            {fmtHour(plan.backstopHcHour)}
-          </dd>
-        {/if}
-
-        {#if cumulus.regretDay && cumulus.regretDay.injWh > 0}
-          <dt style="color: var(--color-muted-fg);">Chauffé aujourd'hui</dt>
-          <dd class="text-right tabular-nums" style="color: var(--color-fg);">
-            ☀️ {(cumulus.regretDay.pvWh / 1000).toFixed(1)} · 🔋 {(
-              cumulus.regretDay.battWh / 1000
-            ).toFixed(1)} · ⚡ {(
-              (cumulus.regretDay.gridHpWh + cumulus.regretDay.gridHcWh) /
-              1000
-            ).toFixed(1)} kWh
-          </dd>
-        {/if}
+        <dt style="color: var(--color-muted-fg);">Prochaine action</dt>
+        <dd class="text-right" style="color: var(--color-fg);">{pilot.nextAction}</dd>
       </dl>
     </div>
   {/if}
 
-  <!-- Comment ça marche ? (dépliable via « ? ») -->
+  <!-- Comment ça marche ? -->
   {#if showHelp}
     <div
       class="flex flex-col gap-2 rounded-xl p-3 text-sm"
       style="background: color-mix(in oklch, var(--color-muted-fg) 8%, transparent); color: var(--color-muted-fg);"
     >
-      <p style="color: var(--color-fg);" class="font-semibold">Comment marche votre eau chaude</p>
+      <p style="color: var(--color-fg);" class="font-semibold">La règle du pilote</p>
       <p>
-        🛢️ Un grand réservoir (300 L) garde de l'eau chaude d'avance — de quoi prendre plusieurs
-        douches sans rien faire.
+        ⚡ Le chauffe-eau ne doit <strong>jamais</strong> être la cause d'un achat de courant à EDF. Il
+        s'allume uniquement quand la maison donne de l'électricité au réseau (elle serait perdue) et s'éteint
+        dès que la maison a besoin de sa puissance.
       </p>
       <p>
-        ☀️ Réchauffer coûte de l'électricité — sauf quand vos <strong>panneaux solaires</strong>
-        produisent plus que la maison ne consomme. Le système choisit ce moment tout seul.
+        ☀️ L'allumage exige sept conditions réunies pendant trois minutes (bouton « pilote » pour
+        les voir). Les stations solaires mettent deux à trois minutes à réagir : ce court passage
+        est le seul courant acheté — environ deux centimes par allumage.
       </p>
       <p>
-        🌙 S'il fait gris plusieurs jours, il recharge la nuit, quand l'électricité est moins chère
-        — juste à temps pour les douches du matin.
+        🌙 Si le soleil n'a pas suffi, une recharge de fin de nuit, aux heures creuses, garantit les
+        douches du matin — calée pour finir vers sept heures et quart.
       </p>
       <p>
-        💶 La ligne « Économies » compare chaque jour ce qui a été payé à ce qu'aurait coûté une
-        recharge de nuit systématique : c'est le gain réel du pilotage.
+        💶 La ligne « Économies » compare ce qui a été payé à ce qu'aurait coûté une recharge de
+        nuit systématique.
       </p>
-      <p>
-        ✋ Vous gardez toujours la main : « Chauffer maintenant » force une chauffe immédiate, «
-        Manuel » vous rend l'interrupteur, « Vacances » coupe tout.
-      </p>
+      <p>✋ Vous gardez toujours la main : « Chauffer maintenant », « Manuel », « Vacances ».</p>
     </div>
   {/if}
 </section>
 
 <style>
-  /* ── Voyant LED (glow Chrome-safe : pas de color-mix en box-shadow) ── */
   .led {
     width: 11px;
     height: 11px;
@@ -559,7 +519,6 @@
     }
   }
 
-  /* ── Bandeau d'anomalie (ambre calme, oklch direct — safe Chrome) ── */
   .cc-anomaly {
     padding: 0.5rem 0.7rem;
     border-radius: var(--radius-lg);
@@ -570,8 +529,16 @@
     background: oklch(0.66 0.14 75 / 0.16);
     box-shadow: inset 0 0 0 1px oklch(0.66 0.14 75 / 0.5);
   }
+  .cc-observ {
+    padding: 0.5rem 0.7rem;
+    border-radius: var(--radius-lg);
+    font-size: 0.78rem;
+    line-height: 1.3;
+    color: var(--color-muted-fg);
+    background: oklch(0.6 0.12 262 / 0.12);
+    box-shadow: inset 0 0 0 1px oklch(0.6 0.12 262 / 0.35);
+  }
 
-  /* ── Sélecteur de mode (segmented) ── */
   .seg {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -601,7 +568,6 @@
     box-shadow: 0 1px 3px oklch(0.1 0.01 286 / 0.25);
   }
 
-  /* ── Bouton « Chauffer maintenant » ── */
   .boost-btn {
     appearance: none;
     border: 1px solid var(--color-border);
@@ -622,7 +588,6 @@
     border-color: oklch(0.66 0.14 40 / 0.55);
   }
 
-  /* ── Ligne économies (compacte) ── */
   .gain {
     display: flex;
     align-items: baseline;
@@ -654,7 +619,6 @@
     margin: 0 0.25rem;
   }
 
-  /* ── Mini-stats horizontales (signature Yeldra : label uppercase + valeur forte) ── */
   .ministats {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -696,7 +660,6 @@
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* ── Bouton plier/déplier le journal ── */
   .fold-btn {
     appearance: none;
     border: none;
@@ -710,7 +673,79 @@
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* ── Interrupteur marche/arrêt (manuel) ── */
+  /* ── Bloc « déclencheur de secours » : état NEUTRE (jamais rouge) ── */
+  .rescue {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.55rem 0.7rem;
+    border-radius: var(--radius-lg);
+    background: color-mix(in oklch, var(--color-muted-fg) 8%, transparent);
+  }
+  .rescue-armed {
+    /* accent discret (cyan charte), PAS rouge : c'est une voie d'allumage prête */
+    background: oklch(0.82 0.15 200 / 0.12);
+    box-shadow: inset 0 0 0 1px oklch(0.82 0.15 200 / 0.35);
+  }
+  .rescue-unavailable {
+    opacity: 0.75;
+  }
+  .rescue-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+  .rescue-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted-fg);
+  }
+  .rescue-state {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-fg);
+  }
+  .rescue dl {
+    font-size: 12px;
+  }
+
+  /* ── Grille des conditions du pilote (✓/✗ d'un coup d'œil) ── */
+  .conds {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .cond {
+    display: grid;
+    grid-template-columns: 1.1rem auto 1fr;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-size: 12.5px;
+  }
+  .cond-dot {
+    font-weight: 700;
+    color: var(--color-warning);
+  }
+  .cond-ok .cond-dot {
+    color: var(--color-success);
+  }
+  .cond-label {
+    font-weight: 600;
+    color: var(--color-fg);
+    white-space: nowrap;
+  }
+  .cond-detail {
+    color: var(--color-muted-fg);
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .tg-track {
     position: relative;
     width: 44px;

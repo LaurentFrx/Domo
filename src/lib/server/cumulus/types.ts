@@ -22,19 +22,14 @@ export type DecisionReason =
   | 'manual_off' // mode manuel, relais forcé OFF
   | 'vacation_off' // mode off (vacances) → OFF
   | 'safety_high' // T ≥ Tmax (sonde) → OFF impératif
-  | 'comfort_min' // T < Tmin → ON garanti (filet famille)
   | 'boost' // chauffe « à la demande » (bouton Chauffer maintenant), jusqu'au plein
-  | 'legionella' // cycle anti-légionellose → ON
-  | 'solar' // surplus PV → ON
-  | 'offpeak' // heures creuses (cible de base) → ON
-  | 'offpeak_boost' // heures creuses (cible renfort, peu de soleil demain) → ON
   | 'tank_full' // coupure mécanique détectée (ballon plein) → OFF
-  | 'idle' // veille : ni surplus, ni HC → OFF
-  | 'observe_only' // mode observation : chauffe AUTO neutralisée (collecte seule, ÉTAPE 1a)
+  | 'idle' // veille (aucun pilote actif) → OFF
+  | 'observe_only' // mode observation : le pilote journalise, le relais n'est PAS commandé
   | 'anticycle_hold' // transition bloquée par l'anti-court-cycle → maintien
-  | 'plan_solar' // EXPLOITATION : le plan économique chauffe sur le solaire → ON
-  | 'plan_hc' // EXPLOITATION : le plan économique recharge en heures creuses → ON
-  | 'plan_wait'; // EXPLOITATION : le plan économique attend (surplus/HC à venir) → OFF
+  | 'pilot_solar' // PILOTE V2 : chauffe solaire (règle zéro achat EDF) → ON
+  | 'pilot_hc' // PILOTE V2 : recharge de fin de nuit en heures creuses → ON
+  | 'pilot_wait'; // PILOTE V2 : conditions non réunies → OFF
 
 /** Anomalie détectée (visible dans l'UI, non bloquante sauf heater_fault). */
 export type Anomaly =
@@ -76,29 +71,35 @@ export interface CumulusInputs {
   priceHp: number; // €/kWh heures pleines
   priceHc: number; // €/kWh heures creuses
 
-  // ── Prévision PV ──
+  // ── Prévision PV (UNIQUEMENT pour la décision nocturne de recharge HC) ──
   forecastAvailable: boolean;
   /** Énergie PV prévue sur le prochain créneau diurne à venir (kWh). */
   solNextDaylightKwh: number;
-  /** Courbe PV horaire à venir (heures ≥ courante) — pour le planificateur (ÉTAPE 2a). */
-  forecastHourly: PlanForecastPoint[];
+  /** Énergie PV prévue demain (J+1), journée complète (kWh). −1 si inconnue. */
+  forecastD1Kwh: number;
+  /** Énergie PV prévue après-demain (J+2), journée complète (kWh). −1 si inconnue. */
+  forecastD2Kwh: number;
 
   // ── Relais (état physique lu) ──
   relayAvailable: boolean;
   relayOn: boolean | null;
 
-  // ── Système solaire/batterie (Anker SolarBank) — COLLECTE seule (ÉTAPE 1a) ──
-  // Aucune décision ne s'appuie dessus pour l'instant ; journalisées à chaque tick.
+  // ── Système solaire/batterie (Anker SolarBank, cloud ~60 s de retard) ──
+  // ⚠️ Conditions LENTES uniquement (batteries pleines, SoC, protection décharge).
+  // JAMAIS pour une décision instantanée ; la production affichée MENT en bridage.
   ankerAvailable: boolean;
-  pvPowerW: number; // production solaire instantanée (solar_power_w)
+  pvPowerW: number; // production solaire AFFICHÉE (solar_power_w) — mensongère en bridage
   ankerGridPowerW: number; // réseau vu côté Anker, signé (+ soutirage / − injection)
   sbOutputPowerW: number; // sortie du système SolarBank vers la maison (W)
   batteryDischargeW: number; // puissance de décharge batterie (W, ≥ 0)
   batterySocPct: number[]; // niveau de charge de chaque batterie (%)
-  batteryEnergyWh: number; // énergie stockée RÉELLE (Wh, somme des SolarBank) — pour la réserve du soir
+  batteryEnergyWh: number; // énergie stockée RÉELLE (Wh, somme des SolarBank)
   batteryCapacityWh: number; // capacité batterie totale (Wh)
   batteryChargeW: number; // puissance de CHARGE batterie (W, ≥ 0 = surplus en cours d'absorption)
-  pvApsW: number; // prod du micro-onduleur APsystems EZ1 (pan Sud), W — invisible côté Anker
+  sbInputW: (number | null)[]; // PV ENTRANT par station (input_power_w) — pour la calibration de l'estimateur
+  pvApsW: number; // prod du micro-onduleur APsystems EZ1 (pan Sud), W — l'ÉTALON (jamais bridé)
+  apsAvailable: boolean; // le bridge APS répond (distinguer « injoignable » de « 0 W réel »)
+  apsAgeSec: number | null; // fraîcheur de la donnée APS (s), null si inconnue
 
   // ── Températures ambiantes (modèle d'énergie ballon, ÉTAPE 1b+) ──
   // Moyennes des sources disponibles ; null si aucune source.
@@ -134,24 +135,18 @@ export interface CumulusConfig {
   profile: 'solar_first' | 'balanced' | 'comfort_first';
 
   // Températures (°C, sur la sonde de surface — voir calibration tempOffsetC)
-  tminConfortC: number; // sous ce seuil → chauffe garantie (filet, en tout temps)
+  tminConfortC: number; // « eau au moins tiède » (sert à la détection tank_full vs panne) — plus AUCUNE chauffe automatique de confort (réponse Laurent Q1 : jamais de chauffe HP de panique)
   tmaxSondeC: number; // sécurité anti-emballement, au-dessus de la consigne du cumulus
-  comfortHysteresisC: number; // marge au-dessus de Tmin avant de couper « confort »
   rechargeHysteresisC: number; // baisse de T requise pour rechauffer après « plein »
   tempOffsetC: number; // calibration sonde (T_réelle ≈ T_sonde + offset)
-
-  // Surplus PV (W) — décision sur le surplus reconstitué = cumulusPowerW − gridPowerW
-  surplusOnW: number; // seuil d'enclenchement
-  surplusOffW: number; // seuil de maintien (hystérésis)
-  surplusOffGraceSec: number; // tolérance sous le seuil avant coupure (anti-nuage)
 
   // Anti-court-cycle (s)
   minOnSec: number;
   minOffSec: number;
   antiCyclingSec: number;
 
-  // Prévision
-  forecastFaibleKwh: number; // sous ce seuil → cible HC renfort
+  // Prévision (modulation de la recharge HC uniquement)
+  forecastFaibleKwh: number; // en dessous, une journée prévue est considérée « grise » (kWh)
 
   // Sûreté
   autoOffDelaySec: number; // watchdog Shelly (toggle_after), ré-armé à chaque tick
@@ -162,17 +157,18 @@ export interface CumulusConfig {
   tankFullConfirmSec: number; // durée de confirmation « ballon plein »
   faultConfirmSec: number; // durée ON sans conso + eau froide → panne
 
-  // ── ÉTAPE 1a — sécurité (observation) & réserve pour la reconstruction ──
-  /** true → AUCUNE chauffe AUTOMATIQUE (comfort/solar/HC) ; manuel & boost intacts. */
+  // ── Sécurité de déploiement ──
+  /** true → le pilote tourne et JOURNALISE ses décisions, mais AUCUN ordre au relais
+   *  (manuel & boost restent opérants). C'est le mode de validation de la V2. */
   observationMode: boolean;
-  /** P max de décharge batterie (W) — réservé au futur réflexe de délestage (non utilisé). */
+  /** P max de décharge batterie (W) — réservé (non utilisé). */
   batteryMaxDischargeW: number;
 
-  /** ÉTAPE 1b — estimateur d'énergie du ballon (observation, ne pilote rien). */
+  /** Estimateur d'énergie du ballon (calorimétrie validée — NE PAS TOUCHER). */
   energyModel: EnergyModelConfig;
 
-  /** ÉTAPE 2a — planificateur prédictif (shadow : calcule un plan, ne pilote pas encore). */
-  planner: PlannerConfig;
+  /** PILOTE V2 — machine à phases « règle zéro achat EDF » (spec validée 03/07/2026). */
+  pilot: PilotConfig;
 }
 
 /**
@@ -212,58 +208,131 @@ export interface OutdoorSourcesConfig {
   forecast: boolean; // temp horaire du provider météo (:8098)
 }
 
-/** Action recommandée par le planificateur prédictif (ÉTAPE 2a). */
-export type PlanAction = 'heat_now' | 'heat_hc' | 'wait_solar' | 'wait';
+/** Phase du pilote V2 (dérivée du relais réel + de l'état — jamais désynchronisée). */
+export type PilotPhase =
+  | 'repos' // éteint, surveillance des conditions d'allumage
+  | 'allumage' // relais fermé, grâce de démarrage (latence SolarBank 2-3 min)
+  | 'chauffe' // régime établi : règle zéro achat EDF stricte
+  | 'cession' // coupé pour rendre la puissance à la maison (purge anti-cycle)
+  | 'plein' // le thermostat mécanique a coupé
+  | 'recharge_hc'; // garde-fou nocturne en heures creuses
 
-/** Plan de chauffe calculé par le modèle économique (shadow : journalisé, non commandé). */
-export interface HeatPlan {
-  action: PlanAction;
-  reason: string;
-  targetHour: number | null; // heure locale Paris visée (créneau), si pertinent
-  showers: number; // réserve actuelle estimée (douches)
-  floorShowers: number; // douches à garantir au matin
-  deficitWh: number; // énergie manquante pour garantir le matin
-  gridNowW: number; // soutirage EDF RÉEL instantané (EM-50 voie 0, + soutiré / − injecté)
-  measured: boolean; // true = le ballon chauffe → décompo MESURÉE ; false = projection (ballon à l'arrêt)
-  pvCoverW: number; // part de la chauffe couverte par le PV net (gratuit), W
-  batteryCoverW: number; // part couverte par la batterie (autoconso), W
-  gridDrawW: number; // EDF ponctionné par la chauffe (RÉEL si measured, sinon projeté), W — à MINIMISER
-  autoconsoPct: number; // % de la chauffe couvert sans EDF ((pv+batt)/chauffe)
-  eveningNeedWh: number; // réserve batterie du soir CALCULÉE (talon×heures + dîner), Wh
-  storageLossWh: number; // péage de stockage : pertes d'ici l'usage (7 h 30) si on chauffe maintenant, Wh
-  costNowEur: number; // coût du kWh UTILE maintenant (EDF + opportunité batterie + péage), €/kWh
-  costHcEur: number; // coût du kWh UTILE en heures creuses (tarif HC + péage court), €/kWh
-  backstopHcHour: number | null; // heure calculée de bascule HC (filet de fin de nuit)
-  computedAt: number; // epoch ms
+/** Cause d'une cession — décide si la reprise compte dans le quota (réponse Laurent Q4). */
+export type CessionCause =
+  | 'buy' // achat réseau (électroménager/cuisine) → reprise HORS quota
+  | 'hard_buy' // achat franc > cutBuyHardW → reprise HORS quota
+  | 'battery' // protection batterie → reprise soumise au quota
+  | 'grace_fail'; // la grâce de démarrage a échoué (nuage au départ) → quota
+
+/** Paramètres du pilote V2 (spec du 03/07/2026, annotée par Laurent). */
+export interface PilotConfig {
+  // ── Allumage solaire ──
+  exportOnW: number; // don franc au réseau (W) exigé pour allumer — valeur Laurent : 200
+  observationBeforeOnSec: number; // les conditions doivent tenir EN CONTINU — Laurent : 180 s
+  battFullPct: number; // batteries « pleines » au-dessus de ce SoC — Laurent : 98
+  chargeIdleW: number; // charge résiduelle « quasi nulle » sous ce seuil (W)
+  solarStartsPerDay: number; // quota d'allumages SPONTANÉS par jour (reprises après cession-achat HORS quota)
+  apsMinW: number; // soleil RÉEL exigé : production APS minimale (W)
+  minUsefulHeatMin: number; // jamais d'allumage s'il reste moins de X min de fenêtre devant soi
+  invisibleSurplusMinW: number; // déclencheur de secours : surplus invisible estimé minimal (W)
+
+  // ── Grâce et coupures (chauffe en cours) ──
+  graceStartupSec: number; // latence SolarBank tolérée au démarrage — 240 s
+  cutBuyW: number; // achat réseau qui déclenche la coupure (W) — 150
+  cutBuySustainSec: number; // durée d'achat soutenu avant coupure — VALEUR LAURENT : 30 s
+  cutBuyHardW: number; // achat franc → coupure IMMÉDIATE (four/plaques) — 500
+  batteryDropCutPts: number; // baisse de SoC depuis le début de chauffe → coupure — Laurent : 20 points
+  batteryFloorCutPct: number; // plancher absolu de SoC pendant une chauffe — Laurent : 40 %
+
+  // ── Fenêtre solaire par éphémérides (pas d'heures en dur) ──
+  sunElevStartDeg: number; // début : élévation du soleil au-dessus de ce seuil…
+  sunAzStartDeg: number; // … ET azimut au-delà (le pan Sud sort du masque du matin)
+  sunElevEndDeg: number; // fin : élévation sous ce seuil…
+  sunAzEndDeg: number; // … OU azimut au-delà (l'Ouest décroche)
+  degradedWindowEndH: number; // cloud Anker muet → fin de fenêtre resserrée (heure locale)
+
+  // ── Recharge HC de fin de nuit ──
+  hcEndTarget: string; // heure visée de FIN de recharge ('07:15')
+  hcPlanHour: number; // heure locale du calcul du plan nocturne (22)
+  hcMorningReservePct: number; // SoC plancher pendant la recharge HC (réserve du matin) — 30
+  hcGrey1Factor: number; // J+1 gris → cible = besoin × ce facteur
+  hcGrey2Factor: number; // J+1 ET J+2 gris → cible = besoin × ce facteur
+
+  // ── Alerte « APS muet » (l'étalon de TOUTE la détection solaire) ──
+  apsStaleSec: number; // données APS plus vieilles → « injoignable » (fenêtre ouverte)
+  apsMuteFloorW: number; // production APS sous ce seuil…
+  apsMuteConfirmSec: number; // … soutenue aussi longtemps…
+  apsTwinMinW: number; // … pendant que les jumeaux SB1 chargent au-dessus → « panne probable »
+
+  // ── Divers ──
+  reserveShowers: number; // douches à garantir au matin (2)
+  fullFraction: number; // E_avail ≥ fullFraction × E_full → ballon considéré plein
+  heatPowerW: number; // puissance de chauffe réelle (W, ~2900) — dimensionnement HC
+  sb1BatteryIndex: number; // index de la station SUD dans batteries[] (calibration estimateur)
+  latDeg: number; // coordonnées du site (origine : forecast-bridge)
+  lonDeg: number;
 }
 
-/** Paramètres du modèle économique (ÉTAPE 2b). */
-export interface PlannerConfig {
-  enabled: boolean; // calcule le plan (shadow) ; n'affecte pas encore le pilotage
-  reserveShowers: number; // douches à garantir au matin (fiche : 2)
-  fullFraction: number; // E_avail ≥ fullFraction·E_full → « plein »
-  horizonH: number; // horizon de prévision considéré (h)
-  peakMinW: number; // seuil « pic solaire exploitable » à venir (W)
-  heatPowerW: number; // puissance de chauffe RÉELLE mesurée (W)
-  // ── Autoconsommation (objectif : ne PAS ponctionner EDF ; étaler les charges) ──
-  sbOutMaxW: number; // plafond de sortie du système SolarBank (PV+batterie), W — mesuré ~2400
-  socReservePct: number; // SoC plancher DUR sous lequel la batterie ne couvre jamais la chauffe
-  gridTolW: number; // soutirage EDF toléré pour considérer la chauffe « couverte par le solaire » (W)
-  purePvFraction: number; // le PV SEUL doit couvrir cette fraction de la chauffe → opportunité gratuite franche
-  // ⚠️ ANGLE MORT n°1 (écrêtage) : batteries pleines → les SolarBank ne produisent QUE la
-  // demande → solar_power_w s'effondre PILE quand le surplus est maximal. Signaux d'inférence :
-  clipSocPct: number; // SoC ≥ ce seuil + charge ~nulle + jour → écrêtage probable → surplus libre
-  // ── Réserve du soir CALCULÉE (remplace tout % fixe) : conso maison attendue
-  //    entre la fin du solaire et l'ouverture des HC (00 h 06) ──
-  eveningBaseW: number; // talon de conso du soir (W) — sera APPRIS (étape B), défaut prudent
-  dinnerWh: number; // forfait cuisson/dîner (Wh) si le dîner est encore à venir
+/** État persistant du pilote (mémoire de la machine à phases). */
+export interface PilotState {
+  /** Depuis quand les conditions d'allumage sont TOUTES vraies (null = pas toutes vraies). */
+  condsSinceTs: number | null;
+  /** Depuis quand l'achat réseau dépasse cutBuyW pendant une chauffe (hors grâce). */
+  buyOverSinceTs: number | null;
+  /** SoC moyen au début de la chauffe en cours (protection batterie). */
+  socStartOfHeat: number | null;
+  /** Compteurs du jour (clé date Paris). */
+  startsDate: string;
+  solarStartsToday: number; // allumages spontanés (soumis au quota)
+  resumesToday: number; // reprises hors quota (après cession pour achat réseau)
+  /** Dernière cession : cause + horodatage (décide du quota de la reprise). */
+  lastCessionCause: CessionCause | null;
+  lastCessionTs: number | null;
+  /** Plan de recharge HC calculé le soir (null = pas de recharge prévue). */
+  hcPlan: HcPlan | null;
+  /** Observation : front « j'aurais allumé » déjà journalisé (évite le spam). */
+  wouldOnSinceTs: number | null;
+  /** Alerte APS : depuis quand la production est anormalement basse vs jumeaux SB1. */
+  apsLowSinceTs: number | null;
+  /** Niveau d'alerte APS courant (fronts journalisés à l'activation/résorption). */
+  apsAlert: 'none' | 'unreachable' | 'fault';
 }
 
-/** Un point horaire de la courbe de prévision PV à venir (≥ heure courante). */
-export interface PlanForecastPoint {
-  hoursAhead: number; // 0 = heure courante, 1 = la suivante, …
-  hour: number; // heure locale Paris 0..23
-  pvW: number; // puissance PV prévue (W)
+/** Plan de recharge nocturne calculé à hcPlanHour. */
+export interface HcPlan {
+  forDate: string; // date Paris du MATIN visé ('YYYY-MM-DD')
+  targetWh: number; // E_avail à atteindre (besoin douches, modulé météo J+1/J+2)
+  minWh: number; // besoin STRICT douches (plancher pour l'arrêt sur réserve batterie)
+  startMin: number; // départ, en minutes locales depuis minuit (borné ≥ 00:06)
+  endMin: number; // fin de fenêtre d'exécution (07:30 dur)
+  reason: string; // explication (modulation météo appliquée)
+  computedAt: number;
+}
+
+/** Vue du pilote pour l'interface (recalculée à chaque tick, persistée pour l'UI). */
+export interface PilotView {
+  phase: PilotPhase;
+  phaseSinceTs: number;
+  wantOn: boolean; // ce que le pilote FERAIT (= fait, hors observation)
+  note: string; // explication de la décision courante
+  conds: { key: string; label: string; ok: boolean; detail: string }[]; // les 7 conditions (le secours est À PART)
+  /** Déclencheur de SECOURS (bridage) — une voie d'allumage alternative, PAS une 8e
+   *  condition : jamais de ✗ rouge. */
+  rescue: {
+    state: 'standby_export' | 'standby_below' | 'armed' | 'unavailable';
+    detail: string;
+  };
+  apsAlert: 'none' | 'unreachable' | 'fault'; // alerte « APS muet » (bandeau carte)
+  invisibleSurplusW: number; // surplus invisible estimé (W)
+  potTotalW: number; // potentiel solaire total estimé (W)
+  pApsW: number; // production APS (l'étalon)
+  socNow: number | null;
+  socStart: number | null; // SoC au début de la chauffe en cours
+  solarStartsToday: number;
+  resumesToday: number;
+  quota: number;
+  nextAction: string; // « recharge HC 05:12 → 07:15 » / « attente fenêtre » / …
+  computedAt: number;
 }
 
 /** Une entrée du journal de décisions (ring buffer). */
@@ -278,8 +347,8 @@ export interface DecisionLogEntry {
   anomaly: Anomaly;
 }
 
-/** Évènement de la timeline SHADOW (observation 2a) — un point du journal du jour. */
-export type ShadowEventKind = 'plan' | 'heat_start' | 'heat_end' | 'draw' | 'full' | 'appliance';
+/** Évènement de la timeline — un point du journal du jour (transitions du pilote incluses). */
+export type ShadowEventKind = 'phase' | 'heat_start' | 'heat_end' | 'draw' | 'full' | 'appliance';
 export interface ShadowEvent {
   ts: number;
   kind: ShadowEventKind;
@@ -325,12 +394,6 @@ export interface CumulusRuntimeState {
   lastOffTs: number | null;
   lastTransitionTs: number | null;
 
-  // Hystérésis surplus (grâce anti-nuage)
-  surplusBelowSinceTs: number | null;
-  /** EXPLOITATION : depuis quand le plan demande l'arrêt d'une chauffe en cours (hystérésis
-   *  d'arrêt — la régulation SolarBank oscille ~2-4 min, un creux d'un tick ne coupe pas). */
-  planStopSinceTs: number | null;
-
   // Fin de chauffe / niveau de charge
   lowPowerSinceTs: number | null;
   ballonCharged: boolean;
@@ -355,13 +418,15 @@ export interface CumulusRuntimeState {
   lastSubMode: CumulusMode;
   anomaly: Anomaly;
 
-  /** ÉTAPE 1b — état de l'estimateur d'énergie du ballon (observation). */
+  /** État de l'estimateur d'énergie du ballon (calorimétrie). */
   energy: EnergyState;
   /** Instantané d'affichage du modèle (lecture seule UI ; écrit par engine.ts). */
   energyView: EnergyView | null;
-  /** ÉTAPE 2a — dernier plan du planificateur (shadow : journalisé, ne pilote pas). */
-  plan: HeatPlan | null;
-  /** ÉTAPE 2a — timeline du jour (transitions de plan, chauffes, puisages, pleins). */
+  /** PILOTE V2 — mémoire de la machine à phases. */
+  pilot: PilotState;
+  /** PILOTE V2 — vue pour l'interface (phase, conditions, potentiel, prochaine action). */
+  pilotView: PilotView | null;
+  /** Timeline du jour (transitions de phase, chauffes, puisages, pleins, appareils). */
   shadowLog: ShadowEvent[];
   /** Suivi interne de la chauffe en cours pour la timeline (début + énergie + gratuit/réseau). */
   shadowHeat: { sinceTs: number; sinceInjWh: number; solar: boolean } | null;
@@ -384,12 +449,14 @@ export interface ApplianceCycle {
   deferTicks: number; // ticks où le délestage 6 kVA aurait bloqué une chauffe voulue
 }
 
-/** Valeurs dérivées du modèle d'énergie, persistées pour l'UI (carte Cumulus). */
+/** Valeurs dérivées du modèle d'énergie, persistées pour l'UI ET la jauge du pilote. */
 export interface EnergyView {
   eAvailWh: number; // énergie chaude disponible (Wh)
   eFullWh: number; // capacité à plein (Wh)
   showers: number; // nombre de douches équivalent (eAvail / eDouche)
   tTankC: number; // température moyenne estimée du ballon (°C)
+  eDoucheWh: number; // énergie d'une douche (interpolation saisonnière du modèle)
+  lossPerHWh: number; // pertes actuelles du ballon (Wh/h) — dimensionnement recharge HC
 }
 
 /** État runtime de l'estimateur d'énergie du ballon (persisté dans cumulus-state.json). */

@@ -24,12 +24,8 @@ export interface CumulusConfigClient {
   profile: 'solar_first' | 'balanced' | 'comfort_first';
   tminConfortC: number;
   tmaxSondeC: number;
-  comfortHysteresisC: number;
   rechargeHysteresisC: number;
   tempOffsetC: number;
-  surplusOnW: number;
-  surplusOffW: number;
-  surplusOffGraceSec: number;
   minOnSec: number;
   minOffSec: number;
   antiCyclingSec: number;
@@ -39,6 +35,12 @@ export interface CumulusConfigClient {
   tankFullPowerW: number;
   tankFullConfirmSec: number;
   faultConfirmSec: number;
+  pilot?: {
+    apsStaleSec: number;
+    apsMuteFloorW: number;
+    apsMuteConfirmSec: number;
+    apsTwinMinW: number;
+  } & Record<string, unknown>;
 }
 
 export type CumulusAutoMode = 'auto' | 'manual' | 'off';
@@ -56,6 +58,30 @@ export interface RegretDayClient {
   gainEur: number;
 }
 
+/** Miroir client de la vue du pilote V2 (serveur : PilotView). */
+export interface PilotViewClient {
+  phase: 'repos' | 'allumage' | 'chauffe' | 'cession' | 'plein' | 'recharge_hc';
+  phaseSinceTs: number;
+  wantOn: boolean;
+  note: string;
+  conds: { key: string; label: string; ok: boolean; detail: string }[];
+  rescue: {
+    state: 'standby_export' | 'standby_below' | 'armed' | 'unavailable';
+    detail: string;
+  };
+  apsAlert: 'none' | 'unreachable' | 'fault';
+  invisibleSurplusW: number;
+  potTotalW: number;
+  pApsW: number;
+  socNow: number | null;
+  socStart: number | null;
+  solarStartsToday: number;
+  resumesToday: number;
+  quota: number;
+  nextAction: string;
+  computedAt: number;
+}
+
 /** Libellés FR des raisons de décision (affichage carte). */
 export const CUMULUS_REASON_LABELS: Record<string, string> = {
   cold_start: 'Initialisation',
@@ -63,17 +89,24 @@ export const CUMULUS_REASON_LABELS: Record<string, string> = {
   manual_off: 'Arrêt manuel',
   vacation_off: 'Vacances',
   safety_high: 'Sécurité — eau très chaude',
-  comfort_min: 'Confort garanti',
-  legionella: 'Cycle anti-légionellose',
-  solar: 'Surplus solaire',
-  offpeak: 'Heures creuses',
-  offpeak_boost: 'Heures creuses (renfort)',
+  boost: 'Chauffe à la demande',
   tank_full: 'Ballon plein',
   idle: 'En veille',
+  observe_only: 'Observation (relais non commandé)',
   anticycle_hold: 'Maintien (anti-cycle)',
-  plan_solar: 'Chauffe solaire (auto)',
-  plan_hc: 'Recharge heures creuses (auto)',
-  plan_wait: 'Attente du meilleur moment (auto)'
+  pilot_solar: 'Chauffe solaire (pilote)',
+  pilot_hc: 'Recharge heures creuses (pilote)',
+  pilot_wait: 'En attente du bon moment (pilote)'
+};
+
+/** Libellés FR des phases du pilote V2. */
+export const PILOT_PHASE_LABELS: Record<string, string> = {
+  repos: 'Au repos — surveillance',
+  allumage: 'Allumage (régulation SolarBank)',
+  chauffe: 'Chauffe au soleil',
+  cession: 'A cédé la place — purge',
+  plein: 'Ballon plein',
+  recharge_hc: 'Recharge de nuit (heures creuses)'
 };
 
 /** Libellés FR des anomalies (bandeau d'alerte). '' = rien à signaler. */
@@ -156,28 +189,9 @@ class CumulusState {
   lastAnchorTs = $state<number | null>(null);
   /** Config effective du moteur (cibles/seuils) — null avant le 1er poll. */
   config = $state<CumulusConfigClient | null>(null);
-  /** ÉTAPE 2a — plan du planificateur prédictif (shadow, lecture seule UI). */
-  plan = $state<{
-    action: 'heat_now' | 'heat_hc' | 'wait_solar' | 'wait';
-    reason: string;
-    targetHour: number | null;
-    showers: number;
-    floorShowers: number;
-    deficitWh: number;
-    gridNowW: number;
-    measured: boolean;
-    pvCoverW: number;
-    batteryCoverW: number;
-    gridDrawW: number;
-    autoconsoPct: number;
-    eveningNeedWh: number;
-    storageLossWh: number;
-    costNowEur: number;
-    costHcEur: number;
-    backstopHcHour: number | null;
-    computedAt: number;
-  } | null>(null);
-  /** ÉTAPE 2a — timeline du jour (transitions de plan, chauffes, puisages, pleins). */
+  /** PILOTE V2 — vue de la machine à phases (phase, 7 conditions, potentiel, prochaine action). */
+  pilotView = $state<PilotViewClient | null>(null);
+  /** Timeline du jour (transitions de phase, chauffes, puisages, pleins, appareils). */
   shadowLog = $state<{ ts: number; kind: string; label: string; detail: string }[]>([]);
   /** Boucle de regret — jour en cours + historique (≤ 30 j) : gain € vs stratégie tout-HC. */
   regretDay = $state<RegretDayClient | null>(null);
@@ -351,28 +365,32 @@ class CumulusState {
         const ev = s.energyView;
         this.eFullWh = typeof ev?.eFullWh === 'number' ? ev.eFullWh : null;
         this.showers = typeof ev?.showers === 'number' ? ev.showers : null;
-        const pl = s.plan;
-        this.plan =
-          pl && typeof pl.action === 'string'
+        const pv = s.pilotView;
+        this.pilotView =
+          pv && typeof pv.phase === 'string'
             ? {
-                action: pl.action,
-                reason: typeof pl.reason === 'string' ? pl.reason : '',
-                targetHour: typeof pl.targetHour === 'number' ? pl.targetHour : null,
-                showers: typeof pl.showers === 'number' ? pl.showers : 0,
-                floorShowers: typeof pl.floorShowers === 'number' ? pl.floorShowers : 0,
-                deficitWh: typeof pl.deficitWh === 'number' ? pl.deficitWh : 0,
-                gridNowW: typeof pl.gridNowW === 'number' ? pl.gridNowW : 0,
-                measured: typeof pl.measured === 'boolean' ? pl.measured : false,
-                pvCoverW: typeof pl.pvCoverW === 'number' ? pl.pvCoverW : 0,
-                batteryCoverW: typeof pl.batteryCoverW === 'number' ? pl.batteryCoverW : 0,
-                gridDrawW: typeof pl.gridDrawW === 'number' ? pl.gridDrawW : 0,
-                autoconsoPct: typeof pl.autoconsoPct === 'number' ? pl.autoconsoPct : 0,
-                eveningNeedWh: typeof pl.eveningNeedWh === 'number' ? pl.eveningNeedWh : 0,
-                storageLossWh: typeof pl.storageLossWh === 'number' ? pl.storageLossWh : 0,
-                costNowEur: typeof pl.costNowEur === 'number' ? pl.costNowEur : 0,
-                costHcEur: typeof pl.costHcEur === 'number' ? pl.costHcEur : 0,
-                backstopHcHour: typeof pl.backstopHcHour === 'number' ? pl.backstopHcHour : null,
-                computedAt: typeof pl.computedAt === 'number' ? pl.computedAt : 0
+                phase: pv.phase,
+                phaseSinceTs: typeof pv.phaseSinceTs === 'number' ? pv.phaseSinceTs : 0,
+                wantOn: pv.wantOn === true,
+                note: typeof pv.note === 'string' ? pv.note : '',
+                conds: Array.isArray(pv.conds) ? pv.conds : [],
+                rescue:
+                  pv.rescue && typeof pv.rescue.state === 'string'
+                    ? pv.rescue
+                    : { state: 'standby_below', detail: '' },
+                apsAlert:
+                  pv.apsAlert === 'unreachable' || pv.apsAlert === 'fault' ? pv.apsAlert : 'none',
+                invisibleSurplusW:
+                  typeof pv.invisibleSurplusW === 'number' ? pv.invisibleSurplusW : 0,
+                potTotalW: typeof pv.potTotalW === 'number' ? pv.potTotalW : 0,
+                pApsW: typeof pv.pApsW === 'number' ? pv.pApsW : 0,
+                socNow: typeof pv.socNow === 'number' ? pv.socNow : null,
+                socStart: typeof pv.socStart === 'number' ? pv.socStart : null,
+                solarStartsToday: typeof pv.solarStartsToday === 'number' ? pv.solarStartsToday : 0,
+                resumesToday: typeof pv.resumesToday === 'number' ? pv.resumesToday : 0,
+                quota: typeof pv.quota === 'number' ? pv.quota : 2,
+                nextAction: typeof pv.nextAction === 'string' ? pv.nextAction : '',
+                computedAt: typeof pv.computedAt === 'number' ? pv.computedAt : 0
               }
             : null;
         this.shadowLog = Array.isArray(s.shadowLog) ? s.shadowLog : [];

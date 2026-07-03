@@ -1,19 +1,22 @@
 /**
- * Moteur de décision PUR de l'orchestrateur cumulus.
+ * Moteur de décision PUR de l'orchestrateur cumulus — V2 (03/07/2026).
  *
- * `decide(inputs, config, state)` ne fait AUCUNE I/O : il prend un instantané
- * d'entrées (déjà collectées), la config et l'état runtime, et retourne la
- * décision + le nouvel état (pattern reducer). Tout effet (POST relais,
- * persistance, journal) est réalisé par `tick()` dans engine.ts.
+ * `decide(inputs, config, state, pilotWant)` ne fait AUCUNE I/O. Depuis la V2, il
+ * ne contient PLUS AUCUNE logique de chauffe : c'est le PILOTE (pilot.ts, machine à
+ * phases « règle zéro achat EDF ») qui décide QUAND chauffer. decide() conserve ce
+ * qui est au-dessus du pilote et hors de sa portée :
  *
- * Profil « Solaire d'abord » — arbre de priorités décroissantes :
- *   override (manuel/vacances) > panne > sécurité haute > ballon plein >
- *   confort mini garanti > anti-légionellose > surplus PV > heures creuses
- *   (modulé météo) > veille.  Le tout sous anti-court-cycle (sauf sécurité/confort).
+ *   - les commandes utilisateur (manuel / vacances / « Chauffer maintenant ») ;
+ *   - les protections : sécurité 70 °C, détection ballon plein (thermostat) vs
+ *     panne résistance, anti-court-cycle, relais injoignable ;
+ *   - le mode OBSERVATION : le pilote journalise, le relais n'est PAS commandé ;
+ *   - la comptabilité (énergie du jour, désinfection tracée, hystérésis de
+ *     recharge après un plein).
  *
- * Grandeur clé : le **surplus reconstitué** = cumulusPowerW − gridPowerW, qui
- * neutralise la conso de la résistance dans la mesure réseau (sans quoi le
- * surplus « disparaît » dès qu'on chauffe et la régulation oscille).
+ * RETIRÉ de la V1 (logique qui achetait du courant à EDF) : le « maintien
+ * économique », les seuils de surplus (surplusOnW/OffW), la chauffe de confort
+ * automatique (réponse Laurent Q1 : jamais de chauffe plein-tarif de panique),
+ * la chauffe HC « renfort météo » legacy (remplacée par le plan nocturne du pilote).
  */
 
 import type { CumulusMode } from '$theme/tokens';
@@ -28,35 +31,20 @@ import type {
 
 const SEC = 1000;
 
-/** Branches de chauffe AUTOMATIQUE débrayées en mode observation (manuel/boost exclus). */
-const OBSERVE_NEUTRALISES = new Set<DecisionReason>([
-  'comfort_min',
-  'solar',
-  'offpeak_boost',
-  'plan_solar',
-  'plan_hc'
-]);
-
-/** Fraîcheur max du plan économique pour piloter (il est recalculé à chaque tick 60 s). */
-const PLAN_FRESH_MS = 5 * 60_000;
-
-/** Hystérésis d'ARRÊT d'une chauffe pilotée par le plan : la régulation SolarBank oscille
- *  (mesuré 02/07 : 2400 W → 0 → 2400 W en ~3 min) — un creux d'un ou deux ticks ne doit pas
- *  couper une chauffe à 90 % autoconso. On ne coupe que si le plan demande l'arrêt en continu. */
-const PLAN_STOP_GRACE_MS = 150_000;
+/** Ce que le pilote demande pour ce tick (calculé AVANT decide, sur les mesures fraîches). */
+export interface PilotWant {
+  wantOn: boolean;
+  reason: 'solar' | 'hc' | 'wait';
+  note: string;
+}
 
 /** Sous-mode (couleur UI) déduit de la raison + de l'état du relais. */
 function subModeFor(reason: DecisionReason, on: boolean): CumulusMode {
   switch (reason) {
-    case 'solar':
-    case 'plan_solar':
+    case 'pilot_solar':
       return 'PV';
-    case 'offpeak':
-    case 'offpeak_boost':
-    case 'plan_hc':
+    case 'pilot_hc':
       return 'HC';
-    case 'comfort_min':
-    case 'legionella':
     case 'manual_on':
     case 'boost':
       return 'FORCE';
@@ -66,7 +54,7 @@ function subModeFor(reason: DecisionReason, on: boolean): CumulusMode {
     case 'manual_off':
     case 'observe_only':
     case 'idle':
-    case 'plan_wait':
+    case 'pilot_wait':
       return 'OFF';
     default: // cold_start, anticycle_hold
       return on ? 'FORCE' : 'OFF';
@@ -76,20 +64,20 @@ function subModeFor(reason: DecisionReason, on: boolean): CumulusMode {
 export function decide(
   inputs: CumulusInputs,
   config: CumulusConfig,
-  state: CumulusRuntimeState
+  state: CumulusRuntimeState,
+  pilotWant?: PilotWant
 ): Decision {
   const { now } = inputs;
   const next: CumulusRuntimeState = { ...state };
 
   const T = inputs.tempC; // °C, déjà corrigé de l'offset ; null = inconnue/périmée
   const tKnown = T !== null;
-  next.lastTempC = T; // exposé à l'UI (réserve d'eau chaude), jamais affiché en degrés bruts
+  next.lastTempC = T;
 
-  // Désinfection : tracée dès que l'eau (point bas, sonde doigt de gant) atteint ≥60°C —
-  // ce qu'une chauffe complète garantit (le cumulus coupe à sa consigne >60°C). Pas de cycle.
+  // Désinfection : tracée dès que l'eau atteint ≥60 °C (toute chauffe complète). Pas de cycle.
   if (tKnown && (T as number) >= 60) next.lastDisinfectTs = now;
 
-  // Surplus PV reconstitué (W) — ce qui resterait si le cumulus s'arrêtait.
+  // Surplus reconstitué (W) — information de journal uniquement (plus aucune décision dessus).
   const surplusW = inputs.em50Available ? Math.round(inputs.cumulusPowerW - inputs.gridPowerW) : 0;
 
   // ── Suivi « relais physiquement ON depuis » (base des détections conso) ──
@@ -108,7 +96,7 @@ export function decide(
   if (inputs.em50Available && Number.isFinite(inputs.cumulusKwh)) {
     if (next.lastCumulusKwh !== null) {
       const d = inputs.cumulusKwh - next.lastCumulusKwh;
-      if (d > 0 && d < 5) next.energyTodayKwh = +(next.energyTodayKwh + d).toFixed(3); // borne anti-saut
+      if (d > 0 && d < 5) next.energyTodayKwh = +(next.energyTodayKwh + d).toFixed(3);
     }
     next.lastCumulusKwh = inputs.cumulusKwh;
   }
@@ -123,7 +111,7 @@ export function decide(
   // Un « Chauffer maintenant » demandé alors que le ballon est déjà plein est sans objet.
   if (next.boostUntilFull && next.ballonCharged) next.boostUntilFull = false;
 
-  // ── Repli : relais injoignable → on ne pilote rien (cold start / panne tunnel) ──
+  // ── Repli : relais injoignable → on ne pilote rien ──
   if (!inputs.relayAvailable) {
     next.lastReason = 'cold_start';
     next.anomaly = 'relay_unreachable';
@@ -139,21 +127,10 @@ export function decide(
     };
   }
 
-  const relayOn = inputs.relayOn; // boolean (relais joignable)
+  const relayOn = inputs.relayOn;
   let anomaly: Anomaly = tKnown ? 'none' : 'sensor_stale';
 
-  // ── Hystérésis surplus : grâce anti-nuage avant de couper la chauffe solaire ──
-  const aboveOff = inputs.em50Available && surplusW >= config.surplusOffW;
-  if (relayOn === true && inputs.em50Available && !aboveOff) {
-    if (next.surplusBelowSinceTs === null) next.surplusBelowSinceTs = now;
-  } else {
-    next.surplusBelowSinceTs = null;
-  }
-  const graceActive =
-    next.surplusBelowSinceTs !== null &&
-    now - next.surplusBelowSinceTs < config.surplusOffGraceSec * SEC;
-
-  // ── Détection fin de chauffe (ballon plein) vs panne résistance ──
+  // ── Détection fin de chauffe (ballon plein, thermostat mécanique) vs panne ──
   const lowPower = inputs.em50Available && inputs.cumulusPowerW < config.tankFullPowerW;
   if (relayOn === true && lowPower) {
     if (next.lowPowerSinceTs === null) next.lowPowerSinceTs = now;
@@ -170,52 +147,16 @@ export function decide(
   let tankFull = false;
   if (stableLow) {
     if (!tKnown || (T as number) >= config.tminConfortC) {
-      tankFull = true; // conso nulle + eau au moins tiède (ou T inconnue) → thermostat mécanique a coupé
+      tankFull = true; // conso nulle + eau au moins tiède → le thermostat a coupé
     } else if (onMs >= config.faultConfirmSec * SEC) {
-      anomaly = 'heater_fault'; // conso nulle + eau froide depuis longtemps → résistance/disjoncteur
+      anomaly = 'heater_fault';
     }
-    // eau froide + conso nulle depuis < faultConfirmSec : on patiente (ni plein ni panne)
   }
-
-  // ── Plan économique (ÉTAPE 2b, EXPLOITATION) : décideur AUTO quand il est frais ──
-  // Calculé au tick précédent (60 s) sur les mesures EM-50 réelles. Les invariants
-  // (manuel, vacances, sécurité, tank_full, boost, confort, anti-cycle) restent au-dessus.
-  const plan =
-    config.planner?.enabled === true && state.plan && now - state.plan.computedAt < PLAN_FRESH_MS
-      ? state.plan
-      : null;
-
-  // ── « Wants » des différentes branches ──
-  // Confort : filet famille. Avec le plan actif, le critère est la RÉSERVE réelle
-  // (< 1 douche → chauffe immédiate, toutes conditions) et non la sonde basse : celle-ci
-  // chute mécaniquement à chaque douche (stratification) et déclencherait des chauffes
-  // plein tarif alors que le haut du ballon reste chaud. Sans plan : seuil sonde legacy.
-  const comfortHold = relayOn === true && state.lastReason === 'comfort_min' && !next.ballonCharged;
-  const comfortWants =
-    !next.ballonCharged &&
-    (comfortHold || (plan ? plan.showers < 1 : tKnown && (T as number) < config.tminConfortC));
-
-  // Prévision : « peu de soleil demain » (< seuil) autorise la chauffe nocturne en HC.
-  // Sinon (beau temps prévu), AUCUNE chauffe nocturne au-delà du confort mini : le
-  // solaire gratuit du lendemain s'en chargera.
-  const poorSolarTomorrow =
-    inputs.forecastAvailable && inputs.solNextDaylightKwh < config.forecastFaibleKwh;
-  const bigSurplus = inputs.em50Available && surplusW >= config.surplusOnW;
-
-  // Surplus PV : chauffe tant qu'il y a du soleil gratuit ET que le ballon n'est pas
-  // plein. PAS de cible de température : c'est le thermostat du CUMULUS qui décide la fin
-  // (il coupe l'alim de la résistance → la conso tombe → ballonCharged, détecté plus haut).
-  const solarHold = relayOn === true && inputs.em50Available && (aboveOff || graceActive);
-  const solarWants = !next.ballonCharged && (bigSurplus || solarHold);
-
-  // Heures creuses : chauffe (jusqu'à la coupure du cumulus) si peu de soleil prévu demain
-  // ET ballon pas déjà plein. Par beau temps → rien la nuit (seul le confort mini agit).
-  const hcWants = !next.ballonCharged && inputs.isHC && poorSolarTomorrow;
 
   // ── Arbre de décision ──
   let desired: boolean;
   let reason: DecisionReason;
-  let bypass = false; // contourne l'anti-court-cycle (sécurité / confort / override)
+  let bypass = false; // contourne l'anti-court-cycle (sécurité / override)
   let note = '';
 
   if (state.autoMode === 'off') {
@@ -224,7 +165,6 @@ export function decide(
     bypass = true;
     note = 'mode vacances';
   } else if (state.autoMode === 'manual') {
-    // Manuel : l'utilisateur commande, mais la sécurité haute reste un garde-fou.
     if (state.manualRelayOn && tKnown && (T as number) >= config.tmaxSondeC) {
       desired = false;
       reason = 'safety_high';
@@ -251,81 +191,31 @@ export function decide(
     reason = 'tank_full';
     note = 'ballon plein (le cumulus a coupé)';
     next.ballonCharged = true;
-    next.chargedAtTempC = T; // température observée à la coupure du cumulus = sa consigne réelle
-    next.boostUntilFull = false; // chauffe à la demande terminée
+    next.chargedAtTempC = T; // consigne réelle apprise du thermostat
+    next.boostUntilFull = false;
   } else if (next.boostUntilFull && !next.ballonCharged) {
     desired = true;
     reason = 'boost';
     note = 'chauffe lancée à la demande (jusqu’au plein)';
-  } else if (comfortWants) {
-    desired = true;
-    reason = 'comfort_min';
-    bypass = true;
-    note = plan
-      ? `confort : réserve ${plan.showers} douche(s) — filet famille`
-      : tKnown
-        ? `confort : ${Math.round(T as number)}°C < ${config.tminConfortC}°C`
-        : 'confort (sonde HS)';
-  } else if (plan) {
-    // ── EXPLOITATION : le plan économique décide (autoconso max, mesures EM-50) ──
-    const planWantsHeat =
-      (plan.action === 'heat_now' || plan.action === 'heat_hc') && !next.ballonCharged;
-    if (planWantsHeat) {
-      next.planStopSinceTs = null;
+  } else if (pilotWant) {
+    // ── PILOTE V2 : la machine à phases décide (règle zéro achat EDF) ──
+    if (pilotWant.wantOn) {
       desired = true;
-      reason = plan.action === 'heat_now' ? 'plan_solar' : 'plan_hc';
-      note = plan.reason;
-    } else if (
-      relayOn === true &&
-      (state.lastReason === 'plan_solar' || state.lastReason === 'plan_hc')
-    ) {
-      // Chauffe pilotée en cours et le plan demande l'arrêt : HYSTÉRÉSIS — on ne coupe
-      // que si la demande d'arrêt PERSISTE (les creux de régulation SolarBank durent
-      // ~1-2 ticks ; couper sur un creux jette 10 min de surplus via l'anti-cycle).
-      if (next.planStopSinceTs == null) next.planStopSinceTs = now; // == : couvre null ET undefined (état partiel)
-      if (now - next.planStopSinceTs < PLAN_STOP_GRACE_MS) {
-        desired = true;
-        reason = state.lastReason;
-        note = 'arrêt différé — mesure instable (régulation SolarBank)';
-      } else {
-        next.planStopSinceTs = null;
-        desired = false;
-        reason = 'plan_wait';
-        note = plan.reason;
-      }
+      reason = pilotWant.reason === 'hc' ? 'pilot_hc' : 'pilot_solar';
     } else {
-      next.planStopSinceTs = null;
       desired = false;
-      reason = 'plan_wait';
-      note =
-        next.ballonCharged && (plan.action === 'heat_now' || plan.action === 'heat_hc')
-          ? 'ballon plein (thermostat coupé) — chauffe sans objet'
-          : plan.reason;
+      reason = 'pilot_wait';
     }
-  } else if (solarWants) {
-    desired = true;
-    reason = 'solar';
-    note = `surplus PV ${surplusW} W`;
-  } else if (hcWants) {
-    desired = true;
-    reason = 'offpeak_boost';
-    note = 'heures creuses (peu de soleil prévu) — jusqu’à coupure du cumulus';
+    note = pilotWant.note;
   } else {
     desired = false;
     reason = 'idle';
-    note = inputs.isHC
-      ? poorSolarTomorrow
-        ? 'creuses : ballon suffisant'
-        : 'creuses : beau temps prévu, pas de chauffe'
-      : 'veille (ni surplus ni HC)';
+    note = 'pilote indisponible — veille';
   }
 
-  // ── Mode observation (ÉTAPE 1a) : neutralise les chauffes AUTOMATIQUES ──
-  // Le moteur ne commande PLUS le relais pour comfort_min / solar / offpeak_boost
-  // (il journalise « aurait chauffé »). Restent intacts : manuel, boost « Chauffer
-  // maintenant », tank_full, sécurité haute, et l'anti-court-cycle ci-dessous.
-  if (config.observationMode && desired && OBSERVE_NEUTRALISES.has(reason)) {
-    note = `observation : aurait chauffé (${reason}) — relais NON commandé`;
+  // ── Mode OBSERVATION : le pilote journalise, le relais n'est PAS commandé ──
+  if (config.observationMode && desired && (reason === 'pilot_solar' || reason === 'pilot_hc')) {
+    note = `observation : aurait allumé (${reason}) — relais NON commandé`;
     desired = false;
     reason = 'observe_only';
     bypass = false;

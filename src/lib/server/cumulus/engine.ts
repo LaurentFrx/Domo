@@ -1,51 +1,60 @@
 /**
- * Orchestrateur cumulus — boucle impure `tick()`.
+ * Orchestrateur cumulus — boucle impure `tick()` (V2, 03/07/2026).
  *
- * Appelée toutes les 60 s par le timer systemd (POST /api/cumulus/tick) :
- *   collecte des entrées → decide() (pur) → application relais (watchdog
- *   toggle_after) → journal → persistance de l'état.
+ * Ordre du tick (leçon V1 : les décisions instantanées agissent sur les mesures
+ * FRAÎCHES du tick, seule la jauge d'eau — lente — vient du tick précédent) :
+ *   collecte des entrées → estimateur de potentiel solaire → PILOTE (machine à
+ *   phases) → decide() (protections + overrides) → application relais (watchdog
+ *   toggle_after) → calorimétrie (energy-model, INCHANGÉ) → journal → persistance.
  *
- * Garde-fous :
- *   - mutex `ticking` : pas de ticks concurrents (modèle `pulsing` de mqtt.ts).
- *   - timeout global : un fetch pendu ne bloque pas le verrou.
- *   - idempotence : on n'émet un ordre que si l'état change OU pour ré-armer le
- *     watchdog (ON maintenu) — jamais de martèlement inutile.
- *   - dry-run (`apply=false`) : calcule et journalise sans toucher au relais ni
- *     fausser les compteurs anti-court-cycle.
+ * Garde-fous : mutex anti-concurrence, timeout global, idempotence des ordres,
+ * dry-run. En OBSERVATION (observationMode=true) : le pilote calcule et journalise
+ * chaque décision qu'il AURAIT prise, decide() n'émet AUCUN ordre automatique.
  */
 
-import { decide } from './decide';
+import { decide, type PilotWant } from './decide';
 import { collectInputs } from './inputs';
 import { readCumulusConfig } from './config';
 import { readCumulusState, writeCumulusState } from './state-store';
 import { setRelay } from './relay';
 import { ensureTempSensor } from './temp-sensor';
 import { updateEnergyModel, type EnergyTickResult } from './energy-model';
-import { planHeating } from './plan';
+import { pilotStep, type PilotCtx } from './pilot';
+import {
+  estimatePotential,
+  readSolarCalib,
+  writeSolarCalib,
+  type SolarCalib
+} from './solar-potential';
+import { parisDate } from '../tariffs';
 import type { AutoMode, DecisionLogEntry, ShadowEvent } from './types';
 
 const TICK_TIMEOUT_MS = 45_000; // < intervalle timer (60 s)
 const SHADOW_HEAT_W = 500; // conso EM-50 voie cumulus au-dessus → « en chauffe » (timeline)
-const SHADOW_LOG_MAX = 80; // taille du journal shadow (timeline du jour)
-const APPLIANCE_OFF_GRACE_MS = 10 * 60_000; // sous le seuil > 10 min → cycle terminé (tolère les pauses)
+const SHADOW_LOG_MAX = 80; // taille du journal (timeline du jour)
+const APPLIANCE_OFF_GRACE_MS = 10 * 60_000; // sous le seuil > 10 min → cycle terminé
+const LOG_MAX = 60;
 
-// Heure locale Paris fractionnaire (0–24) — pour le modèle éco (deadline matin, HC).
+// Heure locale Paris fractionnaire (0–24) + mois (1-12).
 const PARIS_HM = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Europe/Paris',
   hour: '2-digit',
   minute: '2-digit',
   hourCycle: 'h23'
 });
+const PARIS_MONTH = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Paris',
+  month: 'numeric'
+});
 function parisHourFrac(ts: number): number {
   const parts = PARIS_HM.format(new Date(ts)).split(':');
   return Number(parts[0]) + Number(parts[1]) / 60;
 }
-const LOG_MAX = 60;
 
 export interface TickResult {
   skipped?: 'busy';
-  applied: boolean; // un ordre relais a-t-il été émis (vrai changement) ?
-  apply: boolean; // la décision était-elle applicable (≠ cold-start) ?
+  applied: boolean;
+  apply: boolean;
   relayDesired: boolean;
   relayOn: boolean | null;
   reason: string;
@@ -64,6 +73,9 @@ export interface TickResult {
 }
 
 let ticking = false;
+// Calibration de l'estimateur solaire : cache mémoire, chargée au premier tick,
+// persistée quand elle évolue (data/solar-potential.json — données apprises).
+let solarCalib: SolarCalib | null = null;
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -89,10 +101,62 @@ async function runTick(apply: boolean): Promise<TickResult> {
   const config = await readCumulusConfig();
   const state = await readCumulusState();
   const inputs = await collectInputs(config);
-
-  const decision = decide(inputs, config, state);
-  const next = decision.nextState;
   const now = inputs.now;
+
+  // ── 1. Estimateur de potentiel solaire (APS = étalon ; calibration EWMA persistée) ──
+  if (solarCalib === null) solarCalib = await readSolarCalib();
+  const socs = inputs.batterySocPct.filter((s) => Number.isFinite(s));
+  const socAvg = socs.length ? socs.reduce((a, b) => a + b, 0) / socs.length : null;
+  const batteriesFull =
+    inputs.ankerAvailable &&
+    socAvg !== null &&
+    socAvg >= config.pilot.battFullPct &&
+    inputs.batteryChargeW < config.pilot.chargeIdleW;
+  const sb1Idx = config.pilot.sb1BatteryIndex;
+  const potential = estimatePotential(
+    {
+      ts: now,
+      monthLocal: Number(PARIS_MONTH.format(new Date(now))),
+      hourLocal: Math.floor(parisHourFrac(now)),
+      pApsW: Math.max(0, inputs.pvApsW),
+      sb1InW: inputs.sbInputW[sb1Idx] ?? null,
+      sb2InW: inputs.sbInputW[1 - sb1Idx] ?? null,
+      pvShownW: Math.max(0, inputs.pvPowerW),
+      batteriesFull
+    },
+    config.pilot.latDeg,
+    config.pilot.lonDeg,
+    solarCalib
+  );
+  if (potential.calibUpdated) {
+    // Persistance des données apprises (throttle naturel : ~1 écriture/min max en journée)
+    await writeSolarCalib(solarCalib).catch(() => {});
+  }
+
+  // ── 2. PILOTE (machine à phases) — sur les mesures FRAÎCHES ; jauge du tick précédent ──
+  const hourLocal = parisHourFrac(now);
+  const ctx: PilotCtx = {
+    eAvailWh: state.energyView?.eAvailWh ?? 0,
+    eFullWh: state.energyView?.eFullWh ?? 0,
+    eDoucheWh: state.energyView?.eDoucheWh ?? config.energyModel.eDoucheWhSummer,
+    lossPerHWh: state.energyView?.lossPerHWh ?? 0,
+    hourLocal,
+    minuteOfDay: Math.round(hourLocal * 60),
+    tomorrowParis: parisDate(new Date(now + 86_400_000)),
+    potential
+  };
+  const pilotRes = pilotStep(inputs, config, state, ctx);
+  const pilotWant: PilotWant = {
+    wantOn: pilotRes.wantOn,
+    reason: pilotRes.reason === 'wait' ? 'wait' : pilotRes.reason,
+    note: pilotRes.view.note
+  };
+
+  // ── 3. Décision (protections + overrides par-dessus le pilote) ──
+  const decision = decide(inputs, config, state, pilotWant);
+  const next = decision.nextState;
+  next.pilot = pilotRes.pilot;
+  next.pilotView = pilotRes.view;
 
   let relayOn = inputs.relayOn;
   let applied = false;
@@ -100,105 +164,57 @@ async function runTick(apply: boolean): Promise<TickResult> {
   if (apply && decision.apply && inputs.relayAvailable) {
     const desired = decision.relayDesired;
     const needChange = relayOn !== desired;
-    const needRearm = desired === true; // ré-armer le watchdog tant qu'on veut ON
+    const needRearm = desired === true; // ré-armer le watchdog Shelly tant qu'on veut ON
     if (needChange || needRearm) {
       const res = await setRelay(desired, desired ? config.autoOffDelaySec : undefined);
       if (res.ok) {
         applied = needChange;
         if (res.on !== null) relayOn = res.on;
-        // La réalité prime : si le boîtier ne suit pas l'ordre (entrée « follow »,
-        // reboot Shelly…), on signale un desync plutôt que de marteler.
         if (res.on !== null && res.on !== desired) next.anomaly = 'desync';
       } else {
         next.anomaly = 'relay_unreachable';
       }
     }
   } else if (!apply) {
-    // Dry-run : ne pas fausser les compteurs anti-court-cycle ni le dernier ordre.
     next.lastOnTs = state.lastOnTs;
     next.lastOffTs = state.lastOffTs;
     next.lastTransitionTs = state.lastTransitionTs;
     next.relayDesired = state.relayDesired;
   }
 
-  // Journal console à chaque tick (mode observation) — visible dans `journalctl -u domo`.
+  // Journal console — visible dans `journalctl -u domo`.
   console.log(
     `[cumulus] ${decision.reason} relais=${relayOn ? 'ON' : 'off'}` +
       `${config.observationMode ? ' [OBSERVATION]' : ''}` +
-      ` eau=${inputs.tempC ?? '?'}°C surplus=${decision.surplusW}W |` +
-      ` Anker ${inputs.ankerAvailable ? 'ok' : 'injoignable'}` +
-      ` pv=${inputs.pvPowerW}W sbOut=${inputs.sbOutputPowerW}W` +
-      ` décharge=${inputs.batteryDischargeW}W soc=[${inputs.batterySocPct.join('/')}]%` +
-      ` — ${decision.note}`
+      ` eau=${inputs.tempC ?? '?'}°C |` +
+      ` EDF=${Math.round(inputs.gridPowerW)}W ballon=${Math.round(inputs.cumulusPowerW)}W` +
+      ` soc=[${inputs.batterySocPct.join('/')}]% — ${decision.note}`
+  );
+  console.log(
+    `[pilot] phase=${pilotRes.view.phase} wantOn=${pilotRes.wantOn ? 'OUI' : 'non'}` +
+      ` | APS=${pilotRes.view.pApsW}W potentiel=${pilotRes.view.potTotalW}W` +
+      ` surplus_invisible=${pilotRes.view.invisibleSurplusW}W` +
+      ` | allumages ${pilotRes.view.solarStartsToday}/${pilotRes.view.quota} (+${pilotRes.view.resumesToday} reprises)` +
+      ` | ${pilotRes.view.nextAction}`
   );
 
-  // ── Estimateur d'énergie du ballon (ÉTAPE 1b — observation pure, aucun pilotage) ──
+  // ── 4. Calorimétrie du ballon (energy-model — VALIDÉE, INCHANGÉE) ──
   const energyTick = updateEnergyModel(inputs, config, next);
   next.energy = energyTick.energy;
   const er = energyTick.result;
-  // Instantané d'affichage pour l'UI (lecture seule ; aucune influence sur la décision).
+  // Instantané pour l'UI ET pour la jauge du pilote au tick suivant.
   next.energyView = {
     eAvailWh: er.eAvailWh,
     eFullWh: er.eFullWh,
     showers: +er.showers.toFixed(2),
-    tTankC: er.tTankC
+    tTankC: er.tTankC,
+    eDoucheWh: er.eDoucheWh,
+    lossPerHWh: +(config.energyModel.lossCoeffWhPerCh * Math.max(0, er.tTankC - er.tRoomC)).toFixed(
+      1
+    )
   };
 
-  // ── Modèle économique (ÉTAPE 2b — SHADOW : calcule + journalise, ne pilote pas) ──
-  if (config.planner.enabled) {
-    const socs = inputs.batterySocPct.filter((s) => Number.isFinite(s));
-    const pvTotalW = Math.max(0, inputs.pvPowerW) + Math.max(0, inputs.pvApsW);
-    // Conso maison HORS ballon, par bilan de puissance (PV + décharge − charge + réseau − ballon).
-    const houseW = Math.max(
-      0,
-      Math.round(
-        pvTotalW +
-          inputs.batteryDischargeW -
-          inputs.batteryChargeW +
-          inputs.gridPowerW -
-          inputs.cumulusPowerW
-      )
-    );
-    next.plan = planHeating(
-      {
-        now,
-        hourOfDay: parisHourFrac(now),
-        eAvailWh: er.eAvailWh,
-        eFullWh: er.eFullWh,
-        eDoucheWh: er.eDoucheWh,
-        tTankC: er.tTankC,
-        tRoomC: er.tRoomC,
-        lossCoeffWhPerCh: config.energyModel.lossCoeffWhPerCh,
-        setpointC: config.energyModel.setpointC,
-        pvOnSbW: Math.max(0, inputs.pvPowerW),
-        pvApsW: Math.max(0, inputs.pvApsW),
-        houseW,
-        gridPowerW: inputs.gridPowerW,
-        cumulusPowerW: inputs.cumulusPowerW,
-        heatingSinceMin: next.onSinceTs !== null ? (now - next.onSinceTs) / 60_000 : 0,
-        batteryEnergyWh: inputs.batteryEnergyWh,
-        batteryChargeW: inputs.batteryChargeW,
-        batteryDischargeW: inputs.batteryDischargeW,
-        socPct: socs.length ? socs.reduce((a, b) => a + b, 0) / socs.length : null,
-        isHC: inputs.isHC,
-        priceHp: inputs.priceHp,
-        priceHc: inputs.priceHc,
-        forecast: inputs.forecastHourly
-      },
-      config.planner
-    );
-    const p = next.plan;
-    console.log(
-      `[plan] ${p.action} — ${p.reason} |` +
-        ` réserve ${p.showers}/${p.floorShowers} déficit ${p.deficitWh}Wh` +
-        ` EDF_réel ${p.gridNowW}W${p.measured ? ' [MESURÉ]' : ' [proj]'} |` +
-        ` chauffe: PV ${p.pvCoverW}W + batt ${p.batteryCoverW}W + EDF ${p.gridDrawW}W (${p.autoconsoPct}% autoconso)` +
-        ` coût_now ${p.costNowEur}€/kWh vs HC ${p.costHcEur}€` +
-        (p.backstopHcHour !== null ? ` backstop ${p.backstopHcHour}h` : '')
-    );
-  }
-
-  // ── Boucle de REGRET : accumuler la chauffe VENTILÉE par source, noter le jour ──
+  // ── 5. Boucle de REGRET : ventilation MESURÉE de chaque chauffe (EM50 + Anker) ──
   {
     const emptyDay = (date: string) => ({
       date,
@@ -212,23 +228,24 @@ async function runTick(apply: boolean): Promise<TickResult> {
       gainEur: 0
     });
     let reg = next.regret ?? { day: emptyDay(inputs.todayParis), days: [] };
-    // Clôture au changement de jour : le jour écoulé rejoint l'historique (≤ 30 j).
     if (reg.day.date !== inputs.todayParis) {
       const days = reg.day.injWh > 0 ? [...reg.days, reg.day].slice(-30) : reg.days;
       reg = { day: emptyDay(inputs.todayParis), days };
     } else {
       reg = { day: { ...reg.day }, days: reg.days };
     }
-    // Accumulation : uniquement quand le ballon chauffe (décomposition MESURÉE du plan).
-    const p = next.plan;
-    if (p && p.measured) {
+    const heating = inputs.em50Available && inputs.cumulusPowerW > SHADOW_HEAT_W;
+    if (heating) {
       const dtH = Math.min(0.1, Math.max(0, (now - (state.lastTickTs ?? now)) / 3_600_000));
-      reg.day.pvWh += p.pvCoverW * dtH;
-      reg.day.battWh += p.batteryCoverW * dtH;
-      if (inputs.isHC) reg.day.gridHcWh += p.gridDrawW * dtH;
-      else reg.day.gridHpWh += p.gridDrawW * dtH;
+      const base = inputs.cumulusPowerW;
+      const gridDraw = Math.max(0, Math.min(base, inputs.gridPowerW));
+      const battCover = Math.max(0, Math.min(inputs.batteryDischargeW, base - gridDraw));
+      const pvCover = Math.max(0, base - gridDraw - battCover);
+      reg.day.pvWh += pvCover * dtH;
+      reg.day.battWh += battCover * dtH;
+      if (inputs.isHC) reg.day.gridHcWh += gridDraw * dtH;
+      else reg.day.gridHpWh += gridDraw * dtH;
     }
-    // Notes du jour (recalculées au tick — cash EDF réel vs référence tout-HC).
     reg.day.injWh = Math.round(reg.day.pvWh + reg.day.battWh + reg.day.gridHpWh + reg.day.gridHcWh);
     reg.day.costRealEur = +(
       (reg.day.gridHpWh / 1000) * inputs.priceHp +
@@ -239,15 +256,11 @@ async function runTick(apply: boolean): Promise<TickResult> {
     next.regret = reg;
   }
 
-  // ── Timeline SHADOW (journal du jour : plan / chauffe / puisage / plein) ──
+  // ── 6. Timeline (journal du jour : phases du pilote / chauffes / puisages / appareils) ──
   {
-    const evs: ShadowEvent[] = [];
-    if (next.plan && state.plan?.action !== next.plan.action) {
-      evs.push({ ts: now, kind: 'plan', label: next.plan.action, detail: next.plan.reason });
-    }
+    const evs: ShadowEvent[] = [...pilotRes.events];
     const heatingNow = inputs.em50Available && inputs.cumulusPowerW > SHADOW_HEAT_W;
     if (heatingNow && state.shadowHeat === null) {
-      // « gratuit » si on n'importe quasi rien du réseau (solaire + batterie couvrent).
       const solar = inputs.gridPowerW < SHADOW_HEAT_W;
       next.shadowHeat = { sinceTs: now, sinceInjWh: er.injWhDay, solar };
       evs.push({
@@ -279,44 +292,44 @@ async function runTick(apply: boolean): Promise<TickResult> {
       evs.push({ ts: now, kind: 'full', label: 'ballon plein', detail: 'recalage E_avail' });
     }
 
-    // ── Cycles des gros appareils (lave-vaisselle / lave-linge) : nommer la conso
-    //    + expliquer ce que le pilotage aurait fait (autoconso / soutirage EDF). OBSERVATION. ──
+    // Cycles des gros appareils (lave-vaisselle / lave-linge) : nommer la conso +
+    // l'interaction avec le pilote (une cession « achat réseau » pendant le cycle).
     {
       const dtH = Math.min(0.1, Math.max(0, (now - (state.lastTickTs ?? now)) / 3_600_000));
-      // Le chauffe-eau AURAIT-il voulu chauffer, mais chauffer maintenant ponctionnerait EDF ?
-      const wouldDrawEdf = (next.plan?.gridDrawW ?? 0) > config.planner.gridTolW;
-      const heatIntent = (next.plan?.deficitWh ?? 0) > 0;
+      const cededForBuy =
+        next.pilot.lastCessionTs !== null &&
+        now - next.pilot.lastCessionTs < 10 * 60_000 &&
+        (next.pilot.lastCessionCause === 'buy' || next.pilot.lastCessionCause === 'hard_buy');
 
       const nextCycles: Record<string, (typeof state.applianceCycles)[string]> = {};
       for (const ap of inputs.appliances) {
         let cyc = state.applianceCycles[ap.topic] ? { ...state.applianceCycles[ap.topic] } : null;
         const fresh = ap.powerW !== null;
-        const p = ap.powerW ?? 0;
+        const pw = ap.powerW ?? 0;
 
-        if (fresh && p >= ap.onW) {
+        if (fresh && pw >= ap.onW) {
           if (!cyc || !cyc.running) {
             cyc = {
               running: true,
               startTs: now,
               startEnergyKwh: ap.energyKwh,
               energyWh: 0,
-              peakW: p,
+              peakW: pw,
               lastAboveTs: now,
               coHeatTicks: 0,
               deferTicks: 0
             };
           } else {
             cyc.lastAboveTs = now;
-            cyc.peakW = Math.max(cyc.peakW, p);
+            cyc.peakW = Math.max(cyc.peakW, pw);
           }
         }
 
         if (cyc && cyc.running) {
-          if (fresh) cyc.energyWh += p * dtH;
+          if (fresh) cyc.energyWh += pw * dtH;
           if (heatingNow) cyc.coHeatTicks++;
-          else if (wouldDrawEdf && heatIntent) cyc.deferTicks++;
+          else if (cededForBuy) cyc.deferTicks++;
 
-          // Clôture : plus rien au-dessus du seuil depuis la fenêtre de grâce.
           if (now - cyc.lastAboveTs > APPLIANCE_OFF_GRACE_MS) {
             const endKwh =
               cyc.startEnergyKwh !== null &&
@@ -326,10 +339,10 @@ async function runTick(apply: boolean): Promise<TickResult> {
                 : cyc.energyWh / 1000;
             const durMin = Math.max(1, Math.round((cyc.lastAboveTs - cyc.startTs) / 60_000));
             const note =
-              cyc.coHeatTicks > 0
-                ? 'le chauffe-eau a chauffé en même temps (couvert par le solaire)'
-                : cyc.deferTicks > 0
-                  ? "l'automatisation aurait attendu la fin (sinon la chauffe ponctionnait EDF)"
+              cyc.deferTicks > 0
+                ? 'le chauffe-eau a cédé la place (la maison d’abord)'
+                : cyc.coHeatTicks > 0
+                  ? 'le chauffe-eau a chauffé en même temps (couvert par le solaire)'
                   : 'sans effet sur le chauffe-eau';
             evs.push({
               ts: cyc.lastAboveTs,
@@ -337,7 +350,7 @@ async function runTick(apply: boolean): Promise<TickResult> {
               label: ap.name,
               detail: `${endKwh.toFixed(2).replace('.', ',')} kWh · ${durMin} min · ${note}`
             });
-            cyc.running = false; // clos → non repris dans nextCycles
+            cyc.running = false;
           }
         }
 
@@ -398,7 +411,7 @@ async function runTick(apply: boolean): Promise<TickResult> {
 }
 
 /**
- * Un tick du moteur. `apply=false` = dry-run (observation sans pilotage).
+ * Un tick du moteur. `apply=false` = dry-run (calcule sans toucher au relais).
  * Retourne `skipped:'busy'` si un tick est déjà en cours (pas de concurrence).
  */
 export async function tick(apply = true): Promise<TickResult> {
@@ -426,7 +439,6 @@ export async function tick(apply = true): Promise<TickResult> {
 /**
  * Applique une commande utilisateur (mode auto/manuel/vacances, forçage relais)
  * puis déclenche un tick immédiat pour refléter le changement sans attendre 60 s.
- * Forcer le relais bascule implicitement en mode manuel (hors mode vacances).
  */
 export async function applyCommand(cmd: {
   autoMode?: AutoMode;
@@ -436,7 +448,7 @@ export async function applyCommand(cmd: {
   const state = await readCumulusState();
   if (cmd.autoMode) {
     state.autoMode = cmd.autoMode;
-    if (cmd.autoMode === 'auto') state.boostUntilFull = false; // repasser en auto annule un boost
+    if (cmd.autoMode === 'auto') state.boostUntilFull = false;
   }
   if (typeof cmd.manualRelayOn === 'boolean') {
     state.manualRelayOn = cmd.manualRelayOn;
@@ -444,7 +456,7 @@ export async function applyCommand(cmd: {
   }
   if (typeof cmd.boost === 'boolean') {
     state.boostUntilFull = cmd.boost;
-    if (cmd.boost) state.autoMode = 'auto'; // « Chauffer maintenant » → auto + boost jusqu'au plein
+    if (cmd.boost) state.autoMode = 'auto';
   }
   await writeCumulusState(state);
   return tick(true);

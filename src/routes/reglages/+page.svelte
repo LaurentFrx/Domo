@@ -538,42 +538,8 @@
           </label>
         </div>
 
-        <!-- Surplus, durées, prévision -->
+        <!-- Durées, prévision -->
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <label
-            class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-            style="background: var(--color-muted);"
-          >
-            <span
-              class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-              style="color: var(--color-muted-fg);">Surplus ON (W)</span
-            >
-            <input
-              type="number"
-              step="100"
-              bind:value={cumulusCfg.surplusOnW}
-              onchange={saveCumulusCfg}
-              class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
-              style="color: var(--color-primary);"
-            />
-          </label>
-          <label
-            class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-            style="background: var(--color-muted);"
-          >
-            <span
-              class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-              style="color: var(--color-muted-fg);">Surplus OFF (W)</span
-            >
-            <input
-              type="number"
-              step="100"
-              bind:value={cumulusCfg.surplusOffW}
-              onchange={saveCumulusCfg}
-              class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
-              style="color: var(--color-primary);"
-            />
-          </label>
           <label
             class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
             style="background: var(--color-muted);"
@@ -627,18 +593,91 @@
           </label>
         </div>
 
+        <!-- Alerte « APS muet » (l'étalon de la détection solaire) -->
+        {#if cumulusCfg.pilot}
+          <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <label
+              class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
+              style="background: var(--color-muted);"
+            >
+              <span
+                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+                style="color: var(--color-muted-fg);">APS périmé après (s)</span
+              >
+              <input
+                type="number"
+                step="30"
+                bind:value={cumulusCfg.pilot.apsStaleSec}
+                onchange={saveCumulusCfg}
+                class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
+                style="color: var(--color-fg);"
+              />
+            </label>
+            <label
+              class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
+              style="background: var(--color-muted);"
+            >
+              <span
+                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+                style="color: var(--color-muted-fg);">APS muet si &le; (W)</span
+              >
+              <input
+                type="number"
+                step="5"
+                bind:value={cumulusCfg.pilot.apsMuteFloorW}
+                onchange={saveCumulusCfg}
+                class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
+                style="color: var(--color-fg);"
+              />
+            </label>
+            <label
+              class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
+              style="background: var(--color-muted);"
+            >
+              <span
+                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+                style="color: var(--color-muted-fg);">Confirmé pendant (s)</span
+              >
+              <input
+                type="number"
+                step="60"
+                bind:value={cumulusCfg.pilot.apsMuteConfirmSec}
+                onchange={saveCumulusCfg}
+                class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
+                style="color: var(--color-fg);"
+              />
+            </label>
+            <label
+              class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
+              style="background: var(--color-muted);"
+            >
+              <span
+                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
+                style="color: var(--color-muted-fg);">Jumeaux SB1 &ge; (W)</span
+              >
+              <input
+                type="number"
+                step="50"
+                bind:value={cumulusCfg.pilot.apsTwinMinW}
+                onchange={saveCumulusCfg}
+                class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
+                style="color: var(--color-fg);"
+              />
+            </label>
+          </div>
+        {/if}
+
         <p class="text-[11px] leading-relaxed" style="color: var(--color-muted-fg);">
-          Le moteur décide QUAND chauffer ; c'est le CUMULUS (sa molette) qui décide la fin : il
-          coupe l'alimentation quand l'eau est à sa consigne, et le moteur le détecte (conso → 0).
-          Aucune cible de température. « Solaire d'abord » : ouvre le relais dès qu'il y a du
-          surplus PV, et laisse le cumulus chauffer à fond (gratuit + désinfecté ≥60°C). La nuit
-          (heures creuses 00:06–08:06), il ne chauffe QUE si peu de soleil est prévu demain (sous {cumulusCfg.forecastFaibleKwh}
-          kWh) — sinon rien. On ne relance une chauffe que lorsque l'eau a rebaissé de {cumulusCfg.rechargeHysteresisC}°C
-          sous la dernière charge. Confort mini {cumulusCfg.tminConfortC}°C toujours garanti ·
-          sécurité
-          {cumulusCfg.tmaxSondeC}°C · watchdog auto-off {Math.round(
+          PILOTE V2 — règle : le chauffe-eau ne cause JAMAIS d'achat de courant à EDF. Il s'allume
+          quand la maison donne au réseau (ou sur surplus invisible estimé), sept conditions tenues
+          trois minutes, et cède la place dès que la maison a besoin de sa puissance. C'est le
+          CUMULUS (sa molette) qui décide la fin de chauffe (conso → 0 détectée). La nuit, une
+          recharge en heures creuses garantit les douches du matin (fin ~07:15), modulée par la
+          météo de demain et d'après-demain (jour « gris » sous {cumulusCfg.forecastFaibleKwh} kWh). On
+          ne relance qu'après une baisse de {cumulusCfg.rechargeHysteresisC}°C sous la dernière
+          charge. Sécurité {cumulusCfg.tmaxSondeC}°C · watchdog auto-off {Math.round(
             cumulusCfg.autoOffDelaySec / 60
-          )} min.
+          )} min. Le détail des conditions vit sur la carte « Eau chaude » (bouton « pilote »).
         </p>
       {:else}
         <p class="text-[12px]" style="color: var(--color-muted-fg);">

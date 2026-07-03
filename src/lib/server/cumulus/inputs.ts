@@ -8,13 +8,7 @@
 
 import { env } from '$env/dynamic/private';
 import { isHC, nextTariffSwitch, parisDate, regimeAt } from '../tariffs';
-import type {
-  CumulusConfig,
-  CumulusInputs,
-  TempSource,
-  ApplianceInput,
-  PlanForecastPoint
-} from './types';
+import type { CumulusConfig, CumulusInputs, TempSource, ApplianceInput } from './types';
 import { readRelay } from './relay';
 import { averageTemp } from './energy-model';
 import { ensureTempSensor, getCumulusTemp, ensureTempTopic, getTempTopic } from './temp-sensor';
@@ -24,7 +18,6 @@ const TIMEOUT_MS = 8_000;
 const FORECAST_TIMEOUT_MS = 12_000;
 const INDOOR_STALE_MS = 3 * 3_600_000; // sonde intérieure périmée au-delà de 3 h
 const APPLIANCE_STALE_MS = 10 * 60_000; // prise périmée au-delà de 10 min (plug offline)
-const FORECAST_HORIZON_H = 30; // courbe PV à venir conservée pour le planificateur (h)
 
 const num = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) ? n : 0);
 
@@ -100,15 +93,17 @@ async function readForecastNextDaylight(now: Date): Promise<{
   available: boolean;
   kwh: number;
   outdoorC: number | null;
-  hourly: PlanForecastPoint[];
+  d1Kwh: number; // énergie prévue demain, journée complète (kWh) ; −1 si inconnue
+  d2Kwh: number; // énergie prévue après-demain (kWh) ; −1 si inconnue
 }> {
+  const fail = { available: false, kwh: 0, outdoorC: null, d1Kwh: -1, d2Kwh: -1 };
   const base = forecastUrl();
-  if (!base) return { available: false, kwh: 0, outdoorC: null, hourly: [] };
+  if (!base) return fail;
   try {
     const r = await fetch(`${base}/api/forecast`, {
       signal: AbortSignal.timeout(FORECAST_TIMEOUT_MS)
     });
-    if (!r.ok) return { available: false, kwh: 0, outdoorC: null, hourly: [] };
+    if (!r.ok) return fail;
     const d = (await r.json()) as {
       hourly?: ForecastPoint[];
       points?: ForecastPoint[];
@@ -134,21 +129,26 @@ async function readForecastNextDaylight(now: Date): Promise<{
       break;
     }
 
-    // Courbe PV horaire À VENIR (heures ≥ courante, jusqu'à l'horizon) pour le planificateur.
-    // hoursAhead = jours d'écart × 24 + (heure du point − heure courante) ; raisonnement en
-    // heures locales (dates calendaires en UTC minuit) → pas d'ambiguïté DST.
-    const todayMidnight = Date.parse(today);
-    const hourly: PlanForecastPoint[] = [];
+    // Agrégats J+1 / J+2 (journées calendaires complètes) — modulation de la recharge HC
+    // nocturne UNIQUEMENT (annotation Laurent : prévision sur DEUX jours pour affiner).
+    const d1Day = parisDate(new Date(now.getTime() + 86_400_000));
+    const d2Day = parisDate(new Date(now.getTime() + 2 * 86_400_000));
+    let d1Wh = 0;
+    let d2Wh = 0;
+    let d1Seen = false;
+    let d2Seen = false;
     for (const pt of arr) {
-      const time = typeof pt.time === 'string' ? pt.time : '';
-      const ph = Number(time.slice(11, 13));
-      const ptDay = Date.parse(time.slice(0, 10));
-      if (!Number.isFinite(ph) || Number.isNaN(ptDay) || Number.isNaN(todayMidnight)) continue;
-      const hoursAhead = Math.round((ptDay - todayMidnight) / 86_400_000) * 24 + (ph - h);
-      if (hoursAhead < 0 || hoursAhead > FORECAST_HORIZON_H) continue;
-      hourly.push({ hoursAhead, hour: ph, pvW: Math.round(pointPowerW(pt)) });
+      const day = typeof pt.time === 'string' ? pt.time.slice(0, 10) : '';
+      if (day === d1Day) {
+        d1Wh += pointPowerW(pt);
+        d1Seen = true;
+      } else if (day === d2Day) {
+        d2Wh += pointPowerW(pt);
+        d2Seen = true;
+      }
     }
-    hourly.sort((a, b) => a.hoursAhead - b.hoursAhead);
+    const d1Kwh = d1Seen ? +(d1Wh / 1000).toFixed(2) : -1;
+    const d2Kwh = d2Seen ? +(d2Wh / 1000).toFixed(2) : -1;
 
     if (arr.length) {
       let wh = 0;
@@ -159,13 +159,13 @@ async function readForecastNextDaylight(now: Date): Promise<{
         if (!Number.isFinite(ph) || ph < fromHour || ph >= 19) continue;
         wh += pointPowerW(pt);
       }
-      return { available: true, kwh: +(wh / 1000).toFixed(2), outdoorC, hourly };
+      return { available: true, kwh: +(wh / 1000).toFixed(2), outdoorC, d1Kwh, d2Kwh };
     }
     if (typeof d.next_24h_kwh === 'number')
-      return { available: true, kwh: d.next_24h_kwh, outdoorC, hourly };
-    return { available: false, kwh: 0, outdoorC, hourly };
+      return { available: true, kwh: d.next_24h_kwh, outdoorC, d1Kwh, d2Kwh };
+    return { ...fail, outdoorC };
   } catch {
-    return { available: false, kwh: 0, outdoorC: null, hourly: [] };
+    return fail;
   }
 }
 
@@ -173,17 +173,30 @@ async function readForecastNextDaylight(now: Date): Promise<{
 const apsystemsUrl = () =>
   (env.APSYSTEMS_BRIDGE_URL || 'http://127.0.0.1:8100').replace(/\/+$/, '');
 
-/** Production instantanée du micro-onduleur APS EZ1 (pan Sud), W. 0 si indispo. */
-async function readApsystems(): Promise<number> {
+interface ApsRead {
+  powerW: number; // production instantanée (0 si indispo)
+  available: boolean; // le bridge répond ET se dit disponible
+  ageSec: number | null; // fraîcheur de la donnée (now − ts), null si ts absent
+}
+
+/** Production du micro-onduleur APS EZ1 (pan Sud) + disponibilité/fraîcheur
+ *  (l'alerte « APS muet » a besoin de distinguer « injoignable » de « 0 W réel »). */
+async function readApsystems(nowMs: number): Promise<ApsRead> {
+  const fail: ApsRead = { powerW: 0, available: false, ageSec: null };
   try {
     const r = await fetch(`${apsystemsUrl()}/api/apsystems/status`, {
       signal: AbortSignal.timeout(TIMEOUT_MS)
     });
-    if (!r.ok) return 0;
-    const d = (await r.json()) as { available?: boolean; power_w?: number };
-    return d.available === false ? 0 : Math.max(0, Math.round(num(d.power_w)));
+    if (!r.ok) return fail;
+    const d = (await r.json()) as { available?: boolean; power_w?: number; ts?: number };
+    const ageSec =
+      typeof d.ts === 'number' && Number.isFinite(d.ts)
+        ? Math.max(0, Math.round(nowMs / 1000 - d.ts))
+        : null;
+    if (d.available === false) return { powerW: 0, available: false, ageSec };
+    return { powerW: Math.max(0, Math.round(num(d.power_w))), available: true, ageSec };
   } catch {
-    return 0;
+    return fail;
   }
 }
 
@@ -200,6 +213,7 @@ interface AnkerRead {
   batteryEnergyWh: number;
   batteryCapacityWh: number;
   socPct: number[];
+  sbInputW: (number | null)[]; // PV entrant par station (input_power_w) — calibration estimateur
 }
 
 async function readAnker(): Promise<AnkerRead> {
@@ -212,7 +226,8 @@ async function readAnker(): Promise<AnkerRead> {
     batteryChargeW: 0,
     batteryEnergyWh: 0,
     batteryCapacityWh: 0,
-    socPct: []
+    socPct: [],
+    sbInputW: []
   };
   try {
     const r = await fetch(`${ankerUrl()}/api/status`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -228,6 +243,7 @@ async function readAnker(): Promise<AnkerRead> {
         battery_energy_wh?: number;
         battery_capacity_wh?: number;
         charging_power_w?: number;
+        input_power_w?: number;
       }[];
     };
     const bats = Array.isArray(d.batteries) ? d.batteries : [];
@@ -240,7 +256,12 @@ async function readAnker(): Promise<AnkerRead> {
       batteryChargeW: Math.round(bats.reduce((s, b) => s + num(b?.charging_power_w), 0)),
       batteryEnergyWh: Math.round(bats.reduce((s, b) => s + num(b?.battery_energy_wh), 0)),
       batteryCapacityWh: Math.round(bats.reduce((s, b) => s + num(b?.battery_capacity_wh), 0)),
-      socPct: bats.map((b) => Math.round(num(b?.soc)))
+      socPct: bats.map((b) => Math.round(num(b?.soc))),
+      sbInputW: bats.map((b) =>
+        typeof b?.input_power_w === 'number' && Number.isFinite(b.input_power_w)
+          ? Math.round(b.input_power_w)
+          : null
+      )
     };
   } catch {
     return fail;
@@ -280,13 +301,13 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
   if (em.outdoorSources.thermoExtTopic) ensureTempTopic(em.outdoorSources.thermoExtTopic);
   const now = new Date();
 
-  const [relay, em50, forecast, anker, daikinOut, pvApsW] = await Promise.all([
+  const [relay, em50, forecast, anker, daikinOut, aps] = await Promise.all([
     readRelay(),
     readEm50(),
     readForecastNextDaylight(now),
     readAnker(),
     em.outdoorSources.daikin ? readDaikinOutdoor() : Promise.resolve(null),
-    readApsystems()
+    readApsystems(now.getTime())
   ]);
 
   const t = getCumulusTemp();
@@ -355,7 +376,8 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     priceHc: reg.hc_eur_kwh,
     forecastAvailable: forecast.available,
     solNextDaylightKwh: forecast.kwh,
-    forecastHourly: forecast.hourly,
+    forecastD1Kwh: forecast.d1Kwh,
+    forecastD2Kwh: forecast.d2Kwh,
     relayAvailable: relay.available,
     relayOn: relay.on,
     ankerAvailable: anker.available,
@@ -367,7 +389,10 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     batteryEnergyWh: anker.batteryEnergyWh,
     batteryCapacityWh: anker.batteryCapacityWh,
     batteryChargeW: anker.batteryChargeW,
-    pvApsW,
+    sbInputW: anker.sbInputW,
+    pvApsW: aps.powerW,
+    apsAvailable: aps.available,
+    apsAgeSec: aps.ageSec,
     indoorC,
     outdoorC,
     indoorSources,

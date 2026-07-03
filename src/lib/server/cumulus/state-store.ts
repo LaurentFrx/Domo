@@ -19,8 +19,9 @@ import type {
   DecisionLogEntry,
   EnergyState,
   EnergyView,
-  HeatPlan,
-  PlanAction,
+  PilotState,
+  PilotView,
+  HcPlan,
   ShadowEvent,
   ApplianceCycle,
   RegretDay
@@ -43,8 +44,6 @@ export function defaultCumulusState(): CumulusRuntimeState {
     lastOnTs: null,
     lastOffTs: null,
     lastTransitionTs: null,
-    surplusBelowSinceTs: null,
-    planStopSinceTs: null,
     lowPowerSinceTs: null,
     ballonCharged: false,
     chargedAtTempC: null,
@@ -60,7 +59,8 @@ export function defaultCumulusState(): CumulusRuntimeState {
     anomaly: 'none',
     energy: defaultEnergyState(),
     energyView: null,
-    plan: null,
+    pilot: defaultPilotStateStore(),
+    pilotView: null,
     shadowLog: [],
     shadowHeat: null,
     applianceCycles: {},
@@ -148,8 +148,6 @@ export function normalizeCumulusState(raw: unknown): CumulusRuntimeState {
     lastOnTs: numOrNull(o.lastOnTs),
     lastOffTs: numOrNull(o.lastOffTs),
     lastTransitionTs: numOrNull(o.lastTransitionTs),
-    surplusBelowSinceTs: numOrNull(o.surplusBelowSinceTs),
-    planStopSinceTs: numOrNull(o.planStopSinceTs),
     lowPowerSinceTs: numOrNull(o.lowPowerSinceTs),
     ballonCharged: boolOr(o.ballonCharged, d.ballonCharged),
     chargedAtTempC: numOrNull(o.chargedAtTempC),
@@ -167,7 +165,8 @@ export function normalizeCumulusState(raw: unknown): CumulusRuntimeState {
     anomaly: (o.anomaly as Anomaly) ?? d.anomaly,
     energy: normEnergy(o.energy),
     energyView: normEnergyView(o.energyView),
-    plan: normPlan(o.plan),
+    pilot: normPilot(o.pilot),
+    pilotView: normPilotView(o.pilotView),
     shadowLog: normShadowLog(o.shadowLog),
     shadowHeat: normShadowHeat(o.shadowHeat),
     applianceCycles: normApplianceCycles(o.applianceCycles),
@@ -227,7 +226,7 @@ function normApplianceCycles(v: unknown): Record<string, ApplianceCycle> {
   return out;
 }
 
-const SHADOW_KINDS = ['plan', 'heat_start', 'heat_end', 'draw', 'full', 'appliance'];
+const SHADOW_KINDS = ['phase', 'heat_start', 'heat_end', 'draw', 'full', 'appliance'];
 function normShadowLog(v: unknown): ShadowEvent[] {
   if (!Array.isArray(v)) return [];
   return v
@@ -261,33 +260,117 @@ function normEnergyView(v: unknown): EnergyView | null {
     eAvailWh: numOr(o.eAvailWh, 0),
     eFullWh: numOr(o.eFullWh, 0),
     showers: numOr(o.showers, 0),
-    tTankC: numOr(o.tTankC, 0)
+    tTankC: numOr(o.tTankC, 0),
+    eDoucheWh: numOr(o.eDoucheWh, 2000),
+    lossPerHWh: numOr(o.lossPerHWh, 0)
   };
 }
 
-const PLAN_ACTIONS: PlanAction[] = ['heat_now', 'heat_hc', 'wait_solar', 'wait'];
-function normPlan(v: unknown): HeatPlan | null {
+// ── PILOTE V2 : mémoire de la machine + vue UI ──
+const CESSION_CAUSES = ['buy', 'hard_buy', 'battery', 'grace_fail'] as const;
+
+function defaultPilotStateStore(): PilotState {
+  return {
+    condsSinceTs: null,
+    buyOverSinceTs: null,
+    socStartOfHeat: null,
+    startsDate: '',
+    solarStartsToday: 0,
+    resumesToday: 0,
+    lastCessionCause: null,
+    lastCessionTs: null,
+    hcPlan: null,
+    wouldOnSinceTs: null,
+    apsLowSinceTs: null,
+    apsAlert: 'none'
+  };
+}
+
+function normHcPlan(v: unknown): HcPlan | null {
   if (!v || typeof v !== 'object') return null;
   const o = v as Record<string, unknown>;
-  if (!PLAN_ACTIONS.includes(o.action as PlanAction)) return null;
+  if (typeof o.forDate !== 'string' || typeof o.startMin !== 'number') return null;
   return {
-    action: o.action as PlanAction,
+    forDate: o.forDate,
+    targetWh: numOr(o.targetWh, 0),
+    minWh: numOr(o.minWh, 0),
+    startMin: numOr(o.startMin, 6),
+    endMin: numOr(o.endMin, 450),
     reason: typeof o.reason === 'string' ? o.reason : '',
-    targetHour: numOrNull(o.targetHour),
-    showers: numOr(o.showers, 0),
-    floorShowers: numOr(o.floorShowers, 0),
-    deficitWh: numOr(o.deficitWh, 0),
-    gridNowW: numOr(o.gridNowW, 0),
-    measured: typeof o.measured === 'boolean' ? o.measured : false,
-    pvCoverW: numOr(o.pvCoverW, 0),
-    batteryCoverW: numOr(o.batteryCoverW, 0),
-    gridDrawW: numOr(o.gridDrawW, 0),
-    autoconsoPct: numOr(o.autoconsoPct, 0),
-    eveningNeedWh: numOr(o.eveningNeedWh, 0),
-    storageLossWh: numOr(o.storageLossWh, 0),
-    costNowEur: numOr(o.costNowEur, 0),
-    costHcEur: numOr(o.costHcEur, 0),
-    backstopHcHour: numOrNull(o.backstopHcHour),
+    computedAt: numOr(o.computedAt, 0)
+  };
+}
+
+function normPilot(v: unknown): PilotState {
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  const d = defaultPilotStateStore();
+  return {
+    condsSinceTs: numOrNull(o.condsSinceTs),
+    buyOverSinceTs: numOrNull(o.buyOverSinceTs),
+    socStartOfHeat: numOrNull(o.socStartOfHeat),
+    startsDate: typeof o.startsDate === 'string' ? o.startsDate : d.startsDate,
+    solarStartsToday: numOr(o.solarStartsToday, 0),
+    resumesToday: numOr(o.resumesToday, 0),
+    lastCessionCause: (CESSION_CAUSES as readonly string[]).includes(o.lastCessionCause as string)
+      ? (o.lastCessionCause as PilotState['lastCessionCause'])
+      : null,
+    lastCessionTs: numOrNull(o.lastCessionTs),
+    hcPlan: normHcPlan(o.hcPlan),
+    wouldOnSinceTs: numOrNull(o.wouldOnSinceTs),
+    apsLowSinceTs: numOrNull(o.apsLowSinceTs),
+    apsAlert: ['none', 'unreachable', 'fault'].includes(o.apsAlert as string)
+      ? (o.apsAlert as PilotState['apsAlert'])
+      : 'none'
+  };
+}
+
+const PILOT_PHASES = ['repos', 'allumage', 'chauffe', 'cession', 'plein', 'recharge_hc'] as const;
+
+function normPilotView(v: unknown): PilotView | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  if (!(PILOT_PHASES as readonly string[]).includes(o.phase as string)) return null;
+  const conds = Array.isArray(o.conds)
+    ? o.conds
+        .filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
+        .map((c) => ({
+          key: typeof c.key === 'string' ? c.key : '',
+          label: typeof c.label === 'string' ? c.label : '',
+          ok: c.ok === true,
+          detail: typeof c.detail === 'string' ? c.detail : ''
+        }))
+    : [];
+  const rescueRaw = (o.rescue && typeof o.rescue === 'object' ? o.rescue : {}) as Record<
+    string,
+    unknown
+  >;
+  const rescueState = ['standby_export', 'standby_below', 'armed', 'unavailable'].includes(
+    rescueRaw.state as string
+  )
+    ? (rescueRaw.state as PilotView['rescue']['state'])
+    : 'standby_below';
+  return {
+    phase: o.phase as PilotView['phase'],
+    phaseSinceTs: numOr(o.phaseSinceTs, 0),
+    wantOn: o.wantOn === true,
+    note: typeof o.note === 'string' ? o.note : '',
+    conds,
+    rescue: {
+      state: rescueState,
+      detail: typeof rescueRaw.detail === 'string' ? rescueRaw.detail : ''
+    },
+    apsAlert: ['none', 'unreachable', 'fault'].includes(o.apsAlert as string)
+      ? (o.apsAlert as PilotView['apsAlert'])
+      : 'none',
+    invisibleSurplusW: numOr(o.invisibleSurplusW, 0),
+    potTotalW: numOr(o.potTotalW, 0),
+    pApsW: numOr(o.pApsW, 0),
+    socNow: numOrNull(o.socNow),
+    socStart: numOrNull(o.socStart),
+    solarStartsToday: numOr(o.solarStartsToday, 0),
+    resumesToday: numOr(o.resumesToday, 0),
+    quota: numOr(o.quota, 2),
+    nextAction: typeof o.nextAction === 'string' ? o.nextAction : '',
     computedAt: numOr(o.computedAt, 0)
   };
 }
