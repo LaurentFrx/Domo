@@ -700,3 +700,61 @@ test('résorption : l’APS revient → alerte levée + journal', () => {
   assert.equal(r.pilot.apsAlert, 'none');
   assert.ok(r.events.some((e) => e.label === 'alerte APS levée'));
 });
+
+// ─── Horaires de la fenêtre solaire (éphémérides, affichés sur la carte) ────────
+
+function hmToMinutes(hm: string): number {
+  const [h, m] = hm.split(':').map(Number);
+  return h * 60 + m;
+}
+
+test('la fenêtre solaire du jour est exposée en horaires HH:MM cohérents (début < fin)', () => {
+  const r = pilotStep(inp(), cfg(), st(), ctx());
+  assert.ok(r.view.sunWindowStart, 'un horaire de début doit être calculé (été, Sanguinet)');
+  assert.ok(r.view.sunWindowEnd, 'un horaire de fin doit être calculé');
+  const startMin = hmToMinutes(r.view.sunWindowStart!);
+  const endMin = hmToMinutes(r.view.sunWindowEnd!);
+  assert.ok(startMin < endMin, 'la fenêtre doit s’ouvrir avant de se fermer');
+  // Sanity : cohérent avec les seuils par défaut (élévation/azimut) à cette date/latitude.
+  assert.ok(
+    startMin >= 11 * 60 && startMin <= 13 * 60,
+    `début inattendu : ${r.view.sunWindowStart}`
+  );
+  assert.ok(endMin >= 16 * 60 && endMin <= 18 * 60, `fin inattendue : ${r.view.sunWindowEnd}`);
+});
+
+test('la fenêtre du jour est identique qu’on interroge le pilote de jour ou de nuit (calculée par date)', () => {
+  const day = pilotStep(inp(), cfg(), st(), ctx());
+  const night = pilotStep(
+    inp({ now: NIGHT, gridPowerW: 0 }),
+    cfg(),
+    st(),
+    ctx({ hourLocal: 4, minuteOfDay: 240 })
+  );
+  assert.equal(day.view.sunWindowStart, night.view.sunWindowStart);
+  assert.equal(day.view.sunWindowEnd, night.view.sunWindowEnd);
+});
+
+test('la fenêtre est mise en CACHE (pas recalculée) tant que la date ne change pas', () => {
+  const r1 = pilotStep(inp(), cfg(), st(), ctx());
+  const cached = r1.pilot.sunWindow;
+  assert.equal(cached?.forDate, '2026-07-03');
+  const r2 = pilotStep(inp({ now: NOON + min(20) }), cfg(), st({}, { ...r1.pilot }), ctx());
+  assert.deepEqual(r2.pilot.sunWindow, cached);
+});
+
+test('Anker muet : note « resserrée » accompagne les horaires (sans changer la fenêtre affichée)', () => {
+  const r = pilotStep(inp({ ankerAvailable: false, batterySocPct: [] }), cfg(), st(), ctx());
+  assert.ok(r.view.sunWindowNote.includes('resserrée'));
+  assert.ok(r.view.sunWindowStart && r.view.sunWindowEnd);
+});
+
+test('fenêtre fermée (avant ouverture) : la prochaine action mentionne l’heure d’ouverture', () => {
+  const r = pilotStep(
+    inp({ now: NIGHT, gridPowerW: 100, pvApsW: 0 }),
+    cfg(),
+    st(),
+    ctx({ hourLocal: 4, minuteOfDay: 240, eAvailWh: 14000 })
+  );
+  assert.match(r.view.nextAction, /ouverture prévue \d{2}:\d{2}/);
+});

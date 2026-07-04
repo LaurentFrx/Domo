@@ -282,7 +282,19 @@ function defaultPilotStateStore(): PilotState {
     hcPlan: null,
     wouldOnSinceTs: null,
     apsLowSinceTs: null,
-    apsAlert: 'none'
+    apsAlert: 'none',
+    sunWindow: null
+  };
+}
+
+function normSunWindow(v: unknown): PilotState['sunWindow'] {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.forDate !== 'string') return null;
+  return {
+    forDate: o.forDate,
+    startMin: numOr(o.startMin, -1),
+    endMin: numOr(o.endMin, -1)
   };
 }
 
@@ -320,7 +332,8 @@ function normPilot(v: unknown): PilotState {
     apsLowSinceTs: numOrNull(o.apsLowSinceTs),
     apsAlert: ['none', 'unreachable', 'fault'].includes(o.apsAlert as string)
       ? (o.apsAlert as PilotState['apsAlert'])
-      : 'none'
+      : 'none',
+    sunWindow: normSunWindow(o.sunWindow)
   };
 }
 
@@ -362,6 +375,9 @@ function normPilotView(v: unknown): PilotView | null {
     apsAlert: ['none', 'unreachable', 'fault'].includes(o.apsAlert as string)
       ? (o.apsAlert as PilotView['apsAlert'])
       : 'none',
+    sunWindowStart: typeof o.sunWindowStart === 'string' ? o.sunWindowStart : null,
+    sunWindowEnd: typeof o.sunWindowEnd === 'string' ? o.sunWindowEnd : null,
+    sunWindowNote: typeof o.sunWindowNote === 'string' ? o.sunWindowNote : '',
     invisibleSurplusW: numOr(o.invisibleSurplusW, 0),
     potTotalW: numOr(o.potTotalW, 0),
     pApsW: numOr(o.pApsW, 0),

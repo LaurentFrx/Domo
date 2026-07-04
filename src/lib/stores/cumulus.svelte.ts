@@ -70,6 +70,9 @@ export interface PilotViewClient {
     detail: string;
   };
   apsAlert: 'none' | 'unreachable' | 'fault';
+  sunWindowStart: string | null;
+  sunWindowEnd: string | null;
+  sunWindowNote: string;
   invisibleSurplusW: number;
   potTotalW: number;
   pApsW: number;
@@ -380,6 +383,9 @@ class CumulusState {
                     : { state: 'standby_below', detail: '' },
                 apsAlert:
                   pv.apsAlert === 'unreachable' || pv.apsAlert === 'fault' ? pv.apsAlert : 'none',
+                sunWindowStart: typeof pv.sunWindowStart === 'string' ? pv.sunWindowStart : null,
+                sunWindowEnd: typeof pv.sunWindowEnd === 'string' ? pv.sunWindowEnd : null,
+                sunWindowNote: typeof pv.sunWindowNote === 'string' ? pv.sunWindowNote : '',
                 invisibleSurplusW:
                   typeof pv.invisibleSurplusW === 'number' ? pv.invisibleSurplusW : 0,
                 potTotalW: typeof pv.potTotalW === 'number' ? pv.potTotalW : 0,

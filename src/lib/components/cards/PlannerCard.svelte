@@ -419,6 +419,17 @@
         {/each}
       </div>
 
+      <!-- Horaires de la fenêtre solaire du jour (éphémérides) -->
+      {#if pilot.sunWindowStart && pilot.sunWindowEnd}
+        <div class="sun-window">
+          <span>☀️ Fenêtre solaire aujourd'hui</span>
+          <strong class="tabular-nums">{pilot.sunWindowStart} → {pilot.sunWindowEnd}</strong>
+        </div>
+        {#if pilot.sunWindowNote}
+          <div class="sun-window-note">{pilot.sunWindowNote}</div>
+        {/if}
+      {/if}
+
       <!-- Déclencheur de SECOURS (bridage) : une voie d'allumage ALTERNATIVE, pas une
            8e condition — état neutre, jamais de ✗ rouge -->
       <div
@@ -671,6 +682,26 @@
     color: var(--color-primary);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ── Horaires de la fenêtre solaire du jour ── */
+  .sun-window {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.6rem;
+    font-size: 12.5px;
+    color: var(--color-muted-fg);
+  }
+  .sun-window strong {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--color-fg);
+  }
+  .sun-window-note {
+    margin-top: -0.2rem;
+    font-size: 11px;
+    color: var(--color-warning);
   }
 
   /* ── Bloc « déclencheur de secours » : état NEUTRE (jamais rouge) ── */

@@ -296,6 +296,9 @@ export interface PilotState {
   apsLowSinceTs: number | null;
   /** Niveau d'alerte APS courant (fronts journalisés à l'activation/résorption). */
   apsAlert: 'none' | 'unreachable' | 'fault';
+  /** Fenêtre solaire du jour (éphémérides), calculée une fois par jour calendaire
+   *  et mise en cache (indépendante de l'instant courant — ne dépend que de la date). */
+  sunWindow: { forDate: string; startMin: number; endMin: number } | null;
 }
 
 /** Plan de recharge nocturne calculé à hcPlanHour. */
@@ -323,6 +326,12 @@ export interface PilotView {
     detail: string;
   };
   apsAlert: 'none' | 'unreachable' | 'fault'; // alerte « APS muet » (bandeau carte)
+  /** Horaires de la fenêtre solaire du jour (éphémérides), 'HH:MM' ; null si aucune
+   *  fenêtre ce jour (cas polaire, inatteignable à cette latitude). */
+  sunWindowStart: string | null;
+  sunWindowEnd: string | null;
+  /** Note si la fenêtre effective est resserrée à l'exécution (cloud Anker muet). */
+  sunWindowNote: string;
   invisibleSurplusW: number; // surplus invisible estimé (W)
   potTotalW: number; // potentiel solaire total estimé (W)
   pApsW: number; // production APS (l'étalon)

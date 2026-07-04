@@ -31,6 +31,7 @@ import type {
   PilotState,
   PilotView,
   PilotPhase,
+  PilotConfig,
   CessionCause,
   HcPlan,
   ShadowEvent
@@ -75,8 +76,40 @@ export function defaultPilotState(): PilotState {
     hcPlan: null,
     wouldOnSinceTs: null,
     apsLowSinceTs: null,
-    apsAlert: 'none'
+    apsAlert: 'none',
+    sunWindow: null
   };
+}
+
+/**
+ * Fenêtre solaire du jour, en horaires locaux (HH:MM) — dérivée des éphémérides
+ * (mêmes seuils élévation/azimut que la décision d'allumage), balayée sur toute la
+ * journée calendaire. `minuteOfDay` sert à retrouver le minuit local approximatif
+ * (précision à la minute, largement suffisante : le soleil bouge lentement).
+ * Ne dépend que de la date + lat/lon + seuils → calculée UNE FOIS par jour.
+ */
+function computeSunWindowToday(
+  now: number,
+  minuteOfDay: number,
+  p: PilotConfig
+): { startMin: number; endMin: number } | null {
+  const localMidnightTs = now - minuteOfDay * 60_000;
+  let startMin: number | null = null;
+  let endMin: number | null = null;
+  for (let m = 0; m < 24 * 60; m += 5) {
+    const s = sunPosition(localMidnightTs + m * 60_000, p.latDeg, p.lonDeg);
+    const open =
+      s.elevationDeg > p.sunElevStartDeg &&
+      s.azimuthDeg >= p.sunAzStartDeg &&
+      s.elevationDeg >= p.sunElevEndDeg &&
+      s.azimuthDeg <= p.sunAzEndDeg;
+    if (open) {
+      if (startMin === null) startMin = m;
+      endMin = m;
+    }
+  }
+  if (startMin === null || endMin === null) return null;
+  return { startMin, endMin: Math.min(24 * 60 - 1, endMin + 5) };
 }
 
 const hmToMin = (hm: string): number => {
@@ -134,6 +167,23 @@ export function pilotStep(
       windowLeftMin = m;
     }
   }
+
+  // Fenêtre du jour (horaires HH:MM) — calculée une fois par jour, mise en cache
+  // (ne dépend que de la date + lat/lon + seuils, pas de l'instant courant).
+  if (pilot.sunWindow?.forDate !== inputs.todayParis) {
+    const w = computeSunWindowToday(now, ctx.minuteOfDay, p);
+    pilot.sunWindow = {
+      forDate: inputs.todayParis,
+      startMin: w?.startMin ?? -1,
+      endMin: w?.endMin ?? -1
+    };
+  }
+  const sunWindow = pilot.sunWindow;
+  const sunWindowStart = sunWindow && sunWindow.startMin >= 0 ? minToHm(sunWindow.startMin) : null;
+  const sunWindowEnd = sunWindow && sunWindow.endMin >= 0 ? minToHm(sunWindow.endMin) : null;
+  const sunWindowNote = !inputs.ankerAvailable
+    ? `resserrée à ${minToHm(p.degradedWindowEndH * 60)} tant que le cloud Anker reste injoignable`
+    : '';
 
   // ── Plan de recharge HC (calculé le soir à hcPlanHour ; secours après minuit) ──
   const besoinStrictWh = p.reserveShowers * ctx.eDoucheWh;
@@ -455,7 +505,15 @@ export function pilotStep(
     ) {
       return `recharge de nuit à ${minToHm(pilot.hcPlan.startMin)}`;
     }
-    if (!windowOpen) return 'attente de la fenêtre solaire (éphémérides)';
+    if (!windowOpen) {
+      if (sunWindowStart && sunWindow && ctx.minuteOfDay < sunWindow.startMin) {
+        return `attente de la fenêtre solaire — ouverture prévue ${sunWindowStart}`;
+      }
+      if (sunWindowEnd && sunWindow && ctx.minuteOfDay >= sunWindow.endMin) {
+        return `fenêtre solaire fermée pour aujourd'hui (rouverture demain vers ${sunWindowStart ?? '?'})`;
+      }
+      return 'attente de la fenêtre solaire (éphémérides)';
+    }
     if (!battFull) return 'attente : les batteries se remplissent (on ne leur vole rien)';
     if (!trigger) return 'attente d’un don franc au réseau ou d’un surplus invisible';
     if (!quotaOk) return 'quota d’allumages du jour épuisé';
@@ -508,8 +566,10 @@ export function pilotStep(
         'Fenêtre solaire',
         windowOk,
         windowOpen
-          ? `soleil ${Math.round(sun.elevationDeg)}° · APS ${inputs.pvApsW} W · reste ${windowLeftMin} min`
-          : 'fermée'
+          ? `${sunWindowStart ?? '?'} → ${sunWindowEnd ?? '?'} · soleil ${Math.round(sun.elevationDeg)}° · APS ${inputs.pvApsW} W · reste ${windowLeftMin} min`
+          : sunWindowStart && sunWindowEnd
+            ? `fermée · aujourd'hui ${sunWindowStart} → ${sunWindowEnd}`
+            : 'fermée'
       ),
       cond(
         'quota',
@@ -521,6 +581,9 @@ export function pilotStep(
     ],
     rescue,
     apsAlert,
+    sunWindowStart,
+    sunWindowEnd,
+    sunWindowNote,
     invisibleSurplusW: ctx.potential.invisibleSurplusW,
     potTotalW: ctx.potential.potTotalW,
     pApsW: Math.round(inputs.pvApsW),
