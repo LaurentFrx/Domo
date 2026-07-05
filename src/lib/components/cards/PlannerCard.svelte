@@ -474,6 +474,13 @@
 
         <dt style="color: var(--color-muted-fg);">Prochaine action</dt>
         <dd class="text-right" style="color: var(--color-fg);">{pilot.nextAction}</dd>
+
+        {#if cumulus.relaxAmplitudeC !== null && cumulus.relaxTauMin !== null}
+          <dt style="color: var(--color-muted-fg);">Relaxation sonde (calibration)</dt>
+          <dd class="text-right tabular-nums" style="color: var(--color-fg);">
+            {cumulus.relaxAmplitudeC.toFixed(1)} °C · τ {Math.round(cumulus.relaxTauMin)} min
+          </dd>
+        {/if}
       </dl>
     </div>
   {/if}

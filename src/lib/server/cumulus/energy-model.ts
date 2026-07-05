@@ -19,10 +19,18 @@
  */
 
 import type { CumulusInputs, CumulusConfig, CumulusRuntimeState, EnergyState } from './types';
+import {
+  relaxExpectedC,
+  updateProbeRelaxCalib,
+  defaultProbeRelaxCalib,
+  type ProbeRelaxCalib
+} from './probe-relax-calib.ts';
 
 const MS_PER_H = 3_600_000;
 const MAX_DT_MS = 300_000; // borne le Δt (ticks sautés / Domo redémarré) → pas d'inj/loss aberrant
 const MAX_DRAW_INTERVAL_H = 2; // borne l'intervalle de pertes attendues (sonde figée longtemps → ne pas masquer un puisage)
+const RELAX_MAX_WINDOW_MS = 4 * MS_PER_H; // le terme de relaxation ne s'applique QUE dans cette fenêtre après un vrai plein (mesuré : ~3h ; au-delà, relaxation terminée → détection normale)
+const PEAK_BEFORE_ANCHOR_TOL_MS = 30 * 60_000; // le pic sonde peut précéder l'ancre de quelques min (bruit de timing)
 
 const clamp = (lo: number, hi: number, x: number): number => Math.max(lo, Math.min(hi, x));
 
@@ -66,6 +74,11 @@ export interface EnergyTickResult {
   showers: number; // E_avail / eDouche
   eDoucheWh: number; // énergie d'une douche (interpolée saison) — pour le planificateur (2a)
   probeC: number | null;
+  /** Relaxation post-plein absorbée ce tick (°C), pour trace debug ; null = non applicable. */
+  relaxAbsorbedC: number | null;
+  /** Calibration courante (lecture, pour affichage /reglages ou carte — voir probe-relax-calib.ts). */
+  relaxAmplitudeC: number;
+  relaxTauMin: number;
 }
 
 /**
@@ -76,8 +89,9 @@ export interface EnergyTickResult {
 export function updateEnergyModel(
   inputs: CumulusInputs,
   config: CumulusConfig,
-  state: CumulusRuntimeState
-): { energy: EnergyState; result: EnergyTickResult } {
+  state: CumulusRuntimeState,
+  calib: ProbeRelaxCalib = defaultProbeRelaxCalib()
+): { energy: EnergyState; result: EnergyTickResult; calibUpdated: boolean } {
   const em = config.energyModel;
   const now = inputs.now;
   const energy: EnergyState = { ...state.energy };
@@ -146,43 +160,121 @@ export function updateEnergyModel(
   const injWh = em.etaHeat * cumulusW * dtH;
   const lossWh = em.lossCoeffWhPerCh * Math.max(0, tTank - tRoom) * dtH;
 
+  // ── Discriminant de pente (04/07) : référence COURTE et glissante, indépendante
+  // de drawRefC. Un vrai puisage chute TOUJOURS ≥ fastDropThresholdC en ≤ fastDropWindowMin
+  // (mesuré : 2 à 13°C/10min sur 3 semaines) ; la relaxation post-plein est ~10x plus
+  // lente (~0,3-0,5°C/10min max). Sert de confirmation même quand la relaxation
+  // attendue (ci-dessous) absorberait la comparaison par intervalle.
+  let fastDropC = 0;
+  let fastIntervalMin = 0;
+  if (probeC !== null) {
+    if (energy.recentProbeC === null || energy.recentProbeTs === null) {
+      energy.recentProbeC = probeC;
+      energy.recentProbeTs = now;
+    } else {
+      fastIntervalMin = (now - energy.recentProbeTs) / 60_000;
+      fastDropC = energy.recentProbeC - probeC;
+      if (fastIntervalMin >= em.fastDropWindowMin || probeC > energy.recentProbeC) {
+        energy.recentProbeC = probeC;
+        energy.recentProbeTs = now;
+      }
+    }
+  }
+  const fastConcentratedDrop =
+    fastIntervalMin > 0 &&
+    fastIntervalMin <= em.fastDropWindowMin &&
+    fastDropC >= em.fastDropThresholdC;
+
   // ── Détection de puisage par FENÊTRE GLISSANTE (sonde lente) ──────────────
   // On compare la sonde à une référence « point haut récent » (au moins
-  // drawWindowMin), au-delà de ce que les pertes expliquent → ÉVÉNEMENT. Fini la
-  // comparaison tick-à-tick (qui étalait la chute sous le seuil) ; plus de garde
-  // relais ni de masquage par l'anchor : un vrai tirage est toujours vu + historisé.
+  // drawWindowMin), au-delà de ce que les pertes ET la relaxation post-plein
+  // expliquent → ÉVÉNEMENT. Plus de garde relais ni de masquage par l'anchor : un
+  // vrai tirage est toujours vu + historisé.
   let drawWh = 0;
   let drawEvent: EnergyTickResult['drawEvent'] = null;
+  let relaxAbsorbedC: number | null = null;
+  let calibUpdated = false;
   if (probeC !== null) {
     if (energy.drawRefC === null || firstTick || initFromProbe) {
       energy.drawRefC = probeC;
       energy.drawRefTs = now;
+      energy.cleanSinceRef = true;
     } else if (probeC >= energy.drawRefC) {
-      // la sonde remonte (chauffe / re-stratification) → nouveau point haut
+      // la sonde remonte (chauffe / re-stratification) → nouveau point haut. La
+      // fenêtre de relaxation qui vient de s'écouler est-elle CALIBRABLE (propre,
+      // aucun puisage détecté depuis le pic précédent) ? `lastProbeC/Ts` tiennent
+      // encore la DERNIÈRE valeur distincte avant cette remontée (mise à jour plus
+      // bas dans le tick) — c'est le point final propre de la fenêtre qui se clôt.
+      const peakFollowedFull =
+        energy.lastAnchorTs !== null &&
+        energy.drawRefTs !== null &&
+        energy.drawRefTs - energy.lastAnchorTs >= -PEAK_BEFORE_ANCHOR_TOL_MS &&
+        energy.drawRefTs - energy.lastAnchorTs <= RELAX_MAX_WINDOW_MS;
+      if (
+        peakFollowedFull &&
+        energy.cleanSinceRef &&
+        energy.drawRefTs !== null &&
+        energy.lastProbeC !== null &&
+        energy.lastProbeTs !== null &&
+        energy.lastProbeTs > energy.drawRefTs
+      ) {
+        const tFinalMin = (energy.lastProbeTs - energy.drawRefTs) / 60_000;
+        const durH = tFinalMin / 60;
+        const expLossFinalC =
+          (em.lossCoeffWhPerCh * Math.max(0, tTank - tRoom) * Math.min(MAX_DRAW_INTERVAL_H, durH)) /
+          em.tankWhPerC;
+        const relaxObservedFinal = energy.drawRefC - energy.lastProbeC - expLossFinalC;
+        calibUpdated = updateProbeRelaxCalib(tFinalMin, relaxObservedFinal, calib, now);
+      }
       energy.drawRefC = probeC;
       energy.drawRefTs = now;
+      energy.cleanSinceRef = true;
     } else {
       const intervalH = Math.max(0, (now - (energy.drawRefTs as number)) / MS_PER_H);
       const capInt = Math.min(MAX_DRAW_INTERVAL_H, intervalH);
       const expLossC = (em.lossCoeffWhPerCh * Math.max(0, tTank - tRoom) * capInt) / em.tankWhPerC;
       const dropC = energy.drawRefC - probeC;
-      if (intervalH * 60 >= em.drawWindowMin && dropC > expLossC + em.drawDropThresholdC) {
-        // chute nette au-delà des pertes, sur la fenêtre → PUISAGE. La sonde de point
-        // bas SUR-REPRÉSENTE l'amplitude (~×drawStratFactor) : l'eau froide entre par
-        // le bas → la sonde chute plus vite que la température MOYENNE du ballon.
-        // Facteur calibré par calorimétrie EM-50 (replay 14→29/06 : puisé corrigé ≈
-        // E_recharge − pertes). On divise l'énergie « vue » par drawStratFactor pour
-        // approcher l'énergie réellement puisée (estimateur, pas débitmètre ; clamp ≥ 0
-        // en aval ; l'erreur résiduelle est bornée par les recalages au plein).
+
+      // Relaxation post-plein ATTENDUE depuis le pic (terme ajouté, 04/07) : après une
+      // coupure thermostat, la sonde surlit puis se rééquilibre (conduction + fin de
+      // brassage) — chute SANS perte d'énergie réelle. N'est PHYSIQUE que si le pic
+      // (drawRefTs) a suivi de près un vrai plein (lastAnchorTs) : loin d'un plein le
+      // terme est nul → détection normale, aucun puisage lent masqué.
+      const relaxPostFull =
+        energy.lastAnchorTs !== null &&
+        energy.drawRefTs !== null &&
+        energy.drawRefTs - energy.lastAnchorTs >= -PEAK_BEFORE_ANCHOR_TOL_MS &&
+        now - energy.lastAnchorTs <= RELAX_MAX_WINDOW_MS;
+      const tSincePeakMin = (now - (energy.drawRefTs as number)) / 60_000;
+      const relaxC = relaxPostFull ? relaxExpectedC(tSincePeakMin, calib) : 0;
+      const allowedC = expLossC + relaxC;
+
+      const isSlowDraw =
+        intervalH * 60 >= em.drawWindowMin && dropC > allowedC + em.drawDropThresholdC;
+      const isFastDraw = fastConcentratedDrop;
+
+      if (isSlowDraw || isFastDraw) {
+        // chute nette au-delà des pertes (+ relaxation), ou chute concentrée sur une
+        // fenêtre courte → PUISAGE CONFIRMÉ. L'énergie est calculée sur dropC/expLossC
+        // « bruts » (SANS la relaxation) : une fois confirmé réel, on ne veut pas
+        // sous-compter l'énergie puisée. La sonde de point bas SUR-REPRÉSENTE
+        // l'amplitude (~×drawStratFactor) : l'eau froide entre par le bas → la sonde
+        // chute plus vite que la température MOYENNE du ballon. Facteur calibré par
+        // calorimétrie EM-50 (replay 14→29/06 : puisé corrigé ≈ E_recharge − pertes).
         drawWh = (Math.max(0, dropC - expLossC) * em.tankWhPerC) / em.drawStratFactor;
         drawEvent = { ts: now, dropC: +dropC.toFixed(2), eDrawnWh: Math.round(drawWh) };
         energy.drawEvents += 1;
+        energy.cleanSinceRef = false; // un puisage est survenu : fenêtre non calibrable
         energy.drawRefC = probeC; // consommé : nouvelle référence au point bas
         energy.drawRefTs = now;
       } else if (intervalH >= MAX_DRAW_INTERVAL_H) {
         // longue période sans tirage → glissement de la référence (anti-dérive lente)
         energy.drawRefC = probeC;
         energy.drawRefTs = now;
+      } else if (relaxC > 0 && dropC > expLossC) {
+        // La relaxation a absorbé une chute qui aurait sinon approché le seuil —
+        // trace debug (facultative : engine.ts journalise ou non selon le besoin).
+        relaxAbsorbedC = +Math.min(dropC - expLossC, relaxC).toFixed(2);
       }
     }
   }
@@ -252,7 +344,11 @@ export function updateEnergyModel(
       hoursSinceAnchor,
       showers,
       eDoucheWh: eDouche,
-      probeC
-    }
+      probeC,
+      relaxAbsorbedC,
+      relaxAmplitudeC: calib.amplitudeC,
+      relaxTauMin: calib.tauMin
+    },
+    calibUpdated
   };
 }

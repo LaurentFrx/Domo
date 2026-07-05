@@ -116,6 +116,11 @@ export function defaultEnergyModel(): EnergyModelConfig {
     drawWindowMin: 20,
     drawStratFactor: 2.8, // sonde de point bas surlit l'amplitude des puisages ~×2,8 (stratification) ; calibré par calorimétrie EM-50 (replay 14→29/06)
     probeFullRestC: 55,
+    // Discriminant de pente (04/07) : mesuré sur 3 semaines — un vrai puisage chute
+    // TOUJOURS ≥2°C en ≤10 min (jusqu'à 13°C/10min) ; la relaxation post-plein plafonne
+    // à ~0,3-0,5°C/10min. Seuil posé au milieu de cet écart (×2 de marge des deux côtés).
+    fastDropThresholdC: 1.0,
+    fastDropWindowMin: 10,
     indoorTopics: ['zigbee2mqtt/Thermo SdB', 'zigbee2mqtt/Thermo Salon'],
     outdoorSources: {
       daikin: true,
@@ -239,6 +244,8 @@ export function normalizeEnergyModel(raw: unknown): EnergyModelConfig {
     drawWindowMin: asNum(o.drawWindowMin, d.drawWindowMin, 5, 120),
     drawStratFactor: asNum(o.drawStratFactor, d.drawStratFactor, 1, 6),
     probeFullRestC: asNum(o.probeFullRestC, d.probeFullRestC, 40, 70),
+    fastDropThresholdC: asNum(o.fastDropThresholdC, d.fastDropThresholdC, 0.3, 5),
+    fastDropWindowMin: asNum(o.fastDropWindowMin, d.fastDropWindowMin, 3, 30),
     indoorTopics: normTopics(o.indoorTopics, o.indoorTopic, d.indoorTopics),
     outdoorSources: normOutdoor(o.outdoorSources, d.outdoorSources)
   };

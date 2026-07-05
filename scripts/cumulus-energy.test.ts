@@ -11,6 +11,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { updateEnergyModel, averageTemp } from '../src/lib/server/cumulus/energy-model.ts';
+import {
+  defaultProbeRelaxCalib,
+  updateProbeRelaxCalib,
+  type ProbeRelaxCalib
+} from '../src/lib/server/cumulus/probe-relax-calib.ts';
 import type {
   CumulusInputs,
   CumulusConfig,
@@ -42,6 +47,8 @@ function energyModel(o: Partial<EnergyModelConfig> = {}): EnergyModelConfig {
     drawWindowMin: 20,
     drawStratFactor: 2.8,
     probeFullRestC: 55,
+    fastDropThresholdC: 1.0,
+    fastDropWindowMin: 10,
     indoorTopics: ['zigbee2mqtt/Thermo SdB', 'zigbee2mqtt/Thermo Salon'],
     outdoorSources: { daikin: true, thermoExtTopic: 'zigbee2mqtt/Thermo_ext', forecast: true },
     ...o
@@ -101,6 +108,9 @@ function energyState(o: Partial<EnergyState> = {}): EnergyState {
     drawRefTs: null,
     tRoomC: null,
     tExtC: null,
+    recentProbeC: null,
+    recentProbeTs: null,
+    cleanSinceRef: false,
     ...o
   };
 }
@@ -347,15 +357,18 @@ test('garde relais LEVÉ : un tirage est détecté même relais ON', () => {
 });
 
 test('masquage anchor LEVÉ : tirage à ≥55°C journalisé, mais E_avail re-ancré à plein', () => {
+  // Référence à 25 min (au-delà du seuil drawWindowMin) : assez proche du pic pour que
+  // la relaxation post-plein (04/07) n'ait le temps d'expliquer qu'~1°C — la chute de
+  // 4°C (jusqu'au plancher restHot=55°C) reste sans ambiguïté un vrai tirage.
   const { energy, result } = updateEnergyModel(
-    inp({ tempC: 56, relayOn: false }), // ≥55 → restHot
+    inp({ tempC: 55, relayOn: false }), // ≥55 → restHot
     cfg(),
     st({
       lastUpdateTs: NOW - 60_000,
       eAvailWh: 12000,
       lastProbeC: 59,
       drawRefC: 59,
-      drawRefTs: NOW - hours(1)
+      drawRefTs: NOW - 25 * 60_000
     })
   );
   assert.ok(result.drawEvent !== null, 'tirage journalisé (masquage levé)');
@@ -489,4 +502,197 @@ test('averageTemp : une seule source dispo → sa valeur (cas dégradé)', () =>
 
 test('averageTemp : aucune source → null (repli sur la constante saisonnière)', () => {
   assert.equal(averageTemp([]), null);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FIX RELAXATION POST-PLEIN (04/07/2026) — faux puisage éliminé, vrai puisage gardé
+// ═══════════════════════════════════════════════════════════════════════════
+
+const NO_FIX: ProbeRelaxCalib = { amplitudeC: 0, tauMin: 120, samples: 0, updatedAt: 0 };
+const min = (m: number) => m * 60_000;
+
+/**
+ * Déroule une courbe de sonde [offsetMin, °C] à travers le modèle, état chaîné.
+ * Le premier point est le PIC (t=0) juste après un plein ; le ballon reste ancré
+ * tant que la sonde est chaude (reproduit le vrai flux : relayOn=false, ballonCharged).
+ */
+function replay(
+  points: [number, number][],
+  calib: ProbeRelaxCalib,
+  opts: { anchorBeforePeakMin?: number; roomC?: number } = {}
+): { drawEvents: number; eAvailWh: number; firstDrawAtMin: number | null } {
+  const anchorBefore = opts.anchorBeforePeakMin ?? 26;
+  const roomC = opts.roomC ?? 24.9;
+  const peakC = points[0][1];
+  const t0 = NOW;
+  let energy: EnergyState = energyState({
+    eAvailWh: E_FULL,
+    lastUpdateTs: t0 - min(1),
+    lastProbeC: peakC,
+    lastProbeTs: t0 - min(1),
+    lastAnchorTs: t0 - min(anchorBefore),
+    wasFull: true,
+    drawRefC: peakC,
+    drawRefTs: t0,
+    recentProbeC: peakC,
+    recentProbeTs: t0,
+    cleanSinceRef: true,
+    dayDate: '2023-11-14'
+  });
+  let drawEvents = 0;
+  let firstDrawAtMin: number | null = null;
+  const workCalib = { ...calib };
+  for (const [offsetMin, probe] of points) {
+    const now = t0 + min(offsetMin);
+    const { energy: next, result } = updateEnergyModel(
+      inp({ now, tempC: probe, relayOn: false, indoorC: roomC, outdoorC: 25 }),
+      cfg({ lossCoeffWhPerCh: 2.1 }), // conditions RÉELLES de prod (le helper est à 2,8)
+      st(energy, { ballonCharged: true, chargedAtTempC: 59, lastTickTs: energy.lastUpdateTs }),
+      workCalib
+    );
+    energy = next;
+    if (result.drawEvent) {
+      drawEvents += 1;
+      if (firstDrawAtMin === null) firstDrawAtMin = offsetMin;
+    }
+  }
+  return { drawEvents, eAvailWh: energy.eAvailWh, firstDrawAtMin };
+}
+
+// Courbe RÉELLE du 04/07 depuis le pic sonde (15:16, 59,8°C) — maison vide, aucun
+// tirage possible. Le détecteur V1 a journalisé un FAUX « Eau chaude utilisée » à
+// 16:47 (t+91 min). Échantillonnée ~10 min depuis history.db (energy_samples).
+const RELAX_0704: [number, number][] = [
+  [0, 59.8],
+  [4, 59.7],
+  [14, 59.6],
+  [24, 59.4],
+  [34, 59.1],
+  [44, 58.9],
+  [54, 58.6],
+  [64, 58.3],
+  [74, 57.9],
+  [84, 57.7],
+  [91, 57.4],
+  [104, 57.2],
+  [114, 56.9],
+  [124, 56.8],
+  [134, 56.4],
+  [144, 56.3],
+  [154, 56.1],
+  [164, 55.9],
+  [174, 55.7],
+  [184, 55.5],
+  [189, 55.4]
+];
+
+test('REJEU 04/07 SANS fix (calib A=0) → le faux puisage de 16:47 se reproduit (bug confirmé)', () => {
+  const r = replay(RELAX_0704, NO_FIX);
+  assert.ok(r.drawEvents >= 1, 'le détecteur V1 déclenche un faux puisage');
+  assert.ok(
+    r.firstDrawAtMin !== null && r.firstDrawAtMin >= 85 && r.firstDrawAtMin <= 95,
+    `déclenchement attendu vers t+91 min (16:47), obtenu t+${r.firstDrawAtMin}`
+  );
+});
+
+test('REJEU 04/07 AVEC fix → AUCUN puisage détecté, jauge reste à plein', () => {
+  const r = replay(RELAX_0704, defaultProbeRelaxCalib()); // A=6, tau=120
+  assert.equal(r.drawEvents, 0, 'plus aucun faux puisage sur toute la journée');
+  assert.equal(r.eAvailWh, E_FULL, 'la jauge reste au plein');
+});
+
+test('vraie douche 30 min après un plein → toujours DÉTECTÉE (discriminant de pente)', () => {
+  // Pic à t0, plein récent (dans la fenêtre relax) ; une chute franche de 6°C en 8 min.
+  const { result, energy } = updateEnergyModel(
+    inp({ now: NOW + min(30), tempC: 52, relayOn: false, indoorC: 24.9, outdoorC: 25 }),
+    cfg(),
+    st(
+      energyState({
+        eAvailWh: E_FULL,
+        lastUpdateTs: NOW + min(22),
+        lastProbeC: 58,
+        lastProbeTs: NOW + min(22),
+        lastAnchorTs: NOW - min(5), // plein il y a 35 min → relaxation ACTIVE
+        wasFull: true,
+        drawRefC: 59,
+        drawRefTs: NOW,
+        recentProbeC: 58, // il y a 8 min
+        recentProbeTs: NOW + min(22),
+        cleanSinceRef: true
+      }),
+      { ballonCharged: false }
+    ),
+    defaultProbeRelaxCalib()
+  );
+  assert.ok(result.drawEvent !== null, 'la douche est détectée malgré la relaxation en cours');
+  assert.ok(result.drawEvent!.eDrawnWh > 0);
+  assert.ok(energy.eAvailWh < E_FULL, 'la jauge baisse (vrai puisage)');
+});
+
+test('puisage LENT loin de tout plein → détecté (la relaxation NE s’applique pas)', () => {
+  // Chute de 3°C en 40 min, dernier plein il y a 6 h → relaxPostFull=false → détection normale.
+  const { result } = updateEnergyModel(
+    inp({ now: NOW, tempC: 47, relayOn: false, indoorC: 24.9, outdoorC: 25 }),
+    cfg(),
+    st(
+      energyState({
+        eAvailWh: 8000,
+        lastUpdateTs: NOW - min(1),
+        lastProbeC: 50,
+        lastProbeTs: NOW - min(1),
+        lastAnchorTs: NOW - hours(6), // plein trop ancien
+        drawRefC: 50,
+        drawRefTs: NOW - min(40),
+        recentProbeC: 50, // pente douce : pas de fastDraw, doit passer par la fenêtre lente
+        recentProbeTs: NOW - min(9),
+        cleanSinceRef: true
+      })
+    ),
+    defaultProbeRelaxCalib()
+  );
+  assert.ok(result.drawEvent !== null, 'un puisage lent hors fenêtre post-plein reste détecté');
+});
+
+test('deux pleins rapprochés → le terme de relaxation se réarme au dernier pic', () => {
+  // 1er plein (pic à t0), relaxation, puis un 2e plein remonte la sonde à t+40 (nouveau pic).
+  const seq: [number, number][] = [
+    [0, 59.6],
+    [15, 59.3],
+    [30, 58.9], // relaxation du 1er plein
+    [40, 60.0], // 2e plein : la sonde REMONTE → nouveau pic, drawRef réarmé
+    [55, 59.7],
+    [70, 59.3],
+    [85, 58.9] // relaxation du 2e plein (courte depuis SON pic)
+  ];
+  // Le 2e « pic » n'est PAS suivi d'un nouvel anchor dans replay() (lastAnchorTs figé),
+  // donc on vérifie surtout qu'aucun faux puisage ne surgit sur la séquence complète.
+  const r = replay(seq, defaultProbeRelaxCalib(), { anchorBeforePeakMin: 20 });
+  assert.equal(r.drawEvents, 0, 'aucun faux puisage à travers deux relaxations enchaînées');
+});
+
+// ── EWMA bornée (calibration apprise robuste aux aberrations) ──
+test('calibration : valeur aberrante rejetée (amplitude reste ≤ 8°C, tau borné)', () => {
+  const c = defaultProbeRelaxCalib(); // A=6, tau=120
+  // Fenêtre absurde : 50°C de « relaxation » en 60 min (impossible physiquement).
+  for (let i = 0; i < 20; i++) updateProbeRelaxCalib(60, 50, c, NOW);
+  assert.ok(c.amplitudeC <= 8 && c.amplitudeC >= 0, `amplitude bornée, obtenu ${c.amplitudeC}`);
+  assert.ok(c.tauMin >= 20 && c.tauMin <= 240, `tau borné, obtenu ${c.tauMin}`);
+});
+
+test('calibration : fenêtre trop courte (<30 min) ignorée', () => {
+  const c = defaultProbeRelaxCalib();
+  const before = { ...c };
+  const updated = updateProbeRelaxCalib(15, 3, c, NOW);
+  assert.equal(updated, false);
+  assert.deepEqual(c, before);
+});
+
+test('calibration : une relaxation propre plausible fait converger doucement (EWMA)', () => {
+  const c = { amplitudeC: 6, tauMin: 120, samples: 0, updatedAt: 0 };
+  // Fenêtre de 200 min avec 4°C observés → l'amplitude implicite (~4,9) tire A vers le bas, lentement.
+  const a0 = c.amplitudeC;
+  updateProbeRelaxCalib(200, 4, c, NOW);
+  assert.ok(c.amplitudeC < a0, 'A évolue vers la valeur observée');
+  assert.ok(Math.abs(c.amplitudeC - a0) < 1.5, 'mais lentement (EWMA), pas de saut brutal');
+  assert.equal(c.samples, 1);
 });

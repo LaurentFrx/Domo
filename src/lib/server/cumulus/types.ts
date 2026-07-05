@@ -196,6 +196,14 @@ export interface EnergyModelConfig {
   drawStratFactor: number; // la sonde de point bas surlit l'amplitude des puisages (~×2,8, stratification) → énergie puisée divisée par ce facteur
   probeFullRestC: number; // sonde ≥ ce seuil, relais off → ballon considéré plein (anchor)
 
+  // ── Discriminant de pente (relaxation post-plein vs vrai puisage, 04/07) ──
+  // Une chute CONCENTRÉE sur peu de minutes est un vrai puisage (mesuré : 2-13°C en
+  // ≤10 min) ; la relaxation post-plein est ~10x plus lente (~0,2-0,3°C/10min). Ce
+  // seuil confirme un puisage même quand la relaxation en cours masquerait la chute
+  // dans la comparaison d'intervalle. Ne remplace PAS drawDropThresholdC (inchangé).
+  fastDropThresholdC: number;
+  fastDropWindowMin: number;
+
   // Sources de température de référence (moyennées) — configurables.
   indoorTopics: string[]; // sondes intérieures MQTT (T_room) à moyenner
   outdoorSources: OutdoorSourcesConfig; // sources de temp extérieure à moyenner
@@ -423,6 +431,8 @@ export interface CumulusRuntimeState {
   lastTickTs: number | null;
   /** Dernière température d'eau vue par le moteur (null si sonde périmée). */
   lastTempC: number | null;
+  /** Dernier état RÉEL du relais notifié par push (null = jamais / relais injoignable) — sert à n'émettre qu'une notif par transition allumage/extinction. */
+  lastRelayNotifiedOn: boolean | null;
   lastReason: DecisionReason;
   lastSubMode: CumulusMode;
   anomaly: Anomaly;
@@ -466,6 +476,9 @@ export interface EnergyView {
   tTankC: number; // température moyenne estimée du ballon (°C)
   eDoucheWh: number; // énergie d'une douche (interpolation saisonnière du modèle)
   lossPerHWh: number; // pertes actuelles du ballon (Wh/h) — dimensionnement recharge HC
+  /** Calibration courante de la relaxation post-plein (débogage, 04/07 — voir probe-relax-calib.ts). */
+  relaxAmplitudeC: number;
+  relaxTauMin: number;
 }
 
 /** État runtime de l'estimateur d'énergie du ballon (persisté dans cumulus-state.json). */
@@ -485,6 +498,12 @@ export interface EnergyState {
   drawRefTs: number | null; // horodatage de drawRefC
   tRoomC: number | null; // moyenne intérieure du tick (historisée pour calibrer lossCoeff)
   tExtC: number | null; // moyenne extérieure du tick (historisée)
+
+  // ── Discriminant de pente (fenêtre courte, indépendante de drawRefC) ──
+  recentProbeC: number | null; // sonde il y a ~fastDropWindowMin (référence courte, glissante)
+  recentProbeTs: number | null; // horodatage de recentProbeC
+  // ── Calibration de la relaxation post-plein (voir probe-relax-calib.ts) ──
+  cleanSinceRef: boolean; // aucun puisage détecté depuis le dernier pic (drawRefC) → fenêtre calibrable
 }
 
 /** Résultat de `decide()` — décision + nouvel état à persister (pattern reducer pur). */

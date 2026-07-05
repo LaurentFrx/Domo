@@ -54,6 +54,7 @@ export function defaultCumulusState(): CumulusRuntimeState {
     lastDisinfectTs: null,
     lastTickTs: null,
     lastTempC: null,
+    lastRelayNotifiedOn: null,
     lastReason: 'cold_start',
     lastSubMode: 'OFF',
     anomaly: 'none',
@@ -100,7 +101,10 @@ export function defaultEnergyState(): EnergyState {
     drawRefC: null,
     drawRefTs: null,
     tRoomC: null,
-    tExtC: null
+    tExtC: null,
+    recentProbeC: null,
+    recentProbeTs: null,
+    cleanSinceRef: false
   };
 }
 
@@ -133,7 +137,10 @@ function normEnergy(v: unknown): EnergyState {
     drawRefC: numOrNull(o.drawRefC),
     drawRefTs: numOrNull(o.drawRefTs),
     tRoomC: numOrNull(o.tRoomC),
-    tExtC: numOrNull(o.tExtC)
+    tExtC: numOrNull(o.tExtC),
+    recentProbeC: numOrNull(o.recentProbeC),
+    recentProbeTs: numOrNull(o.recentProbeTs),
+    cleanSinceRef: boolOr(o.cleanSinceRef, d.cleanSinceRef)
   };
 }
 
@@ -158,6 +165,7 @@ export function normalizeCumulusState(raw: unknown): CumulusRuntimeState {
     lastDisinfectTs: numOrNull(o.lastDisinfectTs),
     lastTickTs: numOrNull(o.lastTickTs),
     lastTempC: numOrNull(o.lastTempC),
+    lastRelayNotifiedOn: typeof o.lastRelayNotifiedOn === 'boolean' ? o.lastRelayNotifiedOn : null,
     lastReason: (o.lastReason as DecisionReason) ?? d.lastReason,
     lastSubMode: SUB_MODES.includes(o.lastSubMode as CumulusMode)
       ? (o.lastSubMode as CumulusMode)
@@ -262,7 +270,9 @@ function normEnergyView(v: unknown): EnergyView | null {
     showers: numOr(o.showers, 0),
     tTankC: numOr(o.tTankC, 0),
     eDoucheWh: numOr(o.eDoucheWh, 2000),
-    lossPerHWh: numOr(o.lossPerHWh, 0)
+    lossPerHWh: numOr(o.lossPerHWh, 0),
+    relaxAmplitudeC: numOr(o.relaxAmplitudeC, 6),
+    relaxTauMin: numOr(o.relaxTauMin, 120)
   };
 }
 

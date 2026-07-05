@@ -190,6 +190,9 @@ class CumulusState {
   showers = $state<number | null>(null);
   /** Dernier « ballon plein » (epoch ms), null si jamais observé. */
   lastAnchorTs = $state<number | null>(null);
+  /** Calibration courante de la relaxation post-plein (débogage, 04/07). */
+  relaxAmplitudeC = $state<number | null>(null);
+  relaxTauMin = $state<number | null>(null);
   /** Config effective du moteur (cibles/seuils) — null avant le 1er poll. */
   config = $state<CumulusConfigClient | null>(null);
   /** PILOTE V2 — vue de la machine à phases (phase, 7 conditions, potentiel, prochaine action). */
@@ -368,6 +371,8 @@ class CumulusState {
         const ev = s.energyView;
         this.eFullWh = typeof ev?.eFullWh === 'number' ? ev.eFullWh : null;
         this.showers = typeof ev?.showers === 'number' ? ev.showers : null;
+        this.relaxAmplitudeC = typeof ev?.relaxAmplitudeC === 'number' ? ev.relaxAmplitudeC : null;
+        this.relaxTauMin = typeof ev?.relaxTauMin === 'number' ? ev.relaxTauMin : null;
         const pv = s.pilotView;
         this.pilotView =
           pv && typeof pv.phase === 'string'

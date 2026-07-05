@@ -26,7 +26,13 @@ import {
   writeSolarCalib,
   type SolarCalib
 } from './solar-potential';
+import {
+  readProbeRelaxCalib,
+  writeProbeRelaxCalib,
+  type ProbeRelaxCalib
+} from './probe-relax-calib';
 import { parisDate } from '../tariffs';
+import { sendPush } from '../monitor/push';
 import type { AutoMode, DecisionLogEntry, ShadowEvent } from './types';
 
 const TICK_TIMEOUT_MS = 45_000; // < intervalle timer (60 s)
@@ -76,6 +82,9 @@ let ticking = false;
 // Calibration de l'estimateur solaire : cache mémoire, chargée au premier tick,
 // persistée quand elle évolue (data/solar-potential.json — données apprises).
 let solarCalib: SolarCalib | null = null;
+// Calibration de la relaxation post-plein de la sonde (04/07) — même mécanique que
+// solarCalib : cache mémoire, chargée au premier tick, persistée quand elle évolue.
+let probeRelaxCalib: ProbeRelaxCalib | null = null;
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -105,6 +114,7 @@ async function runTick(apply: boolean): Promise<TickResult> {
 
   // ── 1. Estimateur de potentiel solaire (APS = étalon ; calibration EWMA persistée) ──
   if (solarCalib === null) solarCalib = await readSolarCalib();
+  if (probeRelaxCalib === null) probeRelaxCalib = await readProbeRelaxCalib();
   const socs = inputs.batterySocPct.filter((s) => Number.isFinite(s));
   const socAvg = socs.length ? socs.reduce((a, b) => a + b, 0) / socs.length : null;
   const batteriesFull =
@@ -182,6 +192,40 @@ async function runTick(apply: boolean): Promise<TickResult> {
     next.relayDesired = state.relayDesired;
   }
 
+  // ── Notification push : transition RÉELLE du relais cumulus (allumage / extinction) ──
+  // Basée sur l'état observé du Shelly (`relayOn`), quel que soit le déclencheur
+  // (manuel, boost, pilote, watchdog auto-off, ou coupure physique). On ne notifie
+  // qu'entre deux états booléens connus — jamais depuis/vers null (relais injoignable)
+  // — et une seule fois par transition (référence `lastRelayNotifiedOn` persistée).
+  if (typeof relayOn === 'boolean') {
+    const prevNotified = state.lastRelayNotifiedOn;
+    if (typeof prevNotified === 'boolean' && prevNotified !== relayOn) {
+      const eau = inputs.tempC !== null ? `${inputs.tempC} °C` : 'temp. inconnue';
+      const modeLbl = config.observationMode
+        ? ' · observation'
+        : state.autoMode === 'manual'
+          ? ' · manuel'
+          : state.autoMode === 'off'
+            ? ' · coupé'
+            : ' · auto';
+      // Fire-and-forget : sendPush ne throw jamais (erreurs gérées en interne) ; on
+      // n'attend pas pour ne pas ajouter de latence au tick de pilotage.
+      void sendPush({
+        title: relayOn ? '🔴 Cumulus allumé' : '⚪️ Cumulus éteint',
+        body: relayOn
+          ? `Chauffe en cours — eau ${eau}${modeLbl}`
+          : `Chauffe arrêtée — eau ${eau}${modeLbl}`,
+        tag: 'cumulus-relay',
+        severity: 'info',
+        url: '/energie'
+      });
+    }
+    next.lastRelayNotifiedOn = relayOn;
+  } else {
+    // relais injoignable ce tick : on conserve la dernière référence connue
+    next.lastRelayNotifiedOn = state.lastRelayNotifiedOn;
+  }
+
   // Journal console — visible dans `journalctl -u domo`.
   console.log(
     `[cumulus] ${decision.reason} relais=${relayOn ? 'ON' : 'off'}` +
@@ -198,10 +242,19 @@ async function runTick(apply: boolean): Promise<TickResult> {
       ` | ${pilotRes.view.nextAction}`
   );
 
-  // ── 4. Calorimétrie du ballon (energy-model — VALIDÉE, INCHANGÉE) ──
-  const energyTick = updateEnergyModel(inputs, config, next);
+  // ── 4. Calorimétrie du ballon (energy-model — bilan/anchor INCHANGÉS ; détection
+  //    de puisage complétée du terme de relaxation post-plein, 04/07) ──
+  const energyTick = updateEnergyModel(inputs, config, next, probeRelaxCalib);
   next.energy = energyTick.energy;
   const er = energyTick.result;
+  if (er.relaxAbsorbedC !== null) {
+    console.log(
+      `[energy] relaxation post-plein absorbée : ${er.relaxAbsorbedC}°C (amplitude=${er.relaxAmplitudeC}°C tau=${er.relaxTauMin}min) — pas de puisage retenu`
+    );
+  }
+  if (energyTick.calibUpdated) {
+    await writeProbeRelaxCalib(probeRelaxCalib).catch(() => {});
+  }
   // Instantané pour l'UI ET pour la jauge du pilote au tick suivant.
   next.energyView = {
     eAvailWh: er.eAvailWh,
@@ -211,7 +264,9 @@ async function runTick(apply: boolean): Promise<TickResult> {
     eDoucheWh: er.eDoucheWh,
     lossPerHWh: +(config.energyModel.lossCoeffWhPerCh * Math.max(0, er.tTankC - er.tRoomC)).toFixed(
       1
-    )
+    ),
+    relaxAmplitudeC: er.relaxAmplitudeC,
+    relaxTauMin: er.relaxTauMin
   };
 
   // ── 5. Boucle de REGRET : ventilation MESURÉE de chaque chauffe (EM50 + Anker) ──
