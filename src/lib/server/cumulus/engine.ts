@@ -41,6 +41,13 @@ const SHADOW_LOG_MAX = 80; // taille du journal (timeline du jour)
 const APPLIANCE_OFF_GRACE_MS = 10 * 60_000; // sous le seuil > 10 min → cycle terminé
 const LOG_MAX = 60;
 
+// ── Filet de sécurité « RÈGLE ZÉRO IMPORT » (le ballon ne doit JAMAIS soutirer d'EDF) ──
+// Le pilote V2 coupe déjà sur import (≈150 W / 30 s) ; cette sonde n'alerte que s'il a
+// ÉCHOUÉ à protéger, en tolérant l'import transitoire de démarrage (latence SolarBank 2-3 min).
+const IMPORT_HEAT_MIN_W = 100; // conso ballon au-dessus → chauffe réelle en cours
+const IMPORT_GRID_MIN_W = 150; // soutirage EDF (gridPowerW > 0 = import) au-dessus → import franc
+const IMPORT_GRACE_MS = 4 * 60_000; // import soutenu au-delà → le pilote aurait dû couper → ALERTE
+
 // Heure locale Paris fractionnaire (0–24) + mois (1-12).
 const PARIS_HM = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Europe/Paris',
@@ -224,6 +231,42 @@ async function runTick(apply: boolean): Promise<TickResult> {
   } else {
     // relais injoignable ce tick : on conserve la dernière référence connue
     next.lastRelayNotifiedOn = state.lastRelayNotifiedOn;
+  }
+
+  // ── Filet « zéro import » : import EDF soutenu PENDANT une chauffe réelle ──
+  // gridPowerW > 0 = soutirage EDF ; ballon en chauffe = relais ON + conso franche.
+  // Si la condition tient au-delà de la grâce (le pilote aurait dû couper), on ALERTE
+  // une seule fois par épisode (reset dès que la condition tombe).
+  {
+    const heatingReal = relayOn === true && inputs.cumulusPowerW > IMPORT_HEAT_MIN_W;
+    const importingNow = inputs.gridPowerW > IMPORT_GRID_MIN_W;
+    let impSince = state.importDuringHeatSinceTs;
+    let impAlerted = state.importAlerted;
+    if (heatingReal && importingNow) {
+      if (impSince === null) impSince = now;
+      const durMs = now - impSince;
+      if (durMs >= IMPORT_GRACE_MS && !impAlerted) {
+        impAlerted = true;
+        const w = Math.round(inputs.gridPowerW);
+        const mins = Math.round(durMs / 60_000);
+        console.warn(
+          `[cumulus] ALERTE zéro-import : ${w} W soutirés à l'EDF pendant la chauffe depuis ${mins} min — le pilote n'a pas coupé`
+        );
+        void sendPush({
+          title: '⚠️ Le cumulus soutire de l’EDF',
+          body: `Import ${w} W pendant la chauffe depuis ${mins} min — le pilote n’a pas coupé. Coupe le ballon si besoin.`,
+          tag: 'cumulus-import',
+          severity: 'critical',
+          url: '/energie'
+        });
+      }
+    } else {
+      // conditions levées (import retombé ou chauffe finie) → fin de l'épisode
+      impSince = null;
+      impAlerted = false;
+    }
+    next.importDuringHeatSinceTs = impSince;
+    next.importAlerted = impAlerted;
   }
 
   // Journal console — visible dans `journalctl -u domo`.

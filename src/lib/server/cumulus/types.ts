@@ -433,6 +433,10 @@ export interface CumulusRuntimeState {
   lastTempC: number | null;
   /** Dernier état RÉEL du relais notifié par push (null = jamais / relais injoignable) — sert à n'émettre qu'une notif par transition allumage/extinction. */
   lastRelayNotifiedOn: boolean | null;
+  /** Filet « zéro import » : depuis quand un import EDF soutenu est observé PENDANT une chauffe réelle (null = pas d'épisode en cours). */
+  importDuringHeatSinceTs: number | null;
+  /** Filet « zéro import » : l'épisode courant a-t-il déjà déclenché son alerte push (anti-spam, 1 par épisode). */
+  importAlerted: boolean;
   lastReason: DecisionReason;
   lastSubMode: CumulusMode;
   anomaly: Anomaly;

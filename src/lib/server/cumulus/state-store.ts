@@ -55,6 +55,8 @@ export function defaultCumulusState(): CumulusRuntimeState {
     lastTickTs: null,
     lastTempC: null,
     lastRelayNotifiedOn: null,
+    importDuringHeatSinceTs: null,
+    importAlerted: false,
     lastReason: 'cold_start',
     lastSubMode: 'OFF',
     anomaly: 'none',
@@ -166,6 +168,8 @@ export function normalizeCumulusState(raw: unknown): CumulusRuntimeState {
     lastTickTs: numOrNull(o.lastTickTs),
     lastTempC: numOrNull(o.lastTempC),
     lastRelayNotifiedOn: typeof o.lastRelayNotifiedOn === 'boolean' ? o.lastRelayNotifiedOn : null,
+    importDuringHeatSinceTs: numOrNull(o.importDuringHeatSinceTs),
+    importAlerted: boolOr(o.importAlerted, d.importAlerted),
     lastReason: (o.lastReason as DecisionReason) ?? d.lastReason,
     lastSubMode: SUB_MODES.includes(o.lastSubMode as CumulusMode)
       ? (o.lastSubMode as CumulusMode)
