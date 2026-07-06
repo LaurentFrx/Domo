@@ -209,41 +209,46 @@
       {wled.connected ? 'Aucun segment configuré.' : 'Connexion au module LED…'}
     </p>
   {:else}
-    <!-- ─── Mode : Ensemble (continu) ↔ Par ligne (séparé) ─── -->
-    <div class="flex flex-col gap-1.5">
-      <span
-        class="text-[11px] font-semibold tracking-[0.04em] uppercase"
-        style="color: var(--color-muted-fg);"
-      >
-        Lignes
-      </span>
-      <div class="seg-tabs">
-        <button
-          type="button"
-          class="seg-tab"
-          class:active={isTogether}
-          aria-pressed={isTogether}
-          onclick={() => wled.setScope('together')}
+    <!-- ─── Mode : Ensemble (continu) ↔ Par ligne (séparé) ───
+         Masqué tant que la 2ᵉ ligne n'est pas câblée (canSplit) — sauf si le
+         module est resté découpé en 2 segments (il faut pouvoir revenir). -->
+    {#if wled.canSplit || !isTogether}
+      <div class="flex flex-col gap-1.5">
+        <span
+          class="text-[11px] font-semibold tracking-[0.04em] uppercase"
+          style="color: var(--color-muted-fg);"
         >
-          Ensemble
-        </button>
-        <button
-          type="button"
-          class="seg-tab"
-          class:active={!isTogether}
-          aria-pressed={!isTogether}
-          onclick={() => wled.setScope('perLine')}
-        >
-          Par ligne
-        </button>
-      </div>
-      {#if isTogether}
-        <span class="text-[11px]" style="color: var(--color-muted-fg);">
-          Toute la terrasse pilotée d'un bloc — les effets de mouvement se déroulent sur les deux
-          lignes.
+          Lignes
         </span>
-      {/if}
-    </div>
+        <div class="seg-tabs">
+          <button
+            type="button"
+            class="seg-tab"
+            class:active={isTogether}
+            aria-pressed={isTogether}
+            onclick={() => wled.setScope('together')}
+          >
+            Ensemble
+          </button>
+          <button
+            type="button"
+            class="seg-tab"
+            class:active={!isTogether}
+            aria-pressed={!isTogether}
+            disabled={!wled.canSplit}
+            onclick={() => wled.setScope('perLine')}
+          >
+            Par ligne
+          </button>
+        </div>
+        {#if isTogether}
+          <span class="text-[11px]" style="color: var(--color-muted-fg);">
+            Toute la terrasse pilotée d'un bloc — les effets de mouvement se déroulent sur les deux
+            lignes.
+          </span>
+        {/if}
+      </div>
+    {/if}
 
     {#if isTogether}
       <!-- ─── Ensemble : réglages fins repliés (usage simple par défaut) ─── -->
@@ -669,6 +674,10 @@
   .seg-tab:focus-visible {
     outline: 2px solid var(--color-primary);
     outline-offset: 2px;
+  }
+  .seg-tab:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
   .seg-dot {
     width: 12px;

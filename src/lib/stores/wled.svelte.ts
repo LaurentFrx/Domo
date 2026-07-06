@@ -179,25 +179,12 @@ const INTERACT_HOLD_MS = 900;
 
 export type WledScope = 'together' | 'perLine';
 
-// Disposition des segments WLED pour les deux modes de pilotage :
-//   - together : UN segment continu sur toute la longueur (effets coordonnés
-//     qui parcourent les deux lignes) ; le 2ᵉ segment est désactivé (len 0).
-//   - perLine  : deux segments indépendants (Store / SàM Été).
-// ⚠️ Au branchement du vrai module, ajuster SEG_SPLIT / SEG_TOTAL au nombre
-// réel de LED par ligne (et configurer les 2 sorties en bus CONTIGUS pour que
-// les effets « Ensemble » se déroulent d'une ligne à l'autre).
-const SEG_SPLIT = 60; // fin de la ligne « Store »
-const SEG_TOTAL = 210; // total Store + SàM Été
-const LAYOUT: Record<WledScope, Record<string, unknown>[]> = {
-  together: [
-    { id: 0, start: 0, stop: SEG_TOTAL, n: 'Terrasse' },
-    { id: 1, start: SEG_TOTAL, stop: SEG_TOTAL }
-  ],
-  perLine: [
-    { id: 0, start: 0, stop: SEG_SPLIT, n: 'Store' },
-    { id: 1, start: SEG_SPLIT, stop: SEG_TOTAL, n: 'SàM Été' }
-  ]
-};
+// Découpage des lignes physiques. La longueur TOTALE est lue sur le module
+// (info.leds.count) — JAMAIS codée en dur : le layout suit la config réelle.
+// SEG_SPLIT = nb de pixels de la ligne 1 (Store, COB WS2814 = 16 px/m).
+// Tant que la ligne 2 (SàM) n'est pas câblée, count == SEG_SPLIT → le mode
+// « Par ligne » est sans objet (canSplit=false, bascule masquée dans la carte).
+const SEG_SPLIT = 52; // pixels de la ligne « Store » (52 groupes comptés le 2026-07-06)
 
 class WledStore {
   // ─── Connexion / source ───────────────────────────
@@ -217,6 +204,8 @@ class WledStore {
   name = $state('Éclairage terrasse');
   /** Ruban RGBW (canal blanc dédié) — pilote l'affichage du réglage « Blanc ». */
   rgbw = $state(false);
+  /** Nombre TOTAL de pixels du module (info.leds.count) — source de vérité du layout. */
+  total = $state(0);
 
   // ─── Segments + catalogues ────────────────────────
   segments = $state<WledSegment[]>([]);
@@ -234,6 +223,9 @@ class WledStore {
 
   /** Mode déduit de la disposition réelle : 1 segment = Ensemble, ≥2 = Par ligne. */
   scope = $derived<WledScope>(this.segments.length > 1 ? 'perLine' : 'together');
+
+  /** Le découpage « Par ligne » n'a de sens que si la 2ᵉ ligne existe vraiment. */
+  canSplit = $derived(this.total > SEG_SPLIT);
 
   /** Une interaction continue est-elle en cours (gel du resync) ? */
   #busy(): boolean {
@@ -318,6 +310,7 @@ class WledStore {
     if (typeof info.name === 'string' && info.name) this.name = info.name;
     const leds = info.leds as Record<string, unknown> | undefined;
     if (leds) {
+      if (typeof leds.count === 'number' && leds.count > 0) this.total = leds.count;
       // RGBW signalé de plusieurs façons selon la version WLED : booléen `rgbw`,
       // ou bit blanc dans les capacités `lc`. On combine (OR) — ne jamais repasser à false.
       if (leds.rgbw === true) this.rgbw = true;
@@ -437,9 +430,22 @@ class WledStore {
   toggle(): Promise<void> {
     return this.setOn(!this.on);
   }
-  /** Bascule Ensemble (1 segment continu) ↔ Par ligne (2 segments). */
+  /** Bascule Ensemble (1 segment continu) ↔ Par ligne (2 segments).
+   *  Layout calculé depuis la longueur RÉELLE du module (this.total), jamais
+   *  en dur ; `stop: 0` = suppression du segment (sémantique WLED). */
   async setScope(s: WledScope): Promise<void> {
-    await this.#post({ seg: LAYOUT[s] });
+    const total = this.total || SEG_SPLIT;
+    const seg =
+      s === 'perLine' && this.canSplit
+        ? [
+            { id: 0, start: 0, stop: SEG_SPLIT, n: 'Store' },
+            { id: 1, start: SEG_SPLIT, stop: total, n: 'SàM Été' }
+          ]
+        : [
+            { id: 0, start: 0, stop: total, n: 'Terrasse' },
+            { id: 1, stop: 0 }
+          ];
+    await this.#post({ seg });
   }
   /** Luminosité maître. bri=0 NE coupe PAS l'alimentation (le slider reste pilotable). */
   async setBri(v: number): Promise<void> {
