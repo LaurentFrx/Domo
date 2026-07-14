@@ -4,8 +4,10 @@
    * remplit tout l'écran (voile sombre pour le contraste, masquée si
    * prefers-reduced-transparency), grande pochette nette au centre, indicateur
    * d'écoute animé (gated Animations + reduced-motion), contrôles, file
-   * d'attente — et lien « Supprimer ce morceau » sur la piste EN COURS
-   * (confirmation obligatoire, puis la lecture enchaîne sur la suivante).
+   * d'attente — et bouton « ⋯ » DISCRET sous le titre : pop-up d'infos complètes
+   * du morceau en cours (album, piste, durée, format, taille, fichier) avec,
+   * tout en bas, la suppression par APPUI LONG uniquement (jauge 1 s, un tap ne
+   * fait rien) ; après suppression la lecture enchaîne sur la suivante.
    *
    * Pendant un drag du curseur de progression, l'affichage suit le doigt
    * (`scrub`) et on ne commet le seek qu'au relâché — sinon timeupdate ferait
@@ -13,6 +15,7 @@
    */
   import { plex, player, fmtDuration, plexImg } from '$stores/plex.svelte';
   import { preferences } from '$stores/preferences.svelte';
+  import { haptic } from '$utils/haptic';
   import AlbumCover from './AlbumCover.svelte';
 
   let scrub = $state<number | null>(null);
@@ -27,10 +30,50 @@
   const backdropUrl = $derived(plexImg(player.current?.thumb, 800));
   const eqOn = $derived(player.playing && preferences.animationsEnabled);
 
-  // ── Suppression de la piste en cours ─────────────────────────────────────
-  let confirmOpen = $state(false);
+  // ── Pop-up « infos du morceau » + suppression par APPUI LONG ─────────────
+  // La suppression ne doit pas pouvoir partir par erreur : elle vit au fond du
+  // pop-up d'infos, derrière un appui MAINTENU (jauge 1 s). Relâcher ou glisser
+  // le doigt (>12 px) annule — un tap simple ne fait rien.
+  const HOLD_MS = 1000;
+  let infoOpen = $state(false);
+  let holding = $state(false);
   let deleting = $state(false);
   let delError = $state<string | null>(null);
+  let holdTimer: ReturnType<typeof setTimeout> | null = null;
+  let holdStart: { x: number; y: number } | null = null;
+
+  function openInfo() {
+    delError = null;
+    infoOpen = true;
+  }
+  function closeInfo() {
+    cancelHold();
+    infoOpen = false;
+    delError = null;
+  }
+
+  function beginHold(ev: PointerEvent) {
+    if (deleting || holding) return;
+    holdStart = { x: ev.clientX, y: ev.clientY };
+    holding = true;
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      holding = false;
+      void deleteCurrent();
+    }, HOLD_MS);
+  }
+  function moveHold(ev: PointerEvent) {
+    if (!holding || !holdStart) return;
+    if (Math.hypot(ev.clientX - holdStart.x, ev.clientY - holdStart.y) > 12) cancelHold();
+  }
+  function cancelHold() {
+    holding = false;
+    holdStart = null;
+    if (holdTimer) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+  }
 
   async function deleteCurrent() {
     const t = player.current;
@@ -39,12 +82,27 @@
     delError = null;
     try {
       await plex.deleteItem(t.key);
-      confirmOpen = false;
+      haptic('success');
+      infoOpen = false;
       player.removeAt(player.index);
     } catch (e) {
       delError = (e as Error).message;
     }
     deleting = false;
+  }
+
+  // ── Formatage des infos fichier ──────────────────────────────────────────
+  function fmtSize(bytes: number | null): string | null {
+    if (!bytes || bytes <= 0) return null;
+    return `${(bytes / 1048576).toFixed(1).replace('.', ',')} Mo`;
+  }
+  function fmtFormat(t: { codec: string | null; bitrate: number | null }): string | null {
+    if (!t.codec) return null;
+    return t.codec.toUpperCase() + (t.bitrate ? ` · ${t.bitrate} kbit/s` : '');
+  }
+  function fileName(path: string | null): string | null {
+    if (!path) return null;
+    return path.split('/').pop() ?? null;
   }
 </script>
 
@@ -95,17 +153,15 @@
         {#if player.current.album}
           <div class="album">{player.current.album}</div>
         {/if}
-        <button class="track-del" onclick={() => (confirmOpen = true)}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13" /></svg
-          >
-          Supprimer ce morceau
+        <!-- Discret : ouvre le pop-up d'infos (où vit la suppression, appui long) -->
+        <button class="info-btn" onclick={openInfo} aria-label="Infos sur le morceau">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="5" cy="12" r="1.9" /><circle cx="12" cy="12" r="1.9" /><circle
+              cx="19"
+              cy="12"
+              r="1.9"
+            />
+          </svg>
         </button>
       </div>
 
@@ -222,31 +278,100 @@
       </div>
     </div>
 
-    <!-- Confirmation de suppression (jamais de suppression sèche) -->
-    {#if confirmOpen}
-      <div class="modal" role="dialog" aria-modal="true" aria-label="Confirmer la suppression">
+    <!-- Pop-up « infos du morceau » ; la suppression est tout en bas, par APPUI LONG -->
+    {#if infoOpen}
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Infos sur le morceau">
+        <button class="modal-backdrop" onclick={closeInfo} aria-label="Fermer" tabindex="-1"
+        ></button>
         <div
-          class="modal-card"
+          class="modal-card info-card"
           style="background: var(--color-card); border-color: var(--color-border);"
         >
-          <p class="modal-title">Supprimer « {player.current.title} » ?</p>
-          <p class="modal-detail">
-            Le morceau sera effacé du disque de musique. Cette action est définitive.
-          </p>
-          {#if delError}<p class="modal-error">{delError}</p>{/if}
-          <div class="modal-btns">
-            <button
-              class="modal-btn"
-              onclick={() => {
-                confirmOpen = false;
-                delError = null;
-              }}
-              disabled={deleting}>Annuler</button
-            >
-            <button class="modal-btn danger" onclick={deleteCurrent} disabled={deleting}>
-              {deleting ? 'Suppression…' : 'Supprimer'}
-            </button>
+          <div class="info-head">
+            <span class="info-thumb">
+              <AlbumCover
+                thumb={player.current.thumb}
+                title={player.current.album}
+                size={160}
+                radius={14}
+              />
+            </span>
+            <div class="min-w-0">
+              <p class="modal-title">{player.current.title}</p>
+              <p class="info-sub">{player.current.artist}</p>
+            </div>
           </div>
+
+          <dl class="info-rows">
+            {#if player.current.album}
+              <div>
+                <dt>Album</dt>
+                <dd>{player.current.album}</dd>
+              </div>
+            {/if}
+            {#if player.current.index}
+              <div>
+                <dt>Piste</dt>
+                <dd>
+                  {player.current.disc && player.current.disc > 1
+                    ? `CD ${player.current.disc} · `
+                    : ''}n° {player.current.index}
+                </dd>
+              </div>
+            {/if}
+            <div>
+              <dt>Durée</dt>
+              <dd>{fmtDuration(player.current.duration)}</dd>
+            </div>
+            {#if fmtFormat(player.current)}
+              <div>
+                <dt>Format</dt>
+                <dd>{fmtFormat(player.current)}</dd>
+              </div>
+            {/if}
+            {#if fmtSize(player.current.size)}
+              <div>
+                <dt>Taille</dt>
+                <dd>{fmtSize(player.current.size)}</dd>
+              </div>
+            {/if}
+            {#if fileName(player.current.file)}
+              <div>
+                <dt>Fichier</dt>
+                <dd class="file">{fileName(player.current.file)}</dd>
+              </div>
+            {/if}
+          </dl>
+
+          {#if delError}<p class="modal-error">{delError}</p>{/if}
+
+          <!-- Appui LONG uniquement : un tap ne fait rien, relâcher/glisser annule -->
+          <button
+            class="hold-del"
+            class:holding
+            disabled={deleting}
+            onpointerdown={beginHold}
+            onpointermove={moveHold}
+            onpointerup={cancelHold}
+            onpointercancel={cancelHold}
+            onpointerleave={cancelHold}
+            oncontextmenu={(e) => e.preventDefault()}
+            data-no-haptic
+          >
+            <span class="hold-fill" aria-hidden="true"></span>
+            <span class="hold-label">
+              {#if deleting}
+                Suppression…
+              {:else if holding}
+                Maintenir…
+              {:else}
+                Maintenir pour supprimer le fichier
+              {/if}
+            </span>
+          </button>
+          <p class="hold-hint">Appui long (1 s) — définitif, le fichier est effacé du disque.</p>
+
+          <button class="modal-btn close" onclick={closeInfo} disabled={deleting}>Fermer</button>
         </div>
       </div>
     {/if}
@@ -416,18 +541,18 @@
     }
   }
 
-  .track-del {
+  /* Déclencheur DISCRET du pop-up d'infos : cible 44px, visuel minimal. */
+  .info-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    margin-top: 12px;
-    background: oklch(0.704 0.17 22.2 / 0.14);
-    border: 1px solid oklch(0.704 0.17 22.2 / 0.4);
-    color: oklch(0.82 0.13 22);
-    border-radius: var(--radius-pill, 999px);
-    padding: 7px 14px;
-    font-weight: 600;
-    font-size: 12.5px;
+    justify-content: center;
+    width: 44px;
+    height: 32px;
+    margin-top: 8px;
+    background: none;
+    border: none;
+    border-radius: 999px;
+    color: oklch(0.96 0.013 286 / 0.55);
   }
 
   .progress {
@@ -608,34 +733,125 @@
     font-weight: 700;
     margin: 0;
   }
-  .modal-detail {
-    color: var(--color-muted-fg);
-    font-size: 13.5px;
-    margin: 8px 0 16px;
-  }
   .modal-error {
     color: var(--color-alert);
     font-size: 13px;
     margin: 0 0 12px;
   }
-  .modal-btns {
-    display: flex;
-    gap: 10px;
+  .modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: none;
+    border: none;
+    padding: 0;
   }
   .modal-btn {
-    flex: 1;
     border-radius: 16px;
-    padding: 14px 0;
+    padding: 13px 0;
     font-weight: 700;
     font-size: 15px;
     border: 1px solid var(--color-border);
     background: none;
     color: var(--color-fg);
   }
-  .modal-btn.danger {
+  .modal-btn.close {
+    width: 100%;
+    margin-top: 12px;
+  }
+
+  /* ── Pop-up infos morceau ─────────────────────────────────────────────── */
+  .info-card {
+    position: relative;
+    text-align: left;
+  }
+  .info-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+  .info-thumb {
+    width: 56px;
+    height: 56px;
+    flex: 0 0 56px;
+  }
+  .info-sub {
+    color: var(--color-muted-fg);
+    font-size: 13.5px;
+    margin: 2px 0 0;
+  }
+  .info-rows {
+    margin: 0;
+    display: grid;
+    gap: 7px;
+  }
+  .info-rows > div {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+  }
+  .info-rows dt {
+    flex: 0 0 64px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-muted-fg);
+  }
+  .info-rows dd {
+    margin: 0;
+    min-width: 0;
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+  .info-rows dd.file {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-muted-fg);
+    word-break: break-all;
+  }
+
+  /* ── Suppression par appui long : jauge qui se remplit en 1 s ─────────── */
+  .hold-del {
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+    margin-top: 16px;
+    border-radius: 16px;
+    padding: 13px 0;
+    border: 1px solid oklch(0.704 0.17 22.2 / 0.4);
+    background: oklch(0.704 0.17 22.2 / 0.08);
+    color: oklch(0.82 0.13 22);
+    font-weight: 700;
+    font-size: 14px;
+    /* Un appui long ne doit pas déclencher scroll ni sélection. */
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .hold-fill {
+    position: absolute;
+    inset: 0;
+    width: 0;
     background: var(--color-alert);
-    border-color: transparent;
+    transition: none;
+  }
+  .hold-del.holding .hold-fill {
+    width: 100%;
+    /* Jauge FONCTIONNELLE (feedback de l'appui long), pas décorative : on la
+       garde même en reduced-motion. Durée = HOLD_MS côté script. */
+    transition: width 1000ms linear;
+  }
+  .hold-del.holding {
     color: oklch(0.98 0.01 27);
-    box-shadow: 0 0 20px -6px oklch(0.704 0.17 22.2 / 0.6);
+  }
+  .hold-label {
+    position: relative;
+  }
+  .hold-hint {
+    color: var(--color-muted-fg);
+    font-size: 11.5px;
+    text-align: center;
+    margin: 8px 0 0;
   }
 </style>

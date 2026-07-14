@@ -43,6 +43,13 @@ export interface PlexTrack {
   albumKey: string | null;
   thumb: string | null;
   part: string | null;
+  codec: string | null;
+  /** kbps (convention PMS). */
+  bitrate: number | null;
+  /** Octets. */
+  size: number | null;
+  /** Chemin disque (info « fichier » du pop-up). */
+  file: string | null;
 }
 
 export interface PlexSearchResults {

@@ -30,7 +30,11 @@ export interface RawMeta {
   index?: number;
   parentIndex?: number;
   duration?: number;
-  Media?: Array<{ Part?: Array<{ key?: string; file?: string }> }>;
+  Media?: Array<{
+    audioCodec?: string;
+    bitrate?: number;
+    Part?: Array<{ key?: string; file?: string; size?: number }>;
+  }>;
 }
 
 export interface AlbumJson {
@@ -63,6 +67,14 @@ export interface TrackJson {
   thumb: string | null;
   /** Chemin de la partie média (/library/parts/…/file.ext) pour le stream. */
   part: string | null;
+  /** Infos techniques du fichier (pop-up « infos du morceau »). */
+  codec: string | null;
+  /** kbps (convention PMS). */
+  bitrate: number | null;
+  /** Octets. */
+  size: number | null;
+  /** Chemin disque VU PAR LE CONTENEUR Plex (info, jamais utilisé côté client). */
+  file: string | null;
 }
 
 export function mapAlbum(md: RawMeta): AlbumJson {
@@ -99,7 +111,11 @@ export function mapTrack(md: RawMeta): TrackJson {
     album: md.parentTitle ?? '',
     albumKey: md.parentRatingKey != null ? String(md.parentRatingKey) : null,
     thumb: md.thumb ?? md.parentThumb ?? md.grandparentThumb ?? null,
-    part: md.Media?.[0]?.Part?.[0]?.key ?? null
+    part: md.Media?.[0]?.Part?.[0]?.key ?? null,
+    codec: md.Media?.[0]?.audioCodec ?? null,
+    bitrate: md.Media?.[0]?.bitrate ?? null,
+    size: md.Media?.[0]?.Part?.[0]?.size ?? null,
+    file: md.Media?.[0]?.Part?.[0]?.file ?? null
   };
 }
 
