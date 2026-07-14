@@ -43,6 +43,7 @@ function recoveryMessage(i: Incident): string {
   if (i.key === 'apsystems:blind')
     return 'Onduleur solaire rétabli — données manquantes réconciliées automatiquement.';
   if (i.key === 'recorder:stalled') return 'Enregistreur de données de nouveau opérationnel.';
+  if (i.key === 'wled:down') return 'Éclairage terrasse de nouveau joignable.';
   return `${i.source} de nouveau opérationnel.`;
 }
 

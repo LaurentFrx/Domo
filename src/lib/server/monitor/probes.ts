@@ -126,6 +126,30 @@ export async function runProbes(): Promise<ProbeSummary> {
     });
   }
 
+  // ── Éclairage terrasse (module WLED via tunnel) ──
+  //    Panne historique : crash firmware 0.14.0 en plein effet → module gelé,
+  //    invisible pendant DES JOURS (personne ne regardait la carte /pieces).
+  //    On sonde le module comme le proxy le ferait ; la politique warning
+  //    (push seulement si ça persiste ≥ 5 min) absorbe les coupures brèves.
+  const wledUrl = env.WLED_URL?.replace(/\/+$/, '');
+  if (wledUrl && wledUrl !== 'mock') {
+    let wledBad = false;
+    try {
+      const r = await fetch(`${wledUrl}/json/info`, { signal: AbortSignal.timeout(6000) });
+      const d = r.ok ? ((await r.json().catch(() => null)) as { ver?: string } | null) : null;
+      wledBad = !d || typeof d.ver !== 'string';
+    } catch {
+      wledBad = true; // module éteint, gelé, ou tunnel coupé
+    }
+    assess(wledBad, {
+      key: 'wled:down',
+      severity: 'warning',
+      source: 'wled',
+      kind: 'unreachable',
+      message: 'Éclairage terrasse injoignable — module LED éteint, planté ou hors Wi-Fi'
+    });
+  }
+
   // ── Sources énergie via history.db ──
   const db = openDb();
   if (!db) return s;
