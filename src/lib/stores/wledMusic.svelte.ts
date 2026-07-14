@@ -65,7 +65,17 @@ class WledMusicStore {
    * Idempotent : ignore tout tant que rien n'a changé.
    */
   sync(track: PlexTrack | null, playing: boolean): void {
-    if (!this.enabled || !track) return;
+    if (!this.enabled) return;
+
+    // File de lecture vidée (croix du mini-player) : on FIGE le ruban sur la
+    // dominante (comme une pause) au lieu de laisser l'effet tourner sans fin.
+    if (!track) {
+      if (this.#lastTrackKey !== null && this.#lastPlaying !== false) {
+        this.#lastPlaying = false;
+        void wled.setMusicPaused(true);
+      }
+      return;
+    }
 
     if (track.key !== this.#lastTrackKey) {
       this.#lastTrackKey = track.key;

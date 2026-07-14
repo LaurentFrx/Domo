@@ -389,7 +389,11 @@
   .pv-select {
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
-    border-radius: 9999px;
+    border-radius: var(--radius-lg);
+    /* Cible tactile ≥ 40px : la barre fait 26px, le padding vertical complète
+       (règle Domo). Marge négative pour ne pas espacer visuellement les lignes. */
+    padding-block: 7px;
+    margin-block: -7px;
   }
   .pv-select .pv-bar {
     outline: 2px solid transparent;

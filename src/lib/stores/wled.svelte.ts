@@ -238,12 +238,19 @@ class WledStore {
   /** Le découpage « Par ligne » n'a de sens que si la 2ᵉ ligne existe vraiment. */
   canSplit = $derived(this.total > SEG_SPLIT);
 
+  /** Numéro de séquence des ÉCRITURES (drag ou POST). Une lecture (GET) qui a
+   *  démarré à seq=N ne doit PLUS s'appliquer si une écriture a eu lieu depuis
+   *  (seq a changé) : sa charge est antérieure au dernier ordre. Couvre la
+   *  fenêtre où le GET était déjà parti AVANT la commande et revient après. */
+  #cmdSeq = 0;
+
   /** Une interaction continue est-elle en cours (gel du resync) ? */
   #busy(): boolean {
     return Date.now() - this.#lastTouch < INTERACT_HOLD_MS;
   }
   #touch(): void {
     this.#lastTouch = Date.now();
+    this.#cmdSeq++;
   }
 
   // ─── Lecture ──────────────────────────────────────
@@ -331,6 +338,7 @@ class WledStore {
 
   /** Charge effets + palettes (rarement changeants). */
   async loadMeta(): Promise<void> {
+    const seq = this.#cmdSeq; // invalide l'application d'état si une commande survient pendant le GET
     try {
       const res = await fetch('/api/wled/json', { signal: AbortSignal.timeout(TIMEOUT_MS) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -342,7 +350,8 @@ class WledStore {
       if (Array.isArray(d?.palettes))
         this.palettes = d.palettes.filter((x: unknown) => typeof x === 'string');
       if (d?.info) this.#applyInfo(d.info);
-      if (d?.state && !this.#busy() && !this.#sending) this.#applyState(d.state);
+      if (d?.state && !this.#busy() && !this.#sending && this.#cmdSeq === seq)
+        this.#applyState(d.state);
       this.connected = true;
       this.lastError = null;
       this.lastUpdate = new Date();
@@ -359,6 +368,7 @@ class WledStore {
   async refresh(): Promise<void> {
     if (this.#busy() || this.#sending) return; // ne pas écraser un réglage en cours
     if (!this.#metaLoaded) this.loadMeta(); // retry catalogue tant qu'absent
+    const seq = this.#cmdSeq;
     try {
       const res = await fetch('/api/wled/json/si', { signal: AbortSignal.timeout(TIMEOUT_MS) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -366,7 +376,11 @@ class WledStore {
       if (!this.#looksWled(d)) throw new Error('réponse non-WLED');
       this.isMock = res.headers.get('x-wled-source') === 'mock';
       if (d?.info) this.#applyInfo(d.info);
-      if (d?.state) this.#applyState(d.state);
+      // Re-tester APRÈS l'await : une commande (drag, POST, scène) partie pendant
+      // le GET rend cette réponse périmée — l'appliquer ferait « sauter » l'UI en
+      // arrière (slider sous le doigt, scène qui revient). Garde essentielle.
+      if (d?.state && !this.#busy() && !this.#sending && this.#cmdSeq === seq)
+        this.#applyState(d.state);
       this.connected = true;
       this.lastError = null;
       this.lastUpdate = new Date();
@@ -416,15 +430,22 @@ class WledStore {
     return this.#inflight || this.#pendingBody !== null;
   }
 
-  /** Fusionne `src` dans `dst` — top-level écrasé, `seg` fusionné par id. */
+  /** Fusion « dernière valeur définie gagne ». Les clés `undefined` sont
+   *  ignorées : sinon un ordre `{on: undefined, bri}` (setSegBri quand bri>0
+   *  n'ajoute pas on) écraserait un `on: true` déjà en attente et l'allumage
+   *  serait perdu. JSON.stringify supprime déjà les undefined à l'envoi. */
+  #assignDefined(dst: Record<string, unknown>, src: Record<string, unknown>): void {
+    for (const [k, v] of Object.entries(src)) if (v !== undefined) dst[k] = v;
+  }
   #mergeBody(dst: Record<string, unknown>, src: Record<string, unknown>): Record<string, unknown> {
     for (const [k, v] of Object.entries(src)) {
+      if (v === undefined) continue;
       if (k === 'seg' && Array.isArray(v) && Array.isArray(dst.seg)) {
         const merged = dst.seg as Record<string, unknown>[];
         const byId = new Map(merged.map((s) => [s.id, s]));
         for (const s of v as Record<string, unknown>[]) {
           const ex = byId.get(s.id);
-          if (ex) Object.assign(ex, s);
+          if (ex) this.#assignDefined(ex, s);
           else merged.push(s);
         }
       } else {
@@ -435,6 +456,10 @@ class WledStore {
   }
 
   async #post(partial: object): Promise<void> {
+    // Toute commande (scène, effet, on/off, drag) est une écriture : bumper la
+    // séquence invalide un GET de refresh() déjà en vol, même si le POST se
+    // termine avant le retour du GET (sinon l'ancien état écraserait la commande).
+    this.#cmdSeq++;
     if (this.#inflight) {
       // Un POST est déjà en route : on fusionne, il partira juste après.
       this.#pendingBody = this.#mergeBody(this.#pendingBody ?? {}, {

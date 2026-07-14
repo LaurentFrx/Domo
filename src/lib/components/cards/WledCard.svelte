@@ -17,6 +17,7 @@
    */
   import { wled, WLED_AMBIANCES, type WledSegment } from '$stores/wled.svelte';
   import { wledMusic } from '$stores/wledMusic.svelte';
+  import { player } from '$stores/plex.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import WledColorPicker from './WledColorPicker.svelte';
   import WledPreview from './WledPreview.svelte';
@@ -85,6 +86,12 @@
     return `linear-gradient(135deg, ${stops.join(', ')})`;
   });
 
+  // Libellé de la chip Musique : reflète ce qui se passe VRAIMENT (le mode peut
+  // être actif sans musique en cours → sinon l'activation semble « sans effet »).
+  const musicLabel = $derived(
+    wledMusic.enabled && !player.current ? 'Musique · en attente' : 'Musique'
+  );
+
   /** Un réglage manuel reprend la main sur le suivi musique. */
   function manual(): void {
     wledMusic.releaseControl();
@@ -142,6 +149,9 @@
         checked={wled.on}
         onchange={(e) => {
           haptic('light');
+          // Manœuvrer l'interrupteur = reprise de contrôle : sinon la terrasse
+          // éteinte à la main se rallumerait au morceau suivant (applyMusicColors).
+          manual();
           wled.setOn((e.currentTarget as HTMLInputElement).checked);
         }}
       />
@@ -231,7 +241,7 @@
             </svg>
           {/if}
         </span>
-        <span class="scene-label">Musique</span>
+        <span class="scene-label">{musicLabel}</span>
       </button>
 
       {#each WLED_AMBIANCES as a (a.key)}
@@ -282,6 +292,7 @@
               disabled={!wled.on}
               onchange={(e) => {
                 haptic('light');
+                manual();
                 wled.setSegOn(target.id, (e.currentTarget as HTMLInputElement).checked);
               }}
             />
@@ -391,7 +402,10 @@
               max="255"
               value={s.sx}
               disabled={ctlDisabled}
-              oninput={(e) => wled.setSegSpeed(s.id, +(e.currentTarget as HTMLInputElement).value)}
+              oninput={(e) => {
+                manual();
+                wled.setSegSpeed(s.id, +(e.currentTarget as HTMLInputElement).value);
+              }}
               onchange={() => haptic('light')}
               aria-label="Vitesse de l'effet"
             />
@@ -405,8 +419,10 @@
               max="255"
               value={s.ix}
               disabled={ctlDisabled}
-              oninput={(e) =>
-                wled.setSegIntensity(s.id, +(e.currentTarget as HTMLInputElement).value)}
+              oninput={(e) => {
+                manual();
+                wled.setSegIntensity(s.id, +(e.currentTarget as HTMLInputElement).value);
+              }}
               onchange={() => haptic('light')}
               aria-label="Intensité de l'effet"
             />
@@ -674,7 +690,11 @@
   /* ─── Bascule Ensemble ⇄ Par ligne (action rare → discrète) ─── */
   .split-toggle {
     align-self: center;
-    padding: 6px 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    padding: 6px 14px;
     border: none;
     background: transparent;
     font-size: 12px;
