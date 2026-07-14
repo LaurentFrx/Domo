@@ -11,6 +11,8 @@
   import HealthBanner from '$components/layout/HealthBanner.svelte';
   import TempHistorySheet from '$components/temperature/TempHistorySheet.svelte';
   import MiniPlayer from '$components/music/MiniPlayer.svelte';
+  import { player } from '$stores/plex.svelte';
+  import { wledMusic } from '$stores/wledMusic.svelte';
   import Pager from '$lib/pager/Pager.svelte';
   import { startDemoTicker, stopDemoTicker } from '$stores/demo-ticker.svelte';
   import { anker } from '$stores/anker.svelte';
@@ -43,6 +45,14 @@
   let pagerReady = $state(false);
   onMount(() => {
     pagerReady = true;
+  });
+
+  // ─── Suivi musique → éclairage terrasse ────────────────────────────────
+  // Le lecteur est global (MiniPlayer ci-dessous) : on observe piste + lecture
+  // ici pour que la terrasse suive la musique quelle que soit la page ouverte.
+  // No-op immédiat quand le mode est désactivé (wledMusic.sync est idempotent).
+  $effect(() => {
+    wledMusic.sync(player.current, player.playing);
   });
 
   // ─── Auto-reload après déploiement (anti « client périmé ») ─────────────

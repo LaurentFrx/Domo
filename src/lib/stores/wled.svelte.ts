@@ -83,12 +83,23 @@ export interface WledAmbiance {
   col?: RGB;
   /** Canal blanc 4000K (0-255). */
   white?: number;
-  /** Nom d'effet (résolu en index sur le module). */
-  fx?: string;
-  /** Nom de palette (résolu en index sur le module). */
-  pal?: string;
+  /** Nom d'effet (résolu en index sur le module ; repli sur le suivant si absent). */
+  fx?: string | string[];
+  /** Nom de palette (résolu en index sur le module ; repli sur le suivant si absent). */
+  pal?: string | string[];
   sx?: number;
   ix?: number;
+}
+
+/** Premier nom présent dans le catalogue du module (les noms varient selon la
+ *  version WLED — un nom introuvable ne doit JAMAIS faire échouer en silence). */
+export function resolveByName(catalog: string[], names: string | string[] | undefined): number {
+  if (!names) return -1;
+  for (const n of Array.isArray(names) ? names : [names]) {
+    const i = catalog.indexOf(n);
+    if (i >= 0) return i;
+  }
+  return -1;
 }
 
 export const WLED_AMBIANCES: WledAmbiance[] = [
@@ -137,8 +148,8 @@ export const WLED_AMBIANCES: WledAmbiance[] = [
     bri: 200,
     col: [0, 0, 0],
     white: 0,
-    fx: 'Colorloop',
-    pal: 'Sunset',
+    fx: ['Colorloop', 'Colorwaves', 'Gradient'],
+    pal: ['Sunset', 'Sunset 2', 'Orangery'],
     sx: 60,
     ix: 128
   },
@@ -149,8 +160,8 @@ export const WLED_AMBIANCES: WledAmbiance[] = [
     bri: 255,
     col: [0, 0, 0],
     white: 0,
-    fx: 'Rainbow',
-    pal: 'Party',
+    fx: ['Rainbow', 'Colorloop'],
+    pal: ['Party', 'Rainbow'],
     sx: 200,
     ix: 180
   },
@@ -161,7 +172,7 @@ export const WLED_AMBIANCES: WledAmbiance[] = [
     bri: 160,
     col: [255, 110, 25],
     white: 30,
-    fx: 'Candle',
+    fx: ['Candle', 'Candle Multi', 'Flicker'],
     sx: 110,
     ix: 130
   },
@@ -331,7 +342,7 @@ class WledStore {
       if (Array.isArray(d?.palettes))
         this.palettes = d.palettes.filter((x: unknown) => typeof x === 'string');
       if (d?.info) this.#applyInfo(d.info);
-      if (d?.state && !this.#busy()) this.#applyState(d.state);
+      if (d?.state && !this.#busy() && !this.#sending) this.#applyState(d.state);
       this.connected = true;
       this.lastError = null;
       this.lastUpdate = new Date();
@@ -342,9 +353,11 @@ class WledStore {
     }
   }
 
-  /** Rafraîchit l'état courant (polling léger /json/si). Gelé pendant un drag. */
+  /** Rafraîchit l'état courant (polling léger /json/si). Gelé pendant un drag
+   *  ou tant que des commandes sont en file (un GET intercalé renverrait un
+   *  état antérieur au dernier ordre et ferait « sauter » l'UI en arrière). */
   async refresh(): Promise<void> {
-    if (this.#busy()) return; // ne pas écraser un réglage en cours
+    if (this.#busy() || this.#sending) return; // ne pas écraser un réglage en cours
     if (!this.#metaLoaded) this.loadMeta(); // retry catalogue tant qu'absent
     try {
       const res = await fetch('/api/wled/json/si', { signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -388,29 +401,90 @@ class WledStore {
     }
   }
 
-  // ─── Commandes (optimistes + POST) ────────
-  async #post(partial: object): Promise<void> {
-    try {
-      const res = await fetch('/api/wled/json/state', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        // v:true → le vrai WLED renvoie l'état complet (sinon {success:true}).
-        body: JSON.stringify({ ...partial, v: true }),
-        signal: AbortSignal.timeout(TIMEOUT_MS)
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json().catch(() => null);
-      // Reconciliation immédiate SAUF pendant un drag (l'optimiste fait foi).
-      if (!this.#busy() && d && typeof d === 'object' && ('seg' in d || 'bri' in d || 'on' in d)) {
-        this.#applyState(d as Record<string, unknown>);
+  // ─── Commandes (optimistes + POST sérialisés) ────────
+  // UN SEUL POST en vol à la fois. Les commandes émises pendant ce temps
+  // FUSIONNENT dans un payload d'attente (dernière valeur gagne, par segment) :
+  //   - un drag de slider ne produit plus une rafale de requêtes qui sature
+  //     l'ESP32 (cadence naturelle = 1 requête par aller-retour réseau) ;
+  //   - les réponses ne reviennent plus dans le désordre → fini l'état périmé
+  //     qui écrase le dernier clic quand on enchaîne les commandes.
+  #inflight = false;
+  #pendingBody: Record<string, unknown> | null = null;
+
+  /** File de commandes active ? (gèle refresh() → pas de GET périmé intercalé) */
+  get #sending(): boolean {
+    return this.#inflight || this.#pendingBody !== null;
+  }
+
+  /** Fusionne `src` dans `dst` — top-level écrasé, `seg` fusionné par id. */
+  #mergeBody(dst: Record<string, unknown>, src: Record<string, unknown>): Record<string, unknown> {
+    for (const [k, v] of Object.entries(src)) {
+      if (k === 'seg' && Array.isArray(v) && Array.isArray(dst.seg)) {
+        const merged = dst.seg as Record<string, unknown>[];
+        const byId = new Map(merged.map((s) => [s.id, s]));
+        for (const s of v as Record<string, unknown>[]) {
+          const ex = byId.get(s.id);
+          if (ex) Object.assign(ex, s);
+          else merged.push(s);
+        }
+      } else {
+        dst[k] = v;
       }
-      this.connected = true;
-      this.lastError = null;
-      this.lastUpdate = new Date();
-    } catch (e) {
-      this.lastError = e instanceof Error ? e.message : 'erreur';
-      if (!this.#busy()) this.refresh(); // resync sur échec
     }
+    return dst;
+  }
+
+  async #post(partial: object): Promise<void> {
+    if (this.#inflight) {
+      // Un POST est déjà en route : on fusionne, il partira juste après.
+      this.#pendingBody = this.#mergeBody(this.#pendingBody ?? {}, {
+        ...(partial as Record<string, unknown>)
+      });
+      return;
+    }
+    this.#inflight = true;
+    let body: Record<string, unknown> | null = { ...(partial as Record<string, unknown>) };
+    let lastFailed = false;
+    try {
+      while (body) {
+        lastFailed = false;
+        try {
+          const res = await fetch('/api/wled/json/state', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            // v:true → le vrai WLED renvoie l'état complet (sinon {success:true}).
+            body: JSON.stringify({ ...body, v: true }),
+            signal: AbortSignal.timeout(TIMEOUT_MS)
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const d = await res.json().catch(() => null);
+          // Réconciliation UNIQUEMENT si plus rien n'attend (la réponse reflète
+          // alors le dernier ordre) et hors drag (l'optimiste fait foi).
+          if (
+            this.#pendingBody === null &&
+            !this.#busy() &&
+            d &&
+            typeof d === 'object' &&
+            ('seg' in d || 'bri' in d || 'on' in d)
+          ) {
+            this.#applyState(d as Record<string, unknown>);
+          }
+          this.connected = true;
+          this.lastError = null;
+          this.lastUpdate = new Date();
+        } catch (e) {
+          lastFailed = true;
+          this.lastError = e instanceof Error ? e.message : 'erreur';
+        }
+        body = this.#pendingBody;
+        this.#pendingBody = null;
+        // Petit répit entre deux ordres enchaînés — l'ESP32 n'aime pas le tir en rafale.
+        if (body) await new Promise((r) => setTimeout(r, 60));
+      }
+    } finally {
+      this.#inflight = false;
+    }
+    if (lastFailed && !this.#busy()) this.refresh(); // resync si le DERNIER ordre a échoué
   }
 
   #seg(id: number): WledSegment | undefined {
@@ -521,6 +595,55 @@ class WledStore {
     await this.#post({ seg: [{ id, ix: v }] });
   }
 
+  // ─── Suivi musique ────────────────────────────────
+  // Les couleurs viennent de la pochette du morceau en cours (wledMusic).
+  // Lecture → effet fluide qui déroule le dégradé des 3 couleurs ; pause →
+  // couleur dominante fixe (la terrasse « retient son souffle »).
+
+  /** Effets doux multi-couleurs, par ordre de préférence (noms selon firmware). */
+  static readonly MUSIC_FX = ['Blends', 'Colorwaves', 'Gradient', 'Breathe'];
+  /** Palette « dégradé des couleurs du segment » (0.14 la préfixe d'un astérisque). */
+  static readonly MUSIC_PAL = ['* Color Gradient', 'Color Gradient', '* Colors 1&2', 'Colors 1&2'];
+
+  /** Applique les couleurs du morceau à tous les segments (via la file). */
+  async applyMusicColors(cols: RGB[], playing: boolean): Promise<void> {
+    if (!this.segments.length) return;
+    const c3 = [cols[0], cols[1] ?? cols[0], cols[2] ?? cols[0]];
+    const fxIdx = playing ? resolveByName(this.effects, WledStore.MUSIC_FX) : this.solidFx;
+    const palIdx = Math.max(0, resolveByName(this.palettes, WledStore.MUSIC_PAL));
+
+    for (const s of this.segments) {
+      s.on = true;
+      s.col = c3[0];
+      if (fxIdx >= 0) s.fx = fxIdx;
+      s.pal = palIdx;
+    }
+    this.on = true;
+
+    const colPayload = c3.map((c) => [c[0], c[1], c[2], 0]);
+    await this.#post({
+      on: true,
+      seg: this.segments.map((s) => ({
+        id: s.id,
+        on: true,
+        col: colPayload,
+        ...(fxIdx >= 0 ? { fx: fxIdx } : {}),
+        pal: palIdx,
+        sx: 50,
+        ix: 150
+      }))
+    });
+  }
+
+  /** Pause / reprise de lecture : fige sur la dominante ou relance l'effet. */
+  async setMusicPaused(paused: boolean): Promise<void> {
+    if (!this.segments.length) return;
+    const fxIdx = paused ? this.solidFx : resolveByName(this.effects, WledStore.MUSIC_FX);
+    if (fxIdx < 0) return;
+    for (const s of this.segments) s.fx = fxIdx;
+    await this.#post({ seg: this.segments.map((s) => ({ id: s.id, fx: fxIdx })) });
+  }
+
   /** Applique une ambiance aux segments RÉELS (jamais d'id fantôme). */
   async applyAmbiance(key: string): Promise<void> {
     const a = WLED_AMBIANCES.find((x) => x.key === key);
@@ -529,8 +652,13 @@ class WledStore {
       await this.setOn(false);
       return;
     }
-    const fxIdx = a.fx ? this.effects.indexOf(a.fx) : -1;
-    const palIdx = a.pal ? this.palettes.indexOf(a.pal) : -1;
+    // Effet : repli sur Solid si le nom n'existe pas sur ce firmware (mieux un
+    // rendu fixe propre que l'effet précédent qui « colle »). Palette : les
+    // ambiances sans palette explicite reviennent à Default (0) — sinon la
+    // palette de l'ambiance PRÉCÉDENTE (ex. Party) contamine la nouvelle.
+    const wanted = resolveByName(this.effects, a.fx);
+    const fxIdx = a.fx ? (wanted >= 0 ? wanted : this.solidFx) : -1;
+    const palIdx = a.pal ? Math.max(0, resolveByName(this.palettes, a.pal)) : 0;
 
     // Reflet optimiste local + payload depuis la MÊME source (segments réels).
     for (const s of this.segments) {

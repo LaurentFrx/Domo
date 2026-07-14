@@ -1,11 +1,14 @@
 <script lang="ts">
   /**
-   * Aperçu visuel de l'éclairage WLED « tel qu'il est réglé ».
-   * Une barre de lumière par segment, rendue façon COB RGBW : trait CONTINU et
-   * diffus (pas de points) avec halo (bloom). Reflète en direct la couleur
-   * effective (RGB + blanc 4000K atténué), la luminosité (maître × segment),
-   * l'état on/off et la FAMILLE d'effet : fixe / dégradé qui défile / balayage
-   * (point qui se déplace) / scintillement / pulsation. Aperçu INDICATIF.
+   * LA barre de lumière — héros et signature de la carte terrasse.
+   * Une barre par segment, rendue façon COB RGBW : trait CONTINU et diffus
+   * (pas de points) avec halo (bloom). Reflète en direct la couleur effective
+   * (RGB + blanc 4000K atténué), la luminosité (maître × segment), l'état
+   * on/off et la FAMILLE d'effet : fixe / dégradé qui défile / balayage /
+   * scintillement / pulsation. Aperçu INDICATIF.
+   *
+   * En mode « Par ligne » (`selectable`), la barre EST le sélecteur : toucher
+   * une ligne l'active pour les réglages — pas d'onglets redondants ailleurs.
    *
    * Animations gardées par `animated` (préférence app) + @media reduced-motion,
    * et MISES EN PAUSE quand l'onglet passe en arrière-plan (document.hidden).
@@ -15,8 +18,13 @@
   interface Props {
     /** Animer les effets dynamiques (sinon image fixe). */
     animated?: boolean;
+    /** Les barres deviennent des boutons de sélection de ligne. */
+    selectable?: boolean;
+    /** Ligne sélectionnée (mode selectable). */
+    selectedId?: number;
+    onselect?: (id: number) => void;
   }
-  let { animated = true }: Props = $props();
+  let { animated = true, selectable = false, selectedId = 0, onselect }: Props = $props();
 
   // Pause des animations quand la page n'est pas visible (règle Domo).
   let hidden = $state(false);
@@ -32,9 +40,13 @@
   const COLOR_PALETTES = new Set([
     'Default',
     'Random Cycle',
+    '* Random Cycle',
     'Color 1',
+    '* Color 1',
     'Colors 1&2',
+    '* Colors 1&2',
     'Color Gradient',
+    '* Color Gradient',
     'Colors Only'
   ]);
 
@@ -164,6 +176,7 @@
     'Fire Flicker': 'Feu',
     Colorloop: 'Boucle de couleurs',
     Colorwaves: 'Vagues de couleur',
+    Blends: 'Fondu de couleurs',
     Rainbow: 'Arc-en-ciel',
     'Rainbow Runner': 'Arc-en-ciel',
     Aurora: 'Aurore',
@@ -194,7 +207,6 @@
     id: number;
     name: string;
     on: boolean;
-    pct: string;
     desc: string;
     paint: string;
     size: string;
@@ -208,8 +220,8 @@
   }
 
   function gradientStops(fxName: string, palName: string): string[] | null {
-    if (!COLOR_PALETTES.has(palName) && PALETTE_GRADIENTS[palName])
-      return PALETTE_GRADIENTS[palName];
+    const bare = palName.replace(/^\* /, '');
+    if (!COLOR_PALETTES.has(palName) && PALETTE_GRADIENTS[bare]) return PALETTE_GRADIENTS[bare];
     if (RAINBOW_FX.has(fxName)) return RAINBOW;
     return null;
   }
@@ -292,7 +304,6 @@
         id: seg.id,
         name: seg.name,
         on,
-        pct: on ? `${Math.round(bri * 100)}%` : '—',
         desc,
         paint,
         size,
@@ -306,20 +317,15 @@
       };
     })
   );
+
+  const multi = $derived(models.length > 1);
 </script>
 
 {#if models.length}
   <div class="pv" class:paused={hidden}>
     {#each models as m (m.id)}
-      <div class="pv-row" title="{m.name} · {m.desc} · {m.pct}">
-        <span class="pv-name">{m.name}</span>
-        <div
-          class="pv-bar"
-          class:off={!m.on}
-          style="box-shadow: {m.shadow};"
-          role="img"
-          aria-label="{m.name} : {m.desc}, {m.pct}"
-        >
+      {#snippet bar()}
+        <div class="pv-bar" class:off={!m.on} style="box-shadow: {m.shadow};" aria-hidden="true">
           <div
             class="pv-fill {m.fillAnim}"
             style="background: {m.paint}; background-size: {m.size}; filter: {m.filter}; animation-duration: {m.fillDur}s;"
@@ -331,9 +337,31 @@
             ></div>
           {/if}
         </div>
-        <span class="pv-pct tabular-nums">{m.pct}</span>
-      </div>
+      {/snippet}
+
+      {#if selectable && multi}
+        <!-- La barre EST le sélecteur de ligne (pas d'onglets redondants). -->
+        <button
+          type="button"
+          class="pv-row pv-select"
+          class:selected={m.id === selectedId}
+          aria-pressed={m.id === selectedId}
+          aria-label="Régler {m.name} — {m.desc}"
+          onclick={() => onselect?.(m.id)}
+        >
+          <span class="pv-name">{m.name}</span>
+          {@render bar()}
+        </button>
+      {:else}
+        <div class="pv-row" role="img" aria-label="{multi ? m.name + ' : ' : ''}{m.desc}">
+          {#if multi}<span class="pv-name">{m.name}</span>{/if}
+          {@render bar()}
+        </div>
+      {/if}
     {/each}
+    {#if !multi && models[0].on}
+      <span class="pv-desc">{models[0].desc}</span>
+    {/if}
   </div>
 {/if}
 
@@ -341,13 +369,42 @@
   .pv {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
   }
   .pv-row {
     display: grid;
-    grid-template-columns: 64px 1fr 34px;
+    grid-template-columns: 1fr;
     align-items: center;
     gap: 10px;
+    /* Reset bouton (mode sélection) */
+    padding: 0;
+    border: none;
+    background: transparent;
+    text-align: left;
+    width: 100%;
+  }
+  .pv-row:has(.pv-name) {
+    grid-template-columns: 56px 1fr;
+  }
+  .pv-select {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    border-radius: 9999px;
+  }
+  .pv-select .pv-bar {
+    outline: 2px solid transparent;
+    outline-offset: 3px;
+    transition: outline-color var(--duration-fast) var(--ease-default);
+  }
+  .pv-select.selected .pv-bar {
+    outline-color: var(--color-primary);
+  }
+  .pv-select.selected .pv-name {
+    color: var(--color-fg);
+  }
+  .pv-select:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
   }
   .pv-name {
     font-size: 11px;
@@ -357,17 +414,15 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .pv-pct {
+  .pv-desc {
     font-size: 11px;
-    font-weight: 600;
     color: var(--color-muted-fg);
-    text-align: right;
   }
 
   /* Barre = ruban COB : trait continu diffus avec halo. */
   .pv-bar {
     position: relative;
-    height: 18px;
+    height: 26px;
     border-radius: 9999px;
     overflow: hidden;
     background: transparent;
