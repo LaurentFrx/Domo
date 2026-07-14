@@ -362,6 +362,10 @@ class PlayerState {
   lastError = $state<string | null>(null);
   /** Feuille « Now Playing » plein écran ouverte ? (UI globale) */
   sheetOpen = $state(false);
+  /** Sélecteur de destination dispo ('airplay' WebKit iOS/macOS, 'remote' ailleurs). */
+  outputPicker = $state<'airplay' | 'remote' | null>(null);
+  /** Lecture envoyée vers un appareil sans fil (AirPlay, Cast…) ? */
+  wirelessOutput = $state(false);
 
   current = $derived<PlexTrack | null>(this.queue[this.index] ?? null);
 
@@ -387,9 +391,43 @@ class PlayerState {
       this.lastError = 'Lecture impossible (format ou réseau)';
       this.playing = false;
     });
+    this.detectOutputPicker(a);
     this.audio = a;
     this.setupMediaSession();
     return a;
+  }
+
+  // ─── Destination de lecture (AirPlay / Remote Playback) ───────────────────
+
+  /**
+   * Safari (iOS/macOS) expose le sélecteur AirPlay natif sur l'élément audio
+   * via webkitShowPlaybackTargetPicker ; les autres navigateurs passent par
+   * l'API standard Remote Playback quand elle existe. Sans l'un ni l'autre,
+   * le bouton « Sortie audio » du Now Playing n'est pas rendu.
+   */
+  private detectOutputPicker(a: HTMLAudioElement): void {
+    const w = a as WebKitAudio;
+    if (typeof w.webkitShowPlaybackTargetPicker === 'function') {
+      this.outputPicker = 'airplay';
+      a.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', () => {
+        this.wirelessOutput = !!(a as WebKitAudio).webkitCurrentPlaybackTargetIsWireless;
+      });
+    } else if (a.remote && typeof a.remote.prompt === 'function') {
+      this.outputPicker = 'remote';
+      a.remote.addEventListener('connect', () => (this.wirelessOutput = true));
+      a.remote.addEventListener('disconnect', () => (this.wirelessOutput = false));
+    }
+  }
+
+  /** Ouvre le sélecteur natif de destination (bouton « Sortie audio »). */
+  pickOutput(): void {
+    const a = this.ensureAudio();
+    const w = a as WebKitAudio;
+    if (typeof w.webkitShowPlaybackTargetPicker === 'function') {
+      w.webkitShowPlaybackTargetPicker();
+    } else {
+      a.remote?.prompt().catch(() => undefined);
+    }
   }
 
   /** Lance une file de lecture (album, résultats…) à partir de `startIndex`. */
@@ -568,6 +606,12 @@ class PlayerState {
     if (!('mediaSession' in navigator)) return;
     navigator.mediaSession.playbackState = this.playing ? 'playing' : 'paused';
   }
+}
+
+/** Extensions WebKit (AirPlay) absentes de lib.dom. */
+interface WebKitAudio extends HTMLAudioElement {
+  webkitShowPlaybackTargetPicker?: () => void;
+  webkitCurrentPlaybackTargetIsWireless?: boolean;
 }
 
 function shuffleInPlace<T>(arr: T[]): void {

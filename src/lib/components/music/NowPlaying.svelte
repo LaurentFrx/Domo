@@ -96,9 +96,15 @@
     if (!bytes || bytes <= 0) return null;
     return `${(bytes / 1048576).toFixed(1).replace('.', ',')} Mo`;
   }
-  function fmtFormat(t: { codec: string | null; bitrate: number | null }): string | null {
-    if (!t.codec) return null;
-    return t.codec.toUpperCase() + (t.bitrate ? ` · ${t.bitrate} kbit/s` : '');
+  function fmtBitrate(t: {
+    bitrate: number | null;
+    size: number | null;
+    duration: number | null;
+  }): string | null {
+    // Débit annoncé par Plex, sinon CALCULÉ depuis taille/durée pour qu'il soit
+    // toujours affiché (octets × 8 / ms = kbit/s exactement).
+    const kbps = t.bitrate ?? (t.size && t.duration ? Math.round((t.size * 8) / t.duration) : null);
+    return kbps ? `${kbps} kbit/s` : null;
   }
   function fileName(path: string | null): string | null {
     if (!path) return null;
@@ -254,6 +260,33 @@
         </button>
       </div>
 
+      <!-- Destination de lecture : sélecteur natif AirPlay (iOS/macOS) ou
+           Remote Playback ; absent si le navigateur ne propose ni l'un ni l'autre. -->
+      {#if player.outputPicker}
+        <button
+          class="output"
+          class:on={player.wirelessOutput}
+          onclick={() => player.pickOutput()}
+          aria-label="Choisir la destination de lecture"
+        >
+          <svg
+            width="17"
+            height="17"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1" />
+            <path d="m12 15 5 6H7z" />
+          </svg>
+          {player.wirelessOutput ? 'Lecture sur un autre appareil' : 'Sortie audio'}
+        </button>
+      {/if}
+
       {#if player.lastError}
         <p class="error">{player.lastError}</p>
       {/if}
@@ -323,10 +356,16 @@
               <dt>Durée</dt>
               <dd>{fmtDuration(player.current.duration)}</dd>
             </div>
-            {#if fmtFormat(player.current)}
+            {#if player.current.codec}
               <div>
                 <dt>Format</dt>
-                <dd>{fmtFormat(player.current)}</dd>
+                <dd>{player.current.codec.toUpperCase()}</dd>
+              </div>
+            {/if}
+            {#if fmtBitrate(player.current)}
+              <div>
+                <dt>Débit</dt>
+                <dd>{fmtBitrate(player.current)}</dd>
               </div>
             {/if}
             {#if fmtSize(player.current.size)}
@@ -631,6 +670,26 @@
     box-shadow:
       0 0 30px -4px oklch(0.75 0.23 350 / 0.6),
       inset 2px 3px 6px -2px oklch(1 0 0 / 0.5);
+  }
+
+  .output {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin: 14px auto 0;
+    background: none;
+    border: 1px solid oklch(0.96 0.013 286 / 0.25);
+    color: oklch(0.96 0.013 286 / 0.75);
+    border-radius: var(--radius-pill, 999px);
+    padding: 8px 16px;
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .output.on {
+    color: var(--color-magenta);
+    border-color: oklch(0.75 0.23 350 / 0.5);
+    background: oklch(0.75 0.23 350 / 0.1);
   }
 
   .error {
