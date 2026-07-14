@@ -10,6 +10,7 @@
   import PullToRefresh from '$components/layout/PullToRefresh.svelte';
   import HealthBanner from '$components/layout/HealthBanner.svelte';
   import TempHistorySheet from '$components/temperature/TempHistorySheet.svelte';
+  import MiniPlayer from '$components/music/MiniPlayer.svelte';
   import Pager from '$lib/pager/Pager.svelte';
   import { startDemoTicker, stopDemoTicker } from '$stores/demo-ticker.svelte';
   import { anker } from '$stores/anker.svelte';
@@ -254,6 +255,11 @@
   </main>
 
   <TabBar />
+
+  <!-- Mini-player musique GLOBAL (+ feuille Now Playing) : n'apparaît que si une
+       file de lecture existe. L'audio vit dans le store `player` (module-level),
+       la musique survit donc aux navigations et aux swipes du pager. -->
+  <MiniPlayer />
 
   <!-- Pop-up global « historique de température 4 h » (piloté par openTempHistory) -->
   <TempHistorySheet />
