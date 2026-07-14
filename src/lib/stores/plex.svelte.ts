@@ -314,7 +314,9 @@ class PlexState {
       }
       throw new Error(message);
     }
-    this.albumCache.delete(key);
+    // La clé supprimée peut être une PISTE : son album (autre clé) garderait la
+    // piste fantôme en cache → on vide tout, les vues rechargent à la demande.
+    this.albumCache.clear();
     this.artistCache.clear();
     await this.reloadQuiet();
   }
@@ -445,6 +447,34 @@ class PlayerState {
     if (i < 0 || i >= this.queue.length) return;
     this.index = i;
     this.load(true);
+  }
+
+  /**
+   * Retire une piste de la file (après suppression du fichier depuis le
+   * lecteur). Si c'était la piste courante : on enchaîne sur la suivante (en ne
+   * relançant la lecture que si on était en train de jouer) ; dernière piste →
+   * retour au début de file, en pause ; file vide → lecteur fermé.
+   */
+  removeAt(i: number): void {
+    if (i < 0 || i >= this.queue.length) return;
+    const wasCurrent = i === this.index;
+    const wasPlaying = this.playing;
+    const q = this.queue.filter((_, idx) => idx !== i);
+    if (q.length === 0) {
+      this.clear();
+      return;
+    }
+    this.queue = q;
+    if (i < this.index) {
+      this.index -= 1;
+    } else if (wasCurrent) {
+      if (this.index >= q.length) {
+        this.index = 0;
+        this.load(false);
+      } else {
+        this.load(wasPlaying);
+      }
+    }
   }
 
   toggleShuffle(): void {
