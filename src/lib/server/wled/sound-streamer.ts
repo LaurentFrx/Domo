@@ -120,6 +120,9 @@ export async function updateBeat(u: BeatUpdate): Promise<BeatStatus> {
   // en arrière-plan (le heartbeat suivant la trouvera prête).
   const cached = await cachedTimeline(u.key);
   if (cached) {
+    console.log(
+      `[wled/beat] stream piste ${u.key} pos=${Math.round(u.positionMs / 1000)}s play=${u.playing}`
+    );
     session = {
       key: u.key,
       timeline: cached,
@@ -135,9 +138,11 @@ export async function updateBeat(u: BeatUpdate): Promise<BeatStatus> {
   if (analyzing !== u.key) {
     analyzing = u.key;
     const startedFor = u.key;
+    console.log(`[wled/beat] analyse piste ${u.key} (${u.part})`);
     void analyzeTrack(u.part.replace(/^\/+/, ''), u.key)
+      .then(() => console.log(`[wled/beat] analyse ${startedFor} terminée`))
       .catch((e) => {
-        console.error('[wled/beat] analyse échouée:', (e as Error).message);
+        console.error(`[wled/beat] analyse ${startedFor} échouée:`, (e as Error).message);
       })
       .finally(() => {
         if (analyzing === startedFor) analyzing = null;
@@ -148,6 +153,7 @@ export async function updateBeat(u: BeatUpdate): Promise<BeatStatus> {
 
 /** Arrêt explicite (mode musique désactivé, reprise manuelle, style ambiance). */
 export function stopBeat(): void {
+  if (session) console.log('[wled/beat] stream stoppé');
   session = null;
   stopLoop();
 }

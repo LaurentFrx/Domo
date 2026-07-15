@@ -93,6 +93,10 @@ class WledMusicStore {
   #lastBeatAt = 0;
   #lastBeatPos = 0;
   #lastBeatPlaying: boolean | null = null;
+  /** Réponses « ni prêt ni en analyse » consécutives (= analyse échouée). */
+  #notReadyCount = 0;
+  /** Piste retombée en rendu « ambiance » faute de spectre (une fois par piste). */
+  #fellBack = false;
 
   constructor() {
     if (typeof localStorage !== 'undefined') {
@@ -176,8 +180,20 @@ class WledMusicStore {
       })
     })
       .then((r) => (r.ok ? r.json() : null))
-      .then((st: { analyzing?: boolean } | null) => {
-        if (st) this.analyzing = st.analyzing === true;
+      .then((st: { ready?: boolean; analyzing?: boolean } | null) => {
+        if (!st) return;
+        this.analyzing = st.analyzing === true;
+        // Analyse échouée (ni prêt ni en cours, 2 heartbeats de suite) : plutôt
+        // qu'un effet audio sans données (= ruban noir), on retombe sur le
+        // fondu « ambiance » pour CETTE piste — le style choisi reste acquis.
+        if (st.ready === true || st.analyzing === true) {
+          this.#notReadyCount = 0;
+        } else if (++this.#notReadyCount >= 2 && !this.#fellBack) {
+          this.#fellBack = true;
+          if (this.colors) {
+            void wled.applyMusicColors(this.colors, this.#lastPlaying ?? true);
+          }
+        }
       })
       .catch(() => undefined);
   }
@@ -204,6 +220,8 @@ class WledMusicStore {
       this.#lastTrackKey = track.key;
       this.#lastPlaying = playing;
       this.#lastBeatAt = 0; // heartbeat immédiat (lance l'analyse au besoin)
+      this.#notReadyCount = 0;
+      this.#fellBack = false;
       const gen = ++this.#gen;
       const art = plexImg(track.thumb, 128);
       if (art) {
