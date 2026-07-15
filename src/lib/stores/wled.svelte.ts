@@ -629,6 +629,9 @@ class WledStore {
   static readonly MUSIC_FX = ['Blends', 'Colorwaves', 'Gradient', 'Breathe'];
   /** Palette « dégradé des couleurs du segment » (0.14 la préfixe d'un astérisque). */
   static readonly MUSIC_PAL = ['* Color Gradient', 'Color Gradient', '* Colors 1&2', 'Colors 1&2'];
+  /** Palette des styles RÉACTIFS : nuances de la dominante seule. Mesuré sur le
+   *  ruban : c'est celle qui rend la barre/les impulsions les plus lisibles. */
+  static readonly MUSIC_PAL_REACTIVE = ['* Color 1', 'Color 1'];
 
   /** Applique les couleurs du morceau à tous les segments (via la file).
    *  `style` : effet + réglages du style choisi (défaut : fondu « ambiance »). */
@@ -638,11 +641,20 @@ class WledStore {
     style?: { fx?: string[] | null; sx?: number; ix?: number }
   ): Promise<void> {
     if (!this.segments.length) return;
+    const reactive = !!style?.fx;
     const c3 = [cols[0], cols[1] ?? cols[0], cols[2] ?? cols[0]];
     const fxIdx = playing
       ? resolveByName(this.effects, style?.fx ?? WledStore.MUSIC_FX)
       : this.solidFx;
-    const palIdx = Math.max(0, resolveByName(this.palettes, WledStore.MUSIC_PAL));
+    // ⚠️ col[1] = couleur de FOND des effets WLED. Pour les styles réactifs,
+    // elle DOIT rester noire : une 2ᵉ couleur de pochette vive remplit tout le
+    // ruban en permanence et masque la barre/les impulsions (mesuré : courbe
+    // volume→lumière PLATE, ruban « figé plein » — le bug « n'importe quoi »).
+    const palIdx = Math.max(
+      0,
+      resolveByName(this.palettes, reactive ? WledStore.MUSIC_PAL_REACTIVE : WledStore.MUSIC_PAL)
+    );
+    const slots = reactive ? [c3[0], [0, 0, 0] as RGB, c3[1]] : c3;
     const sx = style?.sx ?? 50;
     const ix = style?.ix ?? 150;
 
@@ -654,7 +666,7 @@ class WledStore {
     }
     this.on = true;
 
-    const colPayload = c3.map((c) => [c[0], c[1], c[2], 0]);
+    const colPayload = slots.map((c) => [c[0], c[1], c[2], 0]);
     await this.#post({
       on: true,
       seg: this.segments.map((s) => ({
