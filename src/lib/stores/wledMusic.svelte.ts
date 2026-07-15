@@ -1,17 +1,19 @@
 /**
  * Suivi de la musique par l'éclairage terrasse.
  *
- * Quand le mode est actif, la terrasse « écoute » le lecteur Plex de l'app :
- *   - nouveau morceau  → couleurs dominantes de la pochette appliquées au ruban
- *     (3 slots WLED + palette dégradé + effet fluide) ;
- *   - pause / reprise  → couleur dominante fixe / reprise de l'effet.
+ * Deux niveaux, au choix (« style ») :
+ *   - « Ambiance » : couleurs dominantes de la pochette + fondu doux — aucune
+ *     donnée temps réel, juste l'esprit du morceau.
+ *   - Styles RÉACTIFS (VU-mètre, Vagues, Gouttes, Cascade, DJ) : le spectre du
+ *     morceau est analysé numériquement côté serveur (FFT du fichier, pas de
+ *     micro) et streamé au module en sound-sync, calé sur la position de
+ *     lecture. Les effets audio natifs du firmware font le rendu ; la palette
+ *     reste les couleurs de la pochette.
  *
- * Le pilotage part de L'APPAREIL où la musique joue (le lecteur est local à
- * l'app) — si deux appareils jouent avec le mode actif, le dernier événement
- * gagne : cas marginal assumé. La préférence est persistée par appareil.
- *
- * Branchement : `sync()` est appelé depuis un $effect du layout (toujours
- * monté) qui lit `player.current` / `player.playing` — pas de $effect.root ici.
+ * Le pilotage part de L'APPAREIL où la musique joue. Le heartbeat de position
+ * s'appuie sur `player.currentTime` (événement audio → continue en arrière-plan
+ * iOS, contrairement aux timers) ; le serveur extrapole entre deux heartbeats.
+ * Préférences (activé + style) persistées par appareil.
  */
 
 import { wled } from '$stores/wled.svelte';
@@ -20,39 +22,120 @@ import { extractArtworkColors } from '$utils/artwork-colors';
 import type { RGB } from '$stores/wled.svelte';
 
 const LS_KEY = 'domo.wled.music';
+const LS_STYLE = 'domo.wled.music.style';
+/** Intervalle nominal entre deux heartbeats de position (le serveur extrapole). */
+const HEARTBEAT_MS = 5_000;
+/** Écart position réelle vs extrapolée qui déclenche un recalage immédiat (seek). */
+const DRIFT_S = 1.5;
+
+export interface WledMusicStyle {
+  key: string;
+  label: string;
+  /** Effet WLED (ordre de préférence). null = fondu « ambiance » (pas de stream). */
+  fx: string[] | null;
+  /** Description une ligne (aide au choix). */
+  hint: string;
+}
+
+export const WLED_MUSIC_STYLES: WledMusicStyle[] = [
+  { key: 'ambiance', label: 'Ambiance', fx: null, hint: 'Couleurs de la pochette, fondu doux' },
+  {
+    key: 'vu',
+    label: 'VU-mètre',
+    fx: ['Gravcenter', 'Gravimeter'],
+    hint: 'Le niveau remplit le ruban'
+  },
+  {
+    key: 'vagues',
+    label: 'Vagues',
+    fx: ['Freqwave', 'Freqmatrix'],
+    hint: 'Les fréquences défilent en couleurs'
+  },
+  {
+    key: 'gouttes',
+    label: 'Gouttes',
+    fx: ['Puddlepeak', 'Puddles', 'Ripple Peak'],
+    hint: 'Des éclats sur les temps forts'
+  },
+  { key: 'cascade', label: 'Cascade', fx: ['Waterfall'], hint: 'Chute colorée par la fréquence' },
+  { key: 'dj', label: 'DJ', fx: ['DJ Light', 'Pixelwave'], hint: 'Flashs énergiques au rythme' }
+];
+
+function lsGet(k: string): string | null {
+  try {
+    return localStorage.getItem(k);
+  } catch {
+    return null;
+  }
+}
+function lsSet(k: string, v: string): void {
+  try {
+    localStorage.setItem(k, v);
+  } catch {
+    /* perte acceptée */
+  }
+}
 
 class WledMusicStore {
   enabled = $state(false);
+  /** Style courant (clé de WLED_MUSIC_STYLES). */
+  style = $state('ambiance');
   /** Couleurs du morceau en cours (pastille de la chip « Musique »). */
   colors = $state<RGB[] | null>(null);
+  /** Analyse spectrale de la piste en cours côté serveur ? (indicatif UI) */
+  analyzing = $state(false);
 
   #lastTrackKey: string | null = null;
   #lastPlaying: boolean | null = null;
   /** Jeton anti-course : seule la dernière extraction lancée a le droit d'écrire. */
   #gen = 0;
+  // Heartbeat sound-sync
+  #lastBeatAt = 0;
+  #lastBeatPos = 0;
+  #lastBeatPlaying: boolean | null = null;
 
   constructor() {
     if (typeof localStorage !== 'undefined') {
-      try {
-        this.enabled = localStorage.getItem(LS_KEY) === '1';
-      } catch {
-        /* localStorage indisponible : préférence non restaurée */
-      }
+      this.enabled = lsGet(LS_KEY) === '1';
+      const st = lsGet(LS_STYLE);
+      if (st && WLED_MUSIC_STYLES.some((s) => s.key === st)) this.style = st;
     }
+  }
+
+  get styleDef(): WledMusicStyle {
+    return WLED_MUSIC_STYLES.find((s) => s.key === this.style) ?? WLED_MUSIC_STYLES[0];
+  }
+  /** Le style courant est-il piloté par le spectre (stream serveur) ? */
+  get reactive(): boolean {
+    return this.enabled && this.styleDef.fx !== null;
   }
 
   setEnabled(on: boolean): void {
     this.enabled = on;
-    try {
-      localStorage.setItem(LS_KEY, on ? '1' : '0');
-    } catch {
-      /* perte acceptée */
-    }
+    lsSet(LS_KEY, on ? '1' : '0');
     if (!on) {
-      // On rend la main SANS toucher au ruban : il garde ses couleurs actuelles.
       this.#lastTrackKey = null;
       this.#lastPlaying = null;
+      this.analyzing = false;
+      this.#stopStream();
     }
+  }
+
+  setStyle(key: string): void {
+    if (!WLED_MUSIC_STYLES.some((s) => s.key === key) || key === this.style) return;
+    this.style = key;
+    lsSet(LS_STYLE, key);
+    if (!this.enabled) return;
+    // Applique le nouveau rendu immédiatement (couleurs déjà extraites).
+    if (this.colors) {
+      void wled.applyMusicColors(
+        this.colors,
+        this.#lastPlaying ?? true,
+        this.styleDef.fx ?? undefined
+      );
+    }
+    if (!this.reactive) this.#stopStream();
+    else this.#lastBeatAt = 0; // force un heartbeat au prochain sync
   }
 
   /** Un réglage manuel (ambiance, couleur, effet) reprend la main. */
@@ -60,11 +143,50 @@ class WledMusicStore {
     if (this.enabled) this.setEnabled(false);
   }
 
+  #stopStream(): void {
+    void fetch('/api/wled/music/beat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ stop: true })
+    }).catch(() => undefined);
+  }
+
+  /** Heartbeat de position vers le streamer (throttlé ; recale sur seek). */
+  #beat(track: PlexTrack, playing: boolean, currentTimeS: number): void {
+    if (!this.reactive || !track.part) return;
+    const now = Date.now();
+    const expected = this.#lastBeatPos + (playing ? (now - this.#lastBeatAt) / 1000 : 0);
+    const drift = Math.abs(currentTimeS - expected);
+    const due =
+      now - this.#lastBeatAt >= HEARTBEAT_MS ||
+      drift > DRIFT_S ||
+      playing !== this.#lastBeatPlaying;
+    if (!due) return;
+    this.#lastBeatAt = now;
+    this.#lastBeatPos = currentTimeS;
+    this.#lastBeatPlaying = playing;
+    void fetch('/api/wled/music/beat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        key: track.key,
+        part: track.part,
+        positionMs: Math.round(currentTimeS * 1000),
+        playing
+      })
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((st: { analyzing?: boolean } | null) => {
+        if (st) this.analyzing = st.analyzing === true;
+      })
+      .catch(() => undefined);
+  }
+
   /**
-   * À appeler quand piste ou lecture changent (depuis un $effect du layout).
-   * Idempotent : ignore tout tant que rien n'a changé.
+   * À appeler quand piste, lecture ou position changent (depuis un $effect du
+   * layout). Idempotent : ignore tout tant que rien n'a changé.
    */
-  sync(track: PlexTrack | null, playing: boolean): void {
+  sync(track: PlexTrack | null, playing: boolean, currentTimeS = 0): void {
     if (!this.enabled) return;
 
     // File de lecture vidée (croix du mini-player) : on FIGE le ruban sur la
@@ -73,6 +195,7 @@ class WledMusicStore {
       if (this.#lastTrackKey !== null && this.#lastPlaying !== false) {
         this.#lastPlaying = false;
         void wled.setMusicPaused(true);
+        this.#stopStream();
       }
       return;
     }
@@ -80,26 +203,34 @@ class WledMusicStore {
     if (track.key !== this.#lastTrackKey) {
       this.#lastTrackKey = track.key;
       this.#lastPlaying = playing;
+      this.#lastBeatAt = 0; // heartbeat immédiat (lance l'analyse au besoin)
       const gen = ++this.#gen;
       const art = plexImg(track.thumb, 128);
-      if (!art) return;
-      void extractArtworkColors(art, 3).then(async (cols) => {
-        if (gen !== this.#gen || !this.enabled) return; // piste déjà remplacée
-        this.colors = cols;
-        // Le store wled n'est peuplé que si une page l'a connecté (acquire sur
-        // /pieces) — or la musique se lance depuis n'importe quelle page. On
-        // charge le catalogue + les segments à la demande.
-        if (!wled.segments.length || !wled.effects.length) await wled.loadMeta();
-        if (gen !== this.#gen || !this.enabled) return;
-        void wled.applyMusicColors(cols, this.#lastPlaying ?? playing);
-      });
+      if (art) {
+        void extractArtworkColors(art, 3).then(async (cols) => {
+          if (gen !== this.#gen || !this.enabled) return; // piste déjà remplacée
+          this.colors = cols;
+          // Le store wled n'est peuplé que si une page l'a connecté (acquire sur
+          // /pieces) — or la musique se lance depuis n'importe quelle page. On
+          // charge le catalogue + les segments à la demande.
+          if (!wled.segments.length || !wled.effects.length) await wled.loadMeta();
+          if (gen !== this.#gen || !this.enabled) return;
+          void wled.applyMusicColors(
+            cols,
+            this.#lastPlaying ?? playing,
+            this.styleDef.fx ?? undefined
+          );
+        });
+      }
+      this.#beat(track, playing, currentTimeS);
       return;
     }
 
     if (playing !== this.#lastPlaying) {
       this.#lastPlaying = playing;
-      void wled.setMusicPaused(!playing);
+      void wled.setMusicPaused(!playing, this.styleDef.fx ?? undefined);
     }
+    this.#beat(track, playing, currentTimeS);
   }
 }
 

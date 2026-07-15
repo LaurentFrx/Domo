@@ -630,11 +630,14 @@ class WledStore {
   /** Palette « dégradé des couleurs du segment » (0.14 la préfixe d'un astérisque). */
   static readonly MUSIC_PAL = ['* Color Gradient', 'Color Gradient', '* Colors 1&2', 'Colors 1&2'];
 
-  /** Applique les couleurs du morceau à tous les segments (via la file). */
-  async applyMusicColors(cols: RGB[], playing: boolean): Promise<void> {
+  /** Applique les couleurs du morceau à tous les segments (via la file).
+   *  `fxNames` : effet du style choisi (défaut : fondu doux « ambiance »). */
+  async applyMusicColors(cols: RGB[], playing: boolean, fxNames?: string[]): Promise<void> {
     if (!this.segments.length) return;
     const c3 = [cols[0], cols[1] ?? cols[0], cols[2] ?? cols[0]];
-    const fxIdx = playing ? resolveByName(this.effects, WledStore.MUSIC_FX) : this.solidFx;
+    const fxIdx = playing
+      ? resolveByName(this.effects, fxNames ?? WledStore.MUSIC_FX)
+      : this.solidFx;
     const palIdx = Math.max(0, resolveByName(this.palettes, WledStore.MUSIC_PAL));
 
     for (const s of this.segments) {
@@ -660,10 +663,13 @@ class WledStore {
     });
   }
 
-  /** Pause / reprise de lecture : fige sur la dominante ou relance l'effet. */
-  async setMusicPaused(paused: boolean): Promise<void> {
+  /** Pause / reprise de lecture : fige sur la dominante ou relance l'effet
+   *  (celui du style choisi via `fxNames`, sinon l'effet « ambiance »). */
+  async setMusicPaused(paused: boolean, fxNames?: string[]): Promise<void> {
     if (!this.segments.length) return;
-    const fxIdx = paused ? this.solidFx : resolveByName(this.effects, WledStore.MUSIC_FX);
+    const fxIdx = paused
+      ? this.solidFx
+      : resolveByName(this.effects, fxNames ?? WledStore.MUSIC_FX);
     if (fxIdx < 0) return;
     for (const s of this.segments) s.fx = fxIdx;
     await this.#post({ seg: this.segments.map((s) => ({ id: s.id, fx: fxIdx })) });

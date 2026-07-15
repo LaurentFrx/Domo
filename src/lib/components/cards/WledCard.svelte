@@ -16,7 +16,7 @@
    * badge d'état seulement si anormal (hors ligne / démo).
    */
   import { wled, WLED_AMBIANCES, type WledSegment } from '$stores/wled.svelte';
-  import { wledMusic } from '$stores/wledMusic.svelte';
+  import { wledMusic, WLED_MUSIC_STYLES } from '$stores/wledMusic.svelte';
   import { player } from '$stores/plex.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import WledColorPicker from './WledColorPicker.svelte';
@@ -89,7 +89,11 @@
   // Libellé de la chip Musique : reflète ce qui se passe VRAIMENT (le mode peut
   // être actif sans musique en cours → sinon l'activation semble « sans effet »).
   const musicLabel = $derived(
-    wledMusic.enabled && !player.current ? 'Musique · en attente' : 'Musique'
+    wledMusic.enabled && !player.current
+      ? 'Musique · en attente'
+      : wledMusic.enabled && wledMusic.analyzing
+        ? 'Musique · analyse…'
+        : 'Musique'
   );
 
   /** Un réglage manuel reprend la main sur le suivi musique. */
@@ -264,6 +268,31 @@
         </button>
       {/each}
     </div>
+
+    <!-- ─── Styles musicaux (visibles quand le suivi musique est actif) ───
+         « Ambiance » = couleurs de la pochette en fondu doux ; les autres
+         réagissent au SPECTRE du morceau (analyse numérique côté serveur,
+         streamée au module — aucun micro). -->
+    {#if wledMusic.enabled}
+      <div class="style-row" role="radiogroup" aria-label="Style musical">
+        {#each WLED_MUSIC_STYLES as st (st.key)}
+          <button
+            type="button"
+            class="style-chip"
+            class:active={wledMusic.style === st.key}
+            role="radio"
+            aria-checked={wledMusic.style === st.key}
+            title={st.hint}
+            onclick={() => {
+              haptic('light');
+              wledMusic.setStyle(st.key);
+            }}
+          >
+            {st.label}
+          </button>
+        {/each}
+      </div>
+    {/if}
 
     <!-- ─── Lignes séparées : bascule discrète + panneau de la ligne choisie ─── -->
     {#if wled.canSplit || !isTogether}
@@ -685,6 +714,39 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* ─── Styles musicaux (pills compactes sous les scènes) ─── */
+  .style-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .style-chip {
+    min-height: 40px;
+    padding: 8px 14px;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border);
+    background: transparent;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-muted-fg);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: all var(--duration-fast) var(--ease-default);
+  }
+  .style-chip:hover:not(:disabled) {
+    border-color: var(--color-border-strong);
+  }
+  .style-chip.active {
+    border-color: var(--color-primary);
+    background: var(--color-primary-muted);
+    color: var(--color-primary-active);
+    font-weight: 600;
+  }
+  .style-chip:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
   }
 
   /* ─── Bascule Ensemble ⇄ Par ligne (action rare → discrète) ─── */

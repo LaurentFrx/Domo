@@ -49,10 +49,13 @@
 
   // ─── Suivi musique → éclairage terrasse ────────────────────────────────
   // Le lecteur est global (MiniPlayer ci-dessous) : on observe piste + lecture
-  // ici pour que la terrasse suive la musique quelle que soit la page ouverte.
-  // No-op immédiat quand le mode est désactivé (wledMusic.sync est idempotent).
+  // + position ici pour que la terrasse suive la musique quelle que soit la
+  // page ouverte. La position (currentTime, poussée par l'événement audio
+  // `timeupdate`) alimente le heartbeat des styles réactifs — elle continue
+  // d'évoluer en arrière-plan iOS tant que la musique joue, contrairement aux
+  // timers. No-op immédiat quand le mode est désactivé (sync idempotent).
   $effect(() => {
-    wledMusic.sync(player.current, player.playing);
+    wledMusic.sync(player.current, player.playing, player.currentTime);
   });
 
   // ─── Auto-reload après déploiement (anti « client périmé ») ─────────────
