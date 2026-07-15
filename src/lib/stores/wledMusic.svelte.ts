@@ -33,32 +33,59 @@ export interface WledMusicStyle {
   label: string;
   /** Effet WLED (ordre de préférence). null = fondu « ambiance » (pas de stream). */
   fx: string[] | null;
+  /** Vitesse / intensité de l'effet (chaque effet audio a son point d'équilibre). */
+  sx?: number;
+  ix?: number;
   /** Description une ligne (aide au choix). */
   hint: string;
 }
 
+// Effets choisis FIDÈLES À LA PALETTE (couleurs de la pochette) — les effets
+// qui colorient par fréquence en HSV brut (Freqwave…) affichent des teintes
+// sans rapport avec le morceau : écartés après mesure sur le ruban réel.
+// Seul « DJ » assume des couleurs libres (dit dans son hint).
 export const WLED_MUSIC_STYLES: WledMusicStyle[] = [
   { key: 'ambiance', label: 'Ambiance', fx: null, hint: 'Couleurs de la pochette, fondu doux' },
   {
     key: 'vu',
     label: 'VU-mètre',
     fx: ['Gravcenter', 'Gravimeter'],
-    hint: 'Le niveau remplit le ruban'
+    sx: 128,
+    ix: 128,
+    hint: 'Le niveau remplit le ruban depuis le centre'
   },
   {
     key: 'vagues',
     label: 'Vagues',
-    fx: ['Freqwave', 'Freqmatrix'],
-    hint: 'Les fréquences défilent en couleurs'
+    fx: ['Pixelwave', 'Matripix'],
+    sx: 110,
+    ix: 140,
+    hint: 'Des impulsions défilent au rythme'
   },
   {
     key: 'gouttes',
     label: 'Gouttes',
     fx: ['Puddlepeak', 'Puddles', 'Ripple Peak'],
+    sx: 128,
+    ix: 200,
     hint: 'Des éclats sur les temps forts'
   },
-  { key: 'cascade', label: 'Cascade', fx: ['Waterfall'], hint: 'Chute colorée par la fréquence' },
-  { key: 'dj', label: 'DJ', fx: ['DJ Light', 'Pixelwave'], hint: 'Flashs énergiques au rythme' }
+  {
+    key: 'cascade',
+    label: 'Cascade',
+    fx: ['Waterfall'],
+    sx: 130,
+    ix: 128,
+    hint: 'Une chute continue qui suit le morceau'
+  },
+  {
+    key: 'dj',
+    label: 'DJ',
+    fx: ['DJ Light'],
+    sx: 140,
+    ix: 160,
+    hint: 'Flashs énergiques, couleurs libres'
+  }
 ];
 
 function lsGet(k: string): string | null {
@@ -132,11 +159,7 @@ class WledMusicStore {
     if (!this.enabled) return;
     // Applique le nouveau rendu immédiatement (couleurs déjà extraites).
     if (this.colors) {
-      void wled.applyMusicColors(
-        this.colors,
-        this.#lastPlaying ?? true,
-        this.styleDef.fx ?? undefined
-      );
+      void wled.applyMusicColors(this.colors, this.#lastPlaying ?? true, this.styleDef);
     }
     if (!this.reactive) this.#stopStream();
     else this.#lastBeatAt = 0; // force un heartbeat au prochain sync
@@ -233,11 +256,7 @@ class WledMusicStore {
           // charge le catalogue + les segments à la demande.
           if (!wled.segments.length || !wled.effects.length) await wled.loadMeta();
           if (gen !== this.#gen || !this.enabled) return;
-          void wled.applyMusicColors(
-            cols,
-            this.#lastPlaying ?? playing,
-            this.styleDef.fx ?? undefined
-          );
+          void wled.applyMusicColors(cols, this.#lastPlaying ?? playing, this.styleDef);
         });
       }
       this.#beat(track, playing, currentTimeS);
@@ -246,7 +265,7 @@ class WledMusicStore {
 
     if (playing !== this.#lastPlaying) {
       this.#lastPlaying = playing;
-      void wled.setMusicPaused(!playing, this.styleDef.fx ?? undefined);
+      void wled.setMusicPaused(!playing, this.styleDef.fx);
     }
     this.#beat(track, playing, currentTimeS);
   }

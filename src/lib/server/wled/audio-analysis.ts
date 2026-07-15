@@ -20,7 +20,9 @@ import { pmsFetch } from '$lib/server/plex';
 
 const CACHE_DIR = 'data/audio-fft';
 const CACHE_MAX_FILES = 80;
-const MAGIC = 0x57_46_46_54; // "WFFT"
+// v2 : normalisation par percentiles (dynamique réelle) + MajorPeak lissé.
+// Changer le magic invalide le cache → ré-analyse avec la nouvelle courbe.
+const MAGIC = 0x57_46_46_32; // "WFF2"
 export const FPS = 25;
 export const BYTES_PER_FRAME = 20; // 16 bandes + volume + peak + majorPeak(u16)
 
@@ -233,6 +235,13 @@ export async function analyzeTrack(partPath: string, cacheKey: string): Promise<
   return p;
 }
 
+/** Laisse respirer l'event loop (l'analyse tourne DANS le process de l'app :
+ *  une boucle FFT synchrone gèlerait toutes les requêtes pendant ~5 s —
+ *  constaté : « serveur de musique injoignable » pendant l'analyse). */
+function breathe(): Promise<void> {
+  return new Promise((r) => setImmediate(r));
+}
+
 async function computeTimeline(partPath: string): Promise<Timeline> {
   const pcm = await decodeToPcm(partPath);
   const nFrames = Math.max(0, Math.floor((pcm.length - N) / HOP));
@@ -248,6 +257,7 @@ async function computeTimeline(partPath: string): Promise<Timeline> {
   let prevBass = 0;
 
   for (let f = 0; f < nFrames; f++) {
+    if (f % 64 === 0) await breathe(); // ~7 ms de FFT max entre deux respirations
     const off = Math.floor(f * HOP);
     let rms = 0;
     for (let i = 0; i < N; i++) {
@@ -284,25 +294,53 @@ async function computeTimeline(partPath: string): Promise<Timeline> {
     prevBass = bass;
   }
 
-  // Normalisation type AGC : p95 du morceau → 254 (compression douce racine).
-  const q = (arr: Float32Array, p: number) => {
+  // ── Normalisation « dynamique réelle » ──
+  // La musique moderne est masterisée fort : normaliser sur un seul plafond
+  // (p95 → max) sature tout et le rendu paraît FIGÉ (barre pleine en continu,
+  // constaté sur le ruban). On mappe par percentiles — p10→30, p50→110,
+  // p97→230 — pour garantir une respiration visible autour de la médiane,
+  // quel que soit le mastering. Les BANDES sont normalisées CHACUNE sur ses
+  // propres percentiles (sinon les basses écrasent tout et les aigus sont
+  // éteints en permanence).
+  const q = (arr: ArrayLike<number>, p: number) => {
     const s = Array.from(arr).sort((a, b) => a - b);
     return s[Math.min(s.length - 1, Math.floor(s.length * p))] || 1e-6;
   };
-  const bandRef = q(bandsRaw, 0.95);
-  const volRef = q(volRaw, 0.95);
+  const rampe = (v: number, p10: number, p50: number, p97: number): number => {
+    let out: number;
+    if (v <= p10) out = (v / Math.max(p10, 1e-9)) * 30;
+    else if (v <= p50) out = 30 + ((v - p10) / Math.max(p50 - p10, 1e-9)) * 80;
+    else out = 110 + ((v - p50) / Math.max(p97 - p50, 1e-9)) * 120;
+    return Math.max(0, Math.min(254, Math.round(out)));
+  };
+
+  const bandP: [number, number, number][] = [];
+  for (let b = 0; b < 16; b++) {
+    const col = new Float32Array(nFrames);
+    for (let f = 0; f < nFrames; f++) col[f] = bandsRaw[f * 16 + b];
+    bandP.push([q(col, 0.1), q(col, 0.5), q(col, 0.97)]);
+  }
+  const volP: [number, number, number] = [q(volRaw, 0.1), q(volRaw, 0.5), q(volRaw, 0.97)];
   const fluxRef = q(bassFlux, 0.97);
+
+  // MajorPeak : médiane glissante (5 trames) — le bin dominant brut saute
+  // d'une trame à l'autre et fait clignoter les effets colorés par fréquence.
+  const peakSmooth = new Float32Array(nFrames);
+  for (let f = 0; f < nFrames; f++) {
+    const w = [];
+    for (let k = Math.max(0, f - 2); k <= Math.min(nFrames - 1, f + 2); k++) w.push(peakHz[k]);
+    w.sort((a, b) => a - b);
+    peakSmooth[f] = w[Math.floor(w.length / 2)];
+  }
 
   for (let f = 0; f < nFrames; f++) {
     const o = f * BYTES_PER_FRAME;
     for (let b = 0; b < 16; b++) {
-      const v = Math.sqrt(Math.min(1.6, bandsRaw[f * 16 + b] / bandRef));
-      data[o + b] = Math.min(254, Math.round(v * 200));
+      data[o + b] = rampe(bandsRaw[f * 16 + b], ...bandP[b]);
     }
-    const vol = Math.sqrt(Math.min(1.6, volRaw[f] / volRef));
-    data[o + 16] = Math.min(254, Math.round(vol * 200));
+    data[o + 16] = rampe(volRaw[f], ...volP);
     data[o + 17] = bassFlux[f] > fluxRef * 0.85 ? 1 : 0; // battement
-    const hz = Math.max(1, Math.min(11025, Math.round(peakHz[f])));
+    const hz = Math.max(1, Math.min(11025, Math.round(peakSmooth[f])));
     data[o + 18] = hz & 0xff;
     data[o + 19] = hz >> 8;
   }
