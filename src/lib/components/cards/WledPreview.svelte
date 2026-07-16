@@ -12,8 +12,16 @@
    *
    * Animations gardées par `animated` (préférence app) + @media reduced-motion,
    * et MISES EN PAUSE quand l'onglet passe en arrière-plan (document.hidden).
+   *
+   * MODE MUSIQUE RÉACTIF : la barre s'anime avec les MÊMES données de spectre
+   * que le ruban (timeline analysée du morceau, cf. wledMusic.liveTimeline),
+   * calée sur la position de lecture — l'écran et la terrasse bougent ensemble.
+   * Piloté par variable CSS (--mvol) mise à jour en requestAnimationFrame,
+   * hors réactivité Svelte (zéro re-render à 60 fps).
    */
   import { wled, previewColor, type RGB } from '$stores/wled.svelte';
+  import { wledMusic } from '$stores/wledMusic.svelte';
+  import { player } from '$stores/plex.svelte';
 
   interface Props {
     /** Animer les effets dynamiques (sinon image fixe). */
@@ -34,6 +42,46 @@
     const onVis = () => (hidden = document.visibilityState === 'hidden');
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
+  });
+
+  // ─── Suivi musique : la barre bouge comme le ruban ───
+  let pvEl = $state<HTMLDivElement | null>(null);
+  const live = $derived(
+    wledMusic.reactive && wledMusic.liveTimeline !== null && player.playing && animated && !hidden
+  );
+
+  // Position extrapolée : currentTime n'est poussé que ~4×/s (timeupdate) —
+  // on note QUAND il a changé pour interpoler entre deux mises à jour.
+  let basePos = 0;
+  let baseAt = 0;
+  $effect(() => {
+    basePos = player.currentTime;
+    baseAt = performance.now();
+  });
+
+  $effect(() => {
+    if (!live || !pvEl) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const tl = wledMusic.liveTimeline;
+    if (!tl) return;
+    const el = pvEl;
+    let raf = 0;
+    let smooth = 0.4;
+    const tick = () => {
+      const pos = basePos + (performance.now() - baseAt) / 1000;
+      const idx = Math.min(tl.vol.length - 1, Math.max(0, Math.floor(pos * tl.fps)));
+      let v = tl.vol[idx] / 254;
+      if (tl.peak[idx]) v = Math.max(v, 0.95); // flash sur les temps forts
+      // Attaque instantanée, retombée douce (comme un vrai VU).
+      smooth = v > smooth ? v : smooth * 0.88 + v * 0.12;
+      el.style.setProperty('--mvol', smooth.toFixed(3));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      el.style.setProperty('--mvol', '0.5'); // repos neutre
+    };
   });
 
   // Palettes « couleur » (= utilisent la couleur du segment, pas un dégradé).
@@ -255,7 +303,15 @@
       let filter = 'none';
       let shadow = 'none';
 
-      if (on) {
+      if (on && live) {
+        // Mode musique réactif : la barre est pilotée par la var CSS --mvol
+        // (mise à jour en rAF depuis la timeline du morceau — les mêmes
+        // données que le ruban). Pas d'animation CSS générique par-dessus.
+        const c = `${eff[0]} ${eff[1]} ${eff[2]}`;
+        paint = `linear-gradient(90deg, ${rgbCss(eff)}, ${rgbCss(eff)})`;
+        filter = `brightness(calc(0.2 + var(--mvol, 0.4) * ${(1.25 * (0.35 + 0.65 * bri)).toFixed(2)})) saturate(1.15)`;
+        shadow = `0 0 calc(4px + var(--mvol, 0.3) * 18px) rgb(${c} / 0.55), 0 0 calc(10px + var(--mvol, 0.3) * 36px) rgb(${c} / 0.30)`;
+      } else if (on) {
         // Luminosité bakée dans le fill (plancher bas) — pas sur le conteneur,
         // sinon le reflet verre (::after) serait assombri lui aussi.
         filter = `brightness(${(0.18 + 0.82 * bri).toFixed(2)}) saturate(1.1)`;
@@ -294,11 +350,15 @@
         }
       }
 
+      // En mode musique, l'état parlant est le STYLE suivi, pas l'effet interne
+      // (en pause le module repasse en Solid → « Couleur fixe » serait trompeur).
       const desc = !on
         ? 'Éteint'
-        : whiteOnly && fxName === 'Solid'
-          ? 'Blanc 4000K'
-          : (FX_FR[fxName] ?? fxName);
+        : wledMusic.enabled
+          ? `Musique · ${wledMusic.styleDef.label}${player.playing ? '' : ' · en pause'}`
+          : whiteOnly && fxName === 'Solid'
+            ? 'Blanc 4000K'
+            : (FX_FR[fxName] ?? fxName);
 
       return {
         id: seg.id,
@@ -322,7 +382,7 @@
 </script>
 
 {#if models.length}
-  <div class="pv" class:paused={hidden}>
+  <div class="pv" class:paused={hidden} bind:this={pvEl}>
     {#each models as m (m.id)}
       {#snippet bar()}
         <div class="pv-bar" class:off={!m.on} style="box-shadow: {m.shadow};" aria-hidden="true">

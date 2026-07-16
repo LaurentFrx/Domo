@@ -103,6 +103,22 @@ function lsSet(k: string, v: string): void {
   }
 }
 
+/** Timeline compacte du morceau (volume + battements, 25 fps) — la MÊME donnée
+ *  que le stream sound-sync : l'aperçu de la carte l'anime pour bouger comme
+ *  le ruban. */
+export interface LiveTimeline {
+  fps: number;
+  vol: Uint8Array;
+  peak: Uint8Array;
+}
+
+function b64ToU8(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
 class WledMusicStore {
   enabled = $state(false);
   /** Style courant (clé de WLED_MUSIC_STYLES). */
@@ -111,6 +127,9 @@ class WledMusicStore {
   colors = $state<RGB[] | null>(null);
   /** Analyse spectrale de la piste en cours côté serveur ? (indicatif UI) */
   analyzing = $state(false);
+  /** Timeline du morceau en cours (pour l'aperçu animé de la carte). */
+  liveTimeline = $state<LiveTimeline | null>(null);
+  #timelineFor: string | null = null;
 
   #lastTrackKey: string | null = null;
   #lastPlaying: boolean | null = null;
@@ -148,8 +167,24 @@ class WledMusicStore {
       this.#lastTrackKey = null;
       this.#lastPlaying = null;
       this.analyzing = false;
+      this.liveTimeline = null;
+      this.#timelineFor = null;
       this.#stopStream();
     }
+  }
+
+  /** Timeline compacte (volume/battements) de la piste — pour l'aperçu animé.
+   *  Chargée quand le serveur annonce la piste prête ; une fois par piste. */
+  #loadTimeline(key: string): void {
+    if (this.#timelineFor === key) return;
+    this.#timelineFor = key;
+    void fetch(`/api/wled/music/timeline?key=${encodeURIComponent(key)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { fps: number; vol: string; peak: string } | null) => {
+        if (!d || this.#timelineFor !== key) return;
+        this.liveTimeline = { fps: d.fps, vol: b64ToU8(d.vol), peak: b64ToU8(d.peak) };
+      })
+      .catch(() => undefined);
   }
 
   setStyle(key: string): void {
@@ -206,6 +241,7 @@ class WledMusicStore {
       .then((st: { ready?: boolean; analyzing?: boolean } | null) => {
         if (!st) return;
         this.analyzing = st.analyzing === true;
+        if (st.ready === true) this.#loadTimeline(track.key);
         // Analyse échouée (ni prêt ni en cours, 2 heartbeats de suite) : plutôt
         // qu'un effet audio sans données (= ruban noir), on retombe sur le
         // fondu « ambiance » pour CETTE piste — le style choisi reste acquis.
@@ -245,6 +281,9 @@ class WledMusicStore {
       this.#lastBeatAt = 0; // heartbeat immédiat (lance l'analyse au besoin)
       this.#notReadyCount = 0;
       this.#fellBack = false;
+      // La timeline de l'ancienne piste ne doit pas animer la nouvelle.
+      this.liveTimeline = null;
+      this.#timelineFor = null;
       const gen = ++this.#gen;
       const art = plexImg(track.thumb, 128);
       if (art) {
