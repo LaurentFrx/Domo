@@ -51,11 +51,19 @@
   // Le lecteur est global (MiniPlayer ci-dessous) : on observe piste + lecture
   // + position ici pour que la terrasse suive la musique quelle que soit la
   // page ouverte. La position (currentTime, poussée par l'événement audio
-  // `timeupdate`) alimente le heartbeat des styles réactifs — elle continue
-  // d'évoluer en arrière-plan iOS tant que la musique joue, contrairement aux
-  // timers. No-op immédiat quand le mode est désactivé (sync idempotent).
+  // `timeupdate`) alimente le heartbeat — elle continue d'évoluer en
+  // arrière-plan iOS tant que la musique joue, contrairement aux timers.
+  // No-op immédiat quand le mode est désactivé (sync idempotent).
   $effect(() => {
     wledMusic.sync(player.current, player.playing, player.currentTime);
+  });
+  // L'état du mode (activé/style) vit AU SERVEUR : l'appareil qui joue doit y
+  // être abonné même sans la carte à l'écran, sinon il ne sait pas qu'il doit
+  // battre. (La carte, elle, s'abonne pour l'affichage — refcounté.)
+  $effect(() => {
+    if (!player.current) return;
+    wledMusic.openLive();
+    return () => wledMusic.closeLive();
   });
 
   // ─── Auto-reload après déploiement (anti « client périmé ») ─────────────

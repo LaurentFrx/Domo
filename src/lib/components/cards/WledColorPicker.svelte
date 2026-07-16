@@ -15,6 +15,10 @@
 
   let { color, disabled = false, onpick }: Props = $props();
 
+  /** Les curseurs fins (teinte/saturation) sont repliés par défaut : les
+   *  pastilles suffisent au quotidien — limpide pour toute la famille. */
+  let showAdjust = $state(false);
+
   // Presets COLORÉS uniquement (le blanc passe par le canal W dédié).
   const PRESETS: { name: string; rgb: RGB }[] = [
     { name: 'Ambre', rgb: [255, 150, 40] },
@@ -98,40 +102,7 @@
 </script>
 
 <div class="flex flex-col gap-2.5" class:opacity-50={disabled}>
-  <div class="flex items-center gap-2.5">
-    <span
-      class="color-preview shrink-0"
-      style="background: {css};"
-      role="img"
-      aria-label="Couleur actuelle : teinte {hue}°, saturation {satPct}%"
-    ></span>
-    <div class="flex min-w-0 flex-1 flex-col gap-2">
-      <input
-        type="range"
-        class="hue-range"
-        min="0"
-        max="359"
-        value={hue}
-        {disabled}
-        oninput={onHue}
-        aria-label="Teinte"
-        aria-valuetext="{hue}°"
-      />
-      <input
-        type="range"
-        class="sat-range"
-        min="0"
-        max="100"
-        value={satPct}
-        {disabled}
-        oninput={onSat}
-        aria-label="Saturation"
-        aria-valuetext="{satPct} %"
-        style="--sat-track: {satTrack};"
-      />
-    </div>
-  </div>
-
+  <!-- Les pastilles d'abord : le choix simple, en grand, pour tous. -->
   <div class="swatches">
     {#each PRESETS as p (p.name)}
       <button
@@ -169,9 +140,85 @@
       </svg>
     </button>
   </div>
+
+  <!-- Les curseurs fins, repliés : pour ajuster précisément quand on y tient. -->
+  <button
+    type="button"
+    class="adjust-toggle"
+    aria-expanded={showAdjust}
+    {disabled}
+    onclick={() => (showAdjust = !showAdjust)}
+  >
+    <span>Ajuster la teinte</span>
+    <span class="chevron" class:open={showAdjust} aria-hidden="true">⌄</span>
+  </button>
+  {#if showAdjust}
+    <div class="flex items-center gap-2.5">
+      <span
+        class="color-preview shrink-0"
+        style="background: {css};"
+        role="img"
+        aria-label="Couleur actuelle : teinte {hue}°, saturation {satPct}%"
+      ></span>
+      <div class="flex min-w-0 flex-1 flex-col gap-2">
+        <input
+          type="range"
+          class="hue-range"
+          min="0"
+          max="359"
+          value={hue}
+          {disabled}
+          oninput={onHue}
+          aria-label="Teinte"
+          aria-valuetext="{hue}°"
+        />
+        <input
+          type="range"
+          class="sat-range"
+          min="0"
+          max="100"
+          value={satPct}
+          {disabled}
+          oninput={onSat}
+          aria-label="Saturation"
+          aria-valuetext="{satPct} %"
+          style="--sat-track: {satTrack};"
+        />
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
+  .adjust-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 40px;
+    padding: 6px 4px;
+    background: transparent;
+    border: none;
+    color: var(--color-muted-fg);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .adjust-toggle:disabled {
+    cursor: not-allowed;
+  }
+  .adjust-toggle:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+  .chevron {
+    transition: transform var(--duration-normal) var(--ease-default);
+  }
+  .chevron.open {
+    transform: rotate(180deg);
+  }
+
   .color-preview {
     width: 38px;
     height: 38px;

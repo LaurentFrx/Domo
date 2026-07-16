@@ -2,22 +2,23 @@
   /**
    * Carte de contrôle de l'éclairage terrasse (WLED — QuinLed Dig-Uno V3).
    *
-   * Hiérarchie « un geste par usage » :
-   *   1. HÉROS — la barre de lumière (WledPreview) montre l'état réel ; en mode
-   *      « Par ligne », toucher une barre sélectionne la ligne à régler.
-   *   2. QUOTIDIEN — luminosité (une ligne compacte) + scènes (pastilles).
-   *      La scène « Musique » suit le lecteur Plex de l'app (couleurs de la
-   *      pochette du morceau en cours) — elle reste active jusqu'à ce qu'un
-   *      réglage manuel reprenne la main.
-   *   3. REPLIÉ — « Personnaliser » : couleur + blanc 4000K | effet et SES
-   *      réglages (vitesse, intensité, palette — visibles quand l'effet en a).
+   * Budget d'information STRICT — surface par défaut = 4 rangées :
+   *   1. en-tête + interrupteur (badge seulement si anormal) ;
+   *   2. HÉROS — la barre de lumière (WledPreview), animée par le niveau
+   *      sonore serveur quand la musique joue (même donnée que le ruban) ;
+   *   3. luminosité (une ligne compacte, un seul %) ;
+   *   4. scènes : Musique + les 3 ambiances les plus utiles + « … » (le reste
+   *      vit dans Personnaliser).
+   * Musique active → UNE rangée de plus : les 6 styles sur une seule ligne
+   * scrollable. Tout le reste (autres ambiances, couleur, effet, lignes
+   * séparées) est replié dans « Personnaliser ».
    *
-   * Un seul % de luminosité affiché, un seul indicateur d'effet (chip active),
-   * badge d'état seulement si anormal (hors ligne / démo).
+   * Le mode Musique est un état SERVEUR partagé (SSE /api/wled/music/live) :
+   * la chip, les styles et la légende reflètent le ruban réel — plus jamais un
+   * flag localStorage propre à l'appareil.
    */
   import { wled, WLED_AMBIANCES, type WledSegment } from '$stores/wled.svelte';
   import { wledMusic, WLED_MUSIC_STYLES } from '$stores/wledMusic.svelte';
-  import { player } from '$stores/plex.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import WledColorPicker from './WledColorPicker.svelte';
   import WledPreview from './WledPreview.svelte';
@@ -27,6 +28,22 @@
   let showCustom = $state(false);
   let showAllFx = $state(false);
   let fxQuery = $state('');
+  /** Rangée de scènes étendue (le « … » déplie SUR PLACE, pas de menu). */
+  let moreScenes = $state(false);
+  /** Vue active du panneau Réglages : UNE décision à la fois. */
+  let customTab = $state<'couleur' | 'effet' | 'lignes'>('couleur');
+
+  // Flux temps réel du mode Musique (état + niveau sonore) tant que la carte
+  // est à l'écran — refcounté et suspendu en arrière-plan dans le store.
+  $effect(() => {
+    wledMusic.openLive();
+    return () => wledMusic.closeLive();
+  });
+
+  // Scènes : les 3 plus utiles d'abord, le reste dépliable sur place via « … ».
+  const SCENE_MAIN = ['blanc', 'warm', 'soiree'];
+  const scenesMain = $derived(WLED_AMBIANCES.filter((a) => SCENE_MAIN.includes(a.key)));
+  const scenesMore = $derived(WLED_AMBIANCES.filter((a) => !SCENE_MAIN.includes(a.key)));
 
   const isTogether = $derived(wled.scope === 'together');
   // Segment ciblé par les contrôles : le segment unique en Ensemble, la ligne
@@ -78,23 +95,9 @@
       .filter((e) => !q || e.name.toLowerCase().includes(q));
   });
 
-  // Pastille de la scène Musique : dégradé des couleurs du morceau en cours.
-  const musicSwatch = $derived.by(() => {
-    const c = wledMusic.colors;
-    if (!wledMusic.enabled || !c?.length) return null;
-    const stops = c.map((x) => `rgb(${x[0]} ${x[1]} ${x[2]})`);
-    return `linear-gradient(135deg, ${stops.join(', ')})`;
-  });
-
-  // Libellé de la chip Musique : reflète ce qui se passe VRAIMENT (le mode peut
-  // être actif sans musique en cours → sinon l'activation semble « sans effet »).
-  const musicLabel = $derived(
-    wledMusic.enabled && !player.current
-      ? 'Musique · en attente'
-      : wledMusic.enabled && wledMusic.analyzing
-        ? 'Musique · analyse…'
-        : 'Musique'
-  );
+  // La chip Musique dit « Musique », point — les états (en attente, analyse,
+  // pause) vivent dans la LÉGENDE de la barre, seule à avoir la place de les
+  // écrire en entier (le libellé dynamique était tronqué à 72 px : du bruit).
 
   /** Un réglage manuel reprend la main sur le suivi musique. */
   function manual(): void {
@@ -153,9 +156,9 @@
         checked={wled.on}
         onchange={(e) => {
           haptic('light');
-          // Manœuvrer l'interrupteur = reprise de contrôle : sinon la terrasse
-          // éteinte à la main se rallumerait au morceau suivant (applyMusicColors).
-          manual();
+          // L'interrupteur coupe la LUMIÈRE, pas le mode Musique : le serveur
+          // suspend le stream tant que le ruban est éteint et ne rallume jamais
+          // de lui-même.
           wled.setOn((e.currentTarget as HTMLInputElement).checked);
         }}
       />
@@ -222,92 +225,292 @@
           wledMusic.setEnabled(!wledMusic.enabled);
         }}
       >
-        <span
-          class="scene-dot"
-          style={musicSwatch ? `background: ${musicSwatch};` : ''}
-          class:scene-dot-idle={!musicSwatch}
-          aria-hidden="true"
-        >
-          {#if !musicSwatch}
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M9 18V5l12-2v13" />
-              <circle cx="6" cy="18" r="3" />
-              <circle cx="18" cy="16" r="3" />
-            </svg>
-          {/if}
+        <span class="scene-dot scene-dot-idle" aria-hidden="true">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M9 18V5l12-2v13" />
+            <circle cx="6" cy="18" r="3" />
+            <circle cx="18" cy="16" r="3" />
+          </svg>
         </span>
-        <span class="scene-label">{musicLabel}</span>
+        <span class="scene-label">Musique</span>
       </button>
 
-      {#each WLED_AMBIANCES as a (a.key)}
-        <button
-          type="button"
-          class="scene"
-          onclick={() => {
-            haptic('medium');
-            manual();
-            wled.applyAmbiance(a.key);
-          }}
-        >
-          <span
-            class="scene-dot"
-            class:scene-off={a.off}
-            style={a.off ? '' : `background: ${a.swatch};`}
-            aria-hidden="true"
-          ></span>
-          <span class="scene-label">{a.label}</span>
-        </button>
+      {#each scenesMain as a (a.key)}
+        {@render sceneChip(a)}
       {/each}
+
+      <!-- « … » déplie les autres scènes SUR PLACE — pas de menu. -->
+      {#if moreScenes}
+        {#each scenesMore as a (a.key)}
+          {@render sceneChip(a)}
+        {/each}
+      {/if}
+      <button
+        type="button"
+        class="scene"
+        aria-label={moreScenes ? 'Moins de scènes' : 'Plus de scènes'}
+        aria-expanded={moreScenes}
+        onclick={() => {
+          haptic('light');
+          moreScenes = !moreScenes;
+        }}
+      >
+        <span class="scene-dot scene-dot-idle scene-more" aria-hidden="true">
+          {moreScenes ? '−' : '…'}
+        </span>
+        <span class="scene-label">{moreScenes ? 'Moins' : 'Plus'}</span>
+      </button>
     </div>
 
-    <!-- ─── Styles musicaux (visibles quand le suivi musique est actif) ───
-         « Ambiance » = couleurs de la pochette en fondu doux ; les autres
-         réagissent au SPECTRE du morceau (analyse numérique côté serveur,
-         streamée au module — aucun micro). -->
+    <!-- ─── Styles musicaux : 2 groupes titrés (état serveur) ───
+         Un effet ♪ ne suit QUE le volume — c'est sa conception WLED : le dire
+         évite de chercher des fréquences là où il n'y en aura jamais. -->
     {#if wledMusic.enabled}
-      <div class="style-row" role="radiogroup" aria-label="Style musical">
-        {#each WLED_MUSIC_STYLES as st (st.key)}
-          <button
-            type="button"
-            class="style-chip"
-            class:active={wledMusic.style === st.key}
-            role="radio"
-            aria-checked={wledMusic.style === st.key}
-            title={st.hint}
-            onclick={() => {
-              haptic('light');
-              wledMusic.setStyle(st.key);
-            }}
-          >
-            {st.label}
-          </button>
+      <div role="radiogroup" aria-label="Style musical" class="flex flex-col gap-1.5">
+        {#each [{ kind: 'freq', title: 'Réagit aux fréquences' }, { kind: 'vol', title: 'Réagit au volume' }] as grp (grp.kind)}
+          <span class="style-group-title">{grp.title}</span>
+          <div class="style-grid">
+            {#each WLED_MUSIC_STYLES.filter((s) => s.kind === grp.kind || (grp.kind === 'freq' && s.kind === 'ambiance')) as st (st.key)}
+              <button
+                type="button"
+                class="style-chip"
+                class:active={wledMusic.style === st.key}
+                role="radio"
+                aria-checked={wledMusic.style === st.key}
+                title={st.hint}
+                onclick={() => {
+                  haptic('light');
+                  wledMusic.setStyle(st.key);
+                }}
+              >
+                {st.label}
+              </button>
+            {/each}
+          </div>
         {/each}
       </div>
     {/if}
 
-    <!-- ─── Lignes séparées : bascule discrète + panneau de la ligne choisie ─── -->
-    {#if wled.canSplit || !isTogether}
-      <button
-        type="button"
-        class="split-toggle"
-        onclick={() => {
-          haptic('light');
-          wled.setScope(isTogether ? 'perLine' : 'together');
-        }}
-      >
-        {isTogether ? 'Régler les lignes séparément' : 'Piloter les deux lignes ensemble'}
-      </button>
+    <!-- ─── Réglages : UNE décision à la fois (Couleur | Effet | Lignes) ─── -->
+    <button
+      type="button"
+      class="disclosure"
+      aria-expanded={showCustom}
+      onclick={() => (showCustom = !showCustom)}
+    >
+      <span>Réglages{!isTogether && target ? ` — ${target.name}` : ''}</span>
+      <span class="chevron" class:open={showCustom} aria-hidden="true">⌄</span>
+    </button>
+    {#if showCustom && target}
+      <div class="mode-tabs" role="tablist" aria-label="Que voulez-vous régler ?">
+        <button
+          type="button"
+          class="mode-tab"
+          class:active={customTab === 'couleur'}
+          role="tab"
+          aria-selected={customTab === 'couleur'}
+          onclick={() => (customTab = 'couleur')}
+        >
+          Couleur
+        </button>
+        <button
+          type="button"
+          class="mode-tab"
+          class:active={customTab === 'effet'}
+          role="tab"
+          aria-selected={customTab === 'effet'}
+          onclick={() => (customTab = 'effet')}
+        >
+          Effet
+        </button>
+        {#if wled.canSplit || !isTogether}
+          <button
+            type="button"
+            class="mode-tab"
+            class:active={customTab === 'lignes'}
+            role="tab"
+            aria-selected={customTab === 'lignes'}
+            onclick={() => (customTab = 'lignes')}
+          >
+            Lignes
+          </button>
+        {/if}
+      </div>
+
+      {#if customTab === 'couleur'}
+        {@render colorPanel(target)}
+      {:else if customTab === 'effet'}
+        {@render effectPanel(target)}
+      {:else if customTab === 'lignes'}
+        {@render linesPanel()}
+      {/if}
+    {/if}
+  {/if}
+</section>
+
+<!-- ─── Chip de scène (façade + panneau Personnaliser) ─── -->
+{#snippet sceneChip(a: (typeof WLED_AMBIANCES)[number])}
+  <button
+    type="button"
+    class="scene"
+    onclick={() => {
+      haptic('medium');
+      manual();
+      wled.applyAmbiance(a.key);
+    }}
+  >
+    <span
+      class="scene-dot"
+      class:scene-off={a.off}
+      style={a.off ? '' : `background: ${a.swatch};`}
+      aria-hidden="true"
+    ></span>
+    <span class="scene-label">{a.label}</span>
+  </button>
+{/snippet}
+
+<!-- ─── Panneau « Personnaliser » du segment ciblé ─── -->
+{#snippet colorPanel(s: WledSegment)}
+  <!-- Vue COULEUR : les pastilles, le blanc — rien d'autre. -->
+  <div class="flex flex-col gap-3" class:dimmed={ctlDisabled}>
+    <WledColorPicker
+      color={s.col}
+      disabled={ctlDisabled}
+      onpick={(rgb) => {
+        manual();
+        wled.setSegColor(s.id, rgb);
+      }}
+    />
+    {#if wled.rgbw}
+      <div class="bri-line">
+        <span class="bri-mini-label">Blanc 4000K</span>
+        <input
+          type="range"
+          class="bri-range white-range"
+          min="0"
+          max="255"
+          value={s.white}
+          disabled={ctlDisabled}
+          oninput={(e) => {
+            manual();
+            wled.setSegWhite(s.id, +(e.currentTarget as HTMLInputElement).value);
+          }}
+          onchange={() => haptic('light')}
+          aria-label="Canal blanc 4000K"
+        />
+        <span class="bri-pct tabular-nums">{Math.round((s.white / 255) * 100)}%</span>
+      </div>
+    {/if}
+  </div>
+{/snippet}
+
+{#snippet effectPanel(s: WledSegment)}
+  {@const isSolid = !effLoaded || (wled.effects[s.fx] ?? 'Solid') === 'Solid'}
+  <!-- Vue EFFET : des noms simples + UNE vitesse. Le reste est un catalogue
+       replié. (Choisir un effet remet ses couleurs par défaut : zéro réglage
+       de « palette » à comprendre.) -->
+  <div class="flex flex-col gap-3" class:dimmed={ctlDisabled}>
+    <div class="fx-curated">
+      {#each curatedFx as c (c.idx)}
+        <button
+          type="button"
+          class="fx-chip"
+          class:active={s.fx === c.idx}
+          aria-pressed={s.fx === c.idx}
+          disabled={ctlDisabled}
+          onclick={() => {
+            manual();
+            wled.setSegEffect(s.id, c.idx);
+            wled.setSegPalette(s.id, 0); // couleurs par défaut de l'effet
+          }}
+        >
+          {c.label}
+        </button>
+      {/each}
+    </div>
+
+    {#if effLoaded && !isSolid}
+      <div class="bri-line">
+        <span class="bri-mini-label">Vitesse</span>
+        <input
+          type="range"
+          class="bri-range"
+          min="0"
+          max="255"
+          value={s.sx}
+          disabled={ctlDisabled}
+          oninput={(e) => {
+            manual();
+            wled.setSegSpeed(s.id, +(e.currentTarget as HTMLInputElement).value);
+          }}
+          onchange={() => haptic('light')}
+          aria-label="Vitesse de l'effet"
+        />
+      </div>
     {/if}
 
+    <button
+      type="button"
+      class="disclosure"
+      aria-expanded={showAllFx}
+      onclick={() => (showAllFx = !showAllFx)}
+    >
+      <span>Tous les effets ({wled.effects.length})</span>
+      <span class="chevron" class:open={showAllFx} aria-hidden="true">⌄</span>
+    </button>
+    {#if showAllFx}
+      <input
+        type="search"
+        class="fx-search"
+        placeholder="Rechercher un effet…"
+        bind:value={fxQuery}
+        disabled={ctlDisabled}
+        aria-label="Rechercher un effet"
+      />
+      <div class="fx-grid" role="listbox" aria-label="Tous les effets">
+        {#each fxFiltered as e (e.i)}
+          <button
+            type="button"
+            class="fx-chip"
+            class:active={s.fx === e.i}
+            role="option"
+            aria-selected={s.fx === e.i}
+            disabled={ctlDisabled}
+            onclick={() => {
+              manual();
+              wled.setSegEffect(s.id, e.i);
+            }}
+          >
+            {e.name}
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </div>
+{/snippet}
+
+{#snippet linesPanel()}
+  <!-- Vue LIGNES : piloter ensemble ou séparément, et la ligne choisie. -->
+  <div class="flex flex-col gap-3">
+    <button
+      type="button"
+      class="split-toggle"
+      onclick={() => {
+        haptic('light');
+        wled.setScope(isTogether ? 'perLine' : 'together');
+      }}
+    >
+      {isTogether ? 'Régler les lignes séparément' : 'Piloter les deux lignes ensemble'}
+    </button>
     {#if !isTogether && target}
       <div class="line-panel" class:dimmed={ctlDisabled}>
         <div class="flex items-center justify-between">
@@ -321,7 +524,6 @@
               disabled={!wled.on}
               onchange={(e) => {
                 haptic('light');
-                manual();
                 wled.setSegOn(target.id, (e.currentTarget as HTMLInputElement).checked);
               }}
             />
@@ -345,177 +547,6 @@
         </div>
       </div>
     {/if}
-
-    <!-- ─── Personnaliser : couleur + blanc | effet et ses réglages ─── -->
-    <button
-      type="button"
-      class="disclosure"
-      aria-expanded={showCustom}
-      onclick={() => (showCustom = !showCustom)}
-    >
-      <span>Personnaliser{!isTogether && target ? ` — ${target.name}` : ''}</span>
-      <span class="chevron" class:open={showCustom} aria-hidden="true">⌄</span>
-    </button>
-    {#if showCustom && target}
-      {@render customPanel(target)}
-    {/if}
-  {/if}
-</section>
-
-<!-- ─── Panneau « Personnaliser » du segment ciblé ─── -->
-{#snippet customPanel(s: WledSegment)}
-  {@const isSolid = !effLoaded || (wled.effects[s.fx] ?? 'Solid') === 'Solid'}
-  <div class="grid gap-4 lg:grid-cols-2" class:dimmed={ctlDisabled}>
-    <!-- Couleur : teinte + canal blanc (c'est UNE décision : la lumière) -->
-    <div class="flex flex-col gap-3">
-      <span class="panel-title">Couleur</span>
-      <WledColorPicker
-        color={s.col}
-        disabled={ctlDisabled}
-        onpick={(rgb) => {
-          manual();
-          wled.setSegColor(s.id, rgb);
-        }}
-      />
-      {#if wled.rgbw}
-        <div class="bri-line">
-          <span class="bri-mini-label">Blanc 4000K</span>
-          <input
-            type="range"
-            class="bri-range white-range"
-            min="0"
-            max="255"
-            value={s.white}
-            disabled={ctlDisabled}
-            oninput={(e) => {
-              manual();
-              wled.setSegWhite(s.id, +(e.currentTarget as HTMLInputElement).value);
-            }}
-            onchange={() => haptic('light')}
-            aria-label="Canal blanc 4000K"
-          />
-          <span class="bri-pct tabular-nums">{Math.round((s.white / 255) * 100)}%</span>
-        </div>
-      {/if}
-    </div>
-
-    <!-- Effet + SES réglages (vitesse / intensité / palette suivent l'effet) -->
-    <div class="flex flex-col gap-3">
-      <span class="panel-title">Effet</span>
-      <div class="fx-curated">
-        {#each curatedFx as c (c.idx)}
-          <button
-            type="button"
-            class="fx-chip"
-            class:active={s.fx === c.idx}
-            aria-pressed={s.fx === c.idx}
-            disabled={ctlDisabled}
-            onclick={() => {
-              manual();
-              wled.setSegEffect(s.id, c.idx);
-            }}
-          >
-            {c.label}
-          </button>
-        {/each}
-      </div>
-
-      {#if effLoaded && !isSolid}
-        <div class="grid grid-cols-2 gap-3">
-          <div class="bri-line">
-            <span class="bri-mini-label">Vitesse</span>
-            <input
-              type="range"
-              class="bri-range"
-              min="0"
-              max="255"
-              value={s.sx}
-              disabled={ctlDisabled}
-              oninput={(e) => {
-                manual();
-                wled.setSegSpeed(s.id, +(e.currentTarget as HTMLInputElement).value);
-              }}
-              onchange={() => haptic('light')}
-              aria-label="Vitesse de l'effet"
-            />
-          </div>
-          <div class="bri-line">
-            <span class="bri-mini-label">Intensité</span>
-            <input
-              type="range"
-              class="bri-range"
-              min="0"
-              max="255"
-              value={s.ix}
-              disabled={ctlDisabled}
-              oninput={(e) => {
-                manual();
-                wled.setSegIntensity(s.id, +(e.currentTarget as HTMLInputElement).value);
-              }}
-              onchange={() => haptic('light')}
-              aria-label="Intensité de l'effet"
-            />
-          </div>
-        </div>
-
-        {#if wled.palettes.length}
-          <label class="flex flex-col gap-1.5">
-            <span class="bri-mini-label">Palette de couleurs</span>
-            <select
-              class="pal-select"
-              value={s.pal}
-              disabled={ctlDisabled}
-              onchange={(e) => {
-                manual();
-                wled.setSegPalette(s.id, +(e.currentTarget as HTMLSelectElement).value);
-              }}
-            >
-              {#each wled.palettes as name, i (name)}
-                <option value={i}>{name}</option>
-              {/each}
-            </select>
-          </label>
-        {/if}
-      {/if}
-
-      <button
-        type="button"
-        class="disclosure"
-        aria-expanded={showAllFx}
-        onclick={() => (showAllFx = !showAllFx)}
-      >
-        <span>Tous les effets ({wled.effects.length})</span>
-        <span class="chevron" class:open={showAllFx} aria-hidden="true">⌄</span>
-      </button>
-      {#if showAllFx}
-        <input
-          type="search"
-          class="fx-search"
-          placeholder="Rechercher un effet…"
-          bind:value={fxQuery}
-          disabled={ctlDisabled}
-          aria-label="Rechercher un effet"
-        />
-        <div class="fx-grid" role="listbox" aria-label="Tous les effets">
-          {#each fxFiltered as e (e.i)}
-            <button
-              type="button"
-              class="fx-chip"
-              class:active={s.fx === e.i}
-              role="option"
-              aria-selected={s.fx === e.i}
-              disabled={ctlDisabled}
-              onclick={() => {
-                manual();
-                wled.setSegEffect(s.id, e.i);
-              }}
-            >
-              {e.name}
-            </button>
-          {/each}
-        </div>
-      {/if}
-    </div>
   </div>
 {/snippet}
 
@@ -641,11 +672,8 @@
   /* ─── Scènes (pastilles rondes + libellé, défilement horizontal) ─── */
   .scene-row {
     display: flex;
+    flex-wrap: wrap; /* dépliée (« … ») → 2ᵉ ligne visible, jamais de scroll caché */
     gap: 4px;
-    overflow-x: auto;
-    scroll-snap-type: x proximity;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
     margin-inline: -4px;
     padding: 4px;
   }
@@ -696,6 +724,12 @@
   .scene-dot-idle {
     background: var(--color-muted);
   }
+  .scene-more {
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--color-fg);
+  }
   .scene-off {
     background:
       linear-gradient(
@@ -716,11 +750,22 @@
     text-overflow: ellipsis;
   }
 
-  /* ─── Styles musicaux (pills compactes sous les scènes) ─── */
-  .style-row {
-    display: flex;
-    flex-wrap: wrap;
+  .style-group-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-muted-fg);
+    padding-top: 2px;
+  }
+
+  /* ─── Styles musicaux : grille compacte, entière (pas de scroll interne :
+     deux zones défilantes empilées coupaient les chips à mi-hauteur) ─── */
+  .style-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
     gap: 6px;
+    padding: 2px;
   }
   .style-chip {
     min-height: 40px;
@@ -745,6 +790,38 @@
     font-weight: 600;
   }
   .style-chip:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  /* ─── Onglets du panneau Réglages : UNE décision à la fois ─── */
+  .mode-tabs {
+    display: flex;
+    gap: 6px;
+    padding: 4px;
+    border-radius: var(--radius-lg);
+    background: var(--color-muted);
+  }
+  .mode-tab {
+    flex: 1;
+    min-height: 44px;
+    padding: 8px 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    background: transparent;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-muted-fg);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: all var(--duration-fast) var(--ease-default);
+  }
+  .mode-tab.active {
+    border-color: var(--color-primary);
+    background: var(--color-primary-muted);
+    color: var(--color-primary);
+  }
+  .mode-tab:focus-visible {
     outline: 2px solid var(--color-primary);
     outline-offset: 2px;
   }
@@ -779,14 +856,6 @@
     padding: 12px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
-  }
-
-  .panel-title {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--color-muted-fg);
   }
 
   /* ─── Effets ─── */
@@ -876,26 +945,6 @@
   }
   .chevron.open {
     transform: rotate(180deg);
-  }
-
-  /* ─── Sélecteur de palette ─── */
-  .pal-select {
-    width: 100%;
-    padding: 9px 12px;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--color-border);
-    background: var(--color-card-hover);
-    color: var(--color-fg);
-    font-size: 16px;
-    cursor: pointer;
-  }
-  .pal-select:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
-  }
-  .pal-select:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 1px;
   }
 
   .dimmed {

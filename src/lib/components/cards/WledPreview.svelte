@@ -13,15 +13,14 @@
    * Animations gardées par `animated` (préférence app) + @media reduced-motion,
    * et MISES EN PAUSE quand l'onglet passe en arrière-plan (document.hidden).
    *
-   * MODE MUSIQUE RÉACTIF : la barre s'anime avec les MÊMES données de spectre
-   * que le ruban (timeline analysée du morceau, cf. wledMusic.liveTimeline),
-   * calée sur la position de lecture — l'écran et la terrasse bougent ensemble.
-   * Piloté par variable CSS (--mvol) mise à jour en requestAnimationFrame,
-   * hors réactivité Svelte (zéro re-render à 60 fps).
+   * MODE MUSIQUE RÉACTIF : la barre s'anime avec le niveau sonore que le
+   * SERVEUR diffuse à tous les appareils (SSE /api/wled/music/live, 12,5 Hz —
+   * la même donnée que le stream sound-sync du ruban). Piloté par variable
+   * CSS (--mvol) mise à jour en requestAnimationFrame, hors réactivité Svelte
+   * (zéro re-render à 60 fps).
    */
   import { wled, previewColor, type RGB } from '$stores/wled.svelte';
   import { wledMusic } from '$stores/wledMusic.svelte';
-  import { player } from '$stores/plex.svelte';
 
   interface Props {
     /** Animer les effets dynamiques (sinon image fixe). */
@@ -45,88 +44,21 @@
   });
 
   // ─── Suivi musique : la barre bouge comme le ruban ───
+  // Source UNIQUE : le niveau sonore 12,5 Hz du SSE /api/wled/music/live
+  // (wledMusic.liveLevel/livePeak — champs non réactifs, lus dans la boucle
+  // rAF). Même donnée pour tous les appareils, y compris celui qui joue.
   let pvEl = $state<HTMLDivElement | null>(null);
-
-  // Cet appareil ne joue pas la musique (elle vient d'un iPhone, d'un iPad…) :
-  // on suit alors l'état SERVEUR du streamer (piste + position extrapolée) —
-  // la barre danse sur TOUS les écrans, pas seulement celui qui joue.
-  let remote = $state<{ key: string; posMs: number; playing: boolean; at: number } | null>(null);
-  const needRemote = $derived(
-    wledMusic.enabled && wledMusic.styleDef.fx !== null && player.current === null && !hidden
-  );
-  $effect(() => {
-    if (!needRemote) {
-      remote = null;
-      return;
-    }
-    let stop = false;
-    const poll = async () => {
-      try {
-        const r = await fetch('/api/wled/music/beat');
-        const d = r.ok
-          ? ((await r.json()) as {
-              active: boolean;
-              key: string | null;
-              positionMs: number;
-              playing: boolean;
-            })
-          : null;
-        if (stop) return;
-        if (d?.active && d.key) {
-          remote = { key: d.key, posMs: d.positionMs, playing: d.playing, at: performance.now() };
-          wledMusic.ensureTimeline(d.key);
-        } else {
-          remote = null;
-        }
-      } catch {
-        /* poll silencieux */
-      }
-    };
-    void poll();
-    const t = setInterval(() => void poll(), 4000);
-    return () => {
-      stop = true;
-      clearInterval(t);
-    };
-  });
-
-  const live = $derived(
-    wledMusic.reactive &&
-      wledMusic.liveTimeline !== null &&
-      (player.playing || remote?.playing === true) &&
-      animated &&
-      !hidden
-  );
-
-  // Position extrapolée : currentTime n'est poussé que ~4×/s (timeupdate) —
-  // on note QUAND il a changé pour interpoler entre deux mises à jour.
-  let basePos = 0;
-  let baseAt = 0;
-  $effect(() => {
-    basePos = player.currentTime;
-    baseAt = performance.now();
-  });
+  const live = $derived(wledMusic.reactive && wledMusic.playing && animated && !hidden);
 
   $effect(() => {
     if (!live || !pvEl) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const tl = wledMusic.liveTimeline;
-    if (!tl) return;
     const el = pvEl;
     let raf = 0;
     let smooth = 0.4;
     const tick = () => {
-      // Source de position : le lecteur local s'il joue ici, sinon l'état
-      // serveur du streamer (appareil spectateur).
-      const r = remote;
-      const pos = player.current
-        ? basePos + (performance.now() - baseAt) / 1000
-        : r
-          ? (r.posMs + (r.playing ? performance.now() - r.at : 0)) / 1000
-          : 0;
-      const idx = Math.min(tl.vol.length - 1, Math.max(0, Math.floor(pos * tl.fps)));
-      let v = tl.vol[idx] / 254;
-      if (tl.peak[idx]) v = Math.max(v, 0.95); // flash sur les temps forts
+      let v = wledMusic.liveLevel;
+      if (wledMusic.livePeak) v = Math.max(v, 0.95); // flash sur les temps forts
       // Attaque instantanée, retombée douce (comme un vrai VU).
       smooth = v > smooth ? v : smooth * 0.88 + v * 0.12;
       el.style.setProperty('--mvol', smooth.toFixed(3));
@@ -407,10 +339,19 @@
 
       // En mode musique, l'état parlant est le STYLE suivi, pas l'effet interne
       // (en pause le module repasse en Solid → « Couleur fixe » serait trompeur).
+      // Mode musique : les ÉTATS vivent ici (seule ligne assez large pour les
+      // écrire en entier) ; le STYLE, lui, est déjà surligné dans la grille
+      // juste en dessous — ne pas le répéter.
       const desc = !on
         ? 'Éteint'
         : wledMusic.enabled
-          ? `Musique · ${wledMusic.styleDef.label}${player.playing || remote?.playing ? '' : ' · en pause'}`
+          ? wledMusic.analyzing
+            ? 'Musique · analyse du morceau…'
+            : !wledMusic.trackKey
+              ? 'Musique · en attente de lecture'
+              : wledMusic.playing
+                ? 'Musique'
+                : 'Musique · en pause'
           : whiteOnly && fxName === 'Solid'
             ? 'Blanc 4000K'
             : (FX_FR[fxName] ?? fxName);

@@ -620,78 +620,9 @@ class WledStore {
     await this.#post({ seg: [{ id, ix: v }] });
   }
 
-  // ─── Suivi musique ────────────────────────────────
-  // Les couleurs viennent de la pochette du morceau en cours (wledMusic).
-  // Lecture → effet fluide qui déroule le dégradé des 3 couleurs ; pause →
-  // couleur dominante fixe (la terrasse « retient son souffle »).
-
-  /** Effets doux multi-couleurs, par ordre de préférence (noms selon firmware). */
-  static readonly MUSIC_FX = ['Blends', 'Colorwaves', 'Gradient', 'Breathe'];
-  /** Palette « dégradé des couleurs du segment » (0.14 la préfixe d'un astérisque). */
-  static readonly MUSIC_PAL = ['* Color Gradient', 'Color Gradient', '* Colors 1&2', 'Colors 1&2'];
-  /** Palette des styles RÉACTIFS : nuances de la dominante seule. Mesuré sur le
-   *  ruban : c'est celle qui rend la barre/les impulsions les plus lisibles. */
-  static readonly MUSIC_PAL_REACTIVE = ['* Color 1', 'Color 1'];
-
-  /** Applique les couleurs du morceau à tous les segments (via la file).
-   *  `style` : effet + réglages du style choisi (défaut : fondu « ambiance »). */
-  async applyMusicColors(
-    cols: RGB[],
-    playing: boolean,
-    style?: { fx?: string[] | null; sx?: number; ix?: number }
-  ): Promise<void> {
-    if (!this.segments.length) return;
-    const reactive = !!style?.fx;
-    const c3 = [cols[0], cols[1] ?? cols[0], cols[2] ?? cols[0]];
-    const fxIdx = playing
-      ? resolveByName(this.effects, style?.fx ?? WledStore.MUSIC_FX)
-      : this.solidFx;
-    // ⚠️ col[1] = couleur de FOND des effets WLED. Pour les styles réactifs,
-    // elle DOIT rester noire : une 2ᵉ couleur de pochette vive remplit tout le
-    // ruban en permanence et masque la barre/les impulsions (mesuré : courbe
-    // volume→lumière PLATE, ruban « figé plein » — le bug « n'importe quoi »).
-    const palIdx = Math.max(
-      0,
-      resolveByName(this.palettes, reactive ? WledStore.MUSIC_PAL_REACTIVE : WledStore.MUSIC_PAL)
-    );
-    const slots = reactive ? [c3[0], [0, 0, 0] as RGB, c3[1]] : c3;
-    const sx = style?.sx ?? 50;
-    const ix = style?.ix ?? 150;
-
-    for (const s of this.segments) {
-      s.on = true;
-      s.col = c3[0];
-      if (fxIdx >= 0) s.fx = fxIdx;
-      s.pal = palIdx;
-    }
-    this.on = true;
-
-    const colPayload = slots.map((c) => [c[0], c[1], c[2], 0]);
-    await this.#post({
-      on: true,
-      seg: this.segments.map((s) => ({
-        id: s.id,
-        on: true,
-        col: colPayload,
-        ...(fxIdx >= 0 ? { fx: fxIdx } : {}),
-        pal: palIdx,
-        sx,
-        ix
-      }))
-    });
-  }
-
-  /** Pause / reprise de lecture : fige sur la dominante ou relance l'effet
-   *  (celui du style choisi, sinon l'effet « ambiance »). */
-  async setMusicPaused(paused: boolean, fxNames?: string[] | null): Promise<void> {
-    if (!this.segments.length) return;
-    const fxIdx = paused
-      ? this.solidFx
-      : resolveByName(this.effects, fxNames ?? WledStore.MUSIC_FX);
-    if (fxIdx < 0) return;
-    for (const s of this.segments) s.fx = fxIdx;
-    await this.#post({ seg: this.segments.map((s) => ({ id: s.id, fx: fxIdx })) });
-  }
+  // Le rendu du mode Musique (couleurs de pochette + effet du style) est
+  // appliqué CÔTÉ SERVEUR (src/lib/server/wled/music-mode.ts) : le client
+  // n'envoie que l'extraction de pochette avec son heartbeat.
 
   /** Applique une ambiance aux segments RÉELS (jamais d'id fantôme). */
   async applyAmbiance(key: string): Promise<void> {
