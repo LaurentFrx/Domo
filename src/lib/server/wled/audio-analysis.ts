@@ -20,11 +20,14 @@ import { pmsFetch } from '$lib/server/plex';
 
 const CACHE_DIR = 'data/audio-fft';
 const CACHE_MAX_FILES = 80;
-// v2 : normalisation par percentiles (dynamique réelle) + MajorPeak lissé.
-// Changer le magic invalide le cache → ré-analyse avec la nouvelle courbe.
-const MAGIC = 0x57_46_46_32; // "WFF2"
+// v3 : normalisation GLOBALE + tilt pink-noise (contraste spectral RÉEL entre
+// bandes — la normalisation par bande de v2 aplatissait le spectre : « tout ne
+// réagit qu'au volume », constaté par Laurent), VRAIE magnitude du pic
+// spectral (l'« intensité de la note » des effets ♫ n'est plus le volume),
+// MajorPeak pondéré aigus + lissage court. Changer le magic invalide le cache.
+const MAGIC = 0x57_46_46_33; // "WFF3"
 export const FPS = 25;
-export const BYTES_PER_FRAME = 20; // 16 bandes + volume + peak + majorPeak(u16)
+export const BYTES_PER_FRAME = 22; // 16 bandes + volume + peak + majorPeak(u16) + magnitude(u16)
 
 const SAMPLE_RATE = 22050;
 const FFT_SIZE = 1024;
@@ -33,7 +36,7 @@ const HOP = SAMPLE_RATE / FPS; // 882 échantillons par trame
 export interface Timeline {
   fps: number;
   frames: number;
-  /** frames × 20 o : [b0..b15, volume, peak, majorPeakHz_lo, majorPeakHz_hi] */
+  /** frames × 22 o : [b0..b15, volume, peak, majorPeakHz(u16le), magnitude(u16le)] */
   data: Uint8Array;
 }
 
@@ -253,6 +256,7 @@ async function computeTimeline(partPath: string): Promise<Timeline> {
   const bandsRaw = new Float32Array(nFrames * 16);
   const volRaw = new Float32Array(nFrames);
   const peakHz = new Float32Array(nFrames);
+  const peakMag = new Float32Array(nFrames);
   const bassFlux = new Float32Array(nFrames);
   let prevBass = 0;
 
@@ -269,9 +273,13 @@ async function computeTimeline(partPath: string): Promise<Timeline> {
     volRaw[f] = Math.sqrt(rms / N);
     fft(re, im);
 
-    // Énergie par bande (log-bandes) + bin dominant
-    let maxMag = 0;
+    // Énergie par bande (log-bandes) + bin dominant PONDÉRÉ pink-noise :
+    // sans pondération, la basse gagne presque toujours (elle domine
+    // l'énergie brute) et la « note dominante » reste verrouillée dans les
+    // graves — les effets ♫ paraissent inertes.
+    let maxW = 0;
     let maxBin = 1;
+    let maxMagRaw = 0;
     for (let b = 0; b < 16; b++) {
       const from = Math.max(1, Math.round(BAND_EDGES[b] / binHz));
       const to = Math.max(from + 1, Math.round(BAND_EDGES[b + 1] / binHz));
@@ -279,14 +287,17 @@ async function computeTimeline(partPath: string): Promise<Timeline> {
       for (let k = from; k < to && k < N / 2; k++) {
         const mag = Math.hypot(re[k], im[k]);
         acc += mag;
-        if (mag > maxMag && k * binHz > 80) {
-          maxMag = mag;
+        const w = mag * Math.sqrt((k * binHz) / 45); // ≈ +3 dB/octave
+        if (w > maxW && k * binHz > 80) {
+          maxW = w;
           maxBin = k;
+          maxMagRaw = mag;
         }
       }
       bandsRaw[f * 16 + b] = acc / Math.max(1, to - from);
     }
     peakHz[f] = maxBin * binHz;
+    peakMag[f] = maxMagRaw;
 
     // Flux d'énergie basses (bandes 0-2) pour la détection de battement
     const bass = bandsRaw[f * 16] + bandsRaw[f * 16 + 1] + bandsRaw[f * 16 + 2];
@@ -294,14 +305,14 @@ async function computeTimeline(partPath: string): Promise<Timeline> {
     prevBass = bass;
   }
 
-  // ── Normalisation « dynamique réelle » ──
-  // La musique moderne est masterisée fort : normaliser sur un seul plafond
-  // (p95 → max) sature tout et le rendu paraît FIGÉ (barre pleine en continu,
-  // constaté sur le ruban). On mappe par percentiles — p10→30, p50→110,
-  // p97→230 — pour garantir une respiration visible autour de la médiane,
-  // quel que soit le mastering. Les BANDES sont normalisées CHACUNE sur ses
-  // propres percentiles (sinon les basses écrasent tout et les aigus sont
-  // éteints en permanence).
+  // ── Normalisation « dynamique réelle » v3 ──
+  // Percentiles p10→30, p50→110, p97→230 (respiration garantie quel que soit
+  // le mastering). Les bandes reçoivent un TILT pink-noise (+3 dB/octave,
+  // ×1.19 par bande) PUIS une référence GLOBALE UNIQUE : les aigus deviennent
+  // visibles SANS détruire les contrastes instantanés basses/aigus — la
+  // normalisation par bande de v2 égalisait les bandes entre elles et le
+  // spectre entier suivait le volume (mesuré : corrélation bande↔volume
+  // médiane 0.31-0.69, rendu « tout au volume » constaté par Laurent).
   const q = (arr: ArrayLike<number>, p: number) => {
     const s = Array.from(arr).sort((a, b) => a - b);
     return s[Math.min(s.length - 1, Math.floor(s.length * p))] || 1e-6;
@@ -314,21 +325,22 @@ async function computeTimeline(partPath: string): Promise<Timeline> {
     return Math.max(0, Math.min(254, Math.round(out)));
   };
 
-  const bandP: [number, number, number][] = [];
-  for (let b = 0; b < 16; b++) {
-    const col = new Float32Array(nFrames);
-    for (let f = 0; f < nFrames; f++) col[f] = bandsRaw[f * 16 + b];
-    bandP.push([q(col, 0.1), q(col, 0.5), q(col, 0.97)]);
+  const TILT = Array.from({ length: 16 }, (_, b) => Math.pow(1.19, b));
+  const tilted = new Float32Array(nFrames * 16);
+  for (let f = 0; f < nFrames; f++) {
+    for (let b = 0; b < 16; b++) tilted[f * 16 + b] = bandsRaw[f * 16 + b] * TILT[b];
   }
+  const bandGlobalP: [number, number, number] = [q(tilted, 0.1), q(tilted, 0.5), q(tilted, 0.97)];
   const volP: [number, number, number] = [q(volRaw, 0.1), q(volRaw, 0.5), q(volRaw, 0.97)];
+  const magP: [number, number, number] = [q(peakMag, 0.1), q(peakMag, 0.5), q(peakMag, 0.97)];
   const fluxRef = q(bassFlux, 0.97);
 
-  // MajorPeak : médiane glissante (5 trames) — le bin dominant brut saute
-  // d'une trame à l'autre et fait clignoter les effets colorés par fréquence.
+  // MajorPeak : médiane glissante COURTE (3 trames = 120 ms) — anti-clignotement
+  // sans rendre la teinte molle (le lissage 200 ms de v2 traînait).
   const peakSmooth = new Float32Array(nFrames);
   for (let f = 0; f < nFrames; f++) {
     const w = [];
-    for (let k = Math.max(0, f - 2); k <= Math.min(nFrames - 1, f + 2); k++) w.push(peakHz[k]);
+    for (let k = Math.max(0, f - 1); k <= Math.min(nFrames - 1, f + 1); k++) w.push(peakHz[k]);
     w.sort((a, b) => a - b);
     peakSmooth[f] = w[Math.floor(w.length / 2)];
   }
@@ -336,13 +348,18 @@ async function computeTimeline(partPath: string): Promise<Timeline> {
   for (let f = 0; f < nFrames; f++) {
     const o = f * BYTES_PER_FRAME;
     for (let b = 0; b < 16; b++) {
-      data[o + b] = rampe(bandsRaw[f * 16 + b], ...bandP[b]);
+      data[o + b] = rampe(tilted[f * 16 + b], ...bandGlobalP);
     }
     data[o + 16] = rampe(volRaw[f], ...volP);
     data[o + 17] = bassFlux[f] > fluxRef * 0.85 ? 1 : 0; // battement
     const hz = Math.max(1, Math.min(11025, Math.round(peakSmooth[f])));
     data[o + 18] = hz & 0xff;
     data[o + 19] = hz >> 8;
+    // VRAIE intensité du pic spectral (l'« intensité de la note » des effets ♫)
+    // — échelle firmware ~0-4000 (les effets divisent par 16/8/4).
+    const mag16 = Math.min(65535, rampe(peakMag[f], ...magP) * 16);
+    data[o + 20] = mag16 & 0xff;
+    data[o + 21] = mag16 >> 8;
   }
   return { fps: FPS, frames: nFrames, data };
 }

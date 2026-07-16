@@ -8,15 +8,35 @@
  * multicast 239.0.0.1 natif du protocole ne traverse PAS la Livebox
  * (ethernet→Wi-Fi) — l'unicast atteint la même socket (bind ANY:port).
  *
- * Synchronisation : le client remonte {position, playing} par heartbeat ; le
- * serveur EXTRAPOLE entre deux heartbeats (l'app iOS en arrière-plan continue
- * la musique mais ses timers JS gèlent). Failsafe : sans heartbeat depuis
- * STALE_MS, on fige — jamais de stream fantôme.
+ * Synchronisation : l'appareil QUI JOUE remonte {position, playing} par
+ * heartbeat ; le serveur EXTRAPOLE entre deux heartbeats (l'app iOS en
+ * arrière-plan continue la musique mais ses timers JS gèlent). Failsafe :
+ * sans heartbeat depuis STALE_MS, on fige — jamais de stream fantôme.
+ *
+ * ANTI-DÉTOURNEMENT : un appareil qui a simplement une piste CHARGÉE en pause
+ * ne peut pas écraser la session d'un appareil qui JOUE. Un heartbeat d'une
+ * autre piste n'est accepté que s'il joue (nouvelle lecture volontaire) ou si
+ * la session est absente/périmée. Il n'y a plus de {stop:true} client :
+ * l'arrêt découle du mode global (enabled=false) ou de la péremption.
+ *
+ * Le tick alimente aussi le hub SSE (music-mode) : niveau sonore à 12,5 Hz
+ * (une trame sur deux) pour que la barre de la carte danse sur TOUS les
+ * appareils.
  */
 
 import dgram from 'node:dgram';
 import { env } from '$env/dynamic/private';
 import { analyzeTrack, cachedTimeline, frameAt, type Timeline } from './audio-analysis';
+import {
+  applyRender,
+  broadcastLive,
+  isModuleOn,
+  isMusicEnabled,
+  isReactiveStyle,
+  noteModuleOn,
+  registerPlayingProvider
+} from './music-mode';
+import { moduleGet } from './module-client';
 
 const PACKET_HDR = '00002\0';
 const SEND_MS = 40; // 25 fps
@@ -31,7 +51,7 @@ function relayTarget(): { host: string; port: number } | null {
 
 interface Session {
   key: string;
-  timeline: Timeline;
+  timeline: Timeline | null; // null : piste en analyse ou style ambiance
   /** Position (ms) au moment du dernier heartbeat. */
   basePosMs: number;
   baseAt: number;
@@ -44,6 +64,16 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let socket: dgram.Socket | null = null;
 /** Piste en cours d'analyse (clé) — pour le retour `analyzing` de l'API. */
 let analyzing: string | null = null;
+/** Alternance 25 fps → 12,5 Hz pour le broadcast SSE. */
+let tickParity = false;
+/** Dernier rafraîchissement de l'état `on` du ruban (throttle 10 s du tick). */
+let lastOnRefresh = 0;
+/** Suspension UDP courante (log UNE ligne par transition, pas par trame). */
+let udpSuspended = false;
+
+// music-mode a besoin de l'état de lecture pour rejouer un rendu différé
+// (rallumage) sans importer ce module (cycle) — on lui fournit un callback.
+registerPlayingProvider(() => beatStatus().playing);
 
 function buildPacket(frame: Uint8Array): Buffer {
   const b = Buffer.alloc(44);
@@ -53,7 +83,9 @@ function buildPacket(frame: Uint8Array): Buffer {
   b.writeFloatLE(vol, 12); // sampleSmth
   b.writeUInt8(frame[17], 16); // samplePeak
   for (let i = 0; i < 16; i++) b.writeUInt8(frame[i], 18 + i);
-  b.writeFloatLE(vol * 80, 36); // FFT_Magnitude (échelle interne, indicatif)
+  // VRAIE intensité du pic spectral (timeline v3, o.20-21) — plus jamais le
+  // volume déguisé : les effets ♫ dosent la note avec, pas le niveau global.
+  b.writeFloatLE(frame[20] | (frame[21] << 8), 36); // FFT_Magnitude
   b.writeFloatLE(frame[18] | (frame[19] << 8), 40); // FFT_MajorPeak (Hz)
   return b;
 }
@@ -62,19 +94,57 @@ const SILENCE = new Uint8Array(20); // volume 0, pas de peak
 
 function tick(): void {
   const s = session;
-  const target = relayTarget();
-  if (!s || !target) return;
-  const now = Date.now();
-  const stale = now - s.lastHeartbeat > STALE_MS;
-  const posMs = s.playing && !stale ? s.basePosMs + (now - s.baseAt) : s.basePosMs;
-  const frame = s.playing && !stale ? frameAt(s.timeline, posMs) : null;
-  // Pause / fin de piste / stale : quelques trames de silence puis on se tait
-  // (le firmware repasse en « idle » de lui-même après 10 s sans paquets).
-  const past = now - s.lastHeartbeat > STALE_MS + 5_000;
-  if (!frame && past) {
-    stopLoop();
+  if (!s) return;
+  // Le mode global est coupé → l'arrêt en découle (plus de stop client).
+  if (!isMusicEnabled()) {
+    stopBeat();
     return;
   }
+  const now = Date.now();
+  const stale = now - s.lastHeartbeat > STALE_MS;
+  const past = now - s.lastHeartbeat > STALE_MS + 5_000;
+  if (past) {
+    stopBeat();
+    return;
+  }
+  const posMs = s.playing && !stale ? s.basePosMs + (now - s.baseAt) : s.basePosMs;
+  const frame =
+    s.playing && !stale && s.timeline && isReactiveStyle() ? frameAt(s.timeline, posMs) : null;
+
+  // SSE : niveau à 12,5 Hz (une trame sur deux) pour l'aperçu de la carte.
+  tickParity = !tickParity;
+  if (tickParity) {
+    broadcastLive({
+      level: frame ? frame[16] / 254 : 0,
+      peak: frame ? frame[17] : 0,
+      key: s.key,
+      playing: s.playing && !stale
+    });
+  }
+
+  // Rafraîchit l'état `on` du ruban toutes les ~10 s : un allumage fait depuis
+  // l'app WLED native ou l'interrupteur physique doit désuspendre le stream
+  // (et rejouer le rendu différé via noteModuleOn) sans passer par Domo.
+  if (now - lastOnRefresh > 10_000) {
+    lastOnRefresh = now;
+    void moduleGet('state')
+      .then(({ data }) => {
+        const on = (data as { on?: unknown })?.on === true;
+        noteModuleOn(on);
+      })
+      .catch(() => undefined); // module injoignable : on garde le dernier connu
+  }
+
+  // Stream UDP suspendu tant que le ruban est éteint (interrupteur utilisateur).
+  const target = relayTarget();
+  const suspended = !target || !isModuleOn();
+  if (suspended !== udpSuspended) {
+    udpSuspended = suspended;
+    console.log(
+      suspended ? '[wled/beat] stream suspendu (ruban éteint)' : '[wled/beat] stream repris'
+    );
+  }
+  if (suspended) return;
   const pkt = buildPacket(frame ?? SILENCE);
   socket ??= dgram.createSocket('udp4');
   socket.send(pkt, target.port, target.host, () => undefined);
@@ -102,64 +172,104 @@ export interface BeatUpdate {
 export interface BeatStatus {
   ready: boolean;
   analyzing: boolean;
+  /** Piste réellement suivie par le serveur (≠ u.key si heartbeat rejeté). */
+  key: string | null;
 }
 
-/** Heartbeat du client : cale (ou démarre) le stream sur la position donnée. */
+function status(ready: boolean): BeatStatus {
+  return { ready, analyzing: analyzing !== null, key: session?.key ?? null };
+}
+
+/** Lance l'analyse spectrale si nécessaire (styles réactifs uniquement). */
+function ensureAnalysis(u: BeatUpdate): void {
+  if (!isReactiveStyle() || analyzing === u.key) return;
+  analyzing = u.key;
+  const startedFor = u.key;
+  console.log(`[wled/beat] analyse piste ${u.key} (${u.part})`);
+  broadcastLive({ analyzing: true });
+  void analyzeTrack(u.part.replace(/^\/+/, ''), u.key)
+    .then(async (tl) => {
+      console.log(`[wled/beat] analyse ${startedFor} terminée`);
+      if (session?.key === startedFor) session.timeline = tl;
+    })
+    .catch((e) => {
+      console.error(`[wled/beat] analyse ${startedFor} échouée:`, (e as Error).message);
+      // Repli : rendu « ambiance » plutôt qu'un effet audio sans données (noir).
+      if (session?.key === startedFor) {
+        void applyRender(session.playing, { forceAmbiance: true });
+      }
+    })
+    .finally(() => {
+      if (analyzing === startedFor) analyzing = null;
+      broadcastLive({ analyzing: analyzing !== null });
+    });
+}
+
+/** Heartbeat de l'appareil qui joue : cale (ou démarre) le stream. */
 export async function updateBeat(u: BeatUpdate): Promise<BeatStatus> {
   const now = Date.now();
+  if (!isMusicEnabled()) return status(false);
+
+  // ── Même piste : recalage simple (+ transition pause/lecture → rendu) ──
   if (session?.key === u.key) {
+    const playingChanged = session.playing !== u.playing;
     session.basePosMs = u.positionMs;
     session.baseAt = now;
     session.playing = u.playing;
     session.lastHeartbeat = now;
+    if (playingChanged) {
+      void applyRender(u.playing); // pause → fondu multicolore lent ; reprise → effet du style
+      broadcastLive({ playing: u.playing, key: u.key });
+    }
     startLoop();
-    return { ready: true, analyzing: false };
+    return status(session.timeline !== null || !isReactiveStyle());
   }
 
-  // Nouvelle piste : timeline en cache → démarrage immédiat ; sinon analyse
-  // en arrière-plan (le heartbeat suivant la trouvera prête).
-  const cached = await cachedTimeline(u.key);
-  if (cached) {
-    console.log(
-      `[wled/beat] stream piste ${u.key} pos=${Math.round(u.positionMs / 1000)}s play=${u.playing}`
-    );
-    session = {
-      key: u.key,
-      timeline: cached,
-      basePosMs: u.positionMs,
-      baseAt: now,
-      playing: u.playing,
-      lastHeartbeat: now
-    };
-    startLoop();
-    return { ready: true, analyzing: false };
+  // ── Autre piste : ANTI-DÉTOURNEMENT ──
+  // Une session fraîche qui joue ne peut être remplacée que par une NOUVELLE
+  // LECTURE (playing=true). Un appareil avec une piste chargée en pause ne
+  // prend pas la main.
+  if (session && now - session.lastHeartbeat <= STALE_MS && !u.playing) {
+    return status(session.timeline !== null);
   }
 
-  if (analyzing !== u.key) {
-    analyzing = u.key;
-    const startedFor = u.key;
-    console.log(`[wled/beat] analyse piste ${u.key} (${u.part})`);
-    void analyzeTrack(u.part.replace(/^\/+/, ''), u.key)
-      .then(() => console.log(`[wled/beat] analyse ${startedFor} terminée`))
-      .catch((e) => {
-        console.error(`[wled/beat] analyse ${startedFor} échouée:`, (e as Error).message);
-      })
-      .finally(() => {
-        if (analyzing === startedFor) analyzing = null;
-      });
-  }
-  return { ready: false, analyzing: true };
+  const cached = isReactiveStyle() ? await cachedTimeline(u.key) : null;
+  console.log(
+    `[wled/beat] stream piste ${u.key} pos=${Math.round(u.positionMs / 1000)}s play=${u.playing}` +
+      (cached ? '' : isReactiveStyle() ? ' (analyse à venir)' : ' (style ambiance)')
+  );
+  session = {
+    key: u.key,
+    timeline: cached,
+    basePosMs: u.positionMs,
+    baseAt: now,
+    playing: u.playing,
+    lastHeartbeat: now
+  };
+  broadcastLive({ key: u.key, playing: u.playing });
+  // (Ré)applique le rendu du style — les couleurs sont celles de SA palette
+  // multicolore, indépendantes du morceau.
+  void applyRender(u.playing);
+  if (!cached) ensureAnalysis(u);
+  startLoop();
+  return status(cached !== null || !isReactiveStyle());
 }
 
-/** Arrêt explicite (mode musique désactivé, reprise manuelle, style ambiance). */
+/** Arrêt (mode global coupé ou péremption). Plus exposé au client. */
 export function stopBeat(): void {
-  if (session) console.log('[wled/beat] stream stoppé');
+  if (session) {
+    console.log('[wled/beat] stream stoppé');
+    broadcastLive({ key: null, playing: false, level: 0, peak: 0 });
+    // Péremption avec mode encore actif : fondu multicolore lent — jamais
+    // un effet audio-réactif sans stream (= ruban allumé mais noir).
+    if (isMusicEnabled()) void applyRender(false);
+  }
   session = null;
   stopLoop();
+  udpSuspended = false; // repart neutre à la prochaine session
 }
 
-/** État courant du stream — pour que les AUTRES appareils (qui ne jouent pas
- *  la musique) puissent animer leur aperçu sur la même position. */
+/** État courant du stream (snapshot SSE + endpoint mode). */
 export function beatStatus(): {
   active: boolean;
   key: string | null;

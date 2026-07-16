@@ -17,6 +17,7 @@
 import { json, error } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { wledGet, wledPostState } from '$lib/server/wled-mock';
+import { noteModuleOn } from '$lib/server/wled/music-mode';
 import type { RequestHandler } from './$types';
 
 const TIMEOUT_MS = 8_000;
@@ -73,9 +74,19 @@ export const POST: RequestHandler = async ({ params, request }) => {
     throw error(400, 'JSON invalide');
   }
 
+  // L'interrupteur passe ici : le « ruban allumé ? » du mode musique est noté
+  // APRÈS le succès du relais — noter avant crée une course : le rendu différé
+  // rejoué lit alors un module encore éteint et re-suspend tout.
+  const onFlag =
+    body && typeof body === 'object' && typeof (body as { on?: unknown }).on === 'boolean'
+      ? (body as { on: boolean }).on
+      : null;
+
   const base = liveBase();
   if (!base) {
-    return json(wledPostState(body), { headers: MOCK_HEADERS });
+    const res = wledPostState(body);
+    if (onFlag !== null) noteModuleOn(onFlag);
+    return json(res, { headers: MOCK_HEADERS });
   }
 
   // Sur le vrai module, toute commande passe par /json/state.
@@ -94,5 +105,6 @@ export const POST: RequestHandler = async ({ params, request }) => {
   }
   if (!upstream.ok) throw error(502, `WLED: HTTP ${upstream.status}`);
   const data = await upstream.json().catch(() => ({ success: true }));
+  if (onFlag !== null) noteModuleOn(onFlag); // le module a APPLIQUÉ l'état
   return json(data, { headers: LIVE_HEADERS });
 };
