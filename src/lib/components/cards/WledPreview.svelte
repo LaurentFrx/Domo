@@ -46,8 +46,56 @@
 
   // ─── Suivi musique : la barre bouge comme le ruban ───
   let pvEl = $state<HTMLDivElement | null>(null);
+
+  // Cet appareil ne joue pas la musique (elle vient d'un iPhone, d'un iPad…) :
+  // on suit alors l'état SERVEUR du streamer (piste + position extrapolée) —
+  // la barre danse sur TOUS les écrans, pas seulement celui qui joue.
+  let remote = $state<{ key: string; posMs: number; playing: boolean; at: number } | null>(null);
+  const needRemote = $derived(
+    wledMusic.enabled && wledMusic.styleDef.fx !== null && player.current === null && !hidden
+  );
+  $effect(() => {
+    if (!needRemote) {
+      remote = null;
+      return;
+    }
+    let stop = false;
+    const poll = async () => {
+      try {
+        const r = await fetch('/api/wled/music/beat');
+        const d = r.ok
+          ? ((await r.json()) as {
+              active: boolean;
+              key: string | null;
+              positionMs: number;
+              playing: boolean;
+            })
+          : null;
+        if (stop) return;
+        if (d?.active && d.key) {
+          remote = { key: d.key, posMs: d.positionMs, playing: d.playing, at: performance.now() };
+          wledMusic.ensureTimeline(d.key);
+        } else {
+          remote = null;
+        }
+      } catch {
+        /* poll silencieux */
+      }
+    };
+    void poll();
+    const t = setInterval(() => void poll(), 4000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
+  });
+
   const live = $derived(
-    wledMusic.reactive && wledMusic.liveTimeline !== null && player.playing && animated && !hidden
+    wledMusic.reactive &&
+      wledMusic.liveTimeline !== null &&
+      (player.playing || remote?.playing === true) &&
+      animated &&
+      !hidden
   );
 
   // Position extrapolée : currentTime n'est poussé que ~4×/s (timeupdate) —
@@ -68,7 +116,14 @@
     let raf = 0;
     let smooth = 0.4;
     const tick = () => {
-      const pos = basePos + (performance.now() - baseAt) / 1000;
+      // Source de position : le lecteur local s'il joue ici, sinon l'état
+      // serveur du streamer (appareil spectateur).
+      const r = remote;
+      const pos = player.current
+        ? basePos + (performance.now() - baseAt) / 1000
+        : r
+          ? (r.posMs + (r.playing ? performance.now() - r.at : 0)) / 1000
+          : 0;
       const idx = Math.min(tl.vol.length - 1, Math.max(0, Math.floor(pos * tl.fps)));
       let v = tl.vol[idx] / 254;
       if (tl.peak[idx]) v = Math.max(v, 0.95); // flash sur les temps forts
@@ -355,7 +410,7 @@
       const desc = !on
         ? 'Éteint'
         : wledMusic.enabled
-          ? `Musique · ${wledMusic.styleDef.label}${player.playing ? '' : ' · en pause'}`
+          ? `Musique · ${wledMusic.styleDef.label}${player.playing || remote?.playing ? '' : ' · en pause'}`
           : whiteOnly && fxName === 'Solid'
             ? 'Blanc 4000K'
             : (FX_FR[fxName] ?? fxName);

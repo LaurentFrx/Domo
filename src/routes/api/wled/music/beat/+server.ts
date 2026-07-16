@@ -7,8 +7,14 @@
  * spectrale d'une piste (quelques secondes, une seule fois par morceau).
  */
 import { json, error } from '@sveltejs/kit';
-import { stopBeat, updateBeat } from '$lib/server/wled/sound-streamer';
+import { beatStatus, stopBeat, updateBeat } from '$lib/server/wled/sound-streamer';
 import type { RequestHandler } from './$types';
+
+/** GET — état du stream (piste, position extrapolée, lecture) pour que les
+ *  appareils SPECTATEURS animent leur aperçu en phase avec le ruban. */
+export const GET: RequestHandler = async () => {
+  return json(beatStatus(), { headers: { 'cache-control': 'no-store' } });
+};
 
 const PART_RE = /^\/?library\/parts\/\d+\/\d+\/file(\.[A-Za-z0-9]+)?$/;
 

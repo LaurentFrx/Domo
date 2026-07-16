@@ -174,8 +174,10 @@ class WledMusicStore {
   }
 
   /** Timeline compacte (volume/battements) de la piste — pour l'aperçu animé.
-   *  Chargée quand le serveur annonce la piste prête ; une fois par piste. */
-  #loadTimeline(key: string): void {
+   *  Chargée quand le serveur annonce la piste prête ; une fois par piste.
+   *  PUBLIC : l'aperçu l'appelle aussi pour la piste jouée par un AUTRE
+   *  appareil (suivi de l'état serveur du streamer). */
+  ensureTimeline(key: string): void {
     if (this.#timelineFor === key) return;
     this.#timelineFor = key;
     void fetch(`/api/wled/music/timeline?key=${encodeURIComponent(key)}`)
@@ -241,7 +243,7 @@ class WledMusicStore {
       .then((st: { ready?: boolean; analyzing?: boolean } | null) => {
         if (!st) return;
         this.analyzing = st.analyzing === true;
-        if (st.ready === true) this.#loadTimeline(track.key);
+        if (st.ready === true) this.ensureTimeline(track.key);
         // Analyse échouée (ni prêt ni en cours, 2 heartbeats de suite) : plutôt
         // qu'un effet audio sans données (= ruban noir), on retombe sur le
         // fondu « ambiance » pour CETTE piste — le style choisi reste acquis.

@@ -157,3 +157,20 @@ export function stopBeat(): void {
   session = null;
   stopLoop();
 }
+
+/** État courant du stream — pour que les AUTRES appareils (qui ne jouent pas
+ *  la musique) puissent animer leur aperçu sur la même position. */
+export function beatStatus(): {
+  active: boolean;
+  key: string | null;
+  positionMs: number;
+  playing: boolean;
+} {
+  const s = session;
+  if (!s) return { active: false, key: null, positionMs: 0, playing: false };
+  const now = Date.now();
+  const stale = now - s.lastHeartbeat > STALE_MS;
+  const playing = s.playing && !stale;
+  const positionMs = playing ? s.basePosMs + (now - s.baseAt) : s.basePosMs;
+  return { active: true, key: s.key, positionMs: Math.round(positionMs), playing };
+}
