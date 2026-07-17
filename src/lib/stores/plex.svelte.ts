@@ -510,8 +510,11 @@ class PlexState {
     }
     // La clé supprimée peut être une PISTE : son album (autre clé) garderait la
     // piste fantôme en cache → on vide tout, les vues rechargent à la demande.
+    // Les playlists aussi : Plex retire lui-même la piste supprimée de leurs
+    // items, un détail caché servirait des pistes fantômes à la réouverture.
     this.albumCache.clear();
     this.artistCache.clear();
+    this.playlistCache.clear();
     await this.reloadQuiet();
   }
 

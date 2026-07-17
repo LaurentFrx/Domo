@@ -9,7 +9,7 @@
    * volontairement séparé de l'écoute (règle : UI simple pour la famille,
    * suppression toujours derrière une confirmation explicite).
    */
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import { acquire } from '$stores/refcount';
   import {
     plex,
@@ -35,15 +35,109 @@
     releases = [];
   });
 
-  // ── Navigation interne ──────────────────────────────────────────────────
+  // ── Navigation interne : PILE avec restauration du défilement ───────────
+  // La page rend ses « écrans » (accueil / artiste / album / playlist) dans le
+  // même composant : sans pile, revenir en arrière repartait EN HAUT de la
+  // liste. Chaque ouverture empile la vue quittée avec sa position de
+  // défilement ET un instantané de ses données ; le retour restaure les trois
+  // (rendu immédiat, scroll à l'identique), puis revalide silencieusement via
+  // les caches du store (instantané si rien n'a bougé, frais après mutation).
   type View =
     | { kind: 'home' }
     | { kind: 'artist'; artist: PlexArtist }
     | { kind: 'album'; key: string }
     | { kind: 'playlist'; key: string };
+  interface StackEntry {
+    view: View;
+    scrollY: number;
+    /** L'accueil change de géométrie (grille ↔ lignes) selon le mode Gérer :
+     *  on le capture pour que le défilement restauré retombe sur le même rendu. */
+    manage: boolean;
+    artistAlbums?: PlexAlbum[];
+    albumDetail?: { album: PlexAlbum; tracks: PlexTrack[] };
+    playlistDetail?: { playlist: PlexPlaylist; tracks: PlexTrack[] };
+  }
   let view = $state<View>({ kind: 'home' });
+  let navStack = $state<StackEntry[]>([]);
   let tab = $state<'albums' | 'artistes' | 'playlists'>('albums');
   let manage = $state(false);
+
+  /**
+   * Jeton de génération de navigation : incrémenté à CHAQUE changement de vue.
+   * Toute continuation async (fetch d'une vue quittée entre-temps) compare son
+   * jeton avant d'écrire — une réponse tardive ne peut plus écraser la fiche
+   * d'une autre vue (ni faire porter une action playlist sur la mauvaise clé).
+   */
+  let navEpoch = 0;
+
+  /** Empile la vue courante (position + données) avant d'en ouvrir une autre. */
+  function pushCurrent() {
+    navStack.push({
+      view,
+      scrollY: window.scrollY,
+      manage,
+      artistAlbums: view.kind === 'artist' ? artistAlbums : undefined,
+      albumDetail: view.kind === 'album' ? (albumDetail ?? undefined) : undefined,
+      playlistDetail: view.kind === 'playlist' ? (playlistDetail ?? undefined) : undefined
+    });
+  }
+
+  /** Retour : restaure vue + données + défilement, puis revalide en douceur. */
+  async function goBack() {
+    const prev = navStack.pop();
+    const epoch = ++navEpoch;
+    if (!prev) {
+      view = { kind: 'home' };
+      return;
+    }
+    if (prev.artistAlbums) artistAlbums = prev.artistAlbums;
+    if (prev.albumDetail) albumDetail = prev.albumDetail;
+    if (prev.playlistDetail) playlistDetail = prev.playlistDetail;
+    // Un chargement abandonné (retour pendant un open) ne doit pas laisser la
+    // vue restaurée bloquée sur « Chargement… ».
+    albumLoading = false;
+    artistLoading = false;
+    playlistLoading = false;
+    manage = prev.manage;
+    view = prev.view;
+    await tick();
+    window.scrollTo(0, prev.scrollY);
+    // 2ᵉ passe post-layout (images/lazy) pour ancrer la position sur iOS.
+    requestAnimationFrame(() => window.scrollTo(0, prev.scrollY));
+    // Revalidation : les caches du store rendent l'appel instantané si rien
+    // n'a changé, et rafraîchissent la vue si une mutation les a invalidés
+    // (ex. album supprimé depuis sa fiche → la liste d'artiste se met à jour).
+    try {
+      if (prev.view.kind === 'artist') {
+        const fresh = await plex.artistAlbums(prev.view.artist.key);
+        if (epoch === navEpoch) artistAlbums = fresh;
+      } else if (prev.view.kind === 'album') {
+        const fresh = await plex.album(prev.view.key);
+        if (epoch === navEpoch) albumDetail = fresh;
+      } else if (prev.view.kind === 'playlist') {
+        const fresh = await plex.playlist(prev.view.key);
+        if (epoch === navEpoch) playlistDetail = fresh;
+      }
+    } catch {
+      /* réseau : l'instantané restauré reste affiché (cas 404 : purgé en amont) */
+    }
+  }
+
+  /** Libellé du bouton retour = la vue d'où l'on vient (façon iOS). */
+  const backLabel = $derived.by(() => {
+    const top = navStack[navStack.length - 1];
+    if (!top) return 'Musique';
+    switch (top.view.kind) {
+      case 'artist':
+        return top.view.artist.title;
+      case 'album':
+        return top.albumDetail?.album.title ?? 'Album';
+      case 'playlist':
+        return top.playlistDetail?.playlist.title ?? 'Playlist';
+      default:
+        return 'Musique';
+    }
+  });
 
   // ── Recherche (debounce 300 ms) ─────────────────────────────────────────
   let query = $state('');
@@ -73,13 +167,19 @@
   let albumDetail = $state<{ album: PlexAlbum; tracks: PlexTrack[] } | null>(null);
   let albumLoading = $state(false);
   async function openAlbum(key: string) {
+    pushCurrent();
+    const epoch = ++navEpoch;
     view = { kind: 'album', key };
+    window.scrollTo(0, 0);
     albumLoading = true;
     albumDetail = null;
     actionError = null;
     try {
-      albumDetail = await plex.album(key);
+      const detail = await plex.album(key);
+      if (epoch !== navEpoch) return; // vue quittée entre-temps : ne rien écrire
+      albumDetail = detail;
     } catch (e) {
+      if (epoch !== navEpoch) return;
       actionError = (e as Error).message;
     }
     albumLoading = false;
@@ -88,20 +188,22 @@
   let artistAlbums = $state<PlexAlbum[]>([]);
   let artistLoading = $state(false);
   async function openArtist(artist: PlexArtist) {
+    pushCurrent();
+    const epoch = ++navEpoch;
     view = { kind: 'artist', artist };
+    window.scrollTo(0, 0);
     artistLoading = true;
     artistAlbums = [];
     actionError = null;
     try {
-      artistAlbums = await plex.artistAlbums(artist.key);
+      const albums = await plex.artistAlbums(artist.key);
+      if (epoch !== navEpoch) return;
+      artistAlbums = albums;
     } catch (e) {
+      if (epoch !== navEpoch) return;
       actionError = (e as Error).message;
     }
     artistLoading = false;
-  }
-
-  function goHome() {
-    view = { kind: 'home' };
   }
 
   // ── Playlists (vue, édition, renommage, suppression) ────────────────────
@@ -110,14 +212,20 @@
   let playlistEdit = $state(false);
   let playlistBusy = $state(false);
   async function openPlaylist(key: string, fresh = false) {
+    pushCurrent();
+    const epoch = ++navEpoch;
     view = { kind: 'playlist', key };
+    window.scrollTo(0, 0);
     playlistEdit = false;
     playlistLoading = true;
     playlistDetail = null;
     actionError = null;
     try {
-      playlistDetail = await plex.playlist(key, fresh);
+      const detail = await plex.playlist(key, fresh);
+      if (epoch !== navEpoch) return;
+      playlistDetail = detail;
     } catch (e) {
+      if (epoch !== navEpoch) return;
       actionError = (e as Error).message;
     }
     playlistLoading = false;
@@ -134,10 +242,12 @@
   }
   async function refreshPlaylistDetail() {
     if (view.kind !== 'playlist') return;
+    const epoch = navEpoch;
     try {
-      playlistDetail = await plex.playlist(view.key, true);
+      const fresh = await plex.playlist(view.key, true);
+      if (epoch === navEpoch) playlistDetail = fresh;
     } catch (e) {
-      actionError = (e as Error).message;
+      if (epoch === navEpoch) actionError = (e as Error).message;
     }
     playlistBusy = false;
   }
@@ -191,10 +301,15 @@
     playlistBusy = true;
     actionError = null;
     try {
-      await plex.deletePlaylist(confirmDeletePl.key);
+      const deletedKey = confirmDeletePl.key;
+      await plex.deletePlaylist(deletedKey);
       confirmDeletePl = null;
-      goHome();
-      tab = 'playlists';
+      // Purge défensive : aucune entrée de pile ne doit pouvoir restaurer la
+      // playlist supprimée (fiche fantôme).
+      navStack = navStack.filter((e) => !(e.view.kind === 'playlist' && e.view.key === deletedKey));
+      // Retour à la vue précédente (l'onglet Playlists de l'accueil, avec son
+      // défilement) — `tab` persiste de lui-même.
+      await goBack();
     } catch (e) {
       actionError = (e as Error).message;
     }
@@ -402,12 +517,21 @@
     deleting = true;
     actionError = null;
     const deletedKey = confirmDelete.key;
+    const epoch = navEpoch;
     try {
       await plex.deleteItem(deletedKey);
       confirmDelete = null;
+      // Purge de la pile : plus AUCUNE entrée ne doit pouvoir restaurer la
+      // fiche de l'album supprimé (sinon fiche fantôme au 2ᵉ retour, le 404 de
+      // revalidation étant volontairement silencieux).
+      navStack = navStack.filter((e) => !(e.view.kind === 'album' && e.view.key === deletedKey));
       if (view.kind === 'album') {
-        if (albumDetail?.album.key === deletedKey) goHome();
-        else if (albumDetail) albumDetail = await plex.album(albumDetail.album.key);
+        if (albumDetail?.album.key === deletedKey) {
+          await goBack();
+        } else if (albumDetail) {
+          const fresh = await plex.album(albumDetail.album.key);
+          if (epoch === navEpoch) albumDetail = fresh;
+        }
       }
     } catch (e) {
       actionError = (e as Error).message;
@@ -416,12 +540,15 @@
   }
 </script>
 
-<div class="flex flex-col gap-5 py-4" style="padding-bottom: {player.current ? '86px' : '16px'};">
+<!-- Padding bas CONSTANT (place du mini-player) : s'il suivait player.current,
+     la hauteur du document changerait entre l'empilement d'une position et sa
+     restauration (scroll clampé ~70 px trop haut après un « Arrêter »). -->
+<div class="flex flex-col gap-5 py-4" style="padding-bottom: 86px;">
   <!-- ─── En-tête ─────────────────────────────────────────────────────── -->
   <header class="flex items-center justify-between">
     <h1 class="text-2xl font-semibold tracking-tight">
       {#if view.kind === 'home'}Musique{:else}
-        <button class="back" onclick={goHome} aria-label="Retour à la musique">
+        <button class="back" onclick={goBack} aria-label="Retour à {backLabel}">
           <svg
             width="18"
             height="18"
@@ -431,7 +558,7 @@
             stroke-width="2.5"
             stroke-linecap="round"><path d="m14 6-6 6 6 6" /></svg
           >
-          Musique
+          <span class="back-label">{backLabel}</span>
         </button>
       {/if}
     </h1>
@@ -1452,6 +1579,16 @@
     font: inherit;
     font-weight: 600;
     padding: 0;
+    max-width: 60vw;
+  }
+  .back svg {
+    flex: 0 0 auto;
+  }
+  .back-label {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
   .pill {
