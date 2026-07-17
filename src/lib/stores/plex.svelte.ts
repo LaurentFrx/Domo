@@ -50,6 +50,8 @@ export interface PlexTrack {
   size: number | null;
   /** Chemin disque (info « fichier » du pop-up). */
   file: string | null;
+  /** Identifiant de LIGNE quand la piste vient d'une playlist (retrait/déplacement). */
+  playlistItemId: number | null;
 }
 
 export interface PlexSearchResults {
@@ -57,6 +59,79 @@ export interface PlexSearchResults {
   albums: PlexAlbum[];
   tracks: PlexTrack[];
 }
+
+export interface PlexPlaylist {
+  key: string;
+  title: string;
+  /** Intelligente (règles Plex, mise à jour automatique, non éditable à la main). */
+  smart: boolean;
+  count: number | null;
+  /** Durée totale en ms. */
+  duration: number | null;
+  /** Mosaïque de pochettes (chemin composite, à passer à plexImg). */
+  thumb: string | null;
+}
+
+/** Règles de mix/playlist intelligente (miroir de src/lib/server/plex-smart.ts). */
+export interface SmartRules {
+  yearFrom?: number;
+  yearTo?: number;
+  addedDays?: number;
+  notPlayedDays?: number;
+  playedOnly?: boolean;
+  neverPlayed?: boolean;
+  minRating?: number;
+  sort?: 'random' | 'added' | 'plays' | 'alpha' | 'recent';
+  limit?: number;
+}
+
+export interface SmartPreset {
+  id: string;
+  label: string;
+  desc: string;
+  /** Teinte OKLCH de la tuile (accents lumineux de la charte). */
+  hue: number;
+  rules: SmartRules;
+}
+
+/** Mix intelligents « une touche » (façon PlexAmp) — lecture immédiate. */
+export const SMART_PRESETS: SmartPreset[] = [
+  {
+    id: 'mix',
+    label: 'Mix aléatoire',
+    desc: 'Toute la bibliothèque, au hasard',
+    hue: 293,
+    rules: { sort: 'random', limit: 100 }
+  },
+  {
+    id: 'fresh',
+    label: 'Ajouts du mois',
+    desc: 'Le plus récent d’abord',
+    hue: 200,
+    rules: { addedDays: 30, sort: 'added', limit: 100 }
+  },
+  {
+    id: 'top',
+    label: 'Les plus écoutés',
+    desc: 'Les valeurs sûres de la maison',
+    hue: 60,
+    rules: { playedOnly: true, sort: 'plays', limit: 50 }
+  },
+  {
+    id: 'redecouvertes',
+    label: 'Redécouvertes',
+    desc: 'Écoutés autrefois, oubliés depuis 3 mois',
+    hue: 152,
+    rules: { notPlayedDays: 90, sort: 'random', limit: 50 }
+  },
+  {
+    id: 'inexplores',
+    label: 'Jamais écoutés',
+    desc: 'Les terres inconnues de la bibliothèque',
+    hue: 350,
+    rules: { neverPlayed: true, sort: 'random', limit: 100 }
+  }
+];
 
 /** URL proxy d'une pochette (null → pas d'image, l'UI met un dégradé). */
 export function plexImg(thumb: string | null | undefined, size = 300): string | null {
@@ -108,6 +183,7 @@ class PlexState {
   albums = $state<PlexAlbum[]>([]);
   albumsTotal = $state(0);
   artists = $state<PlexArtist[]>([]);
+  playlists = $state<PlexPlaylist[]>([]);
 
   /** Upload en cours (mode Gérer) : progression 0–1, ou null. */
   uploadProgress = $state<number | null>(null);
@@ -116,6 +192,7 @@ class PlexState {
   private visibilityHandler: (() => void) | null = null;
   private albumCache = new Map<string, { album: PlexAlbum; tracks: PlexTrack[] }>();
   private artistCache = new Map<string, PlexAlbum[]>();
+  private playlistCache = new Map<string, { playlist: PlexPlaylist; tracks: PlexTrack[] }>();
 
   connect() {
     if (typeof window === 'undefined') return;
@@ -169,12 +246,36 @@ class PlexState {
     const [recents, albums, artists] = await Promise.all([
       this.browse('view=recent&limit=20'),
       this.browse('view=albums&limit=60'),
-      this.browse('view=artists&limit=200')
+      this.browse('view=artists&limit=200'),
+      this.loadPlaylists()
     ]);
     this.recents = recents.items as PlexAlbum[];
     this.albums = albums.items as PlexAlbum[];
     this.albumsTotal = albums.total;
     this.artists = artists.items as PlexArtist[];
+  }
+
+  /** Appel API JSON avec message d'erreur serveur remonté tel quel. */
+  private async api<T>(path: string, init?: RequestInit): Promise<T> {
+    const res = await fetch(path, { cache: 'no-store', ...init });
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`;
+      try {
+        message = ((await res.json()) as { message?: string }).message ?? message;
+      } catch {
+        /* corps non JSON */
+      }
+      throw new Error(message);
+    }
+    return (await res.json()) as T;
+  }
+
+  private post<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
+    return this.api<T>(path, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    });
   }
 
   private async browse(qs: string): Promise<{ items: unknown[]; total: number }> {
@@ -210,6 +311,92 @@ class PlexState {
     const detail = (await res.json()) as { album: PlexAlbum; tracks: PlexTrack[] };
     this.albumCache.set(key, detail);
     return detail;
+  }
+
+  // ─── Playlists (classiques + intelligentes) ───────────────────────────────
+
+  async loadPlaylists(): Promise<void> {
+    const { items } = await this.api<{ items: PlexPlaylist[] }>('/api/plex/playlists');
+    this.playlists = items;
+  }
+
+  /** Détail d'une playlist + pistes (avec playlistItemId). `fresh` court-circuite le cache. */
+  async playlist(
+    key: string,
+    fresh = false
+  ): Promise<{ playlist: PlexPlaylist; tracks: PlexTrack[] }> {
+    if (!fresh) {
+      const cached = this.playlistCache.get(key);
+      if (cached) return cached;
+    }
+    const detail = await this.api<{ playlist: PlexPlaylist; tracks: PlexTrack[] }>(
+      `/api/plex/playlists/${key}`
+    );
+    this.playlistCache.set(key, detail);
+    return detail;
+  }
+
+  async createPlaylist(title: string, keys: string[]): Promise<PlexPlaylist> {
+    const { playlist } = await this.post<{ playlist: PlexPlaylist }>('/api/plex/playlists', {
+      title,
+      keys
+    });
+    await this.loadPlaylists();
+    return playlist;
+  }
+
+  async createSmartPlaylist(title: string, rules: SmartRules): Promise<PlexPlaylist> {
+    const { playlist } = await this.post<{ playlist: PlexPlaylist }>('/api/plex/playlists', {
+      title,
+      smart: rules
+    });
+    await this.loadPlaylists();
+    return playlist;
+  }
+
+  /** Pistes d'un mix intelligent SANS créer de playlist (presets, aperçu). */
+  async smartTracks(rules: SmartRules): Promise<PlexTrack[]> {
+    const { tracks } = await this.post<{ tracks: PlexTrack[] }>('/api/plex/smart', { rules });
+    return tracks;
+  }
+
+  async addToPlaylist(playlistKey: string, keys: string[]): Promise<void> {
+    await this.post(`/api/plex/playlists/${playlistKey}/items`, { keys });
+    this.playlistCache.delete(playlistKey);
+    await this.loadPlaylists();
+  }
+
+  async removePlaylistItem(playlistKey: string, itemId: number): Promise<void> {
+    await this.api(`/api/plex/playlists/${playlistKey}/items/${itemId}`, { method: 'DELETE' });
+    this.playlistCache.delete(playlistKey);
+    await this.loadPlaylists();
+  }
+
+  /** Déplace une ligne après `afterItemId` (null = tout en haut). */
+  async movePlaylistItem(
+    playlistKey: string,
+    itemId: number,
+    afterItemId: number | null
+  ): Promise<void> {
+    await this.post(
+      `/api/plex/playlists/${playlistKey}/items/${itemId}`,
+      { after: afterItemId ? String(afterItemId) : null },
+      'PUT'
+    );
+    this.playlistCache.delete(playlistKey);
+  }
+
+  async renamePlaylist(playlistKey: string, title: string): Promise<void> {
+    await this.post(`/api/plex/playlists/${playlistKey}`, { title }, 'PUT');
+    this.playlistCache.delete(playlistKey);
+    await this.loadPlaylists();
+  }
+
+  /** Supprime la playlist (les fichiers musicaux ne sont jamais touchés). */
+  async deletePlaylist(playlistKey: string): Promise<void> {
+    await this.api(`/api/plex/playlists/${playlistKey}`, { method: 'DELETE' });
+    this.playlistCache.delete(playlistKey);
+    await this.loadPlaylists();
   }
 
   async search(q: string): Promise<PlexSearchResults> {
@@ -485,6 +672,32 @@ class PlayerState {
     const a = this.ensureAudio();
     a.currentTime = Math.max(0, Math.min(seconds, this.duration || seconds));
     this.currentTime = a.currentTime;
+  }
+
+  /** Ajoute des pistes à la FIN de la file (démarre la lecture si file vide). */
+  enqueue(tracks: PlexTrack[]): void {
+    const playable = tracks.filter((t) => t.part);
+    if (playable.length === 0) return;
+    if (this.queue.length === 0) {
+      this.play(playable, 0, null);
+      return;
+    }
+    this.queue = [...this.queue, ...playable];
+  }
+
+  /** Insère des pistes JUSTE APRÈS la piste courante (« Lire ensuite »). */
+  playNext(tracks: PlexTrack[]): void {
+    const playable = tracks.filter((t) => t.part);
+    if (playable.length === 0) return;
+    if (this.queue.length === 0) {
+      this.play(playable, 0, null);
+      return;
+    }
+    this.queue = [
+      ...this.queue.slice(0, this.index + 1),
+      ...playable,
+      ...this.queue.slice(this.index + 1)
+    ];
   }
 
   /** Saute à une piste précise de la file (liste « à suivre » du Now Playing). */

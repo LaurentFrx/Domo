@@ -196,6 +196,22 @@ export async function musicSection(): Promise<MusicSection> {
   return section;
 }
 
+// ─── Identifiant machine (URI server:// des playlists) ──────────────────────
+
+let machineIdCache: string | null = null;
+
+/** machineIdentifier du PMS — requis pour construire les URI de playlists. */
+export async function machineId(): Promise<string> {
+  if (machineIdCache) return machineIdCache;
+  const res = await pmsFetch('/identity');
+  if (!res.ok) throw new PlexError(502, `Plex: HTTP ${res.status}`);
+  const j = (await res.json()) as { MediaContainer?: { machineIdentifier?: string } };
+  const id = j.MediaContainer?.machineIdentifier;
+  if (!id) throw new PlexError(502, 'machineIdentifier introuvable');
+  machineIdCache = id;
+  return id;
+}
+
 // ─── Accès disque RPi4 (upload / suppression de secours) ────────────────────
 
 /** Config SSH vers le RPi4 (tunnel réverse), depuis .env. */

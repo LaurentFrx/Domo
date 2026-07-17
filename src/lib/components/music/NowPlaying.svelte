@@ -44,7 +44,28 @@
 
   function openInfo() {
     delError = null;
+    plPickOpen = false;
+    plMsg = null;
     infoOpen = true;
+  }
+
+  // ── Ajouter le morceau EN COURS à une playlist (depuis le pop-up ⋯) ──────
+  let plPickOpen = $state(false);
+  let plBusy = $state(false);
+  let plMsg = $state<string | null>(null);
+  async function addCurrentTo(plKey: string, plTitle: string) {
+    const t = player.current;
+    if (!t || plBusy) return;
+    plBusy = true;
+    plMsg = null;
+    try {
+      await plex.addToPlaylist(plKey, [t.key]);
+      plMsg = `Ajouté à « ${plTitle} ».`;
+      plPickOpen = false;
+    } catch (e) {
+      plMsg = (e as Error).message;
+    }
+    plBusy = false;
   }
   function closeInfo() {
     cancelHold();
@@ -381,6 +402,44 @@
               </div>
             {/if}
           </dl>
+
+          <div class="pl-add">
+            <button
+              class="pl-toggle"
+              onclick={() => (plPickOpen = !plPickOpen)}
+              aria-expanded={plPickOpen}
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"><path d="M4 6h12M4 11h12M4 16h7M17 12v8M13 16h8" /></svg
+              >
+              Ajouter à une playlist
+            </button>
+            {#if plPickOpen}
+              <div class="pl-list">
+                {#each plex.playlists.filter((p) => !p.smart) as pl (pl.key)}
+                  <button
+                    class="pl-row"
+                    onclick={() => addCurrentTo(pl.key, pl.title)}
+                    disabled={plBusy}
+                  >
+                    {pl.title}
+                    <span class="pl-count">{pl.count ?? 0}</span>
+                  </button>
+                {:else}
+                  <p class="pl-none">
+                    Aucune playlist classique — en créer une depuis l'onglet Playlists.
+                  </p>
+                {/each}
+              </div>
+            {/if}
+            {#if plMsg}<p class="pl-msg">{plMsg}</p>{/if}
+          </div>
 
           {#if delError}<p class="modal-error">{delError}</p>{/if}
 
@@ -868,6 +927,66 @@
     font-weight: 500;
     color: var(--color-muted-fg);
     word-break: break-all;
+  }
+
+  /* ── Ajouter à une playlist (depuis le pop-up ⋯) ──────────────────────── */
+  .pl-add {
+    margin-top: 14px;
+  }
+  .pl-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    border-radius: 14px;
+    padding: 11px 0;
+    border: 1px solid var(--color-border);
+    background: none;
+    color: var(--color-fg);
+    font-weight: 600;
+    font-size: 13.5px;
+  }
+  .pl-list {
+    margin-top: 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    max-height: 32vh;
+    overflow-y: auto;
+  }
+  .pl-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    padding: 11px 14px;
+    background: none;
+    border: none;
+    color: var(--color-fg);
+    font: inherit;
+    font-weight: 600;
+    font-size: 14px;
+    text-align: left;
+  }
+  .pl-row + .pl-row {
+    border-top: 1px solid oklch(0.52 0.06 286 / 0.25);
+  }
+  .pl-count {
+    color: var(--color-muted-fg);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .pl-none {
+    color: var(--color-muted-fg);
+    font-size: 12.5px;
+    padding: 10px 14px;
+    margin: 0;
+  }
+  .pl-msg {
+    color: var(--color-success);
+    font-size: 12.5px;
+    margin: 8px 2px 0;
   }
 
   /* ── Suppression par appui long : jauge qui se remplit en 1 s ─────────── */

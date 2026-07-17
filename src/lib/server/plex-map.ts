@@ -35,6 +35,11 @@ export interface RawMeta {
     bitrate?: number;
     Part?: Array<{ key?: string; file?: string; size?: number }>;
   }>;
+  /* Playlists */
+  playlistType?: string;
+  smart?: boolean | number | string;
+  composite?: string;
+  playlistItemID?: number;
 }
 
 export interface AlbumJson {
@@ -75,6 +80,31 @@ export interface TrackJson {
   size: number | null;
   /** Chemin disque VU PAR LE CONTENEUR Plex (info, jamais utilisé côté client). */
   file: string | null;
+  /** Identifiant de LIGNE dans une playlist (retrait/déplacement) — null hors playlist. */
+  playlistItemId: number | null;
+}
+
+export interface PlaylistJson {
+  key: string;
+  title: string;
+  /** Playlist intelligente Plex (se met à jour seule, non éditable à la main). */
+  smart: boolean;
+  count: number | null;
+  /** Durée totale en ms. */
+  duration: number | null;
+  /** Chemin de la mosaïque de pochettes (/playlists/N/composite/N). */
+  thumb: string | null;
+}
+
+export function mapPlaylist(md: RawMeta): PlaylistJson {
+  return {
+    key: String(md.ratingKey ?? ''),
+    title: md.title ?? '?',
+    smart: md.smart === true || md.smart === 1 || md.smart === '1',
+    count: md.leafCount ?? null,
+    duration: md.duration ?? null,
+    thumb: md.composite ?? null
+  };
 }
 
 export function mapAlbum(md: RawMeta): AlbumJson {
@@ -115,7 +145,8 @@ export function mapTrack(md: RawMeta): TrackJson {
     codec: md.Media?.[0]?.audioCodec ?? null,
     bitrate: md.Media?.[0]?.bitrate ?? null,
     size: md.Media?.[0]?.Part?.[0]?.size ?? null,
-    file: md.Media?.[0]?.Part?.[0]?.file ?? null
+    file: md.Media?.[0]?.Part?.[0]?.file ?? null,
+    playlistItemId: md.playlistItemID ?? null
   };
 }
 

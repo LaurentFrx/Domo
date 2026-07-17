@@ -9,7 +9,7 @@ import { pmsFetch } from '$lib/server/plex';
 import { plexHttp } from '$lib/server/plex-map';
 import type { RequestHandler } from './$types';
 
-const PATH_RE = /^\/library\/metadata\/\d+\/(thumb|art)\/\d+$/;
+const PATH_RE = /^\/(library\/metadata\/\d+\/(thumb|art)\/\d+|playlists\/\d+\/composite\/\d+)$/;
 
 export const GET: RequestHandler = async ({ url, setHeaders }) => {
   const path = url.searchParams.get('path') ?? '';
