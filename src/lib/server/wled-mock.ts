@@ -17,8 +17,8 @@
  * AUCUN changement côté store ni composants (l'UI est pilotée par les données).
  *
  * Deux segments modélisent les deux lignes LED physiques :
- *   - Segment 0 « Store »   → bras articulés du store banne (2 faisceaux mirroir)
- *   - Segment 1 « SàM Été » → véranda / salle à manger d'été (bandes en série)
+ *   - Segment 0 « Store »         → ruban du store banne (52 groupes COB)
+ *   - Segment 1 « Bras du store » → 2×50 LEDs en Y (parallèle) = 50 px logiques
  *
  * NB : l'état vit en mémoire du process Node (le service domo). Il persiste
  * entre les requêtes mais repart aux valeurs par défaut à chaque redémarrage —
@@ -268,8 +268,8 @@ interface MockState {
   seg: MockSeg[];
 }
 
-const SEG_STORE_LEN = 60; // bras du store banne (faisceaux mirroir)
-const SEG_SAM_LEN = 150; // véranda / SàM Été (bandes en série)
+const SEG_STORE_LEN = 52; // ruban du store banne (52 groupes COB)
+const SEG_BRAS_LEN = 50; // bras du store — 2×50 LEDs en Y (parallèle) = 50 px logiques
 
 const state: MockState = {
   on: true,
@@ -285,11 +285,11 @@ const state: MockState = {
     {
       id: 0,
       // Défaut = mode « Ensemble » : segment unique sur TOUTE la longueur
-      // (Store + SàM), pour des effets continus. Le mode « Par ligne » re-scinde
+      // (Store + Bras), pour des effets continus. Le mode « Par ligne » re-scinde
       // en deux segments via un POST seg start/stop (cf. store setScope).
       start: 0,
-      stop: SEG_STORE_LEN + SEG_SAM_LEN,
-      len: SEG_STORE_LEN + SEG_SAM_LEN,
+      stop: SEG_STORE_LEN + SEG_BRAS_LEN,
+      len: SEG_STORE_LEN + SEG_BRAS_LEN,
       grp: 1,
       spc: 0,
       of: 0,
@@ -323,8 +323,8 @@ const state: MockState = {
     {
       id: 1,
       // Désactivé par défaut (len 0) ; réactivé en mode « Par ligne ».
-      start: SEG_STORE_LEN + SEG_SAM_LEN,
-      stop: SEG_STORE_LEN + SEG_SAM_LEN,
+      start: SEG_STORE_LEN + SEG_BRAS_LEN,
+      stop: SEG_STORE_LEN + SEG_BRAS_LEN,
       len: 0,
       grp: 1,
       spc: 0,
@@ -333,7 +333,7 @@ const state: MockState = {
       frz: false,
       bri: 220,
       cct: 127,
-      n: 'SàM Été',
+      n: 'Bras du store',
       col: [
         [0, 0, 0, 200],
         [0, 0, 0, 0],

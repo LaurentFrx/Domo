@@ -20,9 +20,10 @@
  * sauter le curseur sous le doigt, et l'état des segments est mis à jour
  * IN-PLACE (identité référentielle préservée).
  *
- * Modèle : deux segments WLED = deux lignes LED physiques :
- *   - id 0 « Store »   → bras articulés du store banne
- *   - id 1 « SàM Été » → véranda / salle à manger d'été
+ * Modèle : les lignes LED physiques = segments WLED (liste LINES) :
+ *   - id 0 « Store »         → ruban du store banne (52 px)
+ *   - id 1 « Bras du store » → 2×50 LEDs câblées en Y (parallèle) = 50 px logiques
+ * Future ligne « SàM Été » (2ᵉ sortie du Dig-Uno) : ajouter une entrée LINES.
  */
 
 export type RGB = [number, number, number];
@@ -190,12 +191,19 @@ const INTERACT_HOLD_MS = 900;
 
 export type WledScope = 'together' | 'perLine';
 
-// Découpage des lignes physiques. La longueur TOTALE est lue sur le module
-// (info.leds.count) — JAMAIS codée en dur : le layout suit la config réelle.
-// SEG_SPLIT = nb de pixels de la ligne 1 (Store, COB WS2814 = 16 px/m).
-// Tant que la ligne 2 (SàM) n'est pas câblée, count == SEG_SPLIT → le mode
-// « Par ligne » est sans objet (canSplit=false, bascule masquée dans la carte).
-const SEG_SPLIT = 52; // pixels de la ligne « Store » (52 groupes comptés le 2026-07-06)
+// Lignes physiques chaînées sur la sortie 1 du Dig-Uno, dans l'ordre du câblage.
+// La longueur TOTALE est lue sur le module (info.leds.count) — JAMAIS codée en
+// dur : `stop` absent = jusqu'au bout du ruban, la dernière ligne absorbe donc
+// une extension future sans retouche. Tant que le module ne compte que la
+// ligne 1, le mode « Par ligne » est sans objet (canSplit=false, bascule masquée).
+//   [0,52)   « Store »         — 52 groupes COB WS2814 comptés le 2026-07-06
+//   [52,…)   « Bras du store » — 2×50 LEDs en Y (parallèle) = 50 px logiques
+const LINES: { n: string; start: number; stop?: number }[] = [
+  { n: 'Store', start: 0, stop: 52 },
+  { n: 'Bras du store', start: 52 }
+];
+/** Seuil d'existence de la 2ᵉ ligne (début de la première ligne optionnelle). */
+const SEG_SPLIT = LINES[1].start;
 
 class WledStore {
   // ─── Connexion / source ───────────────────────────
@@ -529,21 +537,54 @@ class WledStore {
   toggle(): Promise<void> {
     return this.setOn(!this.on);
   }
-  /** Bascule Ensemble (1 segment continu) ↔ Par ligne (2 segments).
-   *  Layout calculé depuis la longueur RÉELLE du module (this.total), jamais
-   *  en dur ; `stop: 0` = suppression du segment (sémantique WLED). */
+  /** Bascule Ensemble (1 segment continu) ↔ Par ligne (un segment par entrée
+   *  de LINES). Layout calculé depuis la longueur RÉELLE du module (this.total),
+   *  jamais en dur ; `stop: 0` = suppression du segment (sémantique WLED).
+   *  ⚠️ Le firmware CRÉE tout segment inconnu avec SES défauts (allumé, blanc,
+   *  luminosité max) : on fournit l'état HÉRITÉ du segment maître pour que les
+   *  lignes naissent à l'identique de l'existant — jamais « armées » à l'insu. */
   async setScope(s: WledScope): Promise<void> {
     const total = this.total || SEG_SPLIT;
+    const base = this.segments[0];
+    const inherit = base
+      ? {
+          on: base.on,
+          bri: base.bri,
+          col: this.#colPayload(base.col, base.white),
+          fx: base.fx,
+          sx: base.sx,
+          ix: base.ix,
+          pal: base.pal
+        }
+      : {};
     const seg =
       s === 'perLine' && this.canSplit
-        ? [
-            { id: 0, start: 0, stop: SEG_SPLIT, n: 'Store' },
-            { id: 1, start: SEG_SPLIT, stop: total, n: 'SàM Été' }
-          ]
+        ? LINES.map((l, i) => ({
+            id: i,
+            start: l.start,
+            stop: l.stop ?? total,
+            n: l.n,
+            ...inherit
+          }))
         : [
-            { id: 0, start: 0, stop: total, n: 'Terrasse' },
-            { id: 1, stop: 0 }
+            { id: 0, start: 0, stop: total, n: 'Terrasse', ...inherit },
+            ...LINES.slice(1).map((_, i) => ({ id: i + 1, stop: 0 }))
           ];
+    // Reflet OPTIMISTE de la topologie : une commande enchaînée juste derrière
+    // (ambiance, couleur) itère this.segments — sans ça elle raterait les
+    // lignes qui n'existent que dans la réponse à venir. L'écho réconcilie.
+    if (base) {
+      const live = seg as { id: number; start?: number; stop: number; n?: string }[];
+      this.segments = live
+        .filter((g) => g.stop > 0)
+        .map((g) => ({
+          ...base,
+          id: g.id,
+          name: g.n ?? base.name,
+          len: g.stop - (g.start ?? 0),
+          col: [...base.col] as RGB
+        }));
+    }
     await this.#post({ seg });
   }
   /** Luminosité maître. bri=0 NE coupe PAS l'alimentation (le slider reste pilotable). */
