@@ -42,6 +42,11 @@ const ALLOWED_GET = new Set(['', 'state', 'info', 'si', 'eff', 'pal']);
 const MOCK_HEADERS = { 'x-wled-source': 'mock', 'cache-control': 'no-store' };
 const LIVE_HEADERS = { 'x-wled-source': 'live', 'cache-control': 'no-store' };
 
+// Clés racine autorisées dans un POST /json/state — même défense en profondeur
+// que le GET : le module accepte nativement rb (reboot), psave (flash), udpn…
+// qu'aucun client Domo n'a de raison d'envoyer.
+const ALLOWED_POST_KEYS = new Set(['on', 'bri', 'seg', 'transition', 'tt', 'v']);
+
 export const GET: RequestHandler = async ({ params }) => {
   const sub = subPath(params.path);
   if (!ALLOWED_GET.has(sub)) throw error(404, 'WLED: chemin non autorisé');
@@ -73,6 +78,13 @@ export const POST: RequestHandler = async ({ params, request }) => {
   } catch {
     throw error(400, 'JSON invalide');
   }
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const dropped = Object.keys(body).filter((k) => !ALLOWED_POST_KEYS.has(k));
+    if (dropped.length) {
+      console.warn(`[wled/proxy] clés filtrées du POST : ${dropped.join(', ')}`);
+      for (const k of dropped) delete (body as Record<string, unknown>)[k];
+    }
+  }
 
   // L'interrupteur passe ici : le « ruban allumé ? » du mode musique est noté
   // APRÈS le succès du relais — noter avant crée une course : le rendu différé
@@ -81,11 +93,16 @@ export const POST: RequestHandler = async ({ params, request }) => {
     body && typeof body === 'object' && typeof (body as { on?: unknown }).on === 'boolean'
       ? (body as { on: boolean }).on
       : null;
+  // Le POST pose-t-il déjà un ÉTAT visuel (scène/couleur/effet, via seg) ?
+  // Si oui, un repli statique différé serait superflu ET ferait la course avec
+  // cet état fraîchement choisi — noteModuleOn le désarme au lieu de le rejouer.
+  const postsState =
+    body != null && typeof body === 'object' && Array.isArray((body as { seg?: unknown }).seg);
 
   const base = liveBase();
   if (!base) {
     const res = wledPostState(body);
-    if (onFlag !== null) noteModuleOn(onFlag);
+    if (onFlag !== null) noteModuleOn(onFlag, { postsState });
     return json(res, { headers: MOCK_HEADERS });
   }
 
@@ -105,6 +122,6 @@ export const POST: RequestHandler = async ({ params, request }) => {
   }
   if (!upstream.ok) throw error(502, `WLED: HTTP ${upstream.status}`);
   const data = await upstream.json().catch(() => ({ success: true }));
-  if (onFlag !== null) noteModuleOn(onFlag); // le module a APPLIQUÉ l'état
+  if (onFlag !== null) noteModuleOn(onFlag, { postsState }); // le module a APPLIQUÉ l'état
   return json(data, { headers: LIVE_HEADERS });
 };

@@ -9,7 +9,7 @@
 import type { RequestHandler } from './$types';
 import { isAuthenticated } from '$lib/server/auth';
 import { musicModeState, subscribeLive, type LiveEvent } from '$lib/server/wled/music-mode';
-import { beatStatus } from '$lib/server/wled/sound-streamer';
+import { beatStatus, isAnalyzing } from '$lib/server/wled/sound-streamer';
 
 export const GET: RequestHandler = async ({ cookies }) => {
   if (!isAuthenticated(cookies)) return new Response('Unauthorized', { status: 401 });
@@ -31,7 +31,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
         ...musicModeState(),
         key: bs.key,
         playing: bs.playing,
-        analyzing: false,
+        analyzing: isAnalyzing(), // état RÉEL — un client peut se connecter en pleine analyse
         level: 0,
         peak: 0
       });

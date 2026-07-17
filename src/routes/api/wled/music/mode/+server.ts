@@ -32,6 +32,11 @@ export const POST: RequestHandler = async ({ request }) => {
 
   // POST /mode = GESTE UTILISATEUR (chip Musique, choix de style) : le rendu
   // a le droit d'ALLUMER le ruban — taper une scène doit produire de la lumière.
-  const st = await setMode(patch, beatStatus().playing, { userGesture: true });
+  // `quiet` : désactivation qui ACCOMPAGNE une commande manuelle (releaseControl)
+  // → pas de repli statique (la commande pose son propre état, pas de course).
+  const st = await setMode(patch, beatStatus().playing, {
+    userGesture: true,
+    quiet: body.quiet === true
+  });
   return json(st, { headers: { 'cache-control': 'no-store' } });
 };

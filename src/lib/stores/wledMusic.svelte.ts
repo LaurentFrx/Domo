@@ -114,12 +114,30 @@ class WledMusicStore {
 
   // ─── Pilotage (POST /mode — optimiste, le SSE confirme) ───
 
-  #postMode(patch: { enabled?: boolean; style?: string }): void {
+  #postMode(patch: { enabled?: boolean; style?: string; quiet?: boolean }): void {
     void fetch('/api/wled/music/mode', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(patch)
-    }).catch(() => undefined);
+    })
+      .then((r) => {
+        if (!r.ok) this.#resync();
+      })
+      .catch(() => this.#resync());
+  }
+
+  /** POST /mode perdu (Wi-Fi faible) : l'optimiste ment tant que le SSE ne
+   *  rediffuse rien (il ne pousse que les CHANGEMENTS) → on réaligne sur le
+   *  serveur, sinon chip/grille affichent un mode qui n'existe pas. */
+  #resync(): void {
+    void fetch('/api/wled/music/mode')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((st: { enabled?: boolean; style?: string } | null) => {
+        if (!st) return;
+        if (typeof st.enabled === 'boolean') this.enabled = st.enabled;
+        if (typeof st.style === 'string') this.style = st.style;
+      })
+      .catch(() => undefined);
   }
 
   setEnabled(on: boolean): void {
@@ -140,7 +158,10 @@ class WledMusicStore {
   releaseControl(): void {
     if (!this.enabled) return;
     this.enabled = false; // optimiste
-    this.#postMode({ enabled: false });
+    // quiet : la commande manuelle qui suit pose SON état — sans ça, le repli
+    // statique du serveur (Solid blanc chaud) fait la course avec la scène
+    // que l'utilisateur vient de choisir et peut l'écraser.
+    this.#postMode({ enabled: false, quiet: true });
   }
 
   // ─── Heartbeat de l'appareil qui joue ───

@@ -64,6 +64,10 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let socket: dgram.Socket | null = null;
 /** Piste en cours d'analyse (clé) — pour le retour `analyzing` de l'API. */
 let analyzing: string | null = null;
+/** Analyses échouées récentes (clé → horodatage) : évite de re-tenter en
+ *  boucle à chaque heartbeat un fichier réellement illisible. */
+const failedAnalysis = new Map<string, number>();
+const FAILED_RETRY_MS = 60_000;
 /** Alternance 25 fps → 12,5 Hz pour le broadcast SSE. */
 let tickParity = false;
 /** Dernier rafraîchissement de l'état `on` du ruban (throttle 10 s du tick). */
@@ -180,6 +184,11 @@ function status(ready: boolean): BeatStatus {
   return { ready, analyzing: analyzing !== null, key: session?.key ?? null };
 }
 
+/** Une analyse spectrale est-elle en cours ? (snapshot SSE à la connexion) */
+export function isAnalyzing(): boolean {
+  return analyzing !== null;
+}
+
 /** Lance l'analyse spectrale si nécessaire (styles réactifs uniquement). */
 function ensureAnalysis(u: BeatUpdate): void {
   if (!isReactiveStyle() || analyzing === u.key) return;
@@ -190,10 +199,12 @@ function ensureAnalysis(u: BeatUpdate): void {
   void analyzeTrack(u.part.replace(/^\/+/, ''), u.key)
     .then(async (tl) => {
       console.log(`[wled/beat] analyse ${startedFor} terminée`);
+      failedAnalysis.delete(startedFor);
       if (session?.key === startedFor) session.timeline = tl;
     })
     .catch((e) => {
       console.error(`[wled/beat] analyse ${startedFor} échouée:`, (e as Error).message);
+      failedAnalysis.set(startedFor, Date.now());
       // Repli : rendu « ambiance » plutôt qu'un effet audio sans données (noir).
       if (session?.key === startedFor) {
         void applyRender(session.playing, { forceAmbiance: true });
@@ -221,8 +232,25 @@ export async function updateBeat(u: BeatUpdate): Promise<BeatStatus> {
       void applyRender(u.playing); // pause → fondu multicolore lent ; reprise → effet du style
       broadcastLive({ playing: u.playing, key: u.key });
     }
+    // Style devenu réactif EN COURS de piste (session née en « ambiance »),
+    // ou analyse échouée retentable : sans timeline, l'effet réactif reçoit
+    // du SILENCE en continu = ruban allumé mais noir. On (re)tente le cache
+    // puis l'analyse ici — le heartbeat suivant (≤5 s) rattrape le style.
+    if (
+      u.playing &&
+      !session.timeline &&
+      isReactiveStyle() &&
+      analyzing !== u.key &&
+      now - (failedAnalysis.get(u.key) ?? 0) > FAILED_RETRY_MS
+    ) {
+      const cached = await cachedTimeline(u.key);
+      if (session?.key === u.key) {
+        if (cached) session.timeline = cached;
+        else ensureAnalysis(u);
+      }
+    }
     startLoop();
-    return status(session.timeline !== null || !isReactiveStyle());
+    return status(session?.timeline != null || !isReactiveStyle());
   }
 
   // ── Autre piste : ANTI-DÉTOURNEMENT ──

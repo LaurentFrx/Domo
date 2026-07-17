@@ -2,6 +2,10 @@ import { redirect, type Handle, type HandleServerError } from '@sveltejs/kit';
 import { isAuthenticated } from '$lib/server/auth';
 import { setIncidentReporter } from '$lib/server/atomic-store';
 import { raiseIncident, resolveIncident } from '$lib/server/monitor/incidents';
+// Import d'amorçage : arme les timers de fond du mode Musique (réconciliation
+// post-restart + poll d'alimentation du ruban) DÈS LE BOOT du serveur — sans
+// lui, ils n'existeraient qu'au premier accès à une route /api/wled.
+import '$lib/server/wled/music-mode';
 
 // Branche la remontée d'incidents du socle de persistence sur le bus (une fois,
 // au chargement du serveur) : une corruption de fichier d'état devient une alerte.

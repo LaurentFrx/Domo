@@ -63,6 +63,10 @@ function loadState(): MusicModeState {
 const state: MusicModeState = loadState();
 /** Dernier `on` connu du ruban (proxy + rendus). Défaut optimiste. */
 let moduleOn = true;
+/** Repli statique DIFFÉRÉ : la sortie du mode a trouvé le ruban éteint — le
+ *  repli sera rejoué au prochain rallumage (sinon l'effet audio-réactif reste
+ *  gravé dans le module : rallumage = ruban allumé mais noir/figé). */
+let pendingFallback = false;
 
 function persist(): void {
   writeFile(STATE_PATH, JSON.stringify(state), () => undefined); // best-effort
@@ -117,12 +121,23 @@ export function registerPlayingProvider(fn: () => boolean): void {
 /** À appeler à chaque signal d'alimentation du ruban (POST proxy, rendus,
  *  rafraîchissement du tick). Transition éteint→allumé pendant que le mode est
  *  actif → le rendu différé est REJOUÉ (c'est le « rendu différé » promis). */
-export function noteModuleOn(on: boolean): void {
+export function noteModuleOn(on: boolean, opts: { postsState?: boolean } = {}): void {
   const was = moduleOn;
   moduleOn = on;
   if (!was && on && state.enabled) {
+    pendingFallback = false; // le rendu musique remplace tout repli en attente
     console.log('[wled/mode] ruban rallumé — rendu différé rejoué');
     void applyRender(playingProvider());
+  } else if (!was && on && pendingFallback) {
+    if (opts.postsState) {
+      // Le rallumage vient d'une commande qui POSE déjà son état (scène,
+      // couleur…) : le repli est superflu et ferait la course avec elle.
+      pendingFallback = false;
+      console.log('[wled/mode] repli différé désarmé (état posé par la commande)');
+    } else {
+      console.log('[wled/mode] ruban rallumé — repli statique différé rejoué');
+      void applyStaticFallback();
+    }
   }
 }
 
@@ -187,11 +202,14 @@ export function applyRender(playing: boolean, opts: RenderOpts = {}): Promise<vo
     const palIdx = Math.max(0, resolveByName(palettes, def.pal));
     const colPayload = MODE_SLOTS.map((x) => [x[0], x[1], x[2], 0]);
 
+    // `on` par segment : JAMAIS envoyé sur un rendu automatique (une ligne
+    // éteinte volontairement — bras du store repliés — doit le RESTER) ; seul
+    // le geste utilisateur (powerOn) allume ruban ET lignes.
     await modulePostState({
       ...(opts.powerOn ? { on: true } : {}),
       seg: segs.map((s) => ({
         id: s.id ?? 0,
-        on: true,
+        ...(opts.powerOn ? { on: true } : {}),
         col: colPayload,
         ...(fxIdx >= 0 ? { fx: fxIdx } : {}),
         pal: palIdx,
@@ -225,7 +243,11 @@ export function applyStaticFallback(): Promise<void> {
       effects?: string[];
     };
     if (d.state?.on !== true) {
-      console.log('[wled/mode] repli statique inutile : ruban éteint');
+      // Ruban éteint : on ne rallume pas, mais l'effet audio-réactif reste
+      // gravé dans le module → repli DIFFÉRÉ, rejoué par noteModuleOn au
+      // prochain rallumage (app WLED native comprise, via le poll du proxy).
+      pendingFallback = true;
+      console.log('[wled/mode] repli statique différé : ruban éteint');
       return;
     }
     const segs = (d.state?.seg ?? []).filter((s) => (s.stop ?? 0) > 0);
@@ -250,12 +272,40 @@ export function applyStaticFallback(): Promise<void> {
         ix: 128
       }))
     });
+    pendingFallback = false;
     console.log('[wled/mode] repli statique appliqué (Solid blanc chaud)');
   };
   renderChain = renderChain.then(run).catch((e) => {
     console.error('[wled/mode] repli statique échoué:', (e as Error).message);
   });
   return renderChain;
+}
+
+// ─── Réconciliation post-restart + poll de fond ──────────────────
+// (garde globalThis : le HMR de dev ré-évalue ce module — jamais deux timers)
+
+const G = globalThis as { __wledModeTimers?: boolean };
+if (!G.__wledModeTimers) {
+  G.__wledModeTimers = true;
+  console.log(`[wled/mode] timers de fond armés (enabled=${state.enabled})`);
+  // Restart du serveur pendant une écoute : session/heartbeats perdus mais
+  // `enabled` persisté → sans ça, l'effet audio-réactif resterait orphelin
+  // (ruban allumé mais noir). On repose un rendu : pause si rien ne joue,
+  // réactif si les heartbeats ont déjà repris. Délai : laisser le tunnel monter.
+  setTimeout(() => {
+    if (state.enabled) {
+      console.log('[wled/mode] réconciliation post-restart : rendu reposé');
+      void applyRender(playingProvider());
+    }
+  }, 10_000);
+  // Poll de fond 60 s : détecte un (r)allumage fait HORS Domo (app WLED
+  // native, coupure de courant) même sans musique en cours — les rendus/replis
+  // différés sont rejoués. Le tick du streamer garde son refresh 10 s en session.
+  setInterval(() => {
+    void moduleGet('state')
+      .then(({ data }) => noteModuleOn((data as { on?: unknown })?.on === true))
+      .catch(() => undefined); // module injoignable : on garde le dernier connu
+  }, 60_000);
 }
 
 // ─── Mutations (POST /api/wled/music/mode) ───────────────────────
@@ -276,7 +326,7 @@ export interface ModePatch {
 export async function setMode(
   patch: ModePatch,
   playingNow: boolean,
-  opts: { userGesture?: boolean } = {}
+  opts: { userGesture?: boolean; quiet?: boolean } = {}
 ): Promise<MusicModeState> {
   const ev: LiveEvent = {};
   if (typeof patch.enabled === 'boolean' && patch.enabled !== state.enabled) {
@@ -293,11 +343,17 @@ export async function setMode(
     persist();
     broadcastLive(ev);
     if (state.enabled && (ev.enabled || ev.style)) {
+      pendingFallback = false; // le rendu musique remplace tout repli en attente
       void applyRender(playingNow, { powerOn: opts.userGesture === true });
-    } else if (ev.enabled === false) {
+    } else if (ev.enabled === false && !opts.quiet) {
       // Désactivation : ne JAMAIS laisser le ruban échoué sur un effet
       // audio-réactif sans stream (allumé mais noir) — état statique propre.
+      // `quiet` : la désactivation ACCOMPAGNE une commande manuelle (scène,
+      // couleur, effet) qui pose son propre état — un repli en parallèle
+      // ferait la course avec elle et l'écraserait.
       void applyStaticFallback();
+    } else if (ev.enabled === false && opts.quiet) {
+      console.log('[wled/mode] désactivation silencieuse (commande manuelle en cours)');
     }
   }
   return musicModeState();
