@@ -18,7 +18,8 @@
  *
  * Deux segments modélisent les deux lignes LED physiques :
  *   - Segment 0 « Store »         → ruban du store banne (52 groupes COB)
- *   - Segment 1 « Bras du store » → 2×50 LEDs en Y (parallèle) = 50 px logiques
+ *   - Segment 1 « Bras du store » → 2×50 LEDs de bras = 50 px (le vrai module a
+ *     en plus un segment cache « Boîte » [52,53) exclu du modèle par l'app)
  *
  * NB : l'état vit en mémoire du process Node (le service domo). Il persiste
  * entre les requêtes mais repart aux valeurs par défaut à chaque redémarrage —
@@ -269,7 +270,7 @@ interface MockState {
 }
 
 const SEG_STORE_LEN = 52; // ruban du store banne (52 groupes COB)
-const SEG_BRAS_LEN = 50; // bras du store — 2×50 LEDs en Y (parallèle) = 50 px logiques
+const SEG_BRAS_LEN = 50; // 2×50 LEDs de bras en parallèle (LEDs boîte sous segment cache « Boîte »)
 
 const state: MockState = {
   on: true,
