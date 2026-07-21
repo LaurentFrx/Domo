@@ -41,7 +41,7 @@ function isAsset(pathname: string): boolean {
 }
 
 /** Données temps réel : jamais de cache navigateur/proxy sur les réponses API
- *  (sauf si la route fixe elle-même sa politique, ex. Solcast 6 h). */
+ *  (sauf si la route fixe elle-même sa politique, ex. images Plex 7 j). */
 function withApiCacheControl(pathname: string, response: Response): Response {
   if (pathname.startsWith('/api/') && !response.headers.has('cache-control')) {
     response.headers.set('cache-control', 'no-store');

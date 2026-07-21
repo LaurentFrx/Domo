@@ -86,10 +86,9 @@ pnpm build
 # ── 6. .env (warn si absent) ─────────────────────────────────────
 if [ ! -f "$TARGET_DIR/.env" ]; then
   warn ''
-  warn '.env absent — /api/solcast/forecast renverra 503 tant que ces variables'
-  warn 'ne sont pas définies dans /home/laurent/domo/.env :'
-  warn '    SOLCAST_API_KEY=...'
-  warn '    SOLCAST_RESOURCE_ID=...'
+  warn ".env absent — l'app démarre mais aucune connexion ne sera possible"
+  warn 'tant que ces variables ne sont pas définies dans /home/laurent/domo/.env :'
+  warn '    AUTH_TOKEN=...    # lien magique /auth?k=<token>'
   warn 'Après création :  sudo systemctl restart domo'
   warn ''
 fi

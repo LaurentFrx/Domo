@@ -34,18 +34,17 @@ src/
 │   │   ├── layout/          → Header, TabBar
 │   │   └── ui/              → Primitives (Badge, Gauge, ...)
 │   ├── theme/               → Design tokens (CSS + TS)
-│   ├── forecast/            → Provider Solcast (PV forecasting)
 │   ├── stores/              → State global Svelte
 │   └── utils/               → Helpers
 ```
 
 ## Phases
 
-| Phase | Contenu                                             | Statut |
-| ----- | --------------------------------------------------- | ------ |
-| 1.1   | Scaffold + design system                            | ✅     |
-| 1.2   | Composants dashboard mockés                         | ✅     |
-| 1.3   | PWA setup (manifest, SW, icônes)                    | ⏳     |
-| 1.4   | Solcast forecast provider                           | ✅     |
-| 1.5   | Polish + déploiement Hetzner                        | ⏳     |
-| 1.6   | Pages secondaires (Énergie, Pièces, Auto, Réglages) | ⏳     |
+| Phase | Contenu                                                                                     | Statut |
+| ----- | ------------------------------------------------------------------------------------------- | ------ |
+| 1.1   | Scaffold + design system                                                                    | ✅     |
+| 1.2   | Composants dashboard mockés                                                                 | ✅     |
+| 1.3   | PWA setup (manifest, SW, icônes)                                                            | ⏳     |
+| 1.4   | Solcast forecast provider (retiré 2026-07 — la prévision PV vient du forecast-bridge AROME) | ✅     |
+| 1.5   | Polish + déploiement Hetzner                                                                | ⏳     |
+| 1.6   | Pages secondaires (Énergie, Pièces, Auto, Réglages)                                         | ⏳     |
