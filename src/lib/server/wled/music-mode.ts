@@ -22,7 +22,6 @@
 import { readFileSync, writeFile } from 'node:fs';
 import path from 'node:path';
 import {
-  MASK_NAME,
   MUSIC_FX,
   musicStyleDef,
   resolveByName,
@@ -183,8 +182,7 @@ export function applyRender(playing: boolean, opts: RenderOpts = {}): Promise<vo
     };
     const effects = d.effects ?? [];
     const palettes = d.palettes ?? [];
-    // Le segment cache « Boîte » garde noires les LEDs de service : jamais d'effet dessus.
-    const segs = (d.state?.seg ?? []).filter((s) => (s.stop ?? 0) > 0 && s.n !== MASK_NAME);
+    const segs = (d.state?.seg ?? []).filter((s) => (s.stop ?? 0) > 0);
     if (!segs.length) {
       console.log('[wled/mode] rendu différé : aucun segment');
       return;
@@ -252,7 +250,7 @@ export function applyStaticFallback(): Promise<void> {
       console.log('[wled/mode] repli statique différé : ruban éteint');
       return;
     }
-    const segs = (d.state?.seg ?? []).filter((s) => (s.stop ?? 0) > 0 && s.n !== MASK_NAME);
+    const segs = (d.state?.seg ?? []).filter((s) => (s.stop ?? 0) > 0);
     if (!segs.length) return;
     const solid = (d.effects ?? []).indexOf('Solid');
     // Sortie du mode : on rend un état STATIQUE chaleureux (blanc chaud, fond

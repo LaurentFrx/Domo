@@ -20,19 +20,16 @@
  * sauter le curseur sous le doigt, et l'état des segments est mis à jour
  * IN-PLACE (identité référentielle préservée).
  *
- * Modèle : les lignes LED physiques = segments WLED (liste LINES) :
- *   - id 0 « Store »         → ruban du store banne (52 px)
- *   - id 1 « Bras du store » → 2×50 LEDs de bras en parallèle = 50 px [53,103)
- * Le px 52 = 2 LEDs régénératrices dans la boîte de dérivation (une par
- * branche : chaque câble a son pilote dédié, le Y passif corrompait le signal
- * par réflexions). Elles restent NOIRES (chauffe boîte) grâce au segment
- * MASK_SEG « Boîte » [52,53) Solid noir posé PAR-DESSUS avec l'id le plus haut
- * (le ledmap du firmware 16.0.1 s'est avéré inopérant). Elles régénèrent le
- * signal même éteintes. Ce segment est EXCLU du modèle de l'app (applyState).
+ * Modèle : les lignes LED physiques = segments WLED (liste LINES), 1 bus :
+ *   - « SàM d'Été » [0,52)  → ruban principal (éclaire la salle à manger d'été)
+ *   - « Store »    [52,102) → les 2 bras du store banne, 2×50 LEDs en PARALLÈLE
+ *     (50 px logiques), chacun derrière SON amplificateur de signal dans la
+ *     boîte de raccordement n°2 (les amplis ont remplacé les LEDs
+ *     régénératrices soudées : le Y passif corrompait le signal par réflexions,
+ *     et les soudures sur pads étaient mécaniquement fragiles).
+ * Plus AUCUNE LED de service ni masque : uniquement des pixels visibles.
  * Future ligne « SàM Été » (2ᵉ sortie du Dig-Uno) : ajouter une entrée LINES.
  */
-
-import { MASK_NAME } from '$lib/wled/music-styles';
 
 export type RGB = [number, number, number];
 
@@ -205,27 +202,12 @@ export type WledScope = 'together' | 'perLine';
 // une extension future sans retouche. Tant que le module ne compte que la
 // ligne 1, le mode « Par ligne » est sans objet (canSplit=false, bascule masquée).
 //   [0,52)   « Store »         — 52 groupes COB WS2814 comptés le 2026-07-06
-//   [0,52)   « Store »         — 52 groupes COB WS2814
-//   px 52    LEDs régénératrices de la boîte (masquées par MASK_SEG, hors lignes)
-//   [53,103) « Bras du store » — 2×50 LEDs en parallèle = 50 px logiques
+//   [0,52)   « SàM d'Été » — 52 groupes COB WS2814 (ruban principal)
+//   [52,102) « Store »      — 2×50 LEDs de bras en parallèle = 50 px logiques
 const LINES: { n: string; start: number; stop?: number }[] = [
-  { n: 'Store', start: 0, stop: 52 },
-  { n: 'Bras du store', start: 53 }
+  { n: "SàM d'Été", start: 0, stop: 52 },
+  { n: 'Store', start: 52 }
 ];
-/** Segment CACHE posé par-dessus les LEDs de service de la boîte de dérivation
- *  (Solid noir, id TOUJOURS le plus haut → rendu en dernier, écrase le fond).
- *  Reposé à chaque setScope ; exclu du modèle par #applyState (jamais dans
- *  l'UI) et ignoré par les rendus serveur (music-mode filtre sur le nom). */
-const MASK_SEG = {
-  start: 52,
-  stop: 53,
-  n: MASK_NAME,
-  on: true,
-  bri: 255,
-  fx: 0,
-  pal: 0,
-  col: [[0, 0, 0, 0]]
-};
 /** Seuil d'existence de la 2ᵉ ligne (début de la première ligne optionnelle). */
 const SEG_SPLIT = LINES[1].start;
 
@@ -311,7 +293,6 @@ class WledStore {
       const stop = typeof seg.stop === 'number' ? seg.stop : 0;
       const len = typeof seg.len === 'number' ? seg.len : Math.max(0, stop - start);
       if (len <= 0) continue; // segment inactif
-      if (seg.n === MASK_NAME) continue; // cache des LEDs de service : jamais dans l'UI
 
       // Couleur primaire : [r,g,b] ou [r,g,b,w] (RGBW).
       let col: RGB = [255, 255, 255];
@@ -582,24 +563,18 @@ class WledStore {
           pal: base.pal
         }
       : {};
-    // Le segment cache « Boîte » prend TOUJOURS l'id le plus haut (rendu en
-    // dernier = écrase le fond) ; les ids excédentaires sont supprimés (stop:0).
     const seg =
       s === 'perLine' && this.canSplit
-        ? [
-            ...LINES.map((l, i) => ({
-              id: i,
-              start: l.start,
-              stop: l.stop ?? total,
-              n: l.n,
-              ...inherit
-            })),
-            { id: LINES.length, ...MASK_SEG }
-          ]
+        ? LINES.map((l, i) => ({
+            id: i,
+            start: l.start,
+            stop: l.stop ?? total,
+            n: l.n,
+            ...inherit
+          }))
         : [
             { id: 0, start: 0, stop: total, n: 'Terrasse', ...inherit },
-            { id: 1, ...MASK_SEG },
-            ...LINES.slice(1).map((_, i) => ({ id: i + 2, stop: 0 }))
+            ...LINES.slice(1).map((_, i) => ({ id: i + 1, stop: 0 }))
           ];
     // Reflet OPTIMISTE de la topologie : une commande enchaînée juste derrière
     // (ambiance, couleur) itère this.segments — sans ça elle raterait les
@@ -607,7 +582,7 @@ class WledStore {
     if (base) {
       const live = seg as { id: number; start?: number; stop: number; n?: string }[];
       this.segments = live
-        .filter((g) => g.stop > 0 && g.n !== MASK_NAME)
+        .filter((g) => g.stop > 0)
         .map((g) => ({
           ...base,
           id: g.id,

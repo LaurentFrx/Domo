@@ -16,10 +16,9 @@
  * (+ tunnel comme les autres bridges) et le proxy bascule sur le vrai module —
  * AUCUN changement côté store ni composants (l'UI est pilotée par les données).
  *
- * Deux segments modélisent les deux lignes LED physiques :
- *   - Segment 0 « Store »         → ruban du store banne (52 groupes COB)
- *   - Segment 1 « Bras du store » → 2×50 LEDs de bras = 50 px (le vrai module a
- *     en plus un segment cache « Boîte » [52,53) exclu du modèle par l'app)
+ * Les lignes LED physiques :
+ *   - Segment 0 « SàM d'Été » → ruban principal (52 groupes COB)
+ *   - Segment 1 « Store »     → 2×50 LEDs de bras en parallèle = 50 px
  *
  * NB : l'état vit en mémoire du process Node (le service domo). Il persiste
  * entre les requêtes mais repart aux valeurs par défaut à chaque redémarrage —
@@ -269,8 +268,8 @@ interface MockState {
   seg: MockSeg[];
 }
 
-const SEG_STORE_LEN = 52; // ruban du store banne (52 groupes COB)
-const SEG_BRAS_LEN = 50; // 2×50 LEDs de bras en parallèle (LEDs boîte sous segment cache « Boîte »)
+const SEG_STORE_LEN = 52; // ruban principal SàM d'été (52 groupes COB)
+const SEG_BRAS_LEN = 50; // les 2 bras en parallèle = 50 px logiques
 
 const state: MockState = {
   on: true,
@@ -334,7 +333,7 @@ const state: MockState = {
       frz: false,
       bri: 220,
       cct: 127,
-      n: 'Bras du store',
+      n: 'Store',
       col: [
         [0, 0, 0, 200],
         [0, 0, 0, 0],

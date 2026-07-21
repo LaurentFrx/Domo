@@ -509,7 +509,7 @@
         wled.setScope(isTogether ? 'perLine' : 'together');
       }}
     >
-      {isTogether ? 'Régler les lignes séparément' : 'Piloter les deux lignes ensemble'}
+      {isTogether ? 'Régler les lignes séparément' : 'Piloter toutes les lignes ensemble'}
     </button>
     {#if !isTogether && target}
       <div class="line-panel" class:dimmed={ctlDisabled}>

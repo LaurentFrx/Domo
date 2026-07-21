@@ -11,12 +11,6 @@
 
 export type RGB = [number, number, number];
 
-/** Nom du segment CACHE qui garde noires les LEDs de service de la boîte de
- *  dérivation (px 52, régénérateurs de signal des bras du store). Partagé
- *  client/serveur : l'UI l'exclut de son modèle, les rendus du mode Musique
- *  ne doivent JAMAIS le couvrir d'un effet. */
-export const MASK_NAME = 'Boîte';
-
 export interface WledMusicStyle {
   key: string;
   label: string;
