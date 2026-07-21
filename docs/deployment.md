@@ -61,8 +61,9 @@ sudo systemctl reload caddy
 `/home/laurent/domo/.env` (gitignored) :
 
 ```env
-SOLCAST_API_KEY=...
-SOLCAST_RESOURCE_ID=...
+AUTH_TOKEN=...      # lien magique /auth?k=<token>
+PORTAIL_TOKEN=...   # Bearer pour POST /api/portail/pulse
+# + URLs/tokens des bridges locaux (Anker, APsystems, Airzone, ...)
 ```
 
 Le service systemd charge ce fichier via `EnvironmentFile=`. Après
