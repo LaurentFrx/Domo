@@ -9,7 +9,6 @@
   import { settings } from '$stores/settings.svelte';
   import { energyMonthly, type MonthAgg } from '$stores/energyMonthly.svelte';
   import { cumulus } from '$stores/cumulus.svelte';
-  import { ankerLocal } from '$stores/ankerLocal.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { matter } from '$stores/matter.svelte';
   import { acquire, acquireFns } from '$stores/refcount';
@@ -42,7 +41,8 @@
     releases = [
       acquire(zigbee),
       acquire(matter), // prises Matter mesurées (Bureau multimédia, Home cinéma) — conso
-      acquire(ankerLocal), // Solarbank Max AC + Smart Meter Gen 2 en Modbus local
+      // ankerLocal (Modbus Max AC + Gen 2) est APP-WIDE (layout) : l'accueil
+      // fusionne son SoC/flux — ne pas le refcounter ici.
       acquire(forecast),
       acquire(productionHistory),
       acquire(energyMonthly), // ventilation mensuelle (tableau + KPI)

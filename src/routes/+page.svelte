@@ -4,6 +4,7 @@
   import KpiCard from '$components/cards/KpiCard.svelte';
   import SavingsCard from '$components/cards/SavingsCard.svelte';
   import { anker } from '$stores/anker.svelte';
+  import { ankerLocal } from '$stores/ankerLocal.svelte';
   import { production } from '$stores/production.svelte';
   import { savings } from '$stores/savings.svelte';
   import { dashboard } from '$stores/dashboard.svelte';
@@ -34,22 +35,64 @@
     anker.connected ? anker.sb2SolarW : Math.round(dashboard.solarPower * 1000 * 0.4)
   );
   // Réseau FIABLE — PRIORITÉ à l'EM-50 (compteur local Shelly : mesure instantanée
-  // signée, recoupée Anker à ±10 W — la raison d'être de son intégration). Repli sur
-  // le dérivé Linky d'Anker (fiable mais lent, ~5 min) si l'EM-50 est injoignable ; le
-  // grid_power_w INSTANTANÉ du cloud Solix, lui, reste inexploitable (paliers figés,
-  // signe instable, fantômes). Mock Shelly en dernier recours (hors Anker).
+  // signée, recoupée Anker à ±10 W — la raison d'être de son intégration). 1er repli :
+  // le Smart Meter Gen 2 lu en Modbus LOCAL (même convention de signe, vérifiée ;
+  // instantané, sans cloud). 2e repli : le dérivé Linky d'Anker (fiable mais lent,
+  // ~5 min) ; le grid_power_w INSTANTANÉ du cloud Solix, lui, reste inexploitable
+  // (paliers figés, signe instable, fantômes). Mock Shelly en dernier recours.
   const gridPowerW = $derived(
-    em50.available ? em50.gridPowerW : anker.connected ? anker.gridReliableW : shelly.gridPowerW
+    em50.available
+      ? em50.gridPowerW
+      : ankerLocal.meterAvailable
+        ? ankerLocal.meterGridPowerW
+        : anker.connected
+          ? anker.gridReliableW
+          : shelly.gridPowerW
   );
-  const batterySoc = $derived(anker.connected ? (anker.averageSoc ?? 0) : dashboard.batteryLevel);
-  // Charge (→ usage) et décharge (→ apport) SÉPARÉES, depuis l'agrégat fiable du
-  // bridge. Le Sankey peut ainsi montrer la batterie du bon côté (voire les deux).
-  const batteryChargeW = $derived(
-    anker.connected ? anker.batteryChargeW : dashboard.batteryStatus === 'charge' ? 400 : 0
-  );
-  const batteryDischargeW = $derived(
-    anker.connected ? anker.batteryDischargeW : dashboard.batteryStatus === 'charge' ? 0 : 600
-  );
+  // ─── Batterie : fusion cloud + LOCAL (Modbus Max AC) ─────────────────────
+  // Le bridge cloud ne liste dans batteries[] QUE les 2 Solarbank 3 (pans
+  // Sud/Ouest) : la Max AC (7,2 kWh, hub AC-couplé) n'y figure PAS — son flux
+  // n'existait que noyé dans l'agrégat (~60 s de retard) et son SoC NULLE PART
+  // (l'accueil affichait « 100 % » parc avec la batterie principale à 49 %).
+  // La lecture Modbus locale (boost 2,5 s ici) la réintègre :
+  //   SoC parc = pondéré par CAPACITÉ (SB3 cloud + Max AC locale) ;
+  //   flux = per-unit SB3 (jamais pollués par la Max AC, absente de la liste)
+  //          + Max AC locale temps réel.
+  // Repli intégral sur le cloud si le local est injoignable (comportement
+  // d'avant), et sur le local seul si le cloud est down.
+  const localBatteryUp = $derived(ankerLocal.sbAvailable && ankerLocal.ratedEnergyWh > 0);
+  const batteryOnline = $derived(anker.connected || localBatteryUp);
+  const batterySoc = $derived.by(() => {
+    if (anker.connected && localBatteryUp) {
+      const num =
+        anker.batteries.reduce((s, b) => s + b.soc * b.capacityWh, 0) +
+        ankerLocal.socPct * ankerLocal.ratedEnergyWh;
+      const den = anker.totalBatteryCapacityWh + ankerLocal.ratedEnergyWh;
+      return den > 0 ? num / den : ankerLocal.socPct;
+    }
+    if (localBatteryUp) return ankerLocal.socPct;
+    return anker.connected ? (anker.averageSoc ?? 0) : dashboard.batteryLevel;
+  });
+  // Charge (→ usage) et décharge (→ apport) SÉPARÉES. Le Sankey peut ainsi
+  // montrer la batterie du bon côté (voire les deux).
+  const batteryChargeW = $derived.by(() => {
+    if (localBatteryUp) {
+      const sb3W = anker.batteries.reduce((s, b) => s + b.chargingPowerW, 0);
+      return sb3W + Math.max(0, -ankerLocal.batteryPowerW);
+    }
+    return anker.connected ? anker.batteryChargeW : dashboard.batteryStatus === 'charge' ? 400 : 0;
+  });
+  const batteryDischargeW = $derived.by(() => {
+    if (localBatteryUp) {
+      const sb3W = anker.batteries.reduce((s, b) => s + b.dischargingPowerW, 0);
+      return sb3W + Math.max(0, ankerLocal.batteryPowerW);
+    }
+    return anker.connected
+      ? anker.batteryDischargeW
+      : dashboard.batteryStatus === 'charge'
+        ? 0
+        : 600;
+  });
 
   // ─── Transitions d'affichage ─────────────────────────────────────────
   // On interpole les puissances entre deux relevés (Anker rafraîchit ~toutes les
@@ -105,18 +148,28 @@
     if (homePageActive) {
       em50.setBoost(2500);
       apsystems.setBoost(5000);
+      ankerLocal.setBoost(2500); // Max AC + Gen 2 en Modbus LAN : boost sans risque
     } else {
       em50.clearBoost();
       apsystems.clearBoost();
+      ankerLocal.clearBoost();
     }
   });
   onDestroy(() => {
     em50.clearBoost();
     apsystems.clearBoost();
+    ankerLocal.clearBoost();
   });
-  const gridLive = $derived(em50.available);
-  // Réseau héros : mesure EM-50 brute (rapide) si dispo, sinon repli lissé (Linky).
-  const gridHeroW = $derived(em50.available ? em50.gridPowerW : gridA);
+  const gridLive = $derived(em50.available || ankerLocal.meterAvailable);
+  // Réseau héros : mesure EM-50 brute (rapide) si dispo, sinon Gen 2 local
+  // (même fraîcheur), sinon repli lissé (Linky).
+  const gridHeroW = $derived(
+    em50.available
+      ? em50.gridPowerW
+      : ankerLocal.meterAvailable
+        ? ankerLocal.meterGridPowerW
+        : gridA
+  );
 
   // ─── Fraîcheur de la part « batterie » de la conso (cloud Solix ~60 s) ───────
   // La conso Maison mêle réseau (frais) et part SolarBank (cloud). Le snapshot Anker
@@ -153,7 +206,10 @@
   );
 
   // ─── Énergie stockée en batterie (kWh) — pour la carte Batterie ───────
-  const storedKwh = $derived(anker.totalBatteryEnergyWh / 1000);
+  // SB3 cloud + Max AC locale (soc × 7,2 kWh) quand le Modbus local est up.
+  const storedKwh = $derived(
+    (anker.totalBatteryEnergyWh + (localBatteryUp ? ankerLocal.energyWh : 0)) / 1000
+  );
 
   // ─── Bilan énergie du JOUR — répartition de toute l'énergie brassée ──────
   // 3 parts d'un même total (= 100 %) : solaire autoconsommé + surplus renvoyé
@@ -215,16 +271,16 @@
       <!-- ═══ Batterie — charge (SOC) + jauge segmentée OVNI (workflow + juge) ═══ -->
       <div
         class="bat-card flex items-center gap-3 rounded-[var(--radius-xl)] border px-4 py-3"
-        class:is-charging={anker.connected && batChargeA > 1}
-        class:is-discharging={anker.connected && batDischargeA > 1}
-        class:is-low={anker.connected && socA <= 20}
-        class:is-offline={!anker.connected}
+        class:is-charging={batteryOnline && batChargeA > 1}
+        class:is-discharging={batteryOnline && batDischargeA > 1}
+        class:is-low={batteryOnline && socA <= 20}
+        class:is-offline={!batteryOnline}
         style="background: var(--color-card); border-color: var(--color-border);"
       >
         <!-- Gauche : SOC numérique + état -->
         <div class="flex shrink-0 flex-col">
           <div class="flex items-baseline gap-1">
-            {#if anker.connected}
+            {#if batteryOnline}
               <span
                 class="bat-soc text-3xl leading-none font-bold tabular-nums"
                 style="color: var(--color-fg);">{Math.round(Math.max(0, Math.min(100, socA)))}</span
@@ -246,7 +302,7 @@
               class="text-[0.6875rem] leading-none font-semibold tracking-wide uppercase"
               style="color: var(--color-muted-fg);"
             >
-              {#if !anker.connected}Hors ligne{:else if batChargeA > 1}Charge{:else if batDischargeA > 1}Décharge{:else}Repos{/if}
+              {#if !batteryOnline}Hors ligne{:else if batChargeA > 1}Charge{:else if batDischargeA > 1}Décharge{:else}Repos{/if}
             </span>
           </div>
         </div>
@@ -256,7 +312,7 @@
           <div class="bat-cells flex h-9 min-w-0 flex-1 items-stretch gap-[3px] rounded-md p-[3px]">
             {#each Array.from({ length: 10 }) as _, i}
               {@const lo = i * 10}
-              {@const lvl = anker.connected ? Math.max(0, Math.min(100, socA)) : 0}
+              {@const lvl = batteryOnline ? Math.max(0, Math.min(100, socA)) : 0}
               {@const fill = Math.max(0, Math.min(1, (lvl - lo) / 10))}
               {@const active = lvl > lo + 0.5}
               {@const isEdge = active && lvl <= lo + 10.5}
@@ -271,11 +327,11 @@
         <!-- Droite : flux (W) + énergie stockée -->
         <div class="flex shrink-0 flex-col items-end">
           <span class="bat-flow text-sm leading-none font-semibold tabular-nums">
-            {#if anker.connected && batChargeA > 1}+{fmtW(batChargeA)} W{:else if anker.connected && batDischargeA > 1}−{fmtW(
+            {#if batteryOnline && batChargeA > 1}+{fmtW(batChargeA)} W{:else if batteryOnline && batDischargeA > 1}−{fmtW(
                 batDischargeA
               )} W{:else}—{/if}
           </span>
-          {#if anker.connected && storedKwh > 0}
+          {#if batteryOnline && storedKwh > 0}
             <span
               class="mt-1.5 text-[0.6875rem] leading-none font-medium tabular-nums"
               style="color: var(--color-muted-fg);">{storedKwh.toFixed(1)} kWh</span

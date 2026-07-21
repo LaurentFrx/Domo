@@ -26,6 +26,11 @@ interface SolarbankBlock {
   battery_status: 'standby' | 'charging' | 'discharging' | 'sleep' | 'unknown';
   mode: string;
   mode_raw: number;
+  /** Capacité nominale (Wh) — la Max AC est ABSENTE de batteries[] côté cloud :
+   *  cette capacité sert à la réintégrer dans le SoC/stock du parc (accueil). */
+  rated_energy_wh: number;
+  /** Énergie stockée estimée (Wh) = soc × rated / 100. */
+  energy_wh: number;
 }
 
 interface MeterBlock {
@@ -58,7 +63,9 @@ const EMPTY: AnkerLocalStatus = {
     load_power_w: 0,
     battery_status: 'unknown',
     mode: 'unknown',
-    mode_raw: -1
+    mode_raw: -1,
+    rated_energy_wh: 0,
+    energy_wh: 0
   },
   meter: { available: false, grid_power_w: 0, voltage_v: 0 },
   em50_grid_w: null,
@@ -88,6 +95,11 @@ class AnkerLocalState {
 
   #timer: ReturnType<typeof setInterval> | null = null;
   #visibilityHandler: (() => void) | null = null;
+  /** Cadence de poll courante (ms). Boostée par setBoost() sur l'accueil (le SoC
+   *  et le flux batterie affichés viennent d'ici quand le local est up) ;
+   *  REFRESH_MS par défaut. Lecture Modbus LAN sans cache cloud → poller vite
+   *  livre une vraie fraîcheur (même mécanique que le store em50). */
+  #intervalMs: number = REFRESH_MS;
 
   // ─── Getters exposés au front ─────────────────────────────────────────
   /** La route répond (dernier poll réussi). */
@@ -131,6 +143,14 @@ class AnkerLocalState {
   /** Mode actif en français (pour l'UI). */
   get modeLabel(): string {
     return MODE_LABELS[this.#snap.solarbank.mode] ?? this.#snap.solarbank.mode;
+  }
+  /** Capacité nominale de la Max AC (Wh) — 0 tant que rien n'a été lu. */
+  get ratedEnergyWh(): number {
+    return this.#snap.solarbank.rated_energy_wh;
+  }
+  /** Énergie stockée estimée dans la Max AC (Wh). */
+  get energyWh(): number {
+    return this.#snap.solarbank.energy_wh;
   }
 
   // Smart Meter Gen 2 (contrôle croisé du EM-50 — PAS la source de vérité)
@@ -185,13 +205,40 @@ class AnkerLocalState {
   }
 
   #start() {
-    this.#timer ??= setInterval(() => this.poll(), REFRESH_MS);
+    this.#timer ??= setInterval(() => this.poll(), this.#intervalMs);
   }
 
   #stop() {
     if (this.#timer) {
       clearInterval(this.#timer);
       this.#timer = null;
+    }
+  }
+
+  /**
+   * Accélère la cadence de poll (ms) tant qu'une page « regarde » la batterie en
+   * direct (accueil). Même contrat que em50.setBoost : #stop() AVANT #start()
+   * pour que la cadence change réellement ; le #visibilityHandler relit
+   * #intervalMs, donc le boost survit à un aller-retour arrière-plan. NE PAS
+   * mettre dans connect() (rappels idempotents app-wide).
+   */
+  setBoost(ms: number) {
+    if (ms === this.#intervalMs) return;
+    this.#intervalMs = ms;
+    if (this.#timer) {
+      this.#stop();
+      this.#start();
+    }
+    this.poll(); // tick immédiat : la 1re lecture rapide n'attend pas `ms`
+  }
+
+  /** Restaure la cadence par défaut (REFRESH_MS). */
+  clearBoost() {
+    if (this.#intervalMs === REFRESH_MS) return;
+    this.#intervalMs = REFRESH_MS;
+    if (this.#timer) {
+      this.#stop();
+      this.#start();
     }
   }
 

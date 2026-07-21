@@ -10,6 +10,7 @@ import { env } from '$env/dynamic/private';
 import { isHC, nextTariffSwitch, parisDate, regimeAt } from '../tariffs';
 import type { CumulusConfig, CumulusInputs, TempSource, ApplianceInput } from './types';
 import { readRelay } from './relay';
+import { readAnkerSolarbank } from '$lib/server/anker-modbus';
 import { averageTemp } from './energy-model';
 import { ensureTempSensor, getCumulusTemp, ensureTempTopic, getTempTopic } from './temp-sensor';
 import { ensureApplianceSensors, getAppliancePower, TRACKED_APPLIANCES } from './appliance-sensor';
@@ -301,13 +302,17 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
   if (em.outdoorSources.thermoExtTopic) ensureTempTopic(em.outdoorSources.thermoExtTopic);
   const now = new Date();
 
-  const [relay, em50, forecast, anker, daikinOut, aps] = await Promise.all([
+  const [relay, em50, forecast, anker, daikinOut, aps, sbLocal] = await Promise.all([
     readRelay(),
     readEm50(),
     readForecastNextDaylight(now),
     readAnker(),
     em.outdoorSources.daikin ? readDaikinOutdoor() : Promise.resolve(null),
-    readApsystems(now.getTime())
+    readApsystems(now.getTime()),
+    // Max AC en Modbus LOCAL : le bridge cloud ne la liste PAS dans batteries[]
+    // → sans elle, socAvg (réserve HC, battFullPct) jugeait un parc « 100 % »
+    // avec la batterie principale (7,2 kWh) à moitié vide. Ne rejette jamais.
+    readAnkerSolarbank()
   ]);
 
   const t = getCumulusTemp();
@@ -385,9 +390,14 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     ankerGridPowerW: anker.gridPowerW,
     sbOutputPowerW: anker.sbOutputPowerW,
     batteryDischargeW: anker.batteryDischargeW,
-    batterySocPct: anker.socPct,
-    batteryEnergyWh: anker.batteryEnergyWh,
-    batteryCapacityWh: anker.batteryCapacityWh,
+    // Parc RÉEL = packs cloud (2× SB3) + Max AC locale quand joignable. Le
+    // pilote moyenne batterySocPct (socAvg) : la Max AC réintégrée rend ses
+    // conditions battFullPct / réserve HC fidèles à la vraie réserve. Les flux
+    // W (charge/décharge) restent l'agrégat cloud : dynamique du pilote tunée
+    // dessus, on ne change QUE la justesse de l'état de charge.
+    batterySocPct: sbLocal.available ? [...anker.socPct, sbLocal.soc_pct] : anker.socPct,
+    batteryEnergyWh: anker.batteryEnergyWh + (sbLocal.available ? sbLocal.energy_wh : 0),
+    batteryCapacityWh: anker.batteryCapacityWh + (sbLocal.available ? sbLocal.rated_energy_wh : 0),
     batteryChargeW: anker.batteryChargeW,
     sbInputW: anker.sbInputW,
     pvApsW: aps.powerW,

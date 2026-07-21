@@ -198,6 +198,12 @@ export interface AnkerSolarbankStatus {
   /** Mode actif (clé technique du YAML officiel, ex. self_consumption). */
   mode: string;
   mode_raw: number;
+  /** Capacité nominale du device (Wh) — rated_energy 10250. La Max AC est ABSENTE
+   *  de la liste batteries[] du bridge cloud : cette capacité sert à la réintégrer
+   *  dans le SoC/stock du parc (accueil + orchestrateur cumulus). */
+  rated_energy_wh: number;
+  /** Énergie stockée estimée (Wh) = soc × rated / 100. */
+  energy_wh: number;
 }
 
 const SB_OFFLINE: AnkerSolarbankStatus = {
@@ -209,32 +215,41 @@ const SB_OFFLINE: AnkerSolarbankStatus = {
   load_power_w: 0,
   battery_status: 'unknown',
   mode: 'unknown',
-  mode_raw: -1
+  mode_raw: -1,
+  rated_energy_wh: 0,
+  energy_wh: 0
 };
 
 /**
- * Trois transactions sur une socket :
+ * Quatre transactions sur une socket :
  *   FC 04 @10001 ×15 → status(0) pv(1-2) pv_tiers(3-4) batterie(7-8)
  *                      maison(9-10) soc(13)
  *   FC 04 @10208 ×2  → ac_grid_output_power
+ *   FC 04 @10250 ×2  → rated_energy (UINT32, gain 10 → kWh×10)
  *   FC 03 @10064 ×1  → operating_mode (plage holding)
  */
 async function fetchSolarbank(): Promise<AnkerSolarbankStatus> {
-  const [main, ac, mode] = await readMany(solarbankTarget(), [
+  const [main, ac, rated, mode] = await readMany(solarbankTarget(), [
     { fc: 4, address: 10001, count: 15 },
     { fc: 4, address: 10208, count: 2 },
+    { fc: 4, address: 10250, count: 2 },
     { fc: 3, address: 10064, count: 1 }
   ]);
+  const socPct = main[13];
+  // rated_energy : UINT32 gain 10 (dixièmes de kWh) → Wh. Vérifié en réel : 7,2 kWh.
+  const ratedWh = ((((rated[0] & 0xffff) << 16) | (rated[1] & 0xffff)) >>> 0) * 100;
   return {
     available: true,
-    soc_pct: main[13],
+    soc_pct: socPct,
     battery_power_w: i32(main[7], main[8]),
     ac_power_w: i32(ac[0], ac[1]),
     pv_power_w: i32(main[1], main[2]) + i32(main[3], main[4]),
     load_power_w: i32(main[9], main[10]),
     battery_status: BATTERY_STATUS[main[0]] ?? 'unknown',
     mode: OPERATING_MODE[mode[0]] ?? `unknown(${mode[0]})`,
-    mode_raw: mode[0]
+    mode_raw: mode[0],
+    rated_energy_wh: ratedWh,
+    energy_wh: Math.round((socPct * ratedWh) / 100)
   };
 }
 

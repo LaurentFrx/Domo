@@ -18,6 +18,7 @@
   import { anker } from '$stores/anker.svelte';
   import { apsystems } from '$stores/apsystems.svelte';
   import { em50 } from '$stores/em50.svelte';
+  import { ankerLocal } from '$stores/ankerLocal.svelte';
   import { production } from '$stores/production.svelte';
   import { savings } from '$stores/savings.svelte';
   import { tariff } from '$stores/tariff.svelte';
@@ -181,6 +182,15 @@
   $effect(() => {
     em50.connect();
     return () => em50.disconnect();
+  });
+
+  // ─── Anker Solix LOCAL (Modbus : Solarbank Max AC + Smart Meter Gen 2) ──
+  // App-wide : le SoC/flux batterie de l'ACCUEIL fusionne la Max AC locale
+  // (absente de batteries[] du cloud) avec les Solarbank 3 cloud — la tuile
+  // /energie le consomme aussi. Poll 10 s, visibility-aware, idempotent.
+  $effect(() => {
+    ankerLocal.connect();
+    return () => ankerLocal.disconnect();
   });
 
   // ─── Économies d'autoconsommation (route locale, base recorder) ────────
