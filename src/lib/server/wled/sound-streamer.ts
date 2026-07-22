@@ -150,12 +150,20 @@ function tick(): void {
   }
   if (suspended) return;
   const pkt = buildPacket(frame ?? SILENCE);
-  socket ??= dgram.createSocket('udp4');
+  if (!socket) {
+    socket = dgram.createSocket('udp4');
+    // Un socket dgram ouvert retient l'event loop : sans unref, un restart
+    // pendant une écoute empêcherait le process de sortir après SIGTERM.
+    socket.unref();
+  }
   socket.send(pkt, target.port, target.host, () => undefined);
 }
 
 function startLoop(): void {
-  if (!timer) timer = setInterval(tick, SEND_MS);
+  if (!timer) {
+    timer = setInterval(tick, SEND_MS);
+    timer.unref(); // même raison : ne jamais retenir le process à l'arrêt
+  }
 }
 function stopLoop(): void {
   if (timer) {

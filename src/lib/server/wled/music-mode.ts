@@ -292,12 +292,14 @@ if (!G.__wledModeTimers) {
   // `enabled` persisté → sans ça, l'effet audio-réactif resterait orphelin
   // (ruban allumé mais noir). On repose un rendu : pause si rien ne joue,
   // réactif si les heartbeats ont déjà repris. Délai : laisser le tunnel monter.
+  // unref() : ces timers de fond ne doivent JAMAIS retenir le process à l'arrêt
+  // (SIGTERM) — sans ça, l'event loop ne se vide pas et systemd finit en SIGKILL.
   setTimeout(() => {
     if (state.enabled) {
       console.log('[wled/mode] réconciliation post-restart : rendu reposé');
       void applyRender(playingProvider());
     }
-  }, 10_000);
+  }, 10_000).unref();
   // Poll de fond 60 s : détecte un (r)allumage fait HORS Domo (app WLED
   // native, coupure de courant) même sans musique en cours — les rendus/replis
   // différés sont rejoués. Le tick du streamer garde son refresh 10 s en session.
@@ -305,7 +307,7 @@ if (!G.__wledModeTimers) {
     void moduleGet('state')
       .then(({ data }) => noteModuleOn((data as { on?: unknown })?.on === true))
       .catch(() => undefined); // module injoignable : on garde le dernier connu
-  }, 60_000);
+  }, 60_000).unref();
 }
 
 // ─── Mutations (POST /api/wled/music/mode) ───────────────────────

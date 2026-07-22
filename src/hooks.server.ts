@@ -14,6 +14,23 @@ setIncidentReporter(
   (key, repaired) => void resolveIncident(key, repaired)
 );
 
+// Arrêt PROPRE du process : adapter-node émet 'sveltekit:shutdown' une fois le
+// serveur HTTP fermé (SIGTERM + toutes connexions closes), mais ne termine pas
+// le process — il compte sur une event loop vide. Or nos handles de fond
+// (client MQTT singleton en reconnexion auto, timers music-mode, socket UDP
+// beat) la maintiennent vivante → node ne sortait jamais, systemd attendait
+// TimeoutStop (90 s) puis SIGKILL : chaque `systemctl restart domo` = ~90 s de
+// coupure totale (app figée, commandes clim/cumulus inopérantes). Couplé à
+// SHUTDOWN_TIMEOUT=3 dans domo.service (coupe les SSE ouvertes → close()
+// complète → l'événement est bien émis), l'arrêt tombe à ~3 s.
+const proc = process as unknown as {
+  once(event: 'sveltekit:shutdown', cb: (reason: 'SIGINT' | 'SIGTERM' | 'IDLE') => void): void;
+};
+proc.once('sveltekit:shutdown', (reason) => {
+  console.log(`[shutdown] serveur HTTP fermé (${reason}) — sortie du process`);
+  process.exit(0);
+});
+
 const PUBLIC_PATHS = ['/auth', '/denied'];
 
 function isPublic(pathname: string): boolean {
