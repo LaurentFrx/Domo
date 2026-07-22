@@ -50,24 +50,25 @@
           : shelly.gridPowerW
   );
   // ─── Batterie : fusion cloud + LOCAL (Modbus Max AC) ─────────────────────
-  // Le bridge cloud ne liste dans batteries[] QUE les 2 Solarbank 3 (pans
-  // Sud/Ouest) : la Max AC (7,2 kWh, hub AC-couplé) n'y figure PAS — son flux
-  // n'existait que noyé dans l'agrégat (~60 s de retard) et son SoC NULLE PART
-  // (l'accueil affichait « 100 % » parc avec la batterie principale à 49 %).
-  // La lecture Modbus locale (boost 2,5 s ici) la réintègre :
+  // Depuis la reconfiguration des systèmes Anker (22/07), le bridge cloud
+  // liste les TROIS batteries dans batteries[] — Max AC (A17E2) comprise.
+  // Quand la lecture Modbus locale est up, elle PRIME pour la Max AC
+  // (fraîcheur 2,5 s ici vs ~60 s cloud) : on DÉDUPLIQUE donc l'entrée cloud
+  // A17E2 pour ne pas compter la Max AC deux fois (SoC pondéré, flux, stock).
   //   SoC parc = pondéré par CAPACITÉ (SB3 cloud + Max AC locale) ;
-  //   flux = per-unit SB3 (jamais pollués par la Max AC, absente de la liste)
-  //          + Max AC locale temps réel.
-  // Repli intégral sur le cloud si le local est injoignable (comportement
-  // d'avant), et sur le local seul si le cloud est down.
+  //   flux = per-unit SB3 cloud + Max AC locale temps réel.
+  // Repli intégral sur le cloud (désormais complet) si le local est
+  // injoignable, et sur le local seul si le cloud est down.
   const localBatteryUp = $derived(ankerLocal.sbAvailable && ankerLocal.ratedEnergyWh > 0);
   const batteryOnline = $derived(anker.connected || localBatteryUp);
+  /** Batteries cloud SANS la Max AC (A17E2) — sa vérité vient du Modbus local. */
+  const cloudSb3 = $derived(anker.batteries.filter((b) => b.model !== 'A17E2'));
   const batterySoc = $derived.by(() => {
     if (anker.connected && localBatteryUp) {
       const num =
-        anker.batteries.reduce((s, b) => s + b.soc * b.capacityWh, 0) +
+        cloudSb3.reduce((s, b) => s + b.soc * b.capacityWh, 0) +
         ankerLocal.socPct * ankerLocal.ratedEnergyWh;
-      const den = anker.totalBatteryCapacityWh + ankerLocal.ratedEnergyWh;
+      const den = cloudSb3.reduce((s, b) => s + b.capacityWh, 0) + ankerLocal.ratedEnergyWh;
       return den > 0 ? num / den : ankerLocal.socPct;
     }
     if (localBatteryUp) return ankerLocal.socPct;
@@ -77,14 +78,14 @@
   // montrer la batterie du bon côté (voire les deux).
   const batteryChargeW = $derived.by(() => {
     if (localBatteryUp) {
-      const sb3W = anker.batteries.reduce((s, b) => s + b.chargingPowerW, 0);
+      const sb3W = cloudSb3.reduce((s, b) => s + b.chargingPowerW, 0);
       return sb3W + Math.max(0, -ankerLocal.batteryPowerW);
     }
     return anker.connected ? anker.batteryChargeW : dashboard.batteryStatus === 'charge' ? 400 : 0;
   });
   const batteryDischargeW = $derived.by(() => {
     if (localBatteryUp) {
-      const sb3W = anker.batteries.reduce((s, b) => s + b.dischargingPowerW, 0);
+      const sb3W = cloudSb3.reduce((s, b) => s + b.dischargingPowerW, 0);
       return sb3W + Math.max(0, ankerLocal.batteryPowerW);
     }
     return anker.connected
@@ -206,10 +207,14 @@
   );
 
   // ─── Énergie stockée en batterie (kWh) — pour la carte Batterie ───────
-  // SB3 cloud + Max AC locale (soc × 7,2 kWh) quand le Modbus local est up.
-  const storedKwh = $derived(
-    (anker.totalBatteryEnergyWh + (localBatteryUp ? ankerLocal.energyWh : 0)) / 1000
-  );
+  // Local up : SB3 cloud (sans l'entrée Max AC, dédupliquée) + Max AC locale.
+  // Local down : total cloud tel quel (il inclut désormais la Max AC).
+  const storedKwh = $derived.by(() => {
+    if (localBatteryUp) {
+      return (cloudSb3.reduce((s, b) => s + b.energyWh, 0) + ankerLocal.energyWh) / 1000;
+    }
+    return anker.totalBatteryEnergyWh / 1000;
+  });
 
   // ─── Bilan énergie du JOUR — répartition de toute l'énergie brassée ──────
   // 3 parts d'un même total (= 100 %) : solaire autoconsommé + surplus renvoyé

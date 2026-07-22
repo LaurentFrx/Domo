@@ -214,6 +214,13 @@ interface AnkerRead {
   batteryEnergyWh: number;
   batteryCapacityWh: number;
   socPct: number[];
+  /** Variantes SANS la Max AC (A17E2) : depuis la reconfig des systèmes Anker
+   *  (22/07), le cloud liste AUSSI la Max AC dans batteries[] — quand la
+   *  lecture Modbus locale est up, elle PRIME et l'entrée cloud est
+   *  dédupliquée via ces champs (sinon la Max AC compterait double). */
+  socPctNoMaxAc: number[];
+  batteryEnergyWhNoMaxAc: number;
+  batteryCapacityWhNoMaxAc: number;
   sbInputW: (number | null)[]; // PV entrant par station (input_power_w) — calibration estimateur
 }
 
@@ -228,6 +235,9 @@ async function readAnker(): Promise<AnkerRead> {
     batteryEnergyWh: 0,
     batteryCapacityWh: 0,
     socPct: [],
+    socPctNoMaxAc: [],
+    batteryEnergyWhNoMaxAc: 0,
+    batteryCapacityWhNoMaxAc: 0,
     sbInputW: []
   };
   try {
@@ -240,6 +250,7 @@ async function readAnker(): Promise<AnkerRead> {
       sb_output_power_w?: number;
       battery_discharge_power_w?: number;
       batteries?: {
+        model?: string;
         soc?: number;
         battery_energy_wh?: number;
         battery_capacity_wh?: number;
@@ -248,6 +259,9 @@ async function readAnker(): Promise<AnkerRead> {
       }[];
     };
     const bats = Array.isArray(d.batteries) ? d.batteries : [];
+    // A17E2 = Solarbank Max AC : exclue des variantes NoMaxAc (sa vérité
+    // vient du Modbus local quand il est up — cf. collectInputs).
+    const noMax = bats.filter((b) => b?.model !== 'A17E2');
     return {
       available: d.connected !== false,
       pvPowerW: Math.round(num(d.solar_power_w)),
@@ -258,6 +272,11 @@ async function readAnker(): Promise<AnkerRead> {
       batteryEnergyWh: Math.round(bats.reduce((s, b) => s + num(b?.battery_energy_wh), 0)),
       batteryCapacityWh: Math.round(bats.reduce((s, b) => s + num(b?.battery_capacity_wh), 0)),
       socPct: bats.map((b) => Math.round(num(b?.soc))),
+      socPctNoMaxAc: noMax.map((b) => Math.round(num(b?.soc))),
+      batteryEnergyWhNoMaxAc: Math.round(noMax.reduce((s, b) => s + num(b?.battery_energy_wh), 0)),
+      batteryCapacityWhNoMaxAc: Math.round(
+        noMax.reduce((s, b) => s + num(b?.battery_capacity_wh), 0)
+      ),
       sbInputW: bats.map((b) =>
         typeof b?.input_power_w === 'number' && Number.isFinite(b.input_power_w)
           ? Math.round(b.input_power_w)
@@ -390,14 +409,19 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     ankerGridPowerW: anker.gridPowerW,
     sbOutputPowerW: anker.sbOutputPowerW,
     batteryDischargeW: anker.batteryDischargeW,
-    // Parc RÉEL = packs cloud (2× SB3) + Max AC locale quand joignable. Le
-    // pilote moyenne batterySocPct (socAvg) : la Max AC réintégrée rend ses
-    // conditions battFullPct / réserve HC fidèles à la vraie réserve. Les flux
-    // W (charge/décharge) restent l'agrégat cloud : dynamique du pilote tunée
-    // dessus, on ne change QUE la justesse de l'état de charge.
-    batterySocPct: sbLocal.available ? [...anker.socPct, sbLocal.soc_pct] : anker.socPct,
-    batteryEnergyWh: anker.batteryEnergyWh + (sbLocal.available ? sbLocal.energy_wh : 0),
-    batteryCapacityWh: anker.batteryCapacityWh + (sbLocal.available ? sbLocal.rated_energy_wh : 0),
+    // Parc RÉEL : packs cloud + Max AC. Depuis la reconfig des systèmes
+    // (22/07), le cloud liste AUSSI la Max AC → quand le Modbus local est up,
+    // il PRIME pour elle (fraîcheur) et l'entrée cloud est DÉDUPLIQUÉE
+    // (variantes NoMaxAc) ; local down = cloud complet tel quel. Le pilote
+    // moyenne batterySocPct (socAvg) : conditions battFullPct / réserve HC
+    // fidèles à la vraie réserve. Les flux W restent l'agrégat cloud.
+    batterySocPct: sbLocal.available ? [...anker.socPctNoMaxAc, sbLocal.soc_pct] : anker.socPct,
+    batteryEnergyWh: sbLocal.available
+      ? anker.batteryEnergyWhNoMaxAc + sbLocal.energy_wh
+      : anker.batteryEnergyWh,
+    batteryCapacityWh: sbLocal.available
+      ? anker.batteryCapacityWhNoMaxAc + sbLocal.rated_energy_wh
+      : anker.batteryCapacityWh,
     batteryChargeW: anker.batteryChargeW,
     sbInputW: anker.sbInputW,
     pvApsW: aps.powerW,
