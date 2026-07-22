@@ -423,6 +423,12 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
       ? anker.batteryCapacityWhNoMaxAc + sbLocal.rated_energy_wh
       : anker.batteryCapacityWh,
     batteryChargeW: anker.batteryChargeW,
+    // ── Max AC locale (Modbus ~2,5 s) : le signal « saturation/réserve » du pilote ──
+    // battery_power_w est SIGNÉ (+ décharge vers la maison / − charge) → la charge
+    // réorientable vers le ballon = max(0, −battery_power_w).
+    maxAcAvailable: sbLocal.available,
+    maxAcSocPct: sbLocal.available ? sbLocal.soc_pct : null,
+    maxAcChargeW: sbLocal.available ? Math.max(0, -sbLocal.battery_power_w) : null,
     sbInputW: anker.sbInputW,
     pvApsW: aps.powerW,
     apsAvailable: aps.available,

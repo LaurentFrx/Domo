@@ -55,6 +55,11 @@ export function defaultPilotConfig(): PilotConfig {
     apsMinW: 300, // soleil RÉEL exigé (production APS minimale)
     minUsefulHeatMin: 45, // jamais d'allumage à moins de 45 min de la fin de fenêtre
     invisibleSurplusMinW: 2000, // déclencheur de secours : surplus invisible estimé minimal
+    // Voie saturation/réserve (Max AC zéro-export) : ballon 2900 W − budget de
+    // drain batterie ~900 W = 2000 W de surplus mesuré ; SoC 65 % → une chauffe
+    // au drain max (~1,1 kWh ≈ 15 pts) laisse ≥ 50 % = la réserve nocturne (3,6 kWh).
+    surplusOnW: 2000,
+    maxAcSocOnPct: 65,
 
     // Grâce et coupures
     graceStartupSec: 240, // latence SolarBank tolérée au démarrage (4 min)
@@ -188,6 +193,8 @@ export function normalizePilotConfig(raw: unknown): PilotConfig {
     apsMinW: asNum(o.apsMinW, d.apsMinW, 50, 900),
     minUsefulHeatMin: asNum(o.minUsefulHeatMin, d.minUsefulHeatMin, 10, 240),
     invisibleSurplusMinW: asNum(o.invisibleSurplusMinW, d.invisibleSurplusMinW, 300, 5000),
+    surplusOnW: asNum(o.surplusOnW, d.surplusOnW, 500, 5000),
+    maxAcSocOnPct: asNum(o.maxAcSocOnPct, d.maxAcSocOnPct, 30, 100),
 
     graceStartupSec: asNum(o.graceStartupSec, d.graceStartupSec, 60, 900),
     cutBuyW: asNum(o.cutBuyW, d.cutBuyW, 50, 1000),

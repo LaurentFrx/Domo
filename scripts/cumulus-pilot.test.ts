@@ -49,6 +49,8 @@ function cfg(o: Record<string, unknown> = {}, pilotO: Record<string, unknown> = 
       apsMinW: 300,
       minUsefulHeatMin: 45,
       invisibleSurplusMinW: 2000,
+      surplusOnW: 2000,
+      maxAcSocOnPct: 65,
       graceStartupSec: 240,
       cutBuyW: 150,
       cutBuySustainSec: 30,
@@ -142,6 +144,11 @@ function inp(o: Partial<CumulusInputs> = {}): CumulusInputs {
     batteryCapacityWh: 5360,
     batteryChargeW: 0,
     sbInputW: [null, null],
+    // Max AC locale muette par défaut : la voie saturation est inerte, les tests
+    // historiques du chemin « don franc » gardent leur sens tel quel.
+    maxAcAvailable: false,
+    maxAcSocPct: null,
+    maxAcChargeW: null,
     pvApsW: 800,
     apsAvailable: true,
     apsAgeSec: 5,
@@ -204,14 +211,91 @@ test('don franc tenu 3 min → allumage (wantOn, raison solaire)', () => {
   assert.equal(r.pilot.solarStartsToday, 1); // allumage spontané compté
 });
 
-test('batteries PAS pleines (en charge) → pas d’allumage même avec don franc', () => {
+test('don franc + batteries en charge : l’export PROUVE la saturation (Max AC vivante) → allumage', () => {
+  // Ancien monde : « on ne vole jamais leur recharge » (battFull dans le tronc
+  // commun). Nouveau monde (Max AC zéro-export, 22/07) : si le compteur DONNE
+  // 450 W soutenus PENDANT que la régulation est vivante (Modbus local up),
+  // c’est que le parc n’absorbe plus — l’export est la preuve.
   const r = pilotStep(
-    inp({ gridPowerW: -450, batterySocPct: [70, 72], batteryChargeW: 900 }),
+    inp({
+      gridPowerW: -450,
+      batterySocPct: [70, 72],
+      batteryChargeW: 900,
+      maxAcAvailable: true,
+      maxAcSocPct: 50,
+      maxAcChargeW: 900
+    }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx()
+  );
+  assert.equal(r.wantOn, true);
+});
+
+test('Max AC MUETTE + packs en charge : l’export ne prouve plus rien → garde historique, pas d’allumage', () => {
+  // Si la mesure locale est morte, la régulation zéro-export l’est peut-être
+  // aussi : l’export redevient un débordement ordinaire — on ré-exige la garde
+  // « batteries pleines » (cloud) comme avant le 22/07.
+  const r = pilotStep(
+    inp({ gridPowerW: -450, batterySocPct: [70, 72], batteryChargeW: 900, maxAcAvailable: false }),
     cfg(),
     st({}, { condsSinceTs: NOON - min(4) }),
     ctx()
   );
   assert.equal(r.wantOn, false); // on ne vole jamais leur recharge
+});
+
+// ─── Voie « saturation/réserve » (Max AC zéro-export, 22/07) ─────────────────
+
+test('zéro-export : charge Max AC forte + réserve faite → allumage sans don franc', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: -30, maxAcAvailable: true, maxAcSocPct: 72, maxAcChargeW: 2200 }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx()
+  );
+  assert.equal(r.wantOn, true);
+  assert.equal(r.reason, 'solar');
+});
+
+test('réserve PAS faite (SoC Max AC < seuil) → pas d’allumage malgré 2,5 kW de charge', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: -30, maxAcAvailable: true, maxAcSocPct: 55, maxAcChargeW: 2500 }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx()
+  );
+  assert.equal(r.wantOn, false);
+});
+
+test('surplus réorientable insuffisant → pas d’allumage (budget de drain protégé)', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: -30, maxAcAvailable: true, maxAcSocPct: 80, maxAcChargeW: 1200 }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx()
+  );
+  assert.equal(r.wantOn, false);
+});
+
+test('Modbus local muet : la voie saturation est inerte, le don franc reste la voie', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: -450, maxAcAvailable: false }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx()
+  );
+  assert.equal(r.wantOn, true); // don franc seul, comme avant
+});
+
+test('achat en cours : pas d’allumage saturation même avec charge et réserve', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: 120, maxAcAvailable: true, maxAcSocPct: 80, maxAcChargeW: 2500 }),
+    cfg(),
+    st({}, { condsSinceTs: NOON - min(4) }),
+    ctx()
+  );
+  assert.equal(r.wantOn, false);
 });
 
 test('lave-vaisselle en marche → maison PAS tranquille → pas d’allumage', () => {

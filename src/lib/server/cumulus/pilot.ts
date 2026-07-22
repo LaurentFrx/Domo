@@ -221,10 +221,17 @@ export function pilotStep(
   // ── Les 7 conditions d'allumage solaire (affichées telles quelles dans l'UI) ──
   const tankNotFull =
     ctx.eFullWh > 0 && ctx.eAvailWh < p.fullFraction * ctx.eFullWh && !state.ballonCharged;
-  const exportFrank = inputs.em50Available && exportW > p.exportOnW;
-  const battFull =
-    !inputs.ankerAvailable || // Anker muet : condition neutralisée (mode dégradé, fenêtre resserrée)
+  // L'axiome « l'export prouve la saturation du parc » ne tient que si la
+  // régulation zéro-export de la Max AC est VIVANTE (mesure locale up). Si elle
+  // est muette — et l'événement qui la rend muette peut être celui qui a tué la
+  // régulation — l'export redevient un débordement ordinaire : on ré-exige la
+  // garde historique « batteries pleines » (cloud), neutralisée seulement si le
+  // cloud aussi est muet (mode dégradé historique, fenêtre resserrée à 15 h).
+  const exportProof =
+    inputs.maxAcAvailable ||
+    !inputs.ankerAvailable ||
     (socAvg !== null && socAvg >= p.battFullPct && inputs.batteryChargeW < p.chargeIdleW);
+  const exportFrank = inputs.em50Available && exportW > p.exportOnW && exportProof;
   const quietHouse = !inputs.appliances.some((a) => a.powerW !== null && a.powerW >= a.onW);
   const windowOk = windowOpen && inputs.pvApsW >= p.apsMinW && windowLeftMin >= p.minUsefulHeatMin;
   const resumeFree = pilot.lastCessionCause === 'buy' || pilot.lastCessionCause === 'hard_buy';
@@ -287,6 +294,26 @@ export function pilotStep(
     pilot.apsAlert = apsAlert;
   }
 
+  // ── Voie SATURATION/RÉSERVE (contexte Max AC zéro-export, 22/07/2026) ──
+  // La Max AC régule le compteur à zéro-export (boucle ~3 s avec le Gen 2) : le
+  // don franc a quasi disparu (mesuré : ZÉRO export soutenu > 150 W en régime
+  // sain, amplitude écrêtée à ~80-160 W). Le surplus vit désormais dans SA
+  // charge, lue en Modbus LOCAL (~2,5 s — classe « mesure locale » comme
+  // l'EM-50, pas le cloud lent). Dès que la réserve nocturne est assurée
+  // (SoC ≥ maxAcSocOnPct), le surplus mesuré (charge Max AC + don résiduel)
+  // bascule vers le ballon : en allumant, la Max AC cesse simplement de charger
+  // d'autant et le compteur reste à zéro. Budget de drain assumé :
+  // heatPowerW − surplusOnW (~900 W), borné par les coupures (achat 150 W/30 s,
+  // chute batteryDropCutPts, plancher batteryFloorCutPct) — inchangées.
+  const surplusDispoW = (inputs.maxAcChargeW ?? 0) + exportW;
+  const saturationTrigger =
+    inputs.maxAcAvailable &&
+    inputs.maxAcSocPct !== null &&
+    inputs.maxAcSocPct >= p.maxAcSocOnPct &&
+    inputs.em50Available &&
+    buyW <= 50 &&
+    surplusDispoW >= p.surplusOnW;
+
   // Déclencheur de secours — SURPLUS INVISIBLE (validé Laurent, question 2)
   const invisibleTrigger =
     inputs.ankerAvailable &&
@@ -311,8 +338,12 @@ export function pilotStep(
               detail: `en veille — ${ctx.potential.invisibleSurplusW} W estimés / seuil ${p.invisibleSurplusMinW}`
             };
 
-  const trigger = exportFrank || invisibleTrigger;
-  const commonOk = tankNotFull && battFull && quietHouse && windowOk && quotaOk && delaysOk;
+  // battFull a QUITTÉ le tronc commun (22/07) : chaque voie porte sa preuve —
+  // l'export franc PROUVE que le parc n'absorbe plus (zéro-export Max AC), la
+  // voie saturation exige la réserve locale, le secours invisible garde son
+  // exigence « batteries pleines » en interne.
+  const trigger = exportFrank || saturationTrigger || invisibleTrigger;
+  const commonOk = tankNotFull && quietHouse && windowOk && quotaOk && delaysOk;
   const allOn = commonOk && trigger;
 
   // ── Chrono de persistance : les conditions doivent tenir observationBeforeOnSec ──
@@ -409,7 +440,9 @@ export function pilotStep(
     reason = 'solar';
     note = exportFrank
       ? `allumage — don franc au réseau ${exportW} W depuis ${Math.round(armedForMs / 60_000)} min`
-      : `allumage — surplus invisible estimé ${ctx.potential.invisibleSurplusW} W (batteries pleines)`;
+      : saturationTrigger
+        ? `allumage — réserve faite (Max AC ${Math.round(inputs.maxAcSocPct ?? 0)} %), surplus réorienté ${surplusDispoW} W`
+        : `allumage — surplus invisible estimé ${ctx.potential.invisibleSurplusW} W (batteries pleines)`;
   } else {
     wantOn = false;
     note = nextActionNote();
@@ -514,8 +547,14 @@ export function pilotStep(
       }
       return 'attente de la fenêtre solaire (éphémérides)';
     }
-    if (!battFull) return 'attente : les batteries se remplissent (on ne leur vole rien)';
-    if (!trigger) return 'attente d’un don franc au réseau ou d’un surplus invisible';
+    if (!inputs.em50Available) return 'compteur EM-50 muet — aucun allumage possible';
+    if (!trigger) {
+      if (!inputs.maxAcAvailable)
+        return `attente d’un don franc au réseau (> ${p.exportOnW} W) — mesure locale muette`;
+      return inputs.maxAcSocPct !== null && inputs.maxAcSocPct < p.maxAcSocOnPct
+        ? `attente : la Max AC fait sa réserve (${Math.round(inputs.maxAcSocPct)} % / ${p.maxAcSocOnPct} %)`
+        : `attente de surplus — charge Max AC + don ${surplusDispoW} W / ${p.surplusOnW} W`;
+    }
     if (!quotaOk) return 'quota d’allumages du jour épuisé';
     if (!delaysOk) return 'délais de protection du matériel en cours';
     if (pilot.condsSinceTs !== null) {
@@ -539,18 +578,27 @@ export function pilotStep(
         `${Math.round((ctx.eAvailWh / Math.max(1, ctx.eFullWh)) * 100)} % rempli`
       ),
       cond(
-        'export',
-        'Don franc au réseau',
-        exportFrank,
-        exportW > 0 ? `${exportW} W donnés` : buyW > 0 ? `${buyW} W achetés` : '≈ 0 W'
+        'surplus',
+        'Surplus disponible',
+        exportFrank || (inputs.em50Available && buyW <= 50 && surplusDispoW >= p.surplusOnW),
+        (inputs.maxAcAvailable
+          ? `${surplusDispoW} W réorientables (charge Max AC ${Math.round(inputs.maxAcChargeW ?? 0)} W + don ${exportW} W)`
+          : exportW > 0
+            ? `${exportW} W donnés (mesure locale muette)`
+            : '≈ 0 W') + (buyW > 50 ? ` · achat ${buyW} W` : '')
       ),
       cond(
-        'battery',
-        'Batteries pleines',
-        battFull,
-        socAvg !== null
-          ? `${Math.round(socAvg)} % · charge ${Math.round(inputs.batteryChargeW)} W`
-          : 'stations muettes (dégradé)'
+        'reserve',
+        'Réserve batterie',
+        exportFrank ||
+          (inputs.maxAcAvailable &&
+            inputs.maxAcSocPct !== null &&
+            inputs.maxAcSocPct >= p.maxAcSocOnPct),
+        exportFrank
+          ? 'prouvée par le don franc (le parc n’absorbe plus)'
+          : inputs.maxAcAvailable && inputs.maxAcSocPct !== null
+            ? `Max AC ${Math.round(inputs.maxAcSocPct)} % (seuil ${p.maxAcSocOnPct} %)`
+            : 'mesure locale muette — voies don franc et secours seulement'
       ),
       cond(
         'quiet',

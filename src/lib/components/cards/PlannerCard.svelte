@@ -494,13 +494,14 @@
       <p style="color: var(--color-fg);" class="font-semibold">La règle du pilote</p>
       <p>
         ⚡ Le chauffe-eau ne doit <strong>jamais</strong> être la cause d'un achat de courant à EDF. Il
-        s'allume uniquement quand la maison donne de l'électricité au réseau (elle serait perdue) et s'éteint
-        dès que la maison a besoin de sa puissance.
+        s'allume quand le soleil produit plus que ce que la maison consomme — surplus mesuré dans la charge
+        de la batterie et au compteur — et s'éteint dès que la maison a besoin de sa puissance.
       </p>
       <p>
-        ☀️ L'allumage exige sept conditions réunies pendant trois minutes (bouton « pilote » pour
-        les voir). Les stations solaires mettent deux à trois minutes à réagir : ce court passage
-        est le seul courant acheté — environ deux centimes par allumage.
+        ☀️ L'allumage exige sept conditions réunies pendant deux minutes (bouton « pilote » pour les
+        voir), dont une réserve de batterie suffisante pour la nuit. La batterie se cale en quelques
+        secondes : la minute et demie de transition est le seul courant acheté — environ un centime
+        par allumage.
       </p>
       <p>
         🌙 Si le soleil n'a pas suffi, une recharge de fin de nuit, aux heures creuses, garantit les

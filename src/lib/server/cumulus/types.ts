@@ -97,6 +97,13 @@ export interface CumulusInputs {
   batteryCapacityWh: number; // capacité batterie totale (Wh)
   batteryChargeW: number; // puissance de CHARGE batterie (W, ≥ 0 = surplus en cours d'absorption)
   sbInputW: (number | null)[]; // PV ENTRANT par station (input_power_w) — pour la calibration de l'estimateur
+  // ── Max AC en Modbus LOCAL (~2,5 s — classe « mesure locale », comme l'EM-50) ──
+  // Depuis que la Max AC régule le compteur à zéro-export (boucle ~3 s avec le
+  // Gen 2), le don franc a quasi disparu : le surplus vit dans SA charge. Ces
+  // champs portent la voie d'allumage « saturation/réserve » du pilote (22/07).
+  maxAcAvailable: boolean; // lecture Modbus locale de la Max AC disponible
+  maxAcSocPct: number | null; // SoC de la Max AC (%), null si local muet
+  maxAcChargeW: number | null; // puissance de CHARGE de la Max AC (W ≥ 0), null si local muet
   pvApsW: number; // prod du micro-onduleur APsystems EZ1 (pan Sud), W — l'ÉTALON (jamais bridé)
   apsAvailable: boolean; // le bridge APS répond (distinguer « injoignable » de « 0 W réel »)
   apsAgeSec: number | null; // fraîcheur de la donnée APS (s), null si inconnue
@@ -243,6 +250,9 @@ export interface PilotConfig {
   apsMinW: number; // soleil RÉEL exigé : production APS minimale (W)
   minUsefulHeatMin: number; // jamais d'allumage s'il reste moins de X min de fenêtre devant soi
   invisibleSurplusMinW: number; // déclencheur de secours : surplus invisible estimé minimal (W)
+  // ── Voie « saturation/réserve » (contexte Max AC zéro-export, 22/07/2026) ──
+  surplusOnW: number; // surplus RÉORIENTABLE mesuré (charge Max AC + don) exigé pour allumer (W)
+  maxAcSocOnPct: number; // réserve nocturne assurée : SoC Max AC local minimal pour céder le flux au ballon (%)
 
   // ── Grâce et coupures (chauffe en cours) ──
   graceStartupSec: number; // latence SolarBank tolérée au démarrage — 240 s
