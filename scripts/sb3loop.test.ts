@@ -301,21 +301,40 @@ test('premier cycle : ancrage du slew sur la consigne vue par le cloud', () => {
 
 // ─── Rescue : préserver la Max AC ───────────────────────────────────────
 
-test('rescue : Max AC basse + SB3 chargées → la consigne suit la charge même de jour', () => {
+test('rescue : Max AC basse ET qui DÉCHARGE + SB3 chargées → la consigne suit la charge', () => {
   const d = decide(
     inp({
       sunElevDeg: 45,
       aps: { ok: true, powerW: 800 },
       em50: { ok: true, gridW: 10 },
-      maxac: { ok: true, socPct: 30, acNetW: 100 },
+      maxac: { ok: true, socPct: 30, acNetW: 400 }, // décharge > seuil 200 = vrai danger
       cloud: { ok: true, freshS: 10, sb3OutW: 200, sb3SocAvg: 85, sb3PresetW: 200, sceneMode: 3 }
     }),
     cfg,
     st({ lastCmdW: 200, pendingDeadband: 1, pendingDeadbandDir: 'up' })
   );
   assert.equal(d.mode, 'rescue');
-  // house = 10+800+200+100 = 1110 → cible 960 ; slew depuis 200 → 500.
+  // house = 10+800+200+400 = 1410 → cible 1260 ; slew depuis 200 → 500.
   assert.equal(d.writeW, 500);
+});
+
+test('INCIDENT 23/07 : Max AC basse mais EN CHARGE (plein soleil) → PAS de rescue, jour', () => {
+  // Le matin ensoleillé : Max AC à 30 % mais qui CHARGE à 2550 W (acNet −2550).
+  // Elle n'est pas en danger — elle se refait. Rescue ne doit PAS drainer les
+  // SB3 : mode jour, consigne 0, tout charge au soleil.
+  const d = decide(
+    inp({
+      sunElevDeg: 45,
+      aps: { ok: true, powerW: 883 },
+      em50: { ok: true, gridW: 4 },
+      maxac: { ok: true, socPct: 30, acNetW: -2550 }, // CHARGE
+      cloud: { ok: true, freshS: 10, sb3OutW: 1200, sb3SocAvg: 40, sb3PresetW: 300, sceneMode: 3 }
+    }),
+    cfg,
+    st({ lastCmdW: 300 })
+  );
+  assert.equal(d.mode, 'day');
+  assert.equal(d.targetW, 0);
 });
 
 test('pas de rescue si les SB3 sont basses elles aussi', () => {
@@ -323,7 +342,7 @@ test('pas de rescue si les SB3 sont basses elles aussi', () => {
     inp({
       sunElevDeg: 45,
       aps: { ok: true, powerW: 800 },
-      maxac: { ok: true, socPct: 30, acNetW: 100 },
+      maxac: { ok: true, socPct: 30, acNetW: 400 },
       cloud: { ok: true, freshS: 10, sb3OutW: 0, sb3SocAvg: 20, sb3PresetW: 0, sceneMode: 3 }
     }),
     cfg,

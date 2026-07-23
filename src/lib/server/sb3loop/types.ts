@@ -44,6 +44,10 @@ export interface Sb3LoopConfig {
   maxAcMinPct: number;
   /** SoC SB3 minimal pour armer le rescue. */
   rescueSb3MinPct: number;
+  /** Rescue : la Max AC doit RÉELLEMENT se vider (décharge AC > ce seuil, W).
+   *  Une Max AC basse mais EN CHARGE (surplus solaire) n'est PAS en danger —
+   *  la "secourir" draine les SB3 qui devraient charger (incident 23/07). */
+  rescueMaxAcDischargeW: number;
   /** Consigne maximale système (W) — garde-fou (le bridge borne aussi). */
   maxPresetW: number;
   /** Fraîcheur cloud au-delà de laquelle house_load n'est plus fiable (s). */
@@ -180,6 +184,7 @@ export function defaultSb3LoopConfig(): Sb3LoopConfig {
     sb3FloorPct: 15,
     maxAcMinPct: 40,
     rescueSb3MinPct: 30,
+    rescueMaxAcDischargeW: 200,
     maxPresetW: 2400,
     cloudStaleS: 180,
     localMuteS: 120,

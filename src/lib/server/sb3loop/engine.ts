@@ -163,6 +163,10 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
     if (state.lastCanaryDayParis !== today) {
       const fault = await runCanary();
       state.lastCanaryDayParis = today;
+      // Réarmement QUOTIDIEN des tentatives de restauration : un échec nocturne
+      // (incident 23/07 : confirmation impossible sur créneau traversant minuit)
+      // ne doit pas condamner la restauration du matin, qui elle aboutit.
+      state.restoreAttempts = 0;
       if (fault !== null && state.enabled) {
         state.enabled = false;
         state.autoDisabledReason = `canary schéma : ${fault}`;

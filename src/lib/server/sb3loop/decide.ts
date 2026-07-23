@@ -115,9 +115,18 @@ export function decide(
     return applyTarget(0, 'day', `SB3 à ${Math.round(sb3Soc)} % — plancher, consigne 0`);
   }
 
-  // ── 4. Rescue : préserver la Max AC. ──
+  // ── 4. Rescue : préserver la Max AC — SEULEMENT si elle se vide RÉELLEMENT.
+  // Incident 23/07 : rescue ne regardait que le SoC → il s'est déclenché tout
+  // un matin ensoleillé alors que la Max AC (basse mais EN CHARGE, acNet < 0)
+  // n'était pas en danger, drainant les SB3 jusqu'à 10 % au lieu de les laisser
+  // charger. Le vrai signal de détresse = la Max AC DÉCHARGE (acNet > seuil)
+  // ET reste basse ET les SB3 ont du stock à céder. Une Max AC en charge ou au
+  // repos ne déclenche jamais de rescue → pas de vol de la recharge diurne. ──
   const rescue =
-    inputs.maxac.socPct < cfg.maxAcMinPct && sb3Soc !== null && sb3Soc > cfg.rescueSb3MinPct;
+    inputs.maxac.socPct < cfg.maxAcMinPct &&
+    inputs.maxac.acNetW > cfg.rescueMaxAcDischargeW &&
+    sb3Soc !== null &&
+    sb3Soc > cfg.rescueSb3MinPct;
 
   // ── 5/6. Jour / nuit par éphémérides + production réelle. APS injoignable
   // en plein soleil (panne ≠ nuit) → on reste conservateur côté « jour »
