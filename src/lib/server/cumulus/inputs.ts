@@ -42,6 +42,20 @@ interface Em50Read {
   cumulusKwh: number;
 }
 
+// Anti-rebond de la voie RÉSEAU EM-50. La voie réseau pilote le veto zéro-import :
+// une mesure act_power absente/non finie NE DOIT PAS être coercée en 0 (« réseau
+// sain », qui aveuglerait le veto sur un CT en défaut PERSISTANT). MAIS un null
+// PONCTUEL (glitch de poll / recalibration CT) ne doit pas non plus basculer le
+// compteur en « muet » au tick — sinon le pilote LIVE coupe une chauffe solaire
+// établie et brûle un quota d'allumage (revue 24/07-4). Compromis : on tient la
+// dernière valeur réseau valide pendant une courte grâce, puis → muet (défaut
+// persistant). Le tick cumulus est ~65 s : 90 s≈1,4 tick tolère UN poll glitché
+// (le 1er null est toujours tenu, 0 s écoulé) et bascule muet si le défaut dure au-
+// delà. Exposition import bornée à ~2 ticks au pire (vs l'ancien 0-aveugle non borné).
+const EM50_GRID_GRACE_MS = 90_000;
+let em50LastGoodGridW = 0;
+let em50GridInvalidSinceMs: number | null = null;
+
 async function readEm50(): Promise<Em50Read> {
   const fail: Em50Read = { available: false, gridPowerW: 0, cumulusPowerW: 0, cumulusKwh: 0 };
   try {
@@ -54,13 +68,22 @@ async function readEm50(): Promise<Em50Read> {
     const cEm = d[`em1:${cumulusId()}`];
     const cData = d[`em1data:${cumulusId()}`];
     if (!gEm || !cEm) return fail;
-    // La voie réseau PILOTE le veto zéro-import : une mesure absente/null NE DOIT PAS
-    // être coercée en 0 (« réseau sain ») — sinon un CT en défaut aveugle le veto et
-    // le pilote pourrait chauffer en important. act_power invalide → EM-50 réputé muet.
-    if (typeof gEm.act_power !== 'number' || !Number.isFinite(gEm.act_power)) return fail;
+
+    const rawGrid = gEm.act_power;
+    const gridValid = typeof rawGrid === 'number' && Number.isFinite(rawGrid);
+    if (gridValid) {
+      em50GridInvalidSinceMs = null;
+      em50LastGoodGridW = Math.round(gridSign() * rawGrid);
+    } else {
+      const now = Date.now();
+      if (em50GridInvalidSinceMs === null) em50GridInvalidSinceMs = now;
+      // Défaut PERSISTANT (> grâce) → compteur réputé muet → veto (D=0 / pas d'allumage).
+      if (now - em50GridInvalidSinceMs > EM50_GRID_GRACE_MS) return fail;
+      // Glitch transitoire → on tient la dernière valeur réseau valide (pas de coupure).
+    }
     return {
       available: true,
-      gridPowerW: Math.round(gridSign() * num(gEm.act_power)),
+      gridPowerW: gridValid ? Math.round(gridSign() * rawGrid) : em50LastGoodGridW,
       cumulusPowerW: Math.round(num(cEm.act_power)),
       cumulusKwh: num(cData?.total_act_energy) / 1000
     };
