@@ -17,6 +17,17 @@
  * pvApsW = aps_w réel (jamais bridé). Tirages/pertes = modèle calorimétrique du
  * recorder. Le modèle sûr n'utilise AUCUNE prévision (pas de foresight à tricher).
  *
+ * LIMITES ASSUMÉES (revue 24/07, ce banc BORNE la sûreté, il ne mesure PAS le gain) :
+ *  - BATTERIE UNIQUE agrégée → socFloorFrac = socFrac : le transitoire « Max AC pleine
+ *    pendant qu'un SB3 charge encore » (que le gate socFloorFrac corrige dans le modèle)
+ *    n'est PAS exerçable ici. Seul le SHADOW live, sur le SoC par pack réel, le teste.
+ *  - production_w est BRIDÉE (mensongère à batterie pleine) et sert de bilan → la sim
+ *    ne modélise PAS le dé-bridage : elle IMPUTE toute la chauffe à un puisage batterie.
+ *    Le « drain→batt » et le « coût réserve » sont donc des MAJORANTS PESSIMISTES (le
+ *    coût réel est ≤), pas une mesure du PV écrêté réellement recouvré.
+ * Conclusion valide malgré ces limites : IMPORT 0.00 et réserve du soir bornée tiennent
+ * A FORTIORI (biais conservateur). Le BÉNÉFICE (PV récupéré) se juge au shadow, pas ici.
+ *
  * Lancer : node --experimental-strip-types scripts/desirability-sim.ts
  */
 import Database from 'better-sqlite3';
@@ -165,6 +176,7 @@ for (const day of days) {
       em50Available: true,
       maxAcChargeW: chargeCur,
       socFrac: socKwh / capKwh,
+      socFloorFrac: socKwh / capKwh, // batterie unique → plancher = moyenne (cf. LIMITE docstring)
       heaterW: HEATER,
       applianceActive: false
     };

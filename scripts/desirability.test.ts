@@ -17,9 +17,11 @@ import {
 
 const cfg = defaultDesConfig();
 
-/** État neutre : midi, cuve mi-pleine, batterie 60 %, aucun surplus franc. */
+/** État neutre : midi, cuve mi-pleine, batterie 60 %, aucun surplus franc.
+ *  Par défaut socFloorFrac SUIT socFrac (hypothèse mono-pack) ; les tests de décalage
+ *  de périmètre le fixent explicitement plus bas que la moyenne. */
 function di(o: Partial<DesInputs> = {}): DesInputs {
-  return {
+  const base: DesInputs = {
     sunElevDeg: 50,
     pvApsW: 600,
     eAvailWh: 8000,
@@ -28,10 +30,13 @@ function di(o: Partial<DesInputs> = {}): DesInputs {
     em50Available: true,
     maxAcChargeW: 0,
     socFrac: 0.6,
+    socFloorFrac: 0.6,
     heaterW: 2900,
     applianceActive: false,
     ...o
   };
+  if (o.socFrac !== undefined && o.socFloorFrac === undefined) base.socFloorFrac = o.socFrac;
+  return base;
 }
 const D = (o: Partial<DesInputs> = {}) => computeDesirability(di(o), cfg).D;
 
@@ -104,6 +109,17 @@ test('BUG revue 24/07 : batterie 91 % QUI ABSORBE ENCORE 1,2 kW → PAS de chauf
 
 test('charge SOUS le heater (SoC 90 %, 2,3 kW) → PAS de chauffe (chauffer puiserait 600 W)', () => {
   assert.ok(D({ socFrac: 0.9, maxAcChargeW: 2300, pvApsW: 650, gridPowerW: -20 }) < cfg.dOff);
+});
+
+test('DÉCALAGE PÉRIMÈTRE (revue 24/07-2) : Max AC pleine (moy 97 %) mais un SB3 à 96 % → PAS de chauffe', () => {
+  // socFrac moyen élevé (Max AC 100 % tire la moyenne) MAIS socFloorFrac = pack le
+  // moins plein (SB3 à 96 %, absorbe encore) → le parc n'écrête pas vraiment. Le gate
+  // sur le plancher, pas la moyenne, doit garder freeCurtail bas (corrige le faux
+  // écrêtage où la Max AC pleine masquait un SB3 en charge).
+  assert.ok(
+    D({ socFrac: 0.973, socFloorFrac: 0.96, maxAcChargeW: 0, pvApsW: 800, gridPowerW: -20 }) <
+      cfg.dOff
+  );
 });
 
 test('LEÇON 23/07 : charge à BAS SoC (51 %, 4,7 kW) → PAS de chauffe (elle se refait)', () => {

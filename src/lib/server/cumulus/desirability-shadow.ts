@@ -39,6 +39,9 @@ export function shadowDesirability(
 ): ShadowResult {
   const socs = inputs.batterySocPct.filter((s) => Number.isFinite(s));
   const socFrac = socs.length ? socs.reduce((a, b) => a + b, 0) / socs.length / 100 : 0;
+  // Gate d'écrêtage sur le pack le MOINS plein : le parc n'écrête que si AUCUN pack
+  // ne peut plus absorber (sinon la Max AC pleine masque un SB3 encore en charge).
+  const socFloorFrac = socs.length ? Math.min(...socs) / 100 : 0;
 
   const di: DesInputs = {
     sunElevDeg: sunPosition(inputs.now, config.pilot.latDeg, config.pilot.lonDeg).elevationDeg,
@@ -49,6 +52,7 @@ export function shadowDesirability(
     em50Available: inputs.em50Available,
     maxAcChargeW: inputs.maxAcAvailable ? inputs.maxAcChargeW : null,
     socFrac,
+    socFloorFrac,
     heaterW: config.pilot.heatPowerW,
     applianceActive: inputs.appliances.some((a) => a.powerW !== null && a.powerW >= a.onW)
   };
@@ -64,9 +68,9 @@ export function shadowDesirability(
     1
   )} chg${s.freeCharge.toFixed(1)} curt${s.freeCurtail.toFixed(1)}) win=${s.solarWindow.toFixed(
     2
-  )} | soc=${Math.round(socFrac * 100)}% eAvail=${Math.round(ctx.eAvailWh)} grid=${Math.round(
-    inputs.gridPowerW
-  )}W | ${res.reason}`;
+  )} | soc=${Math.round(socFrac * 100)}%(min${Math.round(socFloorFrac * 100)}%) eAvail=${Math.round(
+    ctx.eAvailWh
+  )} grid=${Math.round(inputs.gridPowerW)}W | ${res.reason}`;
 
   return { D: res.D, wouldOn: shadowOn, reason: res.reason, logLine };
 }

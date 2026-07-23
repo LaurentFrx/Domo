@@ -12,13 +12,17 @@
  * PLUS l'absorber). Toute la sûreté est STRUCTURELLE, pas confiée à une prévision.
  *
  * Trois enseignements des revues, gravés ici :
- *  1. « batterie qui charge » ≠ « écrêtage ». Une batterie qui absorbe encore du
- *     courant (maxAcChargeW > 0) N'écrête PAS : chauffer lui volerait sa charge
- *     (puisage réserve, INVISIBLE au veto sous zéro-export). L'écrêtage n'est PROUVÉ
- *     que si la batterie a CESSÉ d'absorber (maxAcChargeW → 0) ET est vraiment pleine
- *     (SoC ≳ 95-99 %, aligné sur battFullPct=98) ET le soleil est franc (APS). Alors
- *     chauffer recouvre du PV sinon écrêté, ET la réserve — pleine — se refait
- *     instantanément du même PV : ZÉRO puisage net.
+ *  1. « batterie qui charge » ≠ « écrêtage ». Un pack qui absorbe encore du courant
+ *     N'écrête PAS : chauffer lui volerait sa charge (puisage réserve, INVISIBLE au
+ *     veto sous zéro-export où la Max AC décharge pour tenir le compteur à ~0).
+ *     L'écrêtage n'est PROUVÉ que si le pack le MOINS plein du parc est déjà plein
+ *     (socFloorFrac, pas la moyenne — sinon la Max AC pleine masque un SB3 encore en
+ *     charge) ET la Max AC a cessé d'absorber (maxAcChargeW → 0, mesuré au Modbus) ET
+ *     le soleil est franc (APS). Alors chauffer recouvre du PV sinon écrêté ; le
+ *     puisage résiduel est BORNÉ par le plancher socFloorFrac (freeCurtail s'éteint
+ *     dès qu'un pack repasse sous ~95 %) et refait par le même PV — pas littéralement
+ *     zéro, mais un petit transitoire de tête de bande (mesuré ≤ 0,23 kWh/j, jamais
+ *     un import : le veto grid reste le filet).
  *  2. Charger < chauffer = puiser la réserve. freeCharge n'est un vrai surplus que si
  *     la charge DÉPASSE la puissance de chauffe (sinon la différence sort de la
  *     batterie). Le parc réel plafonne ~2 kW < heater 2,9 kW → ce signal est ~0 en
@@ -63,8 +67,11 @@ export interface DesInputs {
   em50Available: boolean;
   /** Charge AC absorbée par la batterie (W ≥ 0) = ce qu'elle stocke encore ; null si muet. */
   maxAcChargeW: number | null;
-  /** SoC du parc batterie, fraction 0..1. */
+  /** SoC MOYEN du parc batterie, fraction 0..1 (surplus de charge, affichage). */
   socFrac: number;
+  /** SoC du pack le MOINS plein, fraction 0..1 — gate d'écrêtage : le parc n'écrête
+   *  que si AUCUN pack ne peut plus absorber (évite « Max AC pleine masque un SB3 bas »). */
+  socFloorFrac: number;
   /** Puissance de chauffe (W) — échelle de saturation. */
   heaterW: number;
   /** Un gros appareil (four/plaques/lave-*) tourne → veto cuisine. */
@@ -160,16 +167,18 @@ export function computeSignals(di: DesInputs, cfg: DesConfig): DesSignals {
   const freeCharge = chargeMag * battIsSurplus;
 
   // (c) ÉCRÊTAGE PROUVÉ — le gisement dominant l'été. TROIS preuves simultanées :
-  //  - batterie VRAIMENT pleine (nearFull, SoC ≳ 95-99 %) ;
-  //  - elle a CESSÉ d'absorber (chargeExhausted : maxAcChargeW → 0) → preuve
-  //    DIRECTE qu'elle ne peut plus stocker ; une batterie qui charge encore
-  //    n'écrête PAS (bug de la v1 : seuil SoC seul, ignorait la charge en cours) ;
+  //  - le pack le MOINS plein est déjà plein (nearFull sur socFloorFrac, PAS la
+  //    moyenne : sinon la Max AC pleine à 100 % tire la moyenne au-dessus du seuil
+  //    pendant qu'un SB3 à 96 % absorbe encore → faux écrêtage, revue 24/07) ;
+  //  - la Max AC a CESSÉ d'absorber (chargeExhausted : maxAcChargeW → 0, mesuré au
+  //    Modbus) ; un pack qui charge encore n'écrête PAS ;
   //  - soleil FRANC (sunStrong via l'APS, jamais bridé) → il y a bien du PV bridé
   //    à recouvrer.
-  // Alors chauffer « dé-bride » les panneaux (recouvre du PV sinon perdu) ET la
-  // réserve, PLEINE, se refait instantanément du même PV → ZÉRO puisage net. Si la
-  // Max AC est muette (maxAcChargeW null), on ne peut PAS prouver l'écrêtage → 0.
-  const nearFull = smootherstep(cfg.curtailSocLow, cfg.curtailSocHigh, di.socFrac);
+  // Alors chauffer « dé-bride » les panneaux (recouvre du PV sinon perdu) ; le
+  // puisage résiduel est BORNÉ par le plancher nearFull et refait du même PV (petit
+  // transitoire, ≤ 0,23 kWh/j mesuré ; le veto grid reste le filet anti-import). Max
+  // AC muette (maxAcChargeW null) → écrêtage non prouvable → 0.
+  const nearFull = smootherstep(cfg.curtailSocLow, cfg.curtailSocHigh, di.socFloorFrac);
   const chargeExhausted =
     di.maxAcChargeW === null
       ? 0

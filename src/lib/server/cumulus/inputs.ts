@@ -54,6 +54,10 @@ async function readEm50(): Promise<Em50Read> {
     const cEm = d[`em1:${cumulusId()}`];
     const cData = d[`em1data:${cumulusId()}`];
     if (!gEm || !cEm) return fail;
+    // La voie réseau PILOTE le veto zéro-import : une mesure absente/null NE DOIT PAS
+    // être coercée en 0 (« réseau sain ») — sinon un CT en défaut aveugle le veto et
+    // le pilote pourrait chauffer en important. act_power invalide → EM-50 réputé muet.
+    if (typeof gEm.act_power !== 'number' || !Number.isFinite(gEm.act_power)) return fail;
     return {
       available: true,
       gridPowerW: Math.round(gridSign() * num(gEm.act_power)),
