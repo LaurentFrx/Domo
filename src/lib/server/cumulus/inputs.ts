@@ -96,13 +96,15 @@ async function readEm50(): Promise<Em50Read> {
     if (!gEm || !cEm) return fail;
 
     const nowMs = Date.now();
-    // Voie réseau : indisponible (jamais valide OU persistant) → compteur muet (le veto
-    // anti-import joue). Glitch isolé → dernière valeur réseau tenue (pas de coupure).
-    const g = debounceChannel(gridChan, gEm.act_power, nowMs);
+    // Débruiter les DEUX voies à CHAQUE tick — évaluer cumulus AVANT le retour anticipé
+    // réseau, sinon son timer de grâce GÈLE pendant une panne réseau (les deux voies du
+    // même device tombent souvent ensemble) et un glitch cumulus FRAIS au rétablissement
+    // serait déclassé « persistant », grâce annulée. `c` reste inutilisé sur le chemin fail
+    // mais son état (invalidSinceMs/lastGood/everGood) ne gèle plus. (revue 24/07-6)
+    const g = debounceChannel(gridChan, gEm.act_power, nowMs); // réseau : pilote le veto muet
+    const c = debounceChannel(cumulusChan, cEm.act_power, nowMs); // cumulus : heatingNow
+    // Voie réseau indisponible (jamais valide OU défaut persistant) → compteur muet (veto joue).
     if (!g.held) return fail;
-    // Voie cumulus (heatingNow, non pilote du veto) : glitch → dernière valeur tenue (la
-    // chauffe établie n'est pas coupée) ; jamais-valide/persistant → 0 (fallback prudent).
-    const c = debounceChannel(cumulusChan, cEm.act_power, nowMs);
     return {
       available: true,
       gridPowerW: Math.round(gridSign() * g.value),
