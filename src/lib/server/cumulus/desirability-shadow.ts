@@ -18,7 +18,7 @@ import {
   hysteresisOn,
   type DesInputs
 } from './desirability';
-import type { CumulusConfig, CumulusInputs } from './types';
+import type { CumulusConfig, CumulusInputs, DesirShadowSample } from './types';
 import type { PilotCtx } from './pilot';
 
 const cfg = defaultDesConfig();
@@ -30,6 +30,8 @@ export interface ShadowResult {
   wouldOn: boolean;
   reason: string;
   logLine: string;
+  /** Échantillon structuré pour la persistance (page diagnostic /cumulus-labo). */
+  sample: Omit<DesirShadowSample, 'ts'>;
 }
 
 export function shadowDesirability(
@@ -72,5 +74,23 @@ export function shadowDesirability(
     ctx.eAvailWh
   )} grid=${Math.round(inputs.gridPowerW)}W | ${res.reason}`;
 
-  return { D: res.D, wouldOn: shadowOn, reason: res.reason, logLine };
+  const sample: Omit<DesirShadowSample, 'ts'> = {
+    d: res.D,
+    wouldOn: shadowOn,
+    heatingNow,
+    relayOn: inputs.relayOn === true,
+    tankRoom: s.tankRoom,
+    freeExport: s.freeExport,
+    freeCharge: s.freeCharge,
+    freeCurtail: s.freeCurtail,
+    freeSurplus: s.freeSurplus,
+    solarWindow: s.solarWindow,
+    socPct: Math.round(socFrac * 100),
+    socMinPct: Math.round(socFloorFrac * 100),
+    eAvailWh: Math.round(ctx.eAvailWh),
+    gridPowerW: Math.round(inputs.gridPowerW),
+    reason: res.reason
+  };
+
+  return { D: res.D, wouldOn: shadowOn, reason: res.reason, logLine, sample };
 }

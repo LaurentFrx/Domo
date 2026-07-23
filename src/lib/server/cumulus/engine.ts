@@ -34,11 +34,12 @@ import {
 } from './probe-relax-calib';
 import { parisDate } from '../tariffs';
 import { sendPush } from '../monitor/push';
-import type { AutoMode, DecisionLogEntry, ShadowEvent } from './types';
+import type { AutoMode, DecisionLogEntry, ShadowEvent, DesirShadowSample } from './types';
 
 const TICK_TIMEOUT_MS = 45_000; // < intervalle timer (60 s)
 const SHADOW_HEAT_W = 500; // conso EM-50 voie cumulus au-dessus → « en chauffe » (timeline)
 const SHADOW_LOG_MAX = 80; // taille du journal (timeline du jour)
+const DESIR_SHADOW_MAX = 240; // journal du modèle shadow de désirabilité (~4,3 h à 65 s/tick)
 const APPLIANCE_OFF_GRACE_MS = 10 * 60_000; // sous le seuil > 10 min → cycle terminé
 const LOG_MAX = 60;
 
@@ -169,8 +170,11 @@ async function runTick(apply: boolean): Promise<TickResult> {
   // Calcule D et journalise « aurait chauffé » à côté du pilote booléen, SANS
   // toucher au relais ni à la décision. Banc de validation live avant tout
   // passage aux commandes. Une exception ici ne doit JAMAIS casser le tick.
+  let desirSample: DesirShadowSample | null = null;
   try {
-    console.log(shadowDesirability(inputs, ctx, config).logLine);
+    const sr = shadowDesirability(inputs, ctx, config);
+    console.log(sr.logLine);
+    desirSample = { ts: now, ...sr.sample };
   } catch (e) {
     console.warn('[desir-shadow] erreur (ignorée):', e instanceof Error ? e.message : e);
   }
@@ -186,6 +190,10 @@ async function runTick(apply: boolean): Promise<TickResult> {
   const next = decision.nextState;
   next.pilot = pilotRes.pilot;
   next.pilotView = pilotRes.view;
+  // Journal SHADOW de désirabilité (diagnostic /cumulus-labo) — n'influence RIEN.
+  next.desirShadowLog = desirSample
+    ? [...state.desirShadowLog, desirSample].slice(-DESIR_SHADOW_MAX)
+    : state.desirShadowLog;
 
   let relayOn = inputs.relayOn;
   let applied = false;

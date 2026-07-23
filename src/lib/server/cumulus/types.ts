@@ -374,6 +374,29 @@ export interface DecisionLogEntry {
   anomaly: Anomaly;
 }
 
+/**
+ * Échantillon du modèle SHADOW de désirabilité (page diagnostic /cumulus-labo).
+ * OBSERVATION SEULE — ne pilote jamais le relais. Un point par tick.
+ */
+export interface DesirShadowSample {
+  ts: number;
+  d: number; // désirabilité D ∈ [0,1]
+  wouldOn: boolean; // le modèle AURAIT chauffé (après hystérésis)
+  heatingNow: boolean; // le ballon chauffe RÉELLEMENT (conso EM-50)
+  relayOn: boolean; // relais réel ON
+  tankRoom: number; // portail place cuve
+  freeExport: number; // don franc au réseau
+  freeCharge: number; // charge batterie > heater
+  freeCurtail: number; // écrêtage prouvé
+  freeSurplus: number; // max des trois
+  solarWindow: number; // fenêtre solaire
+  socPct: number; // SoC moyen parc
+  socMinPct: number; // SoC du pack le moins plein
+  eAvailWh: number; // énergie cuve
+  gridPowerW: number; // réseau signé
+  reason: string;
+}
+
 /** Évènement de la timeline — un point du journal du jour (transitions du pilote incluses). */
 export type ShadowEventKind = 'phase' | 'heat_start' | 'heat_end' | 'draw' | 'full' | 'appliance';
 export interface ShadowEvent {
@@ -461,6 +484,8 @@ export interface CumulusRuntimeState {
   pilotView: PilotView | null;
   /** Timeline du jour (transitions de phase, chauffes, puisages, pleins, appareils). */
   shadowLog: ShadowEvent[];
+  /** Journal du modèle SHADOW de désirabilité (diagnostic /cumulus-labo ; ne pilote rien). */
+  desirShadowLog: DesirShadowSample[];
   /** Suivi interne de la chauffe en cours pour la timeline (début + énergie + gratuit/réseau). */
   shadowHeat: { sinceTs: number; sinceInjWh: number; solar: boolean } | null;
   /** Cycles de gros appareils EN COURS (clé = topic MQTT) — clos → journal + retiré. */

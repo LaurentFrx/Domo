@@ -23,6 +23,7 @@ import type {
   PilotView,
   HcPlan,
   ShadowEvent,
+  DesirShadowSample,
   ApplianceCycle,
   RegretDay
 } from './types';
@@ -31,6 +32,7 @@ import type { CumulusMode } from '$theme/tokens';
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const FILE = path.join(DATA_DIR, 'cumulus-state.json');
 const LOG_MAX = 60;
+const DESIR_SHADOW_MAX = 240; // ~4,3 h de ticks (65 s) — couvre la fenêtre d'écrêtage de l'après-midi
 
 const AUTO_MODES: AutoMode[] = ['auto', 'manual', 'off'];
 const SUB_MODES: CumulusMode[] = ['OFF', 'PV', 'HC', 'FORCE'];
@@ -65,6 +67,7 @@ export function defaultCumulusState(): CumulusRuntimeState {
     pilot: defaultPilotStateStore(),
     pilotView: null,
     shadowLog: [],
+    desirShadowLog: [],
     shadowHeat: null,
     applianceCycles: {},
     regret: { day: defaultRegretDay(), days: [] },
@@ -180,6 +183,7 @@ export function normalizeCumulusState(raw: unknown): CumulusRuntimeState {
     pilot: normPilot(o.pilot),
     pilotView: normPilotView(o.pilotView),
     shadowLog: normShadowLog(o.shadowLog),
+    desirShadowLog: normDesirShadowLog(o.desirShadowLog),
     shadowHeat: normShadowHeat(o.shadowHeat),
     applianceCycles: normApplianceCycles(o.applianceCycles),
     regret: normRegret(o.regret),
@@ -250,6 +254,37 @@ function normShadowLog(v: unknown): ShadowEvent[] {
         SHADOW_KINDS.includes((e as ShadowEvent).kind)
     )
     .slice(-80);
+}
+
+function normDesirShadowLog(v: unknown): DesirShadowSample[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter(
+      (e): e is DesirShadowSample =>
+        !!e && typeof e === 'object' && typeof (e as DesirShadowSample).ts === 'number'
+    )
+    .map((e) => {
+      const o = e as unknown as Record<string, unknown>;
+      return {
+        ts: numOr(o.ts, 0),
+        d: numOr(o.d, 0),
+        wouldOn: boolOr(o.wouldOn, false),
+        heatingNow: boolOr(o.heatingNow, false),
+        relayOn: boolOr(o.relayOn, false),
+        tankRoom: numOr(o.tankRoom, 0),
+        freeExport: numOr(o.freeExport, 0),
+        freeCharge: numOr(o.freeCharge, 0),
+        freeCurtail: numOr(o.freeCurtail, 0),
+        freeSurplus: numOr(o.freeSurplus, 0),
+        solarWindow: numOr(o.solarWindow, 0),
+        socPct: numOr(o.socPct, 0),
+        socMinPct: numOr(o.socMinPct, 0),
+        eAvailWh: numOr(o.eAvailWh, 0),
+        gridPowerW: numOr(o.gridPowerW, 0),
+        reason: typeof o.reason === 'string' ? o.reason : ''
+      };
+    })
+    .slice(-DESIR_SHADOW_MAX);
 }
 
 function normShadowHeat(
