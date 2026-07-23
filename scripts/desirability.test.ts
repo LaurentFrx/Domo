@@ -1,6 +1,7 @@
 /**
  * Tests du modèle continu de désirabilité (desirability.ts, fonction pure).
- * Lancer : pnpm test:desir
+ * VERSION SÛRE : ne chauffe QUE sur surplus confirmé, batterie haute, jamais en
+ * important. Lancer : pnpm test:desir
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,23 +15,16 @@ import {
 
 const cfg = defaultDesConfig();
 
-/** État de journée neutre (midi, cuve mi-pleine, batterie 50 %, pas de surplus franc). */
+/** État neutre : midi, cuve mi-pleine, batterie 60 %, aucun surplus franc. */
 function di(o: Partial<DesInputs> = {}): DesInputs {
   return {
     sunElevDeg: 50,
+    pvApsW: 600,
     eAvailWh: 8000,
     eFullWh: 15312,
-    comfortReserveWh: 4000,
-    hardComfortWh: 2000,
-    lossPerHWh: 60,
-    minutesToDeadline: 600,
     gridPowerW: 0,
     maxAcChargeW: 0,
-    socFrac: 0.5,
-    dSocFracPerH: 0,
-    forecastRemainingKwh: 5,
-    eveningReserveKwh: 7,
-    batteryCapacityKwh: 12.6,
+    socFrac: 0.6,
     heaterW: 2900,
     applianceActive: false,
     ...o
@@ -38,89 +32,82 @@ function di(o: Partial<DesInputs> = {}): DesInputs {
 }
 const D = (o: Partial<DesInputs> = {}) => computeDesirability(di(o), cfg).D;
 
-// ─── smootherstep : continuité et bornes ────────────────────────────────────
+// ─── smootherstep ───────────────────────────────────────────────────────────
 
-test('smootherstep : 0 au bord bas, 1 au bord haut, 0.5 au milieu, monotone', () => {
+test('smootherstep : bornes, milieu, monotonie', () => {
   assert.equal(smootherstep(0, 10, -5), 0);
   assert.equal(smootherstep(0, 10, 15), 1);
   assert.equal(smootherstep(0, 10, 5), 0.5);
   assert.ok(smootherstep(0, 10, 3) < smootherstep(0, 10, 7));
 });
 
-test('smootherstep : PAS DE FALAISE — un pas de 2 % dans une bande réelle reste doux', () => {
-  // Bande de gating SoC du modèle (0.75-0.90). Un seuil BOOLÉEN sauterait de 0 à 1
-  // (écart 1,0). Le smootherstep, lui, varie graduellement : bien moins qu'une bascule.
+test('smootherstep : PAS DE FALAISE — pas de 2 % dans une bande réelle reste doux', () => {
   const a = smootherstep(0.75, 0.9, 0.83);
   const b = smootherstep(0.75, 0.9, 0.85);
-  assert.ok(Math.abs(a - b) < 0.25);
+  assert.ok(Math.abs(a - b) < 0.25); // vs 1,0 pour un seuil booléen
 });
 
-// ─── Portails durs : nuit, hiver, cuve pleine, cuisine ──────────────────────
+// ─── Portails / vetos durs ──────────────────────────────────────────────────
 
 test('nuit (soleil sous l’horizon) → D = 0', () => {
-  assert.equal(D({ sunElevDeg: -10 }), 0);
-});
-
-test('hiver SANS surplus (soleil bas, pas d’export, forecast pauvre) → D ≈ 0 (repli HC)', () => {
-  // En hiver le solaire est structurellement mort NON par un seuil dur d’élévation
-  // (le modèle capterait un rare gratuit à 22° — c’est correct) mais parce qu’il
-  // n’y a PAS de surplus : ni export, ni charge batterie, forecast au plancher.
-  assert.ok(D({ sunElevDeg: 22, gridPowerW: 0, socFrac: 0.4, forecastRemainingKwh: 1.5 }) < 0.05);
+  assert.equal(D({ sunElevDeg: -10, gridPowerW: -2500 }), 0);
 });
 
 test('cuve pleine → D = 0 même avec surplus franc', () => {
   assert.equal(D({ eAvailWh: 15200, gridPowerW: -2500 }), 0);
 });
 
-test('veto cuisine (gros appareil) → D = 0 même avec tout le reste au vert', () => {
-  assert.equal(D({ applianceActive: true, gridPowerW: -2500, eAvailWh: 5000 }), 0);
+test('VETO cuisine → D = 0 même avec tout au vert', () => {
+  assert.equal(D({ applianceActive: true, socFrac: 0.95, pvApsW: 800 }), 0);
 });
 
-// ─── Voie surplus franc : ne jamais gaspiller du 0 € ────────────────────────
+test('VETO import → D = 0 dès qu’on soutire (jamais de chauffe HP)', () => {
+  // Batterie pleine + soleil franc (écrêtage) MAIS soutirage 300 W → veto dur.
+  assert.equal(D({ socFrac: 0.95, pvApsW: 800, gridPowerW: 300 }), 0);
+});
 
-test('export franc au compteur → chauffe (D élevé)', () => {
+// ─── Surplus CONFIRMÉ → chauffe ─────────────────────────────────────────────
+
+test('export franc au compteur → chauffe', () => {
   assert.ok(D({ gridPowerW: -2000 }) > cfg.dOn);
 });
 
-test('charge batterie AU-DESSUS de la réserve (SoC 88 %) → chauffe (vrai surplus)', () => {
-  assert.ok(D({ socFrac: 0.88, maxAcChargeW: 1600 }) > cfg.dOn);
+test('ÉCRÊTAGE : batterie quasi pleine (93 %) + soleil franc (APS 800 W) → chauffe', () => {
+  // Le cas dominant l’été sous zéro-export ; corrige le faux négatif de la v1
+  // (freeCurtail ne dépend plus de la dérivée de charge).
+  assert.ok(D({ socFrac: 0.93, pvApsW: 800, maxAcChargeW: 0, gridPowerW: -20 }) > cfg.dOn);
 });
 
-test('LEÇON 23/07 : charge batterie à BAS SoC (51 %, 4,7 kW) → PAS de chauffe (elle se refait)', () => {
-  // Pas de surplus franc, pas de prêt (forecast neutre) : la batterie remplit sa
-  // propre réserve, le ballon ne doit pas concourir.
-  assert.ok(D({ socFrac: 0.51, maxAcChargeW: 4700, forecastRemainingKwh: 4 }) < cfg.dOff);
+test('charge batterie FORTE au-dessus de la réserve (SoC 85 %, 2,3 kW) → chauffe', () => {
+  assert.ok(D({ socFrac: 0.85, maxAcChargeW: 2300 }) > cfg.dOn);
 });
 
-// ─── Voie de prêt (plan journalier) : trois pierres alignées ────────────────
+// ─── Sûreté : ce qui ne DOIT PAS chauffer ───────────────────────────────────
 
-test('prêt : batterie confortable (80 %) + journée solaire (forecast 8 kWh) + soleil → chauffe', () => {
-  assert.ok(D({ socFrac: 0.8, forecastRemainingKwh: 8, gridPowerW: 0 }) > cfg.dOn);
+test('LEÇON 23/07 : charge à BAS SoC (51 %, 4,7 kW) → PAS de chauffe (elle se refait)', () => {
+  assert.ok(D({ socFrac: 0.51, maxAcChargeW: 4700, gridPowerW: -20 }) < cfg.dOff);
 });
 
-test('prêt BLOQUÉ : batterie confortable mais journée PAUVRE (forecast 1 kWh) → pas de prêt', () => {
-  assert.ok(D({ socFrac: 0.8, forecastRemainingKwh: 1, gridPowerW: 0 }) < cfg.dOff);
+test('SÛRETÉ : batterie moyenne (60 %) sans surplus franc → PAS de chauffe (pas de prêt spéculatif)', () => {
+  assert.ok(D({ socFrac: 0.6, maxAcChargeW: 600, pvApsW: 500, gridPowerW: 0 }) < cfg.dOff);
 });
 
-test('prêt BLOQUÉ : journée solaire mais batterie SOUS sa réserve (SoC 25 %) → pas de prêt', () => {
-  assert.ok(D({ socFrac: 0.25, forecastRemainingKwh: 8, gridPowerW: 0 }) < cfg.dOff);
+test('SÛRETÉ CARDINALE : cuve BASSE sans surplus → PAS de chauffe (jamais de chauffe HP de panique)', () => {
+  // Le défaut bloquant de la v1 : cuve à 2 douches, batterie basse, midi couvert
+  // → l’ancien modèle forçait D=1 (import EDF). Interdit désormais : c’est le plan
+  // HC nocturne qui garantit le confort, pas une chauffe de panique en journée.
+  assert.equal(D({ eAvailWh: 2500, socFrac: 0.2, pvApsW: 400, maxAcChargeW: 0, gridPowerW: 0 }), 0);
 });
 
-// ─── Urgence confort ────────────────────────────────────────────────────────
-
-test('cuve proche du confort dur (sous réserve) le jour → urgence chauffe', () => {
-  assert.ok(D({ eAvailWh: 2500, forecastRemainingKwh: 1, socFrac: 0.2 }) > cfg.dOn);
-});
-
-test('urgence confort la NUIT → D = 0 (c’est le plan HC qui gère, pas le solaire)', () => {
-  assert.equal(D({ eAvailWh: 2500, sunElevDeg: -10 }), 0);
+test('charge à bas SoC même APS fort (batterie pas pleine) → PAS de chauffe', () => {
+  assert.ok(D({ socFrac: 0.5, pvApsW: 900, maxAcChargeW: 1500, gridPowerW: -10 }) < cfg.dOff);
 });
 
 // ─── Hystérésis ─────────────────────────────────────────────────────────────
 
-test('hystérésis : allume au-dessus de dOn, reste allumé jusqu’à dOff', () => {
-  assert.equal(hysteresisOn(0.6, false, cfg), true); // franchit dOn 0.55
-  assert.equal(hysteresisOn(0.45, true, cfg), true); // reste ON (> dOff 0.35)
-  assert.equal(hysteresisOn(0.3, true, cfg), false); // coupe sous dOff
-  assert.equal(hysteresisOn(0.45, false, cfg), false); // n’allume pas sous dOn
+test('hystérésis : allume au-dessus de dOn, reste jusqu’à dOff', () => {
+  assert.equal(hysteresisOn(0.6, false, cfg), true);
+  assert.equal(hysteresisOn(0.45, true, cfg), true);
+  assert.equal(hysteresisOn(0.3, true, cfg), false);
+  assert.equal(hysteresisOn(0.45, false, cfg), false);
 });
