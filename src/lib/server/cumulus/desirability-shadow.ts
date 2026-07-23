@@ -46,6 +46,7 @@ export function shadowDesirability(
     eAvailWh: ctx.eAvailWh,
     eFullWh: ctx.eFullWh,
     gridPowerW: inputs.gridPowerW,
+    em50Available: inputs.em50Available,
     maxAcChargeW: inputs.maxAcAvailable ? inputs.maxAcChargeW : null,
     socFrac,
     heaterW: config.pilot.heatPowerW,

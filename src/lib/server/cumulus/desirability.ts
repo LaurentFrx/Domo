@@ -6,20 +6,29 @@
  * 2de nulles aux bords = Bézier douce, tue les falaises type « 64 % bloque tout »).
  * Les signaux s'assemblent en D ∈ [0,1] qui franchit UN seuil à hystérésis → on/off.
  *
- * VERSION SÛRE PAR CONSTRUCTION (refonte après revue adversariale 23/07) :
- * on ne chauffe QUE sur surplus solaire CONFIRMÉ, batterie déjà bien au-dessus de
- * sa réserve. Trois défauts de la v1 supprimés :
- *  - PAS de « chauffe confort » qui forcerait un import quand la cuve est basse et
- *    qu'il n'y a pas de surplus (= chauffe HP de panique, bannie par Laurent — le
- *    confort est garanti par le PLAN HC nocturne, séparé) ;
- *  - PAS de « voie de prêt » spéculative qui tirerait de la batterie sur la foi
- *    d'une prévision (drainait la réserve du soir) ;
- *  - écrêtage détecté correctement : batterie quasi pleine ET soleil FRANC (via
- *    l'APS, jamais bridé), PAS via la dérivée de charge (nulle quand ça écrête).
- * Résultat : à chaque instant où D est haut, il y a du surplus gratuit ET la
- * batterie est haute (SoC ≳ 85 %) → la chauffe recouvre du PV sinon écrêté sans
- * puiser la réserve. Un veto d'import (D=0 dès qu'on soutire) est le filet ultime.
- * L'hiver s'éteint tout seul (pas de surplus → freeSurplus≈0 → D≈0 → repli HC).
+ * VERSION SÛRE PAR CONSTRUCTION (2e refonte, après DEUX revues adversariales) :
+ * on ne chauffe QUE sur du surplus solaire RÉELLEMENT gratuit — celui qui, sinon,
+ * serait perdu (export franc au compteur, ou PV écrêté quand la batterie NE PEUT
+ * PLUS l'absorber). Toute la sûreté est STRUCTURELLE, pas confiée à une prévision.
+ *
+ * Trois enseignements des revues, gravés ici :
+ *  1. « batterie qui charge » ≠ « écrêtage ». Une batterie qui absorbe encore du
+ *     courant (maxAcChargeW > 0) N'écrête PAS : chauffer lui volerait sa charge
+ *     (puisage réserve, INVISIBLE au veto sous zéro-export). L'écrêtage n'est PROUVÉ
+ *     que si la batterie a CESSÉ d'absorber (maxAcChargeW → 0) ET est vraiment pleine
+ *     (SoC ≳ 95-99 %, aligné sur battFullPct=98) ET le soleil est franc (APS). Alors
+ *     chauffer recouvre du PV sinon écrêté, ET la réserve — pleine — se refait
+ *     instantanément du même PV : ZÉRO puisage net.
+ *  2. Charger < chauffer = puiser la réserve. freeCharge n'est un vrai surplus que si
+ *     la charge DÉPASSE la puissance de chauffe (sinon la différence sort de la
+ *     batterie). Le parc réel plafonne ~2 kW < heater 2,9 kW → ce signal est ~0 en
+ *     pratique, ce qui est CORRECT.
+ *  3. Un compteur réseau muet n'est pas « zéro import » : c'est « import inconnu ».
+ *     Sans mesure EM-50 fiable, on REFUSE d'allumer (comme le pilote booléen).
+ *
+ * Aucune prévision, aucune voie de « prêt » ni de « confort » : le confort est
+ * garanti par le PLAN HC nocturne, séparé. L'hiver s'éteint tout seul (pas de
+ * surplus → freeSurplus≈0 → D≈0 → repli HC).
  */
 
 // ─── Primitives de mise en forme (courbes continues) ────────────────────────
@@ -48,9 +57,11 @@ export interface DesInputs {
   eAvailWh: number;
   /** Énergie cuve pleine (Wh). */
   eFullWh: number;
-  /** Réseau signé (W) : + soutirage EDF / − injection. */
+  /** Réseau signé (W) : + soutirage EDF / − injection. Valide SEULEMENT si em50Available. */
   gridPowerW: number;
-  /** Charge AC absorbée par la batterie (W ≥ 0) = surplus qui s'y stocke ; null si muet. */
+  /** Le compteur EM-50 répond-il ? Faux ⇒ gridPowerW n'est PAS fiable ⇒ refus d'allumer. */
+  em50Available: boolean;
+  /** Charge AC absorbée par la batterie (W ≥ 0) = ce qu'elle stocke encore ; null si muet. */
   maxAcChargeW: number | null;
   /** SoC du parc batterie, fraction 0..1. */
   socFrac: number;
@@ -63,16 +74,21 @@ export interface DesInputs {
 export interface DesConfig {
   /** Export (W) où le signal free commence à monter (bas — capte 200 W perdus). */
   exportKneeW: number;
-  /** Charge batterie (W) : bornes où elle compte comme surplus fort (≈ couverture heater). */
-  chargeKneeLowW: number;
-  chargeKneeHighW: number;
-  /** SoC où la charge devient du VRAI surplus (au-dessus de la réserve batterie). */
+  /** Charge batterie (W) : bornes où elle compte comme VRAI surplus. Doivent
+   *  ENCADRER le heater : charger sous le heater puise la réserve, pas un surplus. */
+  chargeSurplusLowW: number;
+  chargeSurplusHighW: number;
+  /** SoC où la charge devient du surplus (au-dessus de la réserve batterie). */
   surplusSocLow: number;
   surplusSocHigh: number;
-  /** SoC où l'écrêtage devient probable (batterie quasi pleine). */
+  /** SoC où la batterie est VRAIMENT pleine (écrêtage possible) — proche de battFullPct. */
   curtailSocLow: number;
   curtailSocHigh: number;
-  /** Production APS (W) attestant un soleil FRANC (écrêtage recouvrable). */
+  /** Charge (W) sous laquelle la batterie est réputée avoir CESSÉ d'absorber
+   *  (preuve directe d'écrêtage : elle ne peut plus rien stocker). */
+  chargeExhaustLowW: number;
+  chargeExhaustHighW: number;
+  /** Production APS (W) attestant un soleil FRANC (donc du PV réellement à recouvrer). */
   apsStrongLowW: number;
   apsStrongHighW: number;
   /** Fenêtre solaire douce : élévation de début/fin de rampe (°). */
@@ -88,14 +104,21 @@ export interface DesConfig {
 export function defaultDesConfig(): DesConfig {
   return {
     exportKneeW: 150,
-    chargeKneeLowW: 800,
-    chargeKneeHighW: 2200, // charge ≳ 2,2 kW = surplus proche de couvrir le heater
-    surplusSocLow: 0.75, // sous 75 % la charge remplit la réserve nécessaire, pas du surplus
+    // Encadre le heater 2,9 kW : sous 2,9 kW la charge ne « couvre » pas la chauffe
+    // → chauffer puiserait la différence dans la batterie. Le parc réel (~2 kW) ne
+    // franchit jamais ce seuil → freeCharge ≈ 0 en pratique (CORRECT, cf. §2).
+    chargeSurplusLowW: 2900,
+    chargeSurplusHighW: 3500,
+    surplusSocLow: 0.75,
     surplusSocHigh: 0.9,
-    curtailSocLow: 0.85, // écrêtage : batterie quasi pleine
-    curtailSocHigh: 0.95,
-    apsStrongLowW: 300, // APS > 300 W = soleil franc (le SB serait bridé si batterie pleine)
-    apsStrongHighW: 700,
+    // Écrêtage : batterie VRAIMENT pleine (pas 85 %) — aligné sur pilot.battFullPct=98.
+    curtailSocLow: 0.95,
+    curtailSocHigh: 0.99,
+    // La batterie a cessé d'absorber : charge quasi nulle = elle ne peut plus stocker.
+    chargeExhaustLowW: 200,
+    chargeExhaustHighW: 600,
+    apsStrongLowW: 350, // APS > 350 W = soleil franc → du PV réel à recouvrer
+    apsStrongHighW: 800,
     sunSoftLowDeg: 12,
     sunSoftHighDeg: 25,
     importVetoW: 120,
@@ -109,8 +132,8 @@ export function defaultDesConfig(): DesConfig {
 export interface DesSignals {
   tankRoom: number; // portail de place : ~1 sauf près du plein
   freeExport: number; // don franc au compteur (rare sous zéro-export)
-  freeCharge: number; // charge batterie AU-DESSUS de sa réserve (vrai surplus stocké)
-  freeCurtail: number; // écrêtage : batterie quasi pleine + soleil franc (APS) → PV recouvrable
+  freeCharge: number; // charge batterie qui DÉPASSE le heater (≈0 sur le parc réel)
+  freeCurtail: number; // écrêtage PROUVÉ : batterie pleine + a cessé d'absorber + soleil franc
   freeSurplus: number; // max des trois = surplus gratuit confirmé
   solarWindow: number; // fenêtre solaire douce (0 la nuit)
 }
@@ -120,37 +143,46 @@ export function computeSignals(di: DesInputs, cfg: DesConfig): DesSignals {
   // du haut (valeur marginale décroissante uniquement tout près du plein).
   const tankRoom = falling(0.93 * di.eFullWh, 0.99 * di.eFullWh, di.eAvailWh);
 
-  // (a) Export franc = énergie VRAIMENT perdue (0 €, pas de revente). Rare sous
-  // la régulation zéro-export de la Max AC, mais toujours valable si présent.
+  // (a) Export franc = énergie VRAIMENT perdue (0 €, pas de revente). Rare sous la
+  // régulation zéro-export de la Max AC, mais toujours valable si présent.
   const exportW = Math.max(0, -di.gridPowerW);
   const freeExport = smootherstep(cfg.exportKneeW, di.heaterW, exportW);
 
   // (b) Charge batterie comme surplus — SEULEMENT au-dessus de la réserve (SoC ≥
-  // ~75 % : une batterie basse qui charge remplit son PROPRE besoin, ce n'est pas
-  // du surplus — leçon 23/07) ET si la charge est FORTE (≳ 2 kW ≈ couvre le heater
-  // → chauffer ne puise quasi pas la batterie).
+  // ~75 %) ET si la charge DÉPASSE le heater (sinon chauffer sort la différence de
+  // la batterie = puisage réserve invisible au veto). Le parc réel plafonne ~2 kW
+  // < heater 2,9 kW → ce signal reste ~0, ce qui est physiquement CORRECT.
   const battIsSurplus = smootherstep(cfg.surplusSocLow, cfg.surplusSocHigh, di.socFrac);
   const chargeMag =
     di.maxAcChargeW === null
       ? 0
-      : smootherstep(cfg.chargeKneeLowW, cfg.chargeKneeHighW, di.maxAcChargeW);
+      : smootherstep(cfg.chargeSurplusLowW, cfg.chargeSurplusHighW, di.maxAcChargeW);
   const freeCharge = chargeMag * battIsSurplus;
 
-  // (c) Écrêtage : batterie QUASI PLEINE (ne peut plus absorber) ET soleil FRANC
-  // — attesté par l'APS (jamais bridé). Alors les panneaux SolarBank sont bridés :
-  // chauffer les « dé-bride » (recouvre du PV sinon perdu), couverture ≈ pleine,
-  // ZÉRO puisage batterie. CORRECTION v1 : ne dépend PAS de la dérivée de charge
-  // (nulle justement quand la batterie pleine cesse de charger = quand ça écrête).
+  // (c) ÉCRÊTAGE PROUVÉ — le gisement dominant l'été. TROIS preuves simultanées :
+  //  - batterie VRAIMENT pleine (nearFull, SoC ≳ 95-99 %) ;
+  //  - elle a CESSÉ d'absorber (chargeExhausted : maxAcChargeW → 0) → preuve
+  //    DIRECTE qu'elle ne peut plus stocker ; une batterie qui charge encore
+  //    n'écrête PAS (bug de la v1 : seuil SoC seul, ignorait la charge en cours) ;
+  //  - soleil FRANC (sunStrong via l'APS, jamais bridé) → il y a bien du PV bridé
+  //    à recouvrer.
+  // Alors chauffer « dé-bride » les panneaux (recouvre du PV sinon perdu) ET la
+  // réserve, PLEINE, se refait instantanément du même PV → ZÉRO puisage net. Si la
+  // Max AC est muette (maxAcChargeW null), on ne peut PAS prouver l'écrêtage → 0.
   const nearFull = smootherstep(cfg.curtailSocLow, cfg.curtailSocHigh, di.socFrac);
+  const chargeExhausted =
+    di.maxAcChargeW === null
+      ? 0
+      : falling(cfg.chargeExhaustLowW, cfg.chargeExhaustHighW, di.maxAcChargeW);
   const sunStrong = smootherstep(cfg.apsStrongLowW, cfg.apsStrongHighW, di.pvApsW);
-  const freeCurtail = nearFull * sunStrong;
+  const freeCurtail = nearFull * chargeExhausted * sunStrong;
 
   const freeSurplus = Math.max(freeExport, freeCharge, freeCurtail);
 
   // Fenêtre solaire douce : ~0 la nuit (élévation < 12°). NB : ne suffit PAS à
   // éteindre l'hiver (élévation midi ~22° → window ~0,9) — c'est l'ABSENCE de
-  // surplus (freeSurplus≈0) qui éteint l'hiver, pas la fenêtre. La fenêtre ne
-  // fait qu'interdire la nuit.
+  // surplus (freeSurplus≈0) qui éteint l'hiver, pas la fenêtre. La fenêtre ne fait
+  // qu'interdire la nuit.
   const solarWindow = smootherstep(cfg.sunSoftLowDeg, cfg.sunSoftHighDeg, di.sunElevDeg);
 
   return { tankRoom, freeExport, freeCharge, freeCurtail, freeSurplus, solarWindow };
@@ -168,35 +200,41 @@ export interface DesResult {
  * D = fenêtre × place × surplus-confirmé. Trois portails/magnitude :
  *  - solarWindow ferme la nuit ;
  *  - tankRoom ferme cuve pleine ;
- *  - freeSurplus porte la magnitude (surplus gratuit confirmé, batterie haute).
- * VETO DUR d'import : dès qu'on soutire (> importVetoW), D=0 — le ballon ne cause
- * JAMAIS d'achat EDF. VETO cuisine : gros appareil → D=0 (la maison d'abord).
- * PAS de voie confort ni de prêt : la sûreté est STRUCTURELLE (on ne chauffe qu'à
- * SoC élevé sur du surplus réel), pas laissée à une prévision.
+ *  - freeSurplus porte la magnitude (surplus gratuit confirmé : export franc, charge
+ *    au-dessus du heater, ou écrêtage prouvé batterie pleine).
+ * VETO compteur muet : sans mesure EM-50 fiable, on ne peut pas garantir le
+ * zéro-import → D=0 (comme le pilote booléen refuse d'allumer). VETO import : dès
+ * qu'on soutire (> importVetoW), D=0 — le ballon ne cause JAMAIS d'achat EDF. VETO
+ * cuisine : gros appareil → D=0 (la maison d'abord). Aucune voie confort ni prêt :
+ * la sûreté est STRUCTURELLE (on ne chauffe qu'à batterie pleine sur du PV écrêté,
+ * ou sur un export/charge qui dépasse le heater), pas laissée à une prévision.
  */
 export function computeDesirability(di: DesInputs, cfg: DesConfig): DesResult {
   const s = computeSignals(di, cfg);
   let D = s.solarWindow * s.tankRoom * s.freeSurplus;
 
   const buyW = Math.max(0, di.gridPowerW);
+  if (!di.em50Available) D = 0; // compteur muet : import inconnu → refus
   if (buyW > cfg.importVetoW) D = 0; // veto import : jamais chauffer en soutirant
   if (di.applianceActive) D = 0; // veto cuisine : la maison d'abord
 
-  const reason = di.applianceActive
-    ? 'veto cuisine (gros appareil)'
-    : buyW > cfg.importVetoW
-      ? `veto import (${Math.round(buyW)} W soutirés)`
-      : s.solarWindow < 0.05
-        ? 'nuit — repli HC'
-        : s.tankRoom < 0.05
-          ? 'ballon plein'
-          : s.freeSurplus < 0.1
-            ? 'pas de surplus confirmé — on attend (batterie d’abord)'
-            : s.freeCurtail > 0.4
-              ? `écrêtage recouvré (batterie pleine + soleil franc ${Math.round(di.pvApsW)} W)`
-              : s.freeCharge > 0.4
-                ? `charge batterie excédentaire (SoC ${Math.round(di.socFrac * 100)} %)`
-                : `don franc au réseau (${Math.round(Math.max(0, -di.gridPowerW))} W)`;
+  const reason = !di.em50Available
+    ? 'compteur EM-50 muet — refus (import non vérifiable)'
+    : di.applianceActive
+      ? 'veto cuisine (gros appareil)'
+      : buyW > cfg.importVetoW
+        ? `veto import (${Math.round(buyW)} W soutirés)`
+        : s.solarWindow < 0.05
+          ? 'nuit — repli HC'
+          : s.tankRoom < 0.05
+            ? 'ballon plein'
+            : s.freeSurplus < 0.1
+              ? 'pas de surplus confirmé — on attend (batterie d’abord)'
+              : s.freeCurtail > 0.4
+                ? `écrêtage prouvé (batterie pleine, n’absorbe plus, soleil ${Math.round(di.pvApsW)} W)`
+                : s.freeCharge > 0.4
+                  ? `charge batterie > chauffe (SoC ${Math.round(di.socFrac * 100)} %)`
+                  : `don franc au réseau (${Math.round(Math.max(0, -di.gridPowerW))} W)`;
 
   return { D: clamp01(D), signals: s, reason };
 }
