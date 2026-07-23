@@ -161,7 +161,7 @@ for (const day of days) {
       socFrac,
       dSocFracPerH: dSoc,
       forecastRemainingKwh: rem[i],
-      eveningReserveKwh: 5,
+      eveningReserveKwh: 7,
       batteryCapacityKwh: capKwh,
       heaterW: HEATER,
       applianceActive: false

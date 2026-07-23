@@ -90,6 +90,9 @@ export interface DesConfig {
   /** Fenêtre solaire douce : élévation de début/fin de rampe (°). */
   sunSoftLowDeg: number;
   sunSoftHighDeg: number;
+  /** Plan journalier : PV restant (kWh) où la confiance solaire monte de 0 à 1. */
+  planLowKwh: number;
+  planHighKwh: number;
   /** Hystérésis de sortie sur D. */
   dOn: number;
   dOff: number;
@@ -105,6 +108,8 @@ export function defaultDesConfig(): DesConfig {
     chargeRateAnticipH: 0.12, // +12 pts/h ≈ charge franche → saturation à venir
     sunSoftLowDeg: 12,
     sunSoftHighDeg: 25,
+    planLowKwh: 2, // sous 2 kWh de soleil restant → aucun prêt (repli HC)
+    planHighKwh: 6, // au-delà de 6 kWh restant → journée solaire franche
     dOn: 0.55,
     dOff: 0.35
   };
@@ -116,7 +121,8 @@ export interface DesSignals {
   tankRoom: number; // PORTAIL de place : ~1 tant que la cuve n'est pas quasi pleine, 0 près du plein
   comfortUrgency: number; // urgence confort (échéance douches + refroidissement projeté)
   freeSurplus: number; // surplus RÉELLEMENT gratuit dispo maintenant (export + écrêtage + charge Max AC)
-  reserveHealth: number; // santé de la réserve du soir compte tenu du solaire à venir (1 = prêter OK)
+  reserveHealth: number; // batterie DÉJÀ au-dessus de sa réserve du soir (1 = prêter OK)
+  solarConfidence: number; // plan journalier : le soleil restant refera-t-il la batterie ? (1 = journée solaire)
   solarWindow: number; // fenêtre solaire douce (0 la nuit/hiver)
 }
 
@@ -164,25 +170,28 @@ export function computeSignals(di: DesInputs, cfg: DesConfig): DesSignals {
   const freeCurtail = curtailProximity * chargeStillFranc;
   const freeSurplus = Math.max(freeExport, freeCharge, freeCurtail);
 
-  // reserveHealth : la réserve du soir est-elle assez confortable pour qu'on
-  // puisse prêter un peu au ballon ? On PROJETTE le SoC du soir = SoC actuel +
-  // solaire restant prévu − ce que la maison consommera d'ici là (approx via la
-  // cible de réserve). Si le SoC projeté dépasse la cible, on prête librement.
-  // C'est ici que vivent « la batterie d'abord » ET l'arbitrage par prévision,
-  // en CONTINU (pas un seuil de SoC figé).
+  // reserveHealth : la batterie est-elle DÉJÀ au-dessus de sa réserve du soir
+  // (première créance de la maison) ? SoC courant vs cible + marge. C'est la
+  // condition pour PRÊTER du courant au ballon sans surplus instantané — bornée
+  // par la créance de la batterie (basse → ne prête pas).
   const socKwh = di.socFrac * di.batteryCapacityKwh;
-  const projectedEveningKwh = socKwh + Math.max(0, di.forecastRemainingKwh);
   const reserveHealth = smootherstep(
     di.eveningReserveKwh,
-    di.eveningReserveKwh + 2, // +2 kWh de marge = pleinement sain
-    projectedEveningKwh
+    di.eveningReserveKwh + 2, // +2 kWh au-dessus de la réserve = pleinement sain
+    socKwh
   );
+
+  // solarConfidence : le PLAN JOURNALIER. Le soleil RESTANT prévu (AROME) suffit-il
+  // à refaire la batterie après un prêt au ballon ? Élevé → journée solaire, on
+  // peut chauffer au plein ; bas → journée pauvre, on ne prête pas (repli HC).
+  // C'est l'arbitrage par prévision, en continu (étude : PV ≥14 solaire / <11 HC).
+  const solarConfidence = smootherstep(cfg.planLowKwh, cfg.planHighKwh, di.forecastRemainingKwh);
 
   // solarWindow : rampe douce sur l'élévation. ~0 la nuit et l'hiver (le soleil
   // ne franchit jamais sunSoftHigh en déc → D≈0 → repli HC, pas de spéculation).
   const solarWindow = smootherstep(cfg.sunSoftLowDeg, cfg.sunSoftHighDeg, di.sunElevDeg);
 
-  return { tankRoom, comfortUrgency, freeSurplus, reserveHealth, solarWindow };
+  return { tankRoom, comfortUrgency, freeSurplus, reserveHealth, solarConfidence, solarWindow };
 }
 
 // ─── Assemblage : D ∈ [0,1] ─────────────────────────────────────────────────
@@ -207,11 +216,17 @@ export interface DesResult {
 export function computeDesirability(di: DesInputs, cfg: DesConfig): DesResult {
   const s = computeSignals(di, cfg);
 
-  // Opportunité = surplus RÉELLEMENT gratuit (export perdu, charge au-dessus de la
-  // réserve, écrêtage imminent). On NE prête PAS sur la seule foi de la prévision
-  // (reserveHealth) : trop risqué en instantané (23/07). reserveHealth reste
-  // calculé pour le futur PLAN JOURNALIER (solaire vs HC), pas pour ce tick.
-  const opportunity = s.freeSurplus;
+  // Opportunité = surplus RÉELLEMENT gratuit MAINTENANT (export perdu, charge
+  // au-dessus de la réserve, écrêtage) OU « voie de prêt » : chauffer en tirant
+  // un peu de la batterie, autorisé SEULEMENT si les trois pierres s'alignent —
+  // batterie déjà au-dessus de sa réserve (reserveHealth) ET journée solaire qui
+  // la refera (solarConfidence) ET soleil présent (solarWindow). C'est le
+  // corollaire « ne pas brider tant que le ballon a de la place », borné par la
+  // première créance de la batterie et arbitré par la prévision. Aucune pierre ne
+  // domine : chacune peut fermer la voie de prêt ; le surplus franc, lui, passe
+  // toujours (on ne gaspille jamais du 0 €).
+  const lendPath = s.reserveHealth * s.solarConfidence * s.solarWindow;
+  const opportunity = Math.max(s.freeSurplus, lendPath);
 
   // Base : on chauffe s'il y a de la place ET une opportunité, dans la fenêtre.
   let D = s.solarWindow * s.tankRoom * opportunity;

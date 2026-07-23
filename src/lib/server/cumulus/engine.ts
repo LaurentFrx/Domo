@@ -20,6 +20,7 @@ import { setRelay } from './relay';
 import { ensureTempSensor } from './temp-sensor';
 import { updateEnergyModel, type EnergyTickResult } from './energy-model';
 import { pilotStep, type PilotCtx } from './pilot';
+import { shadowDesirability } from './desirability-shadow';
 import {
   estimatePotential,
   readSolarCalib,
@@ -163,6 +164,17 @@ async function runTick(apply: boolean): Promise<TickResult> {
     potential
   };
   const pilotRes = pilotStep(inputs, config, state, ctx);
+
+  // ── SHADOW : modèle continu de désirabilité (OBSERVATION SEULE) ──
+  // Calcule D et journalise « aurait chauffé » à côté du pilote booléen, SANS
+  // toucher au relais ni à la décision. Banc de validation live avant tout
+  // passage aux commandes. Une exception ici ne doit JAMAIS casser le tick.
+  try {
+    console.log(shadowDesirability(inputs, ctx, config).logLine);
+  } catch (e) {
+    console.warn('[desir-shadow] erreur (ignorée):', e instanceof Error ? e.message : e);
+  }
+
   const pilotWant: PilotWant = {
     wantOn: pilotRes.wantOn,
     reason: pilotRes.reason === 'wait' ? 'wait' : pilotRes.reason,
