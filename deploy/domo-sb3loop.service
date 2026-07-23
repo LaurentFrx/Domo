@@ -1,0 +1,29 @@
+# Boucle SB3 — un « tick » de la boucle lente d'allocation entre batteries.
+#
+# Déclenché toutes les 60 s par domo-sb3loop.timer : appelle l'endpoint interne
+# /api/sb3loop/tick (auth Bearer, bypass cookie en match exact dans
+# hooks.server.ts). Le moteur lit EM-50/APS/Modbus Max AC/cloud SB3, décide
+# (loi jour/nuit/rescue, slew, bande morte, dwell, fail-low), et écrit la
+# consigne système SB3 via l'anker-bridge (compte propriétaire) avec
+# confirmation ; 2 échecs → auto-désactivation + Web Push.
+#
+# ⚠ NON géré par le CI/CD (comme domo-cumulus) — installation MANUELLE :
+#   sudo cp deploy/domo-sb3loop.service deploy/domo-sb3loop.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now domo-sb3loop.timer
+#   journalctl -u domo-sb3loop -f
+# Pré-requis : SB3LOOP_TICK_TOKEN défini dans /home/laurent/domo/.env.
+
+[Unit]
+Description=Domo — boucle SB3 (un tick de la boucle lente d'allocation)
+Documentation=file:/home/laurent/domo/src/lib/server/sb3loop/engine.ts
+After=network-online.target domo.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=laurent
+Group=laurent
+EnvironmentFile=-/home/laurent/domo/.env
+# -m 55 : le tick peut inclure une écriture cloud (login owner ~5-15 s).
+ExecStart=/usr/bin/curl -fsS -m 55 -X POST -H "Authorization: Bearer ${SB3LOOP_TICK_TOKEN}" http://127.0.0.1:3000/api/sb3loop/tick

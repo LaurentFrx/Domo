@@ -1,0 +1,15 @@
+# Planifie la boucle SB3 toutes les 60 s.
+# Installation : voir l'en-tête de domo-sb3loop.service.
+
+[Unit]
+Description=Planifie la boucle SB3 toutes les 60 s
+
+[Timer]
+# Laisse le service Domo démarrer après un boot avant le 1er tick.
+OnBootSec=120s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=domo-sb3loop.service
+
+[Install]
+WantedBy=timers.target

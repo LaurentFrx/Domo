@@ -89,6 +89,12 @@ export const handle: Handle = async ({ event, resolve }) => {
     return withApiCacheControl(pathname, await resolve(event));
   }
 
+  // Endpoint tick de la boucle SB3 : timer systemd en localhost, sans cookie.
+  // Auth par token (Bearer) appliquée dans la route. Match EXACT.
+  if (pathname === '/api/sb3loop/tick') {
+    return withApiCacheControl(pathname, await resolve(event));
+  }
+
   // Endpoint tick de la collecte de température : timer systemd en localhost,
   // sans cookie. Auth par token (Bearer) appliquée dans la route. Match EXACT.
   if (pathname === '/api/temperature/tick') {

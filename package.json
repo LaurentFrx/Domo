@@ -18,7 +18,8 @@
     "test:cumulus": "node --experimental-strip-types --test scripts/cumulus-decide.test.ts",
     "test:energy": "node --experimental-strip-types --test scripts/cumulus-energy.test.ts",
     "test:pilot": "node --experimental-strip-types --test scripts/cumulus-pilot.test.ts",
-    "test:atomic": "node --experimental-strip-types --test scripts/atomic-store.test.ts"
+    "test:atomic": "node --experimental-strip-types --test scripts/atomic-store.test.ts",
+    "test:sb3loop": "node --experimental-strip-types --test scripts/sb3loop.test.ts"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.0",
