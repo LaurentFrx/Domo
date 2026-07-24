@@ -1,6 +1,5 @@
 <script lang="ts">
   import FlowDiagram from '$components/charts/FlowDiagram.svelte';
-  import GridHero from '$components/charts/GridHero.svelte';
   import KpiCard from '$components/cards/KpiCard.svelte';
   import SavingsCard from '$components/cards/SavingsCard.svelte';
   import { anker } from '$stores/anker.svelte';
@@ -95,6 +94,45 @@
         : 600;
   });
 
+  // Détail PAR PACK pour le pied de la carte apports/usages : les 2 Solarbank 3
+  // (cloud, hors A17E2) + la Max AC (Modbus local prioritaire, sinon repli cloud).
+  // SoC = donnée fiable ; charge/décharge = best-effort (indicateur, pas un bilan).
+  interface BatteryDetail {
+    label: string;
+    soc: number;
+    chargeW: number;
+    dischargeW: number;
+  }
+  const batteryDetail = $derived.by((): BatteryDetail[] => {
+    const out: BatteryDetail[] = [];
+    cloudSb3.forEach((b, i) =>
+      out.push({
+        label: `SB3-${i + 1}`,
+        soc: b.soc,
+        chargeW: Math.max(0, b.chargingPowerW),
+        dischargeW: Math.max(0, b.dischargingPowerW)
+      })
+    );
+    if (localBatteryUp) {
+      out.push({
+        label: 'Max AC',
+        soc: ankerLocal.socPct,
+        chargeW: Math.max(0, -ankerLocal.batteryPowerW),
+        dischargeW: Math.max(0, ankerLocal.batteryPowerW)
+      });
+    } else {
+      const max = anker.batteries.find((b) => b.model === 'A17E2');
+      if (max)
+        out.push({
+          label: 'Max AC',
+          soc: max.soc,
+          chargeW: Math.max(0, max.chargingPowerW),
+          dischargeW: Math.max(0, max.dischargingPowerW)
+        });
+    }
+    return out;
+  });
+
   // ─── Transitions d'affichage ─────────────────────────────────────────
   // On interpole les puissances entre deux relevés (Anker rafraîchit ~toutes les
   // 15 s) → les rubans du Sankey et les compteurs GLISSENT au lieu de sauter, ce
@@ -137,10 +175,10 @@
   // Équilibre instantané ; pertes de conversion < 5 % ignorées.
   const homeA = $derived(Math.max(0, Math.round(pvA + gridA - batA)));
 
-  // ─── Réseau « en avant » + boost de réactivité local ─────────────────────────
-  // Le réseau EDF est le signal LOCAL le plus fiable et le plus actionnable quand
-  // on jongle avec les appareils → chiffre héros temps réel (GridHero, au-dessus du
-  // Sankey). On accélère em50/aps (2,5 s / 5 s) SEULEMENT quand l'accueil est la page
+  // ─── Boost de réactivité local (fraîcheur du Sankey) ─────────────────────────
+  // Le réseau EDF est le signal LOCAL le plus fiable et le plus actionnable quand on
+  // jongle avec les appareils → il alimente le Sankey apports/usages en temps réel.
+  // On accélère em50/aps (2,5 s / 5 s) SEULEMENT quand l'accueil est la page
   // CENTRALE du pager (pagerNav.current==='/' ; null = 1er paint hors pager = accueil)
   // → pas de poll rapide en arrière-plan sur les autres pages. Anker JAMAIS boosté
   // (mur cloud Solix ~60 s + risque de ban).
@@ -161,17 +199,6 @@
     apsystems.clearBoost();
     ankerLocal.clearBoost();
   });
-  const gridLive = $derived(em50.available || ankerLocal.meterAvailable);
-  // Réseau héros : mesure EM-50 brute (rapide) si dispo, sinon Gen 2 local
-  // (même fraîcheur), sinon repli lissé (Linky).
-  const gridHeroW = $derived(
-    em50.available
-      ? em50.gridPowerW
-      : ankerLocal.meterAvailable
-        ? ankerLocal.meterGridPowerW
-        : gridA
-  );
-
   // ─── Fraîcheur de la part « batterie » de la conso (cloud Solix ~60 s) ───────
   // La conso Maison mêle réseau (frais) et part SolarBank (cloud). Le snapshot Anker
   // avance ~toutes les 60 s ; figé > 75 s ⇒ pastille ambre sur le nœud Maison (sinon
@@ -427,12 +454,8 @@
     <!-- items-stretch : la colonne stats remplit la hauteur du Sankey carré (sinon
          un grand vide à droite sur desktop). -->
     <div class="grid gap-3.5 sm:gap-5 lg:grid-cols-2 lg:items-stretch">
-      <!-- Colonne gauche : Réseau EDF en avant (chiffre héros temps réel) + Sankey -->
+      <!-- Colonne gauche : bilan apports / usages (Sankey) + détail par batterie -->
       <div class="flex flex-col gap-3.5 sm:gap-4">
-        <div class="mx-auto w-full" style="max-width: 520px;">
-          <GridHero gridPowerW={gridHeroW} live={gridLive} animate={animMs > 0} />
-        </div>
-        <!-- Flow Diagram (carré centré, max 520px) -->
         <FlowDiagram
           pvSudW={pvSudA}
           pvOuestW={pvOuestA}
@@ -443,6 +466,7 @@
           gridPowerW={gridA}
           cumulusW={em50.cumulusPowerW}
           {homeConfidence}
+          batteries={batteryOnline ? batteryDetail : []}
         />
       </div>
 
