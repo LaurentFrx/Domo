@@ -12,9 +12,10 @@
   import { shelly } from '$stores/shelly.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { pagerNav } from '$lib/pager/pager-nav.svelte';
+  import { productionLifetime } from '$stores/productionLifetime.svelte';
   import { Tween } from 'svelte/motion';
   import { cubicOut } from 'svelte/easing';
-  import { onDestroy } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
 
   // ─── Source canonique : Anker quand connecté, mock sinon ─────────────
   // Tout en watts, signed (+ import / − export).
@@ -194,10 +195,12 @@
       ankerLocal.clearBoost();
     }
   });
+  onMount(() => productionLifetime.connect());
   onDestroy(() => {
     em50.clearBoost();
     apsystems.clearBoost();
     ankerLocal.clearBoost();
+    productionLifetime.disconnect();
   });
   // ─── Fraîcheur de la part « batterie » de la conso (cloud Solix ~60 s) ───────
   // La conso Maison mêle réseau (frais) et part SolarBank (cloud). Le snapshot Anker
@@ -263,14 +266,16 @@
   const SURPLUS_RED = 'oklch(0.62 0.21 27)'; // surplus renvoyé
 
   // ─── Cards lifetime — production cumulée de TOUTE l'installation ──────
-  // production.lifetimeKwh = SolarBank (SB1+SB2, cloud Solix) + onduleur APS (EZ1).
-  // L'APS (pan Sud) était jadis omise → total et équivalent VE sous-estimés.
-  // Affichage conditionné à Anker (source principale) ; l'APS s'ajoute si relevée.
-  const hasLifetime = $derived(anker.connected && production.lifetimeKwh > 0);
+  // Source FIABLE : /api/production/lifetime = MAX des compteurs MATÉRIELS historisés
+  // par le recorder (APS EZ1 ~1276 kWh + SolarBank ~2042 kWh). Robuste au bug cloud
+  // « daily-as-lifetime » : depuis la reconfiguration des systèmes Anker (22/07), le
+  // cloud SolarBank renvoie la production du JOUR (~25 kWh) à la place du cumul — d'où
+  // le total et l'équivalent VE jadis FAUX. Le max recorder ne redescend jamais.
+  const hasLifetime = $derived(productionLifetime.available && productionLifetime.totalKwh > 0);
   // Équivalent VE : l'énergie produite depuis l'installation, convertie en km
   // qu'une voiture électrique parcourrait (conso ~16,7 kWh/100 km → 6 km/kWh).
   const EV_KM_PER_KWH = 6;
-  const evKm = $derived(production.lifetimeKwh * EV_KM_PER_KWH);
+  const evKm = $derived(productionLifetime.totalKwh * EV_KM_PER_KWH);
 
   function fmtNumber(n: number, decimals = 0): string {
     return n.toLocaleString('fr-FR', {
@@ -300,17 +305,17 @@
     <!-- Carte Batterie définie en snippet → rendue à 2 endroits : au-dessus du
          Sankey sur mobile, dans la colonne stats droite dès lg. -->
     {#snippet batteryCard()}
-      <!-- ═══ Batterie — charge (SOC) + jauge segmentée OVNI (workflow + juge) ═══ -->
+      <!-- ═══ Batterie — SOC parc + 3 barres par pack (SB3-1 / SB3-2 / Max AC) ═══ -->
       <div
-        class="bat-card flex flex-col gap-2.5 rounded-[var(--radius-xl)] border px-4 py-3"
+        class="bat-card flex flex-col gap-3 rounded-[var(--radius-xl)] border px-4 py-3"
         class:is-charging={batteryOnline && batChargeA > 1}
         class:is-discharging={batteryOnline && batDischargeA > 1}
         class:is-low={batteryOnline && socA <= 20}
         class:is-offline={!batteryOnline}
         style="background: var(--color-card); border-color: var(--color-border);"
       >
-        <!-- Ligne principale : SOC parc + jauge + flux net -->
-        <div class="flex items-center gap-3">
+        <!-- Résumé parc : SOC moyen + état + flux net + énergie stockée -->
+        <div class="flex items-center justify-between gap-3">
           <!-- Gauche : SOC numérique + état -->
           <div class="flex shrink-0 flex-col">
             <div class="flex items-baseline gap-1">
@@ -342,25 +347,6 @@
             </div>
           </div>
 
-          <!-- Centre : jauge segmentée + borne -->
-          <div class="flex min-w-0 flex-1 items-center gap-1.5">
-            <div
-              class="bat-cells flex h-9 min-w-0 flex-1 items-stretch gap-[3px] rounded-md p-[3px]"
-            >
-              {#each Array.from({ length: 10 }) as _, i}
-                {@const lo = i * 10}
-                {@const lvl = batteryOnline ? Math.max(0, Math.min(100, socA)) : 0}
-                {@const fill = Math.max(0, Math.min(1, (lvl - lo) / 10))}
-                {@const active = lvl > lo + 0.5}
-                {@const isEdge = active && lvl <= lo + 10.5}
-                <div class="bat-cell" class:is-active={active} class:is-edge={isEdge}>
-                  <div class="bat-cell-fill" style="transform: scaleX({fill});"></div>
-                </div>
-              {/each}
-            </div>
-            <span class="bat-nub h-3.5 w-[3px] shrink-0 rounded-r-sm"></span>
-          </div>
-
           <!-- Droite : flux (W) + énergie stockée -->
           <div class="flex shrink-0 flex-col items-end">
             <span class="bat-flow text-sm leading-none font-semibold tabular-nums">
@@ -376,38 +362,46 @@
             {/if}
           </div>
         </div>
-        <!-- Détail PAR PACK : SB3-1 / SB3-2 / Max AC (SoC + charge/décharge) -->
+        <!-- Les 3 batteries EN BARRES DE PROGRESSION : SB3-1 / SB3-2 / Max AC -->
         {#if batteryOnline && batteryDetail.length}
           <div
-            class="grid border-t pt-2.5"
-            style="grid-template-columns: repeat({batteryDetail.length}, minmax(0, 1fr)); border-color: var(--color-border);"
+            class="flex flex-col gap-2 border-t pt-2.5"
+            style="border-color: var(--color-border);"
           >
-            {#each batteryDetail as b, i (b.label)}
+            {#each batteryDetail as b (b.label)}
               {@const flow = b.chargeW - b.dischargeW}
-              <div
-                class="flex flex-col items-center gap-0.5 px-1"
-                style={i > 0 ? 'border-left: 1px solid var(--color-border);' : ''}
-              >
+              {@const soc = Math.max(0, Math.min(100, b.soc))}
+              <div class="flex items-center gap-2.5">
                 <span
-                  class="text-[9.5px] font-semibold tracking-[0.04em] uppercase"
+                  class="w-12 shrink-0 text-[0.6875rem] font-semibold tracking-[0.03em] uppercase"
                   style="color: var(--color-muted-fg);">{b.label}</span
                 >
-                <span class="text-[15px] leading-none font-bold tabular-nums"
+                <div
+                  class="relative h-3 min-w-0 flex-1 overflow-hidden rounded-full"
+                  style="background: color-mix(in oklch, var(--color-muted-fg) 16%, transparent);"
+                >
+                  <div
+                    class="h-full rounded-full transition-[width] duration-500"
+                    style="width: {soc}%; background: {soc <= 20
+                      ? 'var(--color-hp)'
+                      : 'var(--color-battery)'};"
+                  ></div>
+                </div>
+                <span class="w-9 shrink-0 text-right text-[0.8125rem] font-bold tabular-nums"
                   >{Math.round(b.soc)}<span
-                    class="text-[10px] font-semibold"
+                    class="text-[0.625rem] font-semibold"
                     style="color: var(--color-muted-fg);">%</span
                   ></span
                 >
                 <span
-                  class="text-[9.5px] font-medium tabular-nums"
+                  class="w-[46px] shrink-0 text-right text-[0.625rem] font-medium tabular-nums"
                   style="color: {flow > 20
                     ? 'var(--color-battery)'
                     : flow < -20
                       ? 'var(--color-consumption)'
                       : 'var(--color-muted-fg)'};"
+                  >{#if flow > 20}▲{fmtW(flow)}{:else if flow < -20}▼{fmtW(flow)}{:else}—{/if}</span
                 >
-                  {#if flow > 20}▲ {fmtW(flow)} W{:else if flow < -20}▼ {fmtW(flow)} W{:else}repos{/if}
-                </span>
               </div>
             {/each}
           </div>
@@ -523,7 +517,7 @@
           <div class="grid grid-cols-2 gap-3">
             <KpiCard
               label="Production totale"
-              value={fmtNumber(production.lifetimeKwh, 0)}
+              value={fmtNumber(productionLifetime.totalKwh, 0)}
               unit="kWh"
               trend="depuis l'installation"
               domain="solar"
@@ -559,48 +553,7 @@
 </div>
 
 <style>
-  /* ═══ Carte Batterie : jauge segmentée OVNI (conçue via workflow + juge) ═══ */
-  /* Rail des cellules : léger creux en verre (relief inversé, cohérent HG/BD). */
-  .bat-cells {
-    background: var(--color-battery-muted);
-    box-shadow:
-      inset 1px 1px 2px oklch(0.3 0.03 286 / 0.18),
-      inset -1px -1px 1px oklch(0.985 0.01 149 / 0.12);
-  }
-  /* Une cellule = case vide en verre. */
-  .bat-cell {
-    position: relative;
-    flex: 1 1 0;
-    min-width: 0;
-    border-radius: 3px;
-    overflow: hidden;
-    background: var(--color-bg);
-    box-shadow: inset 0 0 0 1px var(--color-border);
-  }
-  /* Remplissage vert, transition douce, ancré à gauche. */
-  .bat-cell-fill {
-    position: absolute;
-    inset: 0;
-    transform-origin: left center;
-    transform: scaleX(0);
-    border-radius: 2px;
-    background: linear-gradient(
-      180deg,
-      oklch(0.85 0.17 152) 0%,
-      oklch(0.76 0.19 152) 55%,
-      oklch(0.66 0.2 152) 100%
-    );
-    transition:
-      transform 700ms cubic-bezier(0.22, 1, 0.36, 1),
-      background 300ms ease;
-  }
-  .bat-cell.is-active .bat-cell-fill {
-    box-shadow: inset 0 1px 2px oklch(0.95 0.08 149 / 0.45);
-  }
-  /* Borne (+) en bout de batterie. */
-  .bat-nub {
-    background: var(--color-border-strong);
-  }
+  /* ═══ Carte Batterie : point d'état + flux (le NIVEAU est dans les 3 barres) ═══ */
   .bat-dot {
     background: var(--color-muted-fg);
     transition: background-color 300ms ease;
@@ -608,7 +561,7 @@
   .bat-flow {
     color: var(--color-muted-fg);
   }
-  /* ── CHARGE : vert, la cellule de front pulse ── */
+  /* ── CHARGE : point + flux verts ── */
   .bat-card.is-charging .bat-dot {
     background: var(--color-battery);
     box-shadow: 0 0 6px var(--color-battery);
@@ -616,23 +569,7 @@
   .bat-card.is-charging .bat-flow {
     color: var(--color-battery);
   }
-  .bat-card.is-charging .bat-cell.is-edge .bat-cell-fill {
-    animation: batPulse 1.6s ease-in-out infinite;
-  }
-  @keyframes batPulse {
-    0%,
-    100% {
-      box-shadow: inset 0 0 4px oklch(0.95 0.1 149 / 0.4);
-      filter: brightness(1);
-    }
-    50% {
-      box-shadow: inset 0 0 9px oklch(0.97 0.12 149 / 0.85);
-      filter: brightness(1.18);
-    }
-  }
-  /* ── DÉCHARGE : seuls le point + le flux passent orange. La JAUGE reste
-     verte = elle indique le NIVEAU de charge, pas le sens du flux (sinon une
-     batterie à 95 % en micro-décharge paraîtrait « faible »). ── */
+  /* ── DÉCHARGE : point + flux orange ── */
   .bat-card.is-discharging .bat-dot {
     background: var(--color-solar);
     box-shadow: 0 0 6px var(--color-solar);
@@ -640,23 +577,11 @@
   .bat-card.is-discharging .bat-flow {
     color: var(--color-solar);
   }
-  /* ── NIVEAU BAS (≤ 20 %) : la jauge vire ambre = vrai avertissement ── */
-  .bat-card.is-low .bat-cell-fill {
-    background: linear-gradient(
-      180deg,
-      oklch(0.82 0.16 70) 0%,
-      var(--color-solar) 55%,
-      oklch(0.72 0.18 58) 100%
-    );
-  }
+  /* ── NIVEAU BAS parc (≤ 20 %) : point orange (les barres passent au corail) ── */
   .bat-card.is-low .bat-dot {
     background: var(--color-solar);
   }
-  /* ── HORS LIGNE : neutralise et désature ── */
-  .bat-card.is-offline .bat-cells {
-    opacity: 0.45;
-    filter: grayscale(0.6);
-  }
+  /* ── HORS LIGNE : désature le SOC ── */
   .bat-card.is-offline .bat-soc {
     opacity: 0.6;
   }
@@ -664,28 +589,6 @@
   @media (max-width: 380px) {
     .bat-soc {
       font-size: 1.625rem;
-    }
-    .bat-cells {
-      height: 2rem;
-      gap: 2px;
-    }
-  }
-  /* Accessibilité : pas d'animation si refusée. */
-  @media (prefers-reduced-motion: reduce) {
-    .bat-card.is-charging .bat-cell.is-edge .bat-cell-fill {
-      animation: none;
-    }
-    .bat-cell-fill {
-      transition: none;
-    }
-  }
-  /* Repli sans transparence (réglage iOS global). */
-  @media (prefers-reduced-transparency: reduce) {
-    .bat-cells {
-      background: var(--color-battery-muted);
-    }
-    .bat-cell {
-      background: var(--color-muted);
     }
   }
 </style>

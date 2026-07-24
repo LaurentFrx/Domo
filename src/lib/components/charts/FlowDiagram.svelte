@@ -78,11 +78,13 @@
   const GRID = 'var(--color-grid-energy)';
   const CUMULUS = 'var(--color-hp)'; // chauffe-eau : teinte chaude, distincte de la Maison
 
-  // ─── Géométrie du Sankey (viewBox 400 × 320) ────────────────────────────
+  // ─── Géométrie du Sankey (viewBox 400 × 400) ────────────────────────────
+  // Carte plus HAUTE (ratio ~1:1) : plus de place verticale pour l'éclatement des
+  // 3 batteries (jusqu'à 3 nœuds batterie par côté) sans chevauchement des libellés.
   const VB_W = 400;
-  const VB_H = 320;
-  const CY = 168; // centre vertical (sous le bandeau d'en-tête)
-  const H = 196; // hauteur de la barre centrale (pleine échelle)
+  const VB_H = 400;
+  const CY = 214; // centre vertical (sous le bandeau d'en-tête)
+  const H = 280; // hauteur de la barre centrale (pleine échelle)
   const GAP = 18; // écart vertical entre nœuds d'un même côté
   const CX = 200;
   const BUS_HALF = 6; // demi-largeur de la barre centrale
