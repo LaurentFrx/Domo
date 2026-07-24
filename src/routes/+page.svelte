@@ -104,11 +104,19 @@
     chargeW: number;
     dischargeW: number;
   }
+  // Orientation des 2 SolarBank 3 par NUMÉRO DE SÉRIE : le cloud les nomme à l'identique
+  // (« Solarbank 3 E2700 Pro ») et n'expose ni orientation ni PV par-unité. Mapping donné
+  // par Laurent (24/07) : …635 = pan SUD, …062 = pan OUEST. Repli SB3-1/2 si SN inconnu
+  // (unité remplacée). Préfixe « SB3 » pour ne pas confondre avec les nœuds solaires Sud/Ouest.
+  const SB3_ORIENTATION: Record<string, string> = {
+    APCDJES0F15200635: 'SB3 Sud',
+    APCDJES0F15700062: 'SB3 Ouest'
+  };
   const batteryDetail = $derived.by((): BatteryDetail[] => {
     const out: BatteryDetail[] = [];
     cloudSb3.forEach((b, i) =>
       out.push({
-        label: `SB3-${i + 1}`,
+        label: SB3_ORIENTATION[b.id] ?? `SB3-${i + 1}`,
         soc: b.soc,
         chargeW: Math.max(0, b.chargingPowerW),
         dischargeW: Math.max(0, b.dischargingPowerW)
@@ -373,7 +381,7 @@
               {@const soc = Math.max(0, Math.min(100, b.soc))}
               <div class="flex items-center gap-2.5">
                 <span
-                  class="w-12 shrink-0 text-[0.6875rem] font-semibold tracking-[0.03em] uppercase"
+                  class="w-16 shrink-0 text-[0.6875rem] font-semibold tracking-[0.03em] uppercase"
                   style="color: var(--color-muted-fg);">{b.label}</span
                 >
                 <div
