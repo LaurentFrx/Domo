@@ -718,6 +718,21 @@
           Chargement de la configuration…
         </p>
       {/if}
+
+      <a
+        href="/cumulus-labo"
+        class="mt-2 flex items-center justify-between rounded-[var(--radius-lg)] px-4 py-3"
+        style="background: var(--color-muted); color: var(--color-fg);"
+        data-sveltekit-preload-data
+      >
+        <span class="flex flex-col gap-0.5">
+          <span class="text-[13px] font-semibold">Labo — modèle shadow</span>
+          <span class="text-[11px]" style="color: var(--color-muted-fg);">
+            Ce que le modèle mathématique « aurait » décidé (observation, ne pilote rien)
+          </span>
+        </span>
+        <span class="text-[18px]" style="color: var(--color-primary);">→</span>
+      </a>
     </AccordionSection>
 
     <!-- ═══ Thermostat sèche-serviette ═══ -->
