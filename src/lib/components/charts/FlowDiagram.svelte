@@ -43,8 +43,9 @@
      */
     homeConfidence?: 'off' | 'live' | 'cloud-lag';
     /**
-     * Détail PAR BATTERIE affiché en pied de carte (SB3-1 / SB3-2 / Max AC) : SoC +
-     * charge/décharge instantanée. Vide ⇒ pas de pied (rendu historique inchangé).
+     * Détail PAR BATTERIE (SB3-1 / SB3-2 / Max AC) : sert à ÉCLATER le nœud « Batterie »
+     * du Sankey en un nœud par pack (charge/décharge proportionnelles à l'agrégat).
+     * Vide ⇒ nœud batterie unique agrégé (rendu historique inchangé). soc non utilisé ici.
      */
     batteries?: { label: string; soc: number; chargeW: number; dischargeW: number }[];
   }
@@ -206,14 +207,30 @@
       sources.push({ key: 'sud', name: 'Sud', sub: 'solaire', color: SUD, w: pvSudW });
     if (pvOuestW > 1)
       sources.push({ key: 'ouest', name: 'Ouest', sub: 'solaire', color: OUEST, w: pvOuestW });
-    if (batteryDischargeW > 1)
-      sources.push({
-        key: 'batd',
-        name: 'Batterie',
-        sub: 'décharge',
-        color: BAT,
-        w: batteryDischargeW
-      });
+    // Batterie côté APPORT — ÉCLATÉE par pack (SB3-1 / SB3-2 / Max AC), part
+    // proportionnelle à l'agrégat pour préserver la balance du Sankey. Repli sur un
+    // nœud unique « Batterie » si aucun détail par pack n'est fourni (non-régression).
+    if (batteryDischargeW > 1) {
+      const perD = batteries.filter((b) => b.dischargeW > 1);
+      const sumD = perD.reduce((s, b) => s + b.dischargeW, 0);
+      if (perD.length && sumD > 1)
+        for (const b of perD)
+          sources.push({
+            key: 'batd-' + b.label,
+            name: b.label,
+            sub: 'décharge',
+            color: BAT,
+            w: batteryDischargeW * (b.dischargeW / sumD)
+          });
+      else
+        sources.push({
+          key: 'batd',
+          name: 'Batterie',
+          sub: 'décharge',
+          color: BAT,
+          w: batteryDischargeW
+        });
+    }
     if (gridPowerW > 1)
       sources.push({ key: 'gridi', name: 'Réseau', sub: 'import', color: GRID, w: gridPowerW });
 
@@ -230,8 +247,22 @@
     } else if (homePowerW > 1) {
       sinks.push({ key: 'home', name: 'Maison', color: HOME, w: homePowerW });
     }
-    if (batteryChargeW > 1)
-      sinks.push({ key: 'batc', name: 'Batterie', sub: 'charge', color: BAT, w: batteryChargeW });
+    // Batterie côté USAGE — ÉCLATÉE par pack (même logique que la décharge).
+    if (batteryChargeW > 1) {
+      const perC = batteries.filter((b) => b.chargeW > 1);
+      const sumC = perC.reduce((s, b) => s + b.chargeW, 0);
+      if (perC.length && sumC > 1)
+        for (const b of perC)
+          sinks.push({
+            key: 'batc-' + b.label,
+            name: b.label,
+            sub: 'charge',
+            color: BAT,
+            w: batteryChargeW * (b.chargeW / sumC)
+          });
+      else
+        sinks.push({ key: 'batc', name: 'Batterie', sub: 'charge', color: BAT, w: batteryChargeW });
+    }
     if (gridPowerW < -1)
       sinks.push({ key: 'gride', name: 'Réseau', sub: 'injection', color: SOLAR, w: -gridPowerW });
 
@@ -268,190 +299,138 @@
 
 <div class="relative mx-auto w-full" style="max-width: 520px;">
   <div
-    class="flow-card relative z-[1] flex flex-col overflow-hidden rounded-[var(--radius-3xl)] border"
-    style="background: var(--color-card);"
+    class="flow-card relative z-[1] overflow-hidden rounded-[var(--radius-3xl)] border"
+    style="background: var(--color-card); aspect-ratio: {VB_W / VB_H};"
   >
-    <!-- Sankey (carré) — conteneur dédié pour garder le ratio + centrer les lueurs. -->
-    <div class="relative w-full" style="aspect-ratio: {VB_W / VB_H};">
-      <!-- Lueurs vertes (image) DANS la carte → clipées par overflow-hidden, donc
-           collées aux bords SANS déborder du cadre. -->
-      <div class="flow-lueur flow-lueur-left" aria-hidden="true"></div>
-      <div class="flow-lueur flow-lueur-right" aria-hidden="true"></div>
-      <svg
-        viewBox="0 0 {VB_W} {VB_H}"
-        preserveAspectRatio="xMidYMid meet"
-        class="absolute inset-0 h-full w-full"
-        role="img"
-        aria-label={ariaLabel}
+    <!-- Lueurs vertes (image) DANS la carte → clipées par overflow-hidden, donc
+         collées aux bords SANS déborder du cadre. -->
+    <div class="flow-lueur flow-lueur-left" aria-hidden="true"></div>
+    <div class="flow-lueur flow-lueur-right" aria-hidden="true"></div>
+    <svg
+      viewBox="0 0 {VB_W} {VB_H}"
+      preserveAspectRatio="xMidYMid meet"
+      class="absolute inset-0 h-full w-full"
+      role="img"
+      aria-label={ariaLabel}
+    >
+      <!-- En-tête de colonnes -->
+      <text
+        x="20"
+        y="34"
+        style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; fill: var(--color-muted-fg);"
+        >Apports</text
       >
-        <!-- En-tête de colonnes -->
-        <text
-          x="20"
-          y="34"
-          style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; fill: var(--color-muted-fg);"
-          >Apports</text
-        >
+      <text
+        x={CX}
+        y="34"
+        text-anchor="middle"
+        style="font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; fill: var(--color-muted-fg); opacity: 0.7;"
+        >{layout.rest ? '—' : `${fmtW(layout.total)} W`}</text
+      >
+      <text
+        x={VB_W - 20}
+        y="34"
+        text-anchor="end"
+        style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; fill: var(--color-muted-fg);"
+        >Usages</text
+      >
+
+      {#if layout.rest}
+        <!-- Système au repos : pas de flux significatif -->
+        <line
+          x1="120"
+          y1={CY}
+          x2={VB_W - 120}
+          y2={CY}
+          stroke="var(--color-border-strong)"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-dasharray="1 8"
+        />
         <text
           x={CX}
-          y="34"
+          y={CY + 26}
           text-anchor="middle"
-          style="font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; fill: var(--color-muted-fg); opacity: 0.7;"
-          >{layout.rest ? '—' : `${fmtW(layout.total)} W`}</text
+          style="font-size: 13px; font-weight: 600; fill: var(--color-muted-fg);"
+          >Système à l'équilibre</text
         >
-        <text
-          x={VB_W - 20}
-          y="34"
-          text-anchor="end"
-          style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; fill: var(--color-muted-fg);"
-          >Usages</text
-        >
+      {:else}
+        <!-- Barre centrale (busbar AC) -->
+        <rect
+          x={BUS_L}
+          y={BUS_TOP}
+          width={BUS_HALF * 2}
+          height={H}
+          rx={BUS_HALF}
+          fill="var(--color-primary-muted)"
+          stroke="var(--color-primary)"
+          stroke-opacity="0.4"
+          stroke-width="1"
+        />
 
-        {#if layout.rest}
-          <!-- Système au repos : pas de flux significatif -->
-          <line
-            x1="120"
-            y1={CY}
-            x2={VB_W - 120}
-            y2={CY}
-            stroke="var(--color-border-strong)"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-dasharray="1 8"
-          />
-          <text
-            x={CX}
-            y={CY + 26}
-            text-anchor="middle"
-            style="font-size: 13px; font-weight: 600; fill: var(--color-muted-fg);"
-            >Système à l'équilibre</text
-          >
-        {:else}
-          <!-- Barre centrale (busbar AC) -->
-          <rect
-            x={BUS_L}
-            y={BUS_TOP}
-            width={BUS_HALF * 2}
-            height={H}
-            rx={BUS_HALF}
-            fill="var(--color-primary-muted)"
-            stroke="var(--color-primary)"
-            stroke-opacity="0.4"
-            stroke-width="1"
-          />
-
-          <!-- Rubans proportionnels -->
-          {#each [...layout.left, ...layout.right] as l (l.key)}
-            <path d={l.ribbon} fill={l.color} fill-opacity="0.4" />
-            {#if !reducedMotion}
-              <path
-                class="flow-core"
-                d={l.core}
-                fill="none"
-                stroke={l.color}
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-dasharray="2 10"
-                opacity="0.9"
-              />
-            {/if}
-          {/each}
-
-          <!-- Barres de nœud + libellés -->
-          {#each [...layout.left, ...layout.right] as l (l.key + '-node')}
-            <rect x={l.barX} y={l.barY} width={BAR_W} height={l.barH} rx="3" fill={l.color} />
-            <text
-              x={l.labelX}
-              y={l.labelY - 3}
-              text-anchor={l.anchor}
-              style="font-size: 11px; font-weight: 600; fill: var(--color-fg);"
-              >{l.name}{#if l.sub}<tspan
-                  style="font-size: 9.5px; font-weight: 500; fill: var(--color-muted-fg);"
-                >
-                  · {l.sub}</tspan
-                >{/if}</text
-            >
-            <text
-              x={l.labelX}
-              y={l.labelY + 12}
-              text-anchor={l.anchor}
-              style="font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; fill: {l.color};"
-              >{fmtW(l.w)}<tspan
-                dx="2"
-                style="font-size: 9.5px; font-weight: 500; fill: var(--color-muted-fg);">W</tspan
-              ></text
-            >
-            <!-- Pastille de fraîcheur Maison (additif ; rien si homeConfidence='off'). -->
-            {#if l.key === 'home' && homeConfidence !== 'off'}
-              <circle
-                cx={l.barX + BAR_W / 2}
-                cy={l.barY - 6}
-                r="3.5"
-                fill={homeConfidence === 'cloud-lag'
-                  ? 'var(--color-warning)'
-                  : 'var(--color-glow-bright)'}
-                stroke="var(--color-card)"
-                stroke-width="1.5"
-              >
-                <title
-                  >{homeConfidence === 'cloud-lag'
-                    ? 'Conso Maison : donnée cloud Solix figée (> 75 s), à recaler.'
-                    : 'Conso Maison : la part absorbée par la batterie est estimée via le cloud Solix (~60 s de retard).'}</title
-                >
-              </circle>
-            {/if}
-          {/each}
-        {/if}
-      </svg>
-    </div>
-
-    <!-- Pied : détail PAR BATTERIE (SB3-1 / SB3-2 / Max AC). Additif : rien si vide. -->
-    {#if batteries.length}
-      <div
-        class="relative z-[1] grid border-t"
-        style="grid-template-columns: repeat({batteries.length}, minmax(0, 1fr)); border-color: color-mix(in oklab, var(--color-glow) 22%, var(--color-border));"
-      >
-        {#each batteries as b, i (b.label)}
-          {@const flow = b.chargeW - b.dischargeW}
-          <div
-            class="flex flex-col items-center gap-1 px-2 py-2.5"
-            style={i > 0 ? 'border-left: 1px solid var(--color-border);' : ''}
-          >
-            <span
-              class="text-[10px] font-semibold tracking-[0.05em] uppercase"
-              style="color: var(--color-muted-fg);">{b.label}</span
-            >
-            <span class="text-[17px] leading-none font-bold tabular-nums"
-              >{Math.round(b.soc)}<span
-                class="text-[11px] font-semibold"
-                style="color: var(--color-muted-fg);">%</span
-              ></span
-            >
-            <div
-              class="h-1 w-full max-w-[68px] overflow-hidden rounded-full"
-              style="background: color-mix(in oklch, var(--color-muted-fg) 18%, transparent);"
-            >
-              <div
-                class="h-full rounded-full"
-                style="width: {Math.max(
-                  0,
-                  Math.min(100, b.soc)
-                )}%; background: var(--color-battery);"
-              ></div>
-            </div>
-            <span
-              class="flex items-center gap-1 text-[10px] font-medium tabular-nums"
-              style="color: {flow > 20
-                ? 'var(--color-battery)'
-                : flow < -20
-                  ? 'var(--color-consumption)'
-                  : 'var(--color-muted-fg)'};"
-            >
-              {#if flow > 20}▲ {fmtW(flow)} W{:else if flow < -20}▼ {fmtW(flow)} W{:else}repos{/if}
-            </span>
-          </div>
+        <!-- Rubans proportionnels -->
+        {#each [...layout.left, ...layout.right] as l (l.key)}
+          <path d={l.ribbon} fill={l.color} fill-opacity="0.4" />
+          {#if !reducedMotion}
+            <path
+              class="flow-core"
+              d={l.core}
+              fill="none"
+              stroke={l.color}
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-dasharray="2 10"
+              opacity="0.9"
+            />
+          {/if}
         {/each}
-      </div>
-    {/if}
+
+        <!-- Barres de nœud + libellés -->
+        {#each [...layout.left, ...layout.right] as l (l.key + '-node')}
+          <rect x={l.barX} y={l.barY} width={BAR_W} height={l.barH} rx="3" fill={l.color} />
+          <text
+            x={l.labelX}
+            y={l.labelY - 3}
+            text-anchor={l.anchor}
+            style="font-size: 11px; font-weight: 600; fill: var(--color-fg);"
+            >{l.name}{#if l.sub}<tspan
+                style="font-size: 9.5px; font-weight: 500; fill: var(--color-muted-fg);"
+              >
+                · {l.sub}</tspan
+              >{/if}</text
+          >
+          <text
+            x={l.labelX}
+            y={l.labelY + 12}
+            text-anchor={l.anchor}
+            style="font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; fill: {l.color};"
+            >{fmtW(l.w)}<tspan
+              dx="2"
+              style="font-size: 9.5px; font-weight: 500; fill: var(--color-muted-fg);">W</tspan
+            ></text
+          >
+          <!-- Pastille de fraîcheur Maison (additif ; rien si homeConfidence='off'). -->
+          {#if l.key === 'home' && homeConfidence !== 'off'}
+            <circle
+              cx={l.barX + BAR_W / 2}
+              cy={l.barY - 6}
+              r="3.5"
+              fill={homeConfidence === 'cloud-lag'
+                ? 'var(--color-warning)'
+                : 'var(--color-glow-bright)'}
+              stroke="var(--color-card)"
+              stroke-width="1.5"
+            >
+              <title
+                >{homeConfidence === 'cloud-lag'
+                  ? 'Conso Maison : donnée cloud Solix figée (> 75 s), à recaler.'
+                  : 'Conso Maison : la part absorbée par la batterie est estimée via le cloud Solix (~60 s de retard).'}</title
+              >
+            </circle>
+          {/if}
+        {/each}
+      {/if}
+    </svg>
   </div>
 </div>
 

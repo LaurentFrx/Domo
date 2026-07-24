@@ -94,9 +94,9 @@
         : 600;
   });
 
-  // Détail PAR PACK pour le pied de la carte apports/usages : les 2 Solarbank 3
-  // (cloud, hors A17E2) + la Max AC (Modbus local prioritaire, sinon repli cloud).
-  // SoC = donnée fiable ; charge/décharge = best-effort (indicateur, pas un bilan).
+  // Détail PAR PACK : les 2 Solarbank 3 (cloud, hors A17E2) + la Max AC (Modbus local
+  // prioritaire, sinon repli cloud). Sert à ÉCLATER le nœud Batterie du Sankey ET à la
+  // carte Charge. SoC = donnée fiable ; charge/décharge = best-effort (indicateur).
   interface BatteryDetail {
     label: string;
     soc: number;
@@ -302,74 +302,116 @@
     {#snippet batteryCard()}
       <!-- ═══ Batterie — charge (SOC) + jauge segmentée OVNI (workflow + juge) ═══ -->
       <div
-        class="bat-card flex items-center gap-3 rounded-[var(--radius-xl)] border px-4 py-3"
+        class="bat-card flex flex-col gap-2.5 rounded-[var(--radius-xl)] border px-4 py-3"
         class:is-charging={batteryOnline && batChargeA > 1}
         class:is-discharging={batteryOnline && batDischargeA > 1}
         class:is-low={batteryOnline && socA <= 20}
         class:is-offline={!batteryOnline}
         style="background: var(--color-card); border-color: var(--color-border);"
       >
-        <!-- Gauche : SOC numérique + état -->
-        <div class="flex shrink-0 flex-col">
-          <div class="flex items-baseline gap-1">
-            {#if batteryOnline}
+        <!-- Ligne principale : SOC parc + jauge + flux net -->
+        <div class="flex items-center gap-3">
+          <!-- Gauche : SOC numérique + état -->
+          <div class="flex shrink-0 flex-col">
+            <div class="flex items-baseline gap-1">
+              {#if batteryOnline}
+                <span
+                  class="bat-soc text-3xl leading-none font-bold tabular-nums"
+                  style="color: var(--color-fg);"
+                  >{Math.round(Math.max(0, Math.min(100, socA)))}</span
+                >
+                <span
+                  class="text-base leading-none font-semibold"
+                  style="color: var(--color-muted-fg);">%</span
+                >
+              {:else}
+                <span
+                  class="bat-soc text-3xl leading-none font-bold"
+                  style="color: var(--color-muted-fg);">—</span
+                >
+              {/if}
+            </div>
+            <div class="mt-1.5 flex items-center gap-1.5">
+              <span class="bat-dot h-1.5 w-1.5 shrink-0 rounded-full"></span>
               <span
-                class="bat-soc text-3xl leading-none font-bold tabular-nums"
-                style="color: var(--color-fg);">{Math.round(Math.max(0, Math.min(100, socA)))}</span
+                class="text-[0.6875rem] leading-none font-semibold tracking-wide uppercase"
+                style="color: var(--color-muted-fg);"
               >
+                {#if !batteryOnline}Hors ligne{:else if batChargeA > 1}Charge{:else if batDischargeA > 1}Décharge{:else}Repos{/if}
+              </span>
+            </div>
+          </div>
+
+          <!-- Centre : jauge segmentée + borne -->
+          <div class="flex min-w-0 flex-1 items-center gap-1.5">
+            <div
+              class="bat-cells flex h-9 min-w-0 flex-1 items-stretch gap-[3px] rounded-md p-[3px]"
+            >
+              {#each Array.from({ length: 10 }) as _, i}
+                {@const lo = i * 10}
+                {@const lvl = batteryOnline ? Math.max(0, Math.min(100, socA)) : 0}
+                {@const fill = Math.max(0, Math.min(1, (lvl - lo) / 10))}
+                {@const active = lvl > lo + 0.5}
+                {@const isEdge = active && lvl <= lo + 10.5}
+                <div class="bat-cell" class:is-active={active} class:is-edge={isEdge}>
+                  <div class="bat-cell-fill" style="transform: scaleX({fill});"></div>
+                </div>
+              {/each}
+            </div>
+            <span class="bat-nub h-3.5 w-[3px] shrink-0 rounded-r-sm"></span>
+          </div>
+
+          <!-- Droite : flux (W) + énergie stockée -->
+          <div class="flex shrink-0 flex-col items-end">
+            <span class="bat-flow text-sm leading-none font-semibold tabular-nums">
+              {#if batteryOnline && batChargeA > 1}+{fmtW(batChargeA)} W{:else if batteryOnline && batDischargeA > 1}−{fmtW(
+                  batDischargeA
+                )} W{:else}—{/if}
+            </span>
+            {#if batteryOnline && storedKwh > 0}
               <span
-                class="text-base leading-none font-semibold"
-                style="color: var(--color-muted-fg);">%</span
-              >
-            {:else}
-              <span
-                class="bat-soc text-3xl leading-none font-bold"
-                style="color: var(--color-muted-fg);">—</span
+                class="mt-1.5 text-[0.6875rem] leading-none font-medium tabular-nums"
+                style="color: var(--color-muted-fg);">{storedKwh.toFixed(1)} kWh</span
               >
             {/if}
           </div>
-          <div class="mt-1.5 flex items-center gap-1.5">
-            <span class="bat-dot h-1.5 w-1.5 shrink-0 rounded-full"></span>
-            <span
-              class="text-[0.6875rem] leading-none font-semibold tracking-wide uppercase"
-              style="color: var(--color-muted-fg);"
-            >
-              {#if !batteryOnline}Hors ligne{:else if batChargeA > 1}Charge{:else if batDischargeA > 1}Décharge{:else}Repos{/if}
-            </span>
-          </div>
         </div>
-
-        <!-- Centre : jauge segmentée + borne -->
-        <div class="flex min-w-0 flex-1 items-center gap-1.5">
-          <div class="bat-cells flex h-9 min-w-0 flex-1 items-stretch gap-[3px] rounded-md p-[3px]">
-            {#each Array.from({ length: 10 }) as _, i}
-              {@const lo = i * 10}
-              {@const lvl = batteryOnline ? Math.max(0, Math.min(100, socA)) : 0}
-              {@const fill = Math.max(0, Math.min(1, (lvl - lo) / 10))}
-              {@const active = lvl > lo + 0.5}
-              {@const isEdge = active && lvl <= lo + 10.5}
-              <div class="bat-cell" class:is-active={active} class:is-edge={isEdge}>
-                <div class="bat-cell-fill" style="transform: scaleX({fill});"></div>
+        <!-- Détail PAR PACK : SB3-1 / SB3-2 / Max AC (SoC + charge/décharge) -->
+        {#if batteryOnline && batteryDetail.length}
+          <div
+            class="grid border-t pt-2.5"
+            style="grid-template-columns: repeat({batteryDetail.length}, minmax(0, 1fr)); border-color: var(--color-border);"
+          >
+            {#each batteryDetail as b, i (b.label)}
+              {@const flow = b.chargeW - b.dischargeW}
+              <div
+                class="flex flex-col items-center gap-0.5 px-1"
+                style={i > 0 ? 'border-left: 1px solid var(--color-border);' : ''}
+              >
+                <span
+                  class="text-[9.5px] font-semibold tracking-[0.04em] uppercase"
+                  style="color: var(--color-muted-fg);">{b.label}</span
+                >
+                <span class="text-[15px] leading-none font-bold tabular-nums"
+                  >{Math.round(b.soc)}<span
+                    class="text-[10px] font-semibold"
+                    style="color: var(--color-muted-fg);">%</span
+                  ></span
+                >
+                <span
+                  class="text-[9.5px] font-medium tabular-nums"
+                  style="color: {flow > 20
+                    ? 'var(--color-battery)'
+                    : flow < -20
+                      ? 'var(--color-consumption)'
+                      : 'var(--color-muted-fg)'};"
+                >
+                  {#if flow > 20}▲ {fmtW(flow)} W{:else if flow < -20}▼ {fmtW(flow)} W{:else}repos{/if}
+                </span>
               </div>
             {/each}
           </div>
-          <span class="bat-nub h-3.5 w-[3px] shrink-0 rounded-r-sm"></span>
-        </div>
-
-        <!-- Droite : flux (W) + énergie stockée -->
-        <div class="flex shrink-0 flex-col items-end">
-          <span class="bat-flow text-sm leading-none font-semibold tabular-nums">
-            {#if batteryOnline && batChargeA > 1}+{fmtW(batChargeA)} W{:else if batteryOnline && batDischargeA > 1}−{fmtW(
-                batDischargeA
-              )} W{:else}—{/if}
-          </span>
-          {#if batteryOnline && storedKwh > 0}
-            <span
-              class="mt-1.5 text-[0.6875rem] leading-none font-medium tabular-nums"
-              style="color: var(--color-muted-fg);">{storedKwh.toFixed(1)} kWh</span
-            >
-          {/if}
-        </div>
+        {/if}
       </div>
     {/snippet}
 
@@ -447,8 +489,6 @@
 
     <!-- Batterie EN PREMIER sur mobile (au-dessus du Sankey) ; masquée dès lg. -->
     <div class="lg:hidden">{@render batteryCard()}</div>
-    <!-- Bilan du jour juste sous la batterie (mobile). -->
-    <div class="lg:hidden">{@render flowsCard()}</div>
 
     <!-- ═══ Paysage (iPad/desktop) : Sankey | stats côte à côte ; mobile : empilé ═══ -->
     <!-- items-stretch : la colonne stats remplit la hauteur du Sankey carré (sinon
@@ -468,6 +508,8 @@
           {homeConfidence}
           batteries={batteryOnline ? batteryDetail : []}
         />
+        <!-- Énergie du jour : SOUS la carte apports/usages (mobile ET desktop). -->
+        {@render flowsCard()}
       </div>
 
       <!-- Colonne stats : remplit la hauteur du Sankey (justify-between) ─────── -->
@@ -475,8 +517,6 @@
         <!-- Batterie : colonne droite dès lg (sur mobile elle passe au-dessus du
              Sankey, cf. snippet batteryCard rendu plus haut). -->
         <div class="hidden lg:block">{@render batteryCard()}</div>
-        <!-- Bilan du jour juste sous la batterie (colonne stats, dès lg). -->
-        <div class="hidden lg:block">{@render flowsCard()}</div>
 
         <!-- ═══ KPI lifetime (SolarBank + APsystems, vraies données) ═══ -->
         {#if hasLifetime}
