@@ -422,7 +422,7 @@
             class="text-[0.625rem] font-semibold tracking-[0.08em] uppercase"
             style="color: var(--color-muted-fg);"
           >
-            Énergie du jour
+            Consommation aujourd'hui
           </span>
           {#if flowsReady}
             <span
