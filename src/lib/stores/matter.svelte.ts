@@ -270,27 +270,60 @@ class MatterState {
     this.everConnected = false;
   }
 
+  /**
+   * Dernière commande refusée, en français. Une commande émise pendant la
+   * fenêtre de reconnexion du WebSocket était perdue SILENCIEUSEMENT : le
+   * client rejette « Not connected », l'appelant ne l'attendait pas, et l'écran
+   * gardait son animation optimiste et son retour haptique de confirmation —
+   * le volet ne bougeait pas, l'app disait le contraire.
+   */
+  commandError = $state<string | null>(null);
+
+  /**
+   * Exécute une commande et renvoie `true` si elle est PARTIE.
+   *
+   * On ne met pas la commande en file d'attente pour la rejouer à la
+   * reconnexion : ce sont des moteurs de volet, et faire ressortir un ordre
+   * d'un chapeau quelques secondes plus tard est une classe de bug pire que
+   * celle qu'on corrige. On refuse, et on le dit.
+   */
+  private async run(label: string, fn: () => Promise<unknown> | undefined): Promise<boolean> {
+    if (!this.client || this.connectionStatus !== 'connected') {
+      this.commandError = `${label} : la liaison est coupée, la commande n'est pas partie.`;
+      return false;
+    }
+    try {
+      await fn();
+      this.commandError = null;
+      return true;
+    } catch {
+      this.commandError = `${label} : pas de réponse, la commande n'a pas été appliquée.`;
+      return false;
+    }
+  }
+
   async open(nodeId: number) {
     // « Rentrer » : UpOrOpen ramène à la position 0 (enroulé) → sûr pour tous,
     // y compris les stores bridés (s'éloigne de l'obstacle).
-    await this.client?.open(nodeId);
+    return this.run('Ouverture', () => this.client?.open(nodeId));
   }
   async close(nodeId: number) {
     const limit = SHUTTER_LIMITS[nodeId];
     if (limit) {
       // Store bridé : « déployer » = aller à la BUTÉE (maxOpenPercent) par
       // positionnement. JAMAIS DownOrClose (qui irait à 100 % → obstacle).
-      await this.client?.goToPosition(nodeId, limit.maxOpenPercent);
-    } else {
-      await this.client?.close(nodeId);
+      return this.run('Fermeture', () => this.client?.goToPosition(nodeId, limit.maxOpenPercent));
     }
+    return this.run('Fermeture', () => this.client?.close(nodeId));
   }
   async stop(nodeId: number) {
-    await this.client?.stop(nodeId);
+    return this.run('Arrêt', () => this.client?.stop(nodeId));
   }
   async goToPosition(nodeId: number, percent: number) {
     // percent = consigne AFFICHÉE (0–100) → déploiement physique borné dur.
-    await this.client?.goToPosition(nodeId, realFromDisplay(nodeId, percent));
+    return this.run('Position', () =>
+      this.client?.goToPosition(nodeId, realFromDisplay(nodeId, percent))
+    );
   }
 
   async openAll() {
@@ -306,13 +339,13 @@ class MatterState {
   }
 
   async turnOn(nodeId: number) {
-    await this.client?.turnOn(nodeId);
+    return this.run('Allumage', () => this.client?.turnOn(nodeId));
   }
 
   async turnOff(nodeId: number) {
     // Sécurité : ne JAMAIS couper une prise à alimentation critique (concentrateur Matter).
-    if (this.switches.find((s) => s.nodeId === nodeId)?.monitorOnly) return;
-    await this.client?.turnOff(nodeId);
+    if (this.switches.find((s) => s.nodeId === nodeId)?.monitorOnly) return false;
+    return this.run('Extinction', () => this.client?.turnOff(nodeId));
   }
 
   async toggleSwitch(nodeId: number) {

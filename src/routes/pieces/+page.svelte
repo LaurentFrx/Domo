@@ -170,6 +170,26 @@
 </script>
 
 <div class="flex flex-col gap-2 py-3">
+  {#if matter.commandError}
+    <!-- Une commande refusée était jusqu'ici totalement muette : l'animation
+         optimiste et le retour haptique de confirmation faisaient croire au
+         succès pendant que le volet ne bougeait pas. -->
+    <div
+      class="flex items-center justify-between gap-3 rounded-[var(--radius-lg)] px-4 py-3 text-[13px]"
+      style="background: var(--color-alert-muted); color: var(--color-alert);"
+      role="alert"
+    >
+      <span>{matter.commandError}</span>
+      <button
+        type="button"
+        onclick={() => (matter.commandError = null)}
+        class="shrink-0 rounded-lg px-2.5 py-1 text-[12px] font-semibold"
+        style="background: var(--color-card); color: var(--color-fg);"
+      >
+        OK
+      </button>
+    </div>
+  {/if}
   {#if matterLost}
     <div
       class="rounded-[var(--radius-2xl)] border p-6 text-center"
