@@ -2,6 +2,8 @@
   import type { ZigbeeDevice } from '$stores/zigbee.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
   import { printer, type InkColor } from '$stores/printer.svelte';
+  import { clock } from '$stores/clock.svelte';
+  import { ageLabel } from '$utils/freshness';
   import { haptic } from '$utils/haptic';
 
   interface Props {
@@ -99,7 +101,7 @@
 
   <!-- Niveaux d'encre CMYK : 4 jauges VERTICALES (remplies de bas en haut) + % dessous -->
   {#if printer.inks.length > 0}
-    <div class="ink-pills">
+    <div class="ink-pills" class:opacity-60={!printer.online}>
       {#each printer.inks as ink (ink.color)}
         {@const c = INK[ink.color]}
         {@const pct = Math.max(0, Math.min(100, ink.percent))}
@@ -113,6 +115,16 @@
         </div>
       {/each}
     </div>
+    {#if !printer.online && printer.lastUpdate}
+      <!-- Une fois un relevé réussi, les jauges restaient affichées pour toujours,
+           y compris rechargées du cache de la semaine passée — alors que la dérive
+           DHCP de cette imprimante est un incident récurrent. -->
+      <span class="text-[10px]" style="color: var(--color-muted-fg);">
+        Imprimante éteinte — niveaux relevés il y a {ageLabel(
+          clock.now - printer.lastUpdate.getTime()
+        )}
+      </span>
+    {/if}
   {:else}
     <button
       type="button"

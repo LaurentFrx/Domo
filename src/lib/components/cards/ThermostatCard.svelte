@@ -37,7 +37,13 @@
   ];
 
   // « Chauffe » = le relais est réellement alimenté (sortie TPI du daemon).
-  const heating = $derived(thermostat.connected && thermostat.switchOn === true);
+  // `switchAvailable` en plus de `connected` : le démon peut très bien répondre
+  // alors que le relais du sèche-serviette, lui, est injoignable. La carte
+  // affichait alors « Veille » — rassurant et faux, la vérité étant « je ne sais
+  // pas si le radiateur chauffe ».
+  const heating = $derived(
+    thermostat.connected && thermostat.switchAvailable && thermostat.switchOn === true
+  );
   const override = $derived(thermostat.override);
   const nextTransition = $derived(thermostat.nextTransition);
   const hasSafetyAlert = $derived(thermostat.windowOpen || thermostat.safety !== 'ok');
@@ -219,7 +225,15 @@
         <path d="M12 19c-1.6-2-1.6-3.5 0-5.5s1.6-3.5 0-5.5" />
         <path d="M16 19c-1.6-2-1.6-3.5 0-5.5s1.6-3.5 0-5.5" />
       </svg>
-      {heating ? 'Chauffe' : 'Veille'}
+      <!-- « État inconnu » vise le cas où le démon RÉPOND mais le relais du
+           sèche-serviette est injoignable. Sans le test `connected`, le rendu
+           serveur (où aucun store n'a répondu) l'afficherait à chaque
+           chargement. Le cas « démon muet » relève de l'habillage de la carte. -->
+      {thermostat.connected && !thermostat.switchAvailable
+        ? 'État inconnu'
+        : heating
+          ? 'Chauffe'
+          : 'Veille'}
     </span>
     <div class="tw-tgt">
       {#if showCible}

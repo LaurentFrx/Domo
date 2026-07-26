@@ -24,11 +24,17 @@
     if (!sb3loop.enabled)
       return sb3loop.autoDisabledReason ? 'Désactivée (sécurité)' : 'Désactivée';
     if (!sb3loop.tickAlive) return 'Activée — tick muet ⚠';
+    // Le cloud peut refuser les consignes alors que la boucle tourne : sans ce
+    // test, la carte affichait « Active — dernier ordre 350 W » pendant qu'aucun
+    // ordre n'était accepté.
+    if (sb3loop.confirmFailCount > 2)
+      return `Active — ordres non confirmés (${sb3loop.confirmFailCount})`;
     return MODE_LABELS[last?.mode ?? ''] ?? 'Active';
   });
   const dotColor = $derived.by(() => {
     if (!sb3loop.connected || !sb3loop.enabled) return 'var(--color-muted-fg)';
-    if (sb3loop.autoDisabledReason || !sb3loop.tickAlive) return 'var(--color-hp)';
+    if (sb3loop.autoDisabledReason || !sb3loop.tickAlive || sb3loop.confirmFailCount > 2)
+      return 'var(--color-hp)';
     return 'var(--color-battery)';
   });
 

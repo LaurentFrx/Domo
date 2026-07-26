@@ -453,10 +453,14 @@
           <span class="text-[14px] font-semibold">Flux d'énergie 24h</span>
           <!-- Réseau soutiré du jour : déplacé depuis l'accueil (sa place = page énergie). -->
           <span class="text-[11px]" style="color: var(--color-muted-fg);">
-            Aujourd'hui{#if savings.connected}
-              · <span style="color: var(--color-grid-energy);"
-                >↓ {savings.today.import_kwh.toFixed(2)} kWh réseau</span
-              >{/if}
+            {#if productionHistory.status === 'error'}
+              Historique momentanément indisponible
+            {:else}
+              Aujourd'hui{#if savings.connected}
+                · <span style="color: var(--color-grid-energy);"
+                  >↓ {savings.today.import_kwh.toFixed(2)} kWh réseau</span
+                >{/if}
+            {/if}
           </span>
         </div>
         {#if prodView}
@@ -654,14 +658,19 @@
           class="rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.04em]"
           style="background: var(--color-solar-muted); color: var(--color-solar);"
         >
-          +{forecast.next24hKwh.toFixed(1)} kWh / 24h
+          <!-- Le sous-titre disait déjà « Prévision indisponible », mais ce gros
+               chiffre coloré restait affiché juste à côté, courbe pleine et lisse :
+               le gros chiffre gagne toujours. -->
+          {forecast.status === 'error'
+            ? '— kWh / 24h'
+            : `+${forecast.next24hKwh.toFixed(1)} kWh / 24h`}
         </span>
       </div>
 
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="relative"
-        style="height: 140px;"
+        style="height: 140px; opacity: {forecast.status === 'error' ? 0.45 : 1};"
         role="presentation"
         onmousemove={onFcMove}
         onmouseleave={() => (fcHover = null)}
@@ -849,6 +858,12 @@
         </button>
       </div>
     </div>
+    {#if !energyMonthly.connected && energyMonthly.status !== 'idle'}
+      <p class="text-[11px]" style="color: var(--color-muted-fg);">
+        Relevés mensuels momentanément indisponibles — le tableau montre les derniers chiffres
+        connus.
+      </p>
+    {/if}
     <div class="overflow-x-auto">
       <table class="yeldra-table w-full text-[12px]">
         <thead>

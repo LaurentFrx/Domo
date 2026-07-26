@@ -13,6 +13,7 @@
    */
   import { cumulus, CUMULUS_ANOMALY_LABELS, PILOT_PHASE_LABELS } from '$stores/cumulus.svelte';
   import { em50 } from '$stores/em50.svelte';
+  import { clock } from '$stores/clock.svelte';
   import { haptic } from '$utils/haptic';
   import { openTempHistory } from '$stores/temp-history.svelte';
 
@@ -26,8 +27,28 @@
   const online = $derived(cumulus.relayConnected);
   const relayOn = $derived(cumulus.relayOn === true);
   const anomalyLabel = $derived(CUMULUS_ANOMALY_LABELS[cumulus.anomaly] || '');
-  const cumulusW = $derived(em50.cumulusPowerW);
-  const heatingNow = $derived(cumulusW > HEATING_W);
+  /** Puissance mesurée, gardée par le compteur : sans ce garde, un EM-50 mort
+   *  pendant une chauffe laissait « En chauffe · 2,9 kW » à l'écran pendant des
+   *  heures après l'arrêt réel du chauffe-eau. */
+  const cumulusW = $derived(em50.available ? em50.cumulusPowerW : 0);
+  const heatingNow = $derived(em50.available && cumulusW > HEATING_W);
+
+  // ── Santé du PILOTE (distincte de celle du relais) ──
+  // Le voyant ne regardait que le boîtier Shelly. Si l'orchestrateur meurt, le
+  // relais reste joignable : voyant vert et « Alimenté · température atteinte »
+  // pendant que la réserve, la jauge et la phase restent figées sur le dernier
+  // tick. Deux pannes DISTINCTES, d'où deux indicateurs : la requête qui échoue
+  // (orchestratorConnected) et le démon gelé (lastTickTs qui ne bouge plus).
+  const TICK_STALE_MS = 300_000; // 5 min = 4 ticks manqués (cadence 65 s)
+  const pilotOk = $derived(cumulus.orchestratorConnected);
+  const tickAlive = $derived(
+    cumulus.lastTickTs !== null && clock.now - cumulus.lastTickTs < TICK_STALE_MS
+  );
+  // `lastTickTs !== null` en garde : tant qu'aucun tick n'est jamais arrivé (SSR,
+  // premier rendu), on ne sait pas encore — annoncer la panne à ce stade ferait
+  // clignoter une alerte à chaque ouverture de l'app. Quand le pilote n'a JAMAIS
+  // répondu, l'absence de chiffre (« — ») porte déjà le message.
+  const pilotMuet = $derived(cumulus.lastTickTs !== null && (!pilotOk || !tickAlive));
   const pilot = $derived(cumulus.pilotView);
   const observation = $derived(cumulus.decisionReason === 'observe_only');
 
@@ -210,6 +231,13 @@
     </div>
   </div>
 
+  {#if pilotMuet}
+    <div class="cc-anomaly" role="alert">
+      ⚠️ Le pilote de l'eau chaude ne répond plus — la réserve affichée n'est plus mise à jour. Le
+      chauffe-eau continue sur son dernier réglage.
+    </div>
+  {/if}
+
   {#if anomalyLabel}
     <div class="cc-anomaly" role="alert">
       ⚠️ {anomalyLabel} — le pilotage automatique peut être affecté.
@@ -236,7 +264,7 @@
   <div class="flex flex-col gap-2">
     <div class="flex items-baseline gap-2">
       <span class="text-[34px] leading-none font-bold" style="color: var(--color-fg);"
-        >{showers != null ? `≈ ${showers}` : '—'}</span
+        >{!pilotMuet && showers != null ? `≈ ${showers}` : '—'}</span
       >
       <span class="text-sm" style="color: var(--color-muted-fg);">douches d'eau chaude</span>
     </div>

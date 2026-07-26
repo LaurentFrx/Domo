@@ -61,6 +61,10 @@
   );
   /** Le réseau vient-il d'un compteur RÉEL ? Sinon on l'annonce, on ne le peint pas. */
   const gridMesure = $derived(em50.available || ankerLocal.meterAvailable || anker.connected);
+  /** Conso du chauffe-eau, gardée par la disponibilité du compteur. Non gardée,
+   *  un EM-50 mort pendant une chauffe figeait « ≈ 2 900 W » indéfiniment — et
+   *  comme ce terme ferme le bilan, la conso « Maison » était fausse elle aussi. */
+  const cumulusW = $derived(em50.available ? em50.cumulusPowerW : 0);
   /**
    * Délai de grâce avant d'annoncer quoi que ce soit — même principe que le
    * bandeau `health` (GRACE_MS). Au rendu serveur et juste après l'hydratation,
@@ -184,8 +188,7 @@
     const discharge = perPack.reduce((s, n) => s + Math.max(0, -n), 0) + maxAcDischarge;
     // (c) contrainte 2 — fermeture : si la Maison déduite passe sous la veille, c'est
     // que la charge SB3 est surestimée (le pack sortait en AC) → on la réduit d'autant.
-    const home =
-      pvSudW + pvOuestW + gridPowerW - (sb3Charge + maxAcCharge - discharge) - em50.cumulusPowerW;
+    const home = pvSudW + pvOuestW + gridPowerW - (sb3Charge + maxAcCharge - discharge) - cumulusW;
     if (home < HOUSE_FLOOR_W && sb3Charge > 0) {
       const cut = Math.min(sb3Charge, HOUSE_FLOOR_W - home);
       const k = (sb3Charge - cut) / sb3Charge;
@@ -371,7 +374,11 @@
   const gridImportKwh = $derived(savings.today.import_kwh); // soutiré à EDF (recorder)
   const gridExportKwh = $derived(anker.gridExportTodayKwh); // surplus injecté (Linky)
   const energyTotalKwh = $derived(solarSelfKwh + gridImportKwh + gridExportKwh);
-  const flowsReady = $derived(energyTotalKwh > 0.05);
+  // `savings.connected` en plus du seuil : sans lui, la barre restait affichée
+  // avec les pourcentages FIGÉS du dernier relevé, indéfiniment — pendant que la
+  // carte Économies juste au-dessus affichait « — ». Deux cartes voisines, deux
+  // comportements opposés sur la même source morte.
+  const flowsReady = $derived(savings.connected && energyTotalKwh > 0.05);
   const solarSharePct = $derived(flowsReady ? (solarSelfKwh / energyTotalKwh) * 100 : 0);
   const surplusSharePct = $derived(flowsReady ? (gridExportKwh / energyTotalKwh) * 100 : 0);
   const gridSharePct = $derived(flowsReady ? (gridImportKwh / energyTotalKwh) * 100 : 0);
@@ -587,7 +594,11 @@
           </div>
         {:else}
           <p class="text-[13px]" style="color: var(--color-muted-fg);">
-            Bilan du jour en cours de mesure…
+            <!-- `status === 'idle'` = pas encore interrogé (SSR, premier rendu) :
+                 on ne crie pas la panne avant d'avoir seulement essayé. -->
+            {savings.connected || savings.status === 'idle'
+              ? 'Bilan du jour en cours de mesure…'
+              : 'Chiffres du jour momentanément indisponibles.'}
           </p>
         {/if}
       </div>
@@ -613,7 +624,7 @@
           batteryDischargeW={batDischargeA}
           batterySoc={socA}
           gridPowerW={gridA}
-          cumulusW={em50.cumulusPowerW}
+          {cumulusW}
           {homeConfidence}
           batteries={batteryOnline ? batteryDetail : []}
         />
