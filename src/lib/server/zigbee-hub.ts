@@ -28,6 +28,11 @@ function start() {
   const sub = () => {
     client.subscribe('zigbee2mqtt/bridge/devices', { qos: 0 });
     client.subscribe('zigbee2mqtt/+', { qos: 0 }); // états par device (1 niveau)
+    // Disponibilité par appareil. Sans elle, le client n'a AUCUN moyen de savoir
+    // qu'un capteur est mort : il continue d'afficher sa dernière valeur comme
+    // si elle était fraîche. Publiée en `retained` par Z2M, donc le snapshot la
+    // livre à chaque nouvelle connexion SSE sans code supplémentaire.
+    client.subscribe('zigbee2mqtt/+/availability', { qos: 0 });
   };
   if (client.connected) sub();
   client.on('connect', sub); // re-souscrit après une reconnexion
@@ -36,8 +41,9 @@ function start() {
     // On ne garde QUE la liste des devices et les états par device (1 niveau) —
     // pas les autres topics bridge/* (logs, infos…).
     if (topic !== 'zigbee2mqtt/bridge/devices') {
-      const friendly = topic.slice('zigbee2mqtt/'.length);
-      if (friendly.includes('/')) return; // /set, /availability, bridge/* … ignorés
+      const parts = topic.slice('zigbee2mqtt/'.length).split('/');
+      if (parts.length > 2) return; // bridge/logging, bridge/info…
+      if (parts.length === 2 && parts[1] !== 'availability') return; // /set ignoré
     }
     const payload = buf.toString();
     cache.set(topic, payload);

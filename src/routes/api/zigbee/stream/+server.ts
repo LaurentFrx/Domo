@@ -25,15 +25,25 @@ export const GET: RequestHandler = async ({ cookies }) => {
           /* flux fermé */
         }
       };
-      for (const e of zigbeeSnapshot()) send(e.topic, e.payload); // snapshot = retained
-      unsub = zigbeeSubscribe(send); // updates live
-      ka = setInterval(() => {
+      // Battement APPLICATIF, en plus du commentaire `: ka` gardé pour les
+      // proxies : une ligne commençant par `:` est un commentaire SSE que la
+      // spec impose au navigateur d'ignorer — elle n'atteint jamais JavaScript.
+      // Sans événement nommé, le client ne peut pas distinguer « maison calme »
+      // d'un flux zombie (socket ouverte, tunnel MQTT tombé) : les deux sont du
+      // silence, et il continue d'afficher des états figés comme s'ils étaient
+      // frais.
+      const beat = () => {
         try {
           controller.enqueue(enc.encode(`: ka\n\n`));
+          controller.enqueue(enc.encode(`event: ka\ndata: ${Date.now()}\n\n`));
         } catch {
           /* flux fermé */
         }
-      }, 25000);
+      };
+      for (const e of zigbeeSnapshot()) send(e.topic, e.payload); // snapshot = retained
+      beat(); // premier battement immédiat : le client sait tout de suite qu'il est vivant
+      unsub = zigbeeSubscribe(send); // updates live
+      ka = setInterval(beat, 25000);
     },
     cancel() {
       if (unsub) unsub();
