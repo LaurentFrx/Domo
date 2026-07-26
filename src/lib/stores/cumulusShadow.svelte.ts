@@ -46,11 +46,17 @@ class CumulusShadowState {
 
   private timerId: ReturnType<typeof setTimeout> | null = null;
   private visibilityHandler: (() => void) | null = null;
+  // Jeton de cycle : incrémenté à chaque (re)démarrage/arrêt. Une chaîne
+  // pollAndSchedule dont le jeton n'est plus courant s'arrête au lieu de se
+  // ré-armer → aucun timer orphelin si disconnect()/refresh() survient PENDANT un
+  // fetch en vol (sinon le poll continuerait toute la session, cassant la pause
+  // visibility-aware exigée par CLAUDE.md).
+  private cycle = 0;
 
   connect() {
-    if (typeof window === 'undefined') return;
-    if (this.timerId !== null) return;
-    this.timerId = setTimeout(() => this.pollAndSchedule(), INITIAL_DELAY_MS);
+    if (typeof window === 'undefined' || this.timerId !== null) return;
+    const c = ++this.cycle;
+    this.timerId = setTimeout(() => this.pollAndSchedule(c), INITIAL_DELAY_MS);
     this.visibilityHandler = () => {
       if (document.visibilityState === 'visible') this.refresh();
     };
@@ -58,6 +64,7 @@ class CumulusShadowState {
   }
 
   disconnect() {
+    this.cycle++; // invalide toute chaîne en vol
     if (this.timerId !== null) {
       clearTimeout(this.timerId);
       this.timerId = null;
@@ -73,12 +80,14 @@ class CumulusShadowState {
       clearTimeout(this.timerId);
       this.timerId = null;
     }
-    await this.pollAndSchedule();
+    const c = ++this.cycle; // invalide l'ancienne chaîne, en démarre une neuve
+    await this.pollAndSchedule(c);
   }
 
-  private async pollAndSchedule() {
+  private async pollAndSchedule(c: number) {
     await this.poll();
-    this.timerId = setTimeout(() => this.pollAndSchedule(), POLL_MS);
+    if (c !== this.cycle) return; // déconnecté ou remplacé pendant le fetch → on s'arrête
+    this.timerId = setTimeout(() => this.pollAndSchedule(c), POLL_MS);
   }
 
   private async poll() {

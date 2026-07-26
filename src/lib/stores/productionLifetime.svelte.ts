@@ -17,11 +17,15 @@ class ProductionLifetimeState {
 
   private timerId: ReturnType<typeof setTimeout> | null = null;
   private visibilityHandler: (() => void) | null = null;
+  // Jeton de cycle : invalide toute chaîne pollAndSchedule orpheline (disconnect
+  // ou refresh survenu pendant un fetch en vol) → pas de timer fantôme. Cf.
+  // cumulusShadow.svelte.ts (même correctif, revue cloud 25/07).
+  private cycle = 0;
 
   connect() {
-    if (typeof window === 'undefined') return;
-    if (this.timerId !== null) return;
-    this.timerId = setTimeout(() => this.pollAndSchedule(), INITIAL_DELAY_MS);
+    if (typeof window === 'undefined' || this.timerId !== null) return;
+    const c = ++this.cycle;
+    this.timerId = setTimeout(() => this.pollAndSchedule(c), INITIAL_DELAY_MS);
     this.visibilityHandler = () => {
       if (document.visibilityState === 'visible') this.refresh();
     };
@@ -29,6 +33,7 @@ class ProductionLifetimeState {
   }
 
   disconnect() {
+    this.cycle++; // invalide toute chaîne en vol
     if (this.timerId !== null) {
       clearTimeout(this.timerId);
       this.timerId = null;
@@ -44,12 +49,14 @@ class ProductionLifetimeState {
       clearTimeout(this.timerId);
       this.timerId = null;
     }
-    await this.pollAndSchedule();
+    const c = ++this.cycle;
+    await this.pollAndSchedule(c);
   }
 
-  private async pollAndSchedule() {
+  private async pollAndSchedule(c: number) {
     await this.poll();
-    this.timerId = setTimeout(() => this.pollAndSchedule(), POLL_MS);
+    if (c !== this.cycle) return; // déconnecté ou remplacé pendant le fetch → on s'arrête
+    this.timerId = setTimeout(() => this.pollAndSchedule(c), POLL_MS);
   }
 
   private async poll() {
