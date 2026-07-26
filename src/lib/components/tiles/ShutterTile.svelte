@@ -187,6 +187,16 @@
     dragPos = pointerToPosition(e.clientY);
   }
 
+  /** Geste ABANDONNÉ : on relâche sans commander le moteur. `pointercancel`
+   *  était routé vers onPointerUp, qui appelle `goToPosition` sans condition —
+   *  or le track est en `touch-action: pan-y`, donc un défilement vertical de la
+   *  page émet précisément cet événement. */
+  function onPointerCancel(e: PointerEvent) {
+    if (!dragging) return;
+    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    dragging = false;
+  }
+
   function onPointerUp(e: PointerEvent) {
     if (!dragging) return;
     const finalPos = pointerToPosition(e.clientY);
@@ -271,7 +281,7 @@
           onpointerdown={onPointerDown}
           onpointermove={onPointerMove}
           onpointerup={onPointerUp}
-          onpointercancel={onPointerUp}
+          onpointercancel={onPointerCancel}
         >
           {#if displayedPosition > 1 && displayedPosition < 99}
             <span class="thumb-pct">{displayedPosition}</span>

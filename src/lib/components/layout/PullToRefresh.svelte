@@ -26,10 +26,32 @@
     );
   }
 
+  /**
+   * Le geste est-il parti de l'intérieur d'une couche modale ?
+   *
+   * `window.scrollY > 0` ne suffit PAS à s'en protéger, et c'est contre-intuitif :
+   *  • BottomSheet verrouille le défilement en posant `body.style.position =
+   *    'fixed'` — le document ne défile plus, donc scrollY vaut TOUJOURS 0 tant
+   *    qu'une feuille est ouverte, quelle que soit la position de la page dessous ;
+   *  • la feuille « Now Playing » est en `position: fixed` et défile en interne,
+   *    sans jamais toucher scrollY.
+   * Un glissé vers le bas sur une zone non interactive (pochette d'album, courbe
+   * de température, libellé de formulaire) armait donc le tirer-pour-rafraîchir
+   * et rechargeait l'app au relâché : musique coupée, feuille fermée, champs non
+   * enregistrés perdus.
+   */
+  function inModal(target: EventTarget | null): boolean {
+    const el = target as Element | null;
+    if (el?.closest?.('[role="dialog"], [aria-modal="true"]')) return true;
+    // Filet complémentaire : le verrou de défilement de BottomSheet.
+    return typeof document !== 'undefined' && document.body.style.position === 'fixed';
+  }
+
   function onTouchStart(e: TouchEvent) {
     if (refreshing || e.touches.length !== 1) return;
     if (window.scrollY > 0) return;
     if (isInteractive(e.target)) return;
+    if (inModal(e.target)) return;
     startY = e.touches[0].clientY;
     armed = true;
   }

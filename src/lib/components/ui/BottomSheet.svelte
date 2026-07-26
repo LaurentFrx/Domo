@@ -55,7 +55,10 @@
 {#if open}
   <!-- Backdrop : fermeture au tap ; le clavier ferme via Escape (svelte:window). -->
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="bs-overlay" role="presentation" data-swipe-ignore onclick={onClose}>
+  <!-- data-no-ptr : l'overlay est role="presentation", donc invisible au test
+       [role="dialog"] du tirer-pour-rafraîchir. Même intention que
+       data-swipe-ignore pour le Pager. -->
+  <div class="bs-overlay" role="presentation" data-swipe-ignore data-no-ptr onclick={onClose}>
     <div
       class="bs-panel"
       bind:this={panelEl}

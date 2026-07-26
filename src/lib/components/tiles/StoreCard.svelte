@@ -158,6 +158,22 @@
     e.preventDefault();
     dragPos = posFromX(e.clientX);
   }
+  /**
+   * Geste ABANDONNÉ (pointercancel) : on relâche sans rien commander.
+   *
+   * `pointercancel` était routé vers le MÊME handler que le relâché, donc il
+   * envoyait un ordre de position au moteur. Or la barre porte
+   * `touch-action: pan-y` : un glissé vertical est explicitement rendu au
+   * navigateur, qui émet alors précisément `pointercancel`. Faire défiler
+   * /pieces en posant le pouce sur la barre déployait donc le store-banne —
+   * y compris par grand vent.
+   */
+  function onCancel(e: PointerEvent) {
+    if (!dragging) return;
+    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    dragging = false; // l'affichage repasse sur shutter.position
+  }
+
   function onUp(e: PointerEvent) {
     if (!dragging) return;
     const final = posFromX(e.clientX);
@@ -255,7 +271,7 @@
         onpointerdown={onDown}
         onpointermove={onMove}
         onpointerup={onUp}
-        onpointercancel={onUp}
+        onpointercancel={onCancel}
       >
         <div
           class="fill"
