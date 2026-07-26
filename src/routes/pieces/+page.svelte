@@ -12,6 +12,8 @@
   import { printer } from '$stores/printer.svelte';
   import { matter } from '$stores/matter.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
+  import { clock } from '$stores/clock.svelte';
+  import { ageLabel } from '$utils/freshness';
   import { findmy } from '$stores/findmy.svelte';
   import { wled } from '$stores/wled.svelte';
   import { acquire } from '$stores/refcount';
@@ -65,6 +67,20 @@
   // Tant qu'on n'a jamais abouti (état initial, montage), c'est « en cours », pas
   // une erreur → supprime le flash du message au chargement de la page.
   const matterLost = $derived(matter.connectionStatus === 'disconnected' && matter.everConnected);
+  /**
+   * Flux Zigbee muet. Le délai de grâce de 5 min est indispensable : `onerror`
+   * passe transitoirement à 'disconnected' à chaque micro-coupure, et sans lui
+   * le bandeau clignoterait. `everConnected` évite de l'afficher au chargement.
+   *
+   * Le HealthBanner global ne couvre PAS ce cas : il surveille la liaison MQTT
+   * vue du SERVEUR, avec 3 min de grâce — après un redéploiement, MQTT va très
+   * bien, c'est le flux du navigateur qui est mort.
+   */
+  const zigbeeMuet = $derived(
+    zigbee.connectionStatus !== 'connected' &&
+      zigbee.everConnected &&
+      (zigbee.lastUpdate === null || clock.now - zigbee.lastUpdate.getTime() > 5 * 60_000)
+  );
   const matterPending = $derived(
     matter.connectionStatus === 'connecting' ||
       (matter.connectionStatus === 'disconnected' && !matter.everConnected)
@@ -187,6 +203,28 @@
         style="background: var(--color-card); color: var(--color-fg);"
       >
         OK
+      </button>
+    </div>
+  {/if}
+  {#if zigbeeMuet}
+    <div
+      class="flex items-center justify-between gap-3 rounded-[var(--radius-lg)] px-4 py-3 text-[13px]"
+      style="background: var(--color-alert-muted); color: var(--color-alert);"
+      role="status"
+    >
+      <span>
+        <strong>Capteurs et prises : plus de nouvelles.</strong>
+        Les valeurs affichées datent{zigbee.lastUpdate
+          ? ` d'il y a ${ageLabel(clock.now - zigbee.lastUpdate.getTime())}`
+          : ''}, et les commandes peuvent ne pas partir. La reconnexion se fait toute seule.
+      </span>
+      <button
+        type="button"
+        onclick={() => zigbee.reconnect()}
+        class="shrink-0 rounded-lg px-2.5 py-1 text-[12px] font-semibold"
+        style="background: var(--color-card); color: var(--color-fg);"
+      >
+        Réessayer
       </button>
     </div>
   {/if}

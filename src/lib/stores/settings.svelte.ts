@@ -33,8 +33,6 @@ function genPhaseId(): string {
 type Persisted = {
   priceHc: number;
   priceHp: number;
-  priceExport: number;
-  subscription: number;
   /**
    * Phases d'installation datées (le matériel a été ajouté en plusieurs fois).
    * Coût total ROI = somme des coûts ; le taux d'économie est projeté depuis la
@@ -106,8 +104,6 @@ const DEFAULT_PHASES: InstallationPhase[] = [
 const DEFAULTS: Persisted = {
   priceHc: 0.1812,
   priceHp: 0.2318,
-  priceExport: 0.04,
-  subscription: 13.5,
   installationPhases: DEFAULT_PHASES,
   thermostat: DEFAULT_THERMOSTAT_CONFIG
 };
@@ -115,8 +111,6 @@ const DEFAULTS: Persisted = {
 class SettingsState {
   priceHc = $state(DEFAULTS.priceHc);
   priceHp = $state(DEFAULTS.priceHp);
-  priceExport = $state(DEFAULTS.priceExport);
-  subscription = $state(DEFAULTS.subscription);
   installationPhases = $state<InstallationPhase[]>(DEFAULT_PHASES.map((p) => ({ ...p })));
   /** Config thermostat — objet réactif profond (bindable champ par champ). */
   thermostat = $state<ThermostatConfig>(mergeThermostat({}));
@@ -168,8 +162,6 @@ class SettingsState {
       const data = (await res.json()) as Partial<Persisted>;
       if (typeof data.priceHc === 'number') this.priceHc = data.priceHc;
       if (typeof data.priceHp === 'number') this.priceHp = data.priceHp;
-      if (typeof data.priceExport === 'number') this.priceExport = data.priceExport;
-      if (typeof data.subscription === 'number') this.subscription = data.subscription;
       const legacy = data as Partial<Persisted> & {
         installationCostEur?: number;
         installationDateISO?: string;
@@ -209,8 +201,6 @@ class SettingsState {
         body: JSON.stringify({
           priceHc: this.priceHc,
           priceHp: this.priceHp,
-          priceExport: this.priceExport,
-          subscription: this.subscription,
           installationPhases: $state.snapshot(this.installationPhases),
           thermostat: $state.snapshot(this.thermostat)
         })

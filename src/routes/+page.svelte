@@ -681,7 +681,7 @@
               Statistiques
             </span>
             <p class="mt-1 text-[13px]" style="color: var(--color-muted-fg);">
-              En attente du bridge Anker pour les compteurs historiques.
+              Compteurs de production en cours de relevé.
             </p>
           </div>
         {/if}

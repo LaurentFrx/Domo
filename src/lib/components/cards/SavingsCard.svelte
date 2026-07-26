@@ -214,9 +214,14 @@
           <span class="rate">+{eur(rate)}/h</span>
         {/if}
         <span class="split">
-          <!-- HP/HC via les tokens globaux (désormais corail/cyan, harmonisés partout). -->
-          <span style="color: var(--color-hp);">HP {connected ? eur(today.eur_hp) : DASH}</span>
-          <span style="color: var(--color-hc);">HC {connected ? eur(today.eur_hc) : DASH}</span>
+          <!-- « HP » / « HC » écrits en toutes lettres : ce sont des sigles de
+               facture d'électricité, jamais explicités à l'écran, sur la carte la
+               plus regardée de l'app. Couleurs inchangées (tokens globaux
+               corail/cyan, harmonisés partout). -->
+          <span style="color: var(--color-hp);">Pleines {connected ? eur(today.eur_hp) : DASH}</span
+          >
+          <span style="color: var(--color-hc);">Creuses {connected ? eur(today.eur_hc) : DASH}</span
+          >
         </span>
       </footer>
     </div>

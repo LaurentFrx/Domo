@@ -498,7 +498,7 @@
       summary={sumThermostat}
       bind:openId={openSec}
     >
-      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div class="grid grid-cols-2 gap-3">
         <!-- Presets -->
         <div
           class="col-span-2 -mb-1 text-[10px] font-semibold tracking-[0.06em] uppercase sm:col-span-4"
@@ -832,7 +832,7 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div class="grid grid-cols-2 gap-3">
         <label
           class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
           style="background: var(--color-muted);"
@@ -873,50 +873,6 @@
             onchange={saveRegime}
             class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
             style="color: var(--color-hp);"
-          />
-        </label>
-        <label
-          class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-          style="background: var(--color-muted);"
-        >
-          <span
-            class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-            style="color: var(--color-muted-fg);"
-          >
-            Revente OA
-          </span>
-          <input
-            type="number"
-            step="0.0001"
-            bind:value={settings.priceExport}
-            onchange={() => {
-              haptic('success');
-              settings.save();
-            }}
-            class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
-            style="color: var(--color-solar);"
-          />
-        </label>
-        <label
-          class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-          style="background: var(--color-muted);"
-        >
-          <span
-            class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-            style="color: var(--color-muted-fg);"
-          >
-            Abonnement
-          </span>
-          <input
-            type="number"
-            step="0.01"
-            bind:value={settings.subscription}
-            onchange={() => {
-              haptic('success');
-              settings.save();
-            }}
-            class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
-            style="color: var(--color-fg);"
           />
         </label>
       </div>
@@ -1045,7 +1001,7 @@
       summary={sumSysteme}
       bind:openId={openSec}
     >
-      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div class="grid grid-cols-2 gap-3">
         <div class="flex flex-col gap-1">
           <span
             class="text-[10px] font-semibold tracking-[0.04em] uppercase"

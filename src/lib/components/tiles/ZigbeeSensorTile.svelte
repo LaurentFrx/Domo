@@ -44,14 +44,8 @@
     <span class="truncate text-[12px] leading-tight font-semibold" style="color: var(--color-fg);">
       {displayName}
     </span>
-    <span
-      class="shrink-0 text-[9px] font-semibold tracking-[0.04em] {compact
-        ? 'hidden sm:inline'
-        : ''}"
-      style="color: var(--color-muted-fg);"
-    >
-      ZB
-    </span>
+    <!-- Le badge « ZB » a été retiré : c'est le nom d'un protocole radio, il
+         n'apprend rien à quelqu'un qui regarde la température de sa chambre. -->
   </div>
 
   <div class="flex items-baseline gap-3">
@@ -79,12 +73,17 @@
     {/if}
   </div>
 
-  {#if link !== null}
+  <!-- « LQI 118 » était une mesure de qualité radio brute, incompréhensible et
+       affichée en permanence. On ne dit plus rien quand tout va bien, et une
+       phrase en français quand le signal est réellement faible — c'est la seule
+       information actionnable (rapprocher le capteur ou ajouter un répéteur). -->
+  {#if link !== null && link < 50}
     <div
       class="flex items-center justify-end text-[10px] {compact ? 'hidden sm:flex' : ''}"
-      style="color: var(--color-muted-fg);"
+      style="color: var(--color-warning);"
+      title="Qualité du lien radio : {link}/255"
     >
-      <span class="tabular-nums">LQI {link}</span>
+      <span>Signal faible</span>
     </div>
   {/if}
 </svelte:element>
