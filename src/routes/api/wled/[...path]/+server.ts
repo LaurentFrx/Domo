@@ -72,6 +72,11 @@ export const GET: RequestHandler = async ({ params }) => {
 };
 
 export const POST: RequestHandler = async ({ params, request }) => {
+  // Même liste fermée que le GET : le client Domo n'écrit que sur /json/state.
+  // Sans ce garde, n'importe quel sous-chemin sert de porte d'entrée à une
+  // commande d'actuateur (défense en profondeur derrière le guard d'auth).
+  if (subPath(params.path) !== 'state') throw error(404, 'WLED: chemin non autorisé');
+
   let body: unknown;
   try {
     body = await request.json();

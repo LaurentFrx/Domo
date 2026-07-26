@@ -42,6 +42,12 @@ function isMutating(method: string): boolean {
 }
 
 function isAsset(pathname: string): boolean {
+  // Une route API n'est JAMAIS un asset, quelle que soit la fin de son URL.
+  // Sans ce garde, les `endsWith` ci-dessous exemptent d'authentification tout
+  // chemin suffixé .png/.svg/.ico — et les routes à paramètre rest
+  // (/api/wled/[...path], /api/plex/stream/[...part]) avalent n'importe quel
+  // suffixe : `POST /api/wled/x.png` commandait le module sans cookie.
+  if (pathname.startsWith('/api/')) return false;
   return (
     pathname.startsWith('/_app/') ||
     pathname.startsWith('/icons/') ||
