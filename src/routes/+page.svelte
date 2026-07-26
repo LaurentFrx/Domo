@@ -74,26 +74,82 @@
     if (localBatteryUp) return ankerLocal.socPct;
     return anker.connected ? (anker.averageSoc ?? 0) : dashboard.batteryLevel;
   });
+  // ── Flux des SB3 RECONSTRUITS par bilan physique (les champs cloud sont CASSÉS) ──
+  // `charging_power_w` / `discharging_power_w` par unité valent ≈ TOUJOURS 0 côté cloud.
+  // Conséquence mesurée (25/07) : la charge des SB3 devenait INVISIBLE dans le bilan, et
+  // « Maison » — calculée en résidu — absorbait tout le solaire parti en batterie : jusqu'à
+  // ~1,5 kW fantômes en journée (maison affichée 1488 W alors que la vraie veille est
+  // ~230 W), et 0 W la nuit alors qu'elle tire ~230 W.
+  // On dérive donc le flux de chaque SolarBank de son bilan physique, sur des champs
+  // FIABLES : net = PV entrant (DC) − sortie AC.  net > 0 → charge ; net < 0 → décharge.
+  // (Vérifié sur 3 instants réels : 233 / 188 / 229 W de veille au lieu de 1488 / 617 / 0.)
+  /** PV DC entrant par SB3 (W). Le per-unité cloud est intermittent → repli sur l'agrégat
+   *  `solarPowerW` (fiable) ventilé par le dernier ratio Sud/Ouest connu du store. */
+  const sb3PvInW = $derived.by((): number[] => {
+    const perUnit = cloudSb3.map((b) => Math.max(0, b.inputPowerW));
+    if (perUnit.reduce((s, v) => s + v, 0) > 1) return perUnit;
+    const agg = Math.max(0, anker.solarPowerW);
+    if (agg <= 1) return cloudSb3.map(() => 0);
+    // Convention du store : sb1SolarW ↔ 1re unité, sb2SolarW ↔ 2e (cf. anker.svelte.ts).
+    if (cloudSb3.length === 2) return [anker.sb1SolarW, anker.sb2SolarW];
+    return cloudSb3.map(() => agg / Math.max(1, cloudSb3.length));
+  });
+  /** Horizon d'absorption : un pack ne peut encaisser que la PLACE qui lui reste.
+   *  Un pack à 99 % (27 Wh de place) ne peut pas absorber 372 W — il passe en AC. */
+  const SB3_FILL_HORIZON_H = 0.25;
+  /** Veille incompressible de la maison (box + VMC + RPi4…), mesurée ~230 W la nuit.
+   *  Plancher volontairement CONSERVATEUR : sert de contrainte de fermeture, pas de valeur. */
+  const HOUSE_FLOOR_W = 120;
+
+  /**
+   * Flux batterie (W) — SB3 reconstruits, Max AC mesurée, puis FERMETURE du bilan.
+   * La conso Maison n'est mesurée nulle part (l'EM-50 ne voit que réseau + cumulus) :
+   * elle est forcément déduite. Elle n'est donc juste que si TOUS les autres flux le
+   * sont — or la sortie AC des SB3 est la seule grandeur ni mesurée ni fiable côté
+   * cloud. On la traite comme l'inconnue, en l'encadrant par deux contraintes
+   * PHYSIQUES au lieu de laisser l'erreur s'écraser sur la Maison :
+   *   1. un pack ne peut pas absorber plus que sa place restante (sinon il sort en AC) ;
+   *   2. la Maison ne peut pas descendre sous sa veille incompressible.
+   * Tout écart résiduel est réattribué à la charge SB3 (l'inconnue), jamais à la Maison.
+   */
+  const battFlow = $derived.by((): { charge: number; discharge: number; perPack: number[] } => {
+    if (!localBatteryUp) {
+      // Repli DÉGRADÉ (Modbus Max AC injoignable) : agrégats cloud, eux aussi peu fiables.
+      if (anker.connected)
+        return { charge: anker.batteryChargeW, discharge: anker.batteryDischargeW, perPack: [] };
+      const charging = dashboard.batteryStatus === 'charge';
+      return { charge: charging ? 400 : 0, discharge: charging ? 0 : 600, perPack: [] };
+    }
+    // (a) net brut par SB3 : PV DC entrant − sortie AC.
+    const net = cloudSb3.map((b, i) => sb3PvInW[i] - Math.max(0, b.outputPowerW));
+    // (b) contrainte 1 — plafond d'absorption par la place restante du pack.
+    const perPack = net.map((n, i) => {
+      if (n <= 0) return n;
+      const b = cloudSb3[i];
+      const roomWh = Math.max(0, b.capacityWh * (1 - Math.min(1, Math.max(0, b.soc) / 100)));
+      return Math.min(n, roomWh / SB3_FILL_HORIZON_H);
+    });
+    const maxAcCharge = Math.max(0, -ankerLocal.batteryPowerW);
+    const maxAcDischarge = Math.max(0, ankerLocal.batteryPowerW);
+    let sb3Charge = perPack.reduce((s, n) => s + Math.max(0, n), 0);
+    const discharge = perPack.reduce((s, n) => s + Math.max(0, -n), 0) + maxAcDischarge;
+    // (c) contrainte 2 — fermeture : si la Maison déduite passe sous la veille, c'est
+    // que la charge SB3 est surestimée (le pack sortait en AC) → on la réduit d'autant.
+    const home =
+      pvSudW + pvOuestW + gridPowerW - (sb3Charge + maxAcCharge - discharge) - em50.cumulusPowerW;
+    if (home < HOUSE_FLOOR_W && sb3Charge > 0) {
+      const cut = Math.min(sb3Charge, HOUSE_FLOOR_W - home);
+      const k = (sb3Charge - cut) / sb3Charge;
+      for (let i = 0; i < perPack.length; i++) if (perPack[i] > 0) perPack[i] *= k;
+      sb3Charge -= cut;
+    }
+    return { charge: sb3Charge + maxAcCharge, discharge, perPack };
+  });
+
   // Charge (→ usage) et décharge (→ apport) SÉPARÉES. Le Sankey peut ainsi
   // montrer la batterie du bon côté (voire les deux).
-  const batteryChargeW = $derived.by(() => {
-    if (localBatteryUp) {
-      const sb3W = cloudSb3.reduce((s, b) => s + b.chargingPowerW, 0);
-      return sb3W + Math.max(0, -ankerLocal.batteryPowerW);
-    }
-    return anker.connected ? anker.batteryChargeW : dashboard.batteryStatus === 'charge' ? 400 : 0;
-  });
-  const batteryDischargeW = $derived.by(() => {
-    if (localBatteryUp) {
-      const sb3W = cloudSb3.reduce((s, b) => s + b.dischargingPowerW, 0);
-      return sb3W + Math.max(0, ankerLocal.batteryPowerW);
-    }
-    return anker.connected
-      ? anker.batteryDischargeW
-      : dashboard.batteryStatus === 'charge'
-        ? 0
-        : 600;
-  });
+  const batteryChargeW = $derived(battFlow.charge);
+  const batteryDischargeW = $derived(battFlow.discharge);
 
   // Détail PAR PACK : les 2 Solarbank 3 (cloud, hors A17E2) + la Max AC (Modbus local
   // prioritaire, sinon repli cloud). Sert à ÉCLATER le nœud Batterie du Sankey ET à la
@@ -114,12 +170,14 @@
   };
   const batteryDetail = $derived.by((): BatteryDetail[] => {
     const out: BatteryDetail[] = [];
+    // Flux SB3 : bilan physique borné (cf. battFlow), PAS les champs cloud cassés qui
+    // affichaient « — » (repos) alors que les packs chargeaient à plus d'1 kW.
     cloudSb3.forEach((b, i) =>
       out.push({
         label: SB3_ORIENTATION[b.id] ?? `SB3-${i + 1}`,
         soc: b.soc,
-        chargeW: Math.max(0, b.chargingPowerW),
-        dischargeW: Math.max(0, b.dischargingPowerW)
+        chargeW: Math.max(0, battFlow.perPack[i] ?? 0),
+        dischargeW: Math.max(0, -(battFlow.perPack[i] ?? 0))
       })
     );
     if (localBatteryUp) {
