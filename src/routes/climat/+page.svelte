@@ -40,6 +40,10 @@
   // ─── État hors-ligne Airzone (le boîtier ne répond plus : données figées,
   //     commandes inopérantes). On le rend VISIBLE — sinon la panne est muette. ──
   const azOffline = $derived(airzone.offline);
+  /** Le bridge Daikin a répondu par le passé mais ne répond plus. `unit.online`
+   *  seul ne suffit pas : il vient du dernier instantané reçu et reste figé à
+   *  true indéfiniment après la mort du bridge. */
+  const dkOffline = $derived(daikin.offline);
   function fmtAgo(ms: number): string {
     const m = Math.round(ms / 60000);
     if (m < 1) return "à l'instant";
@@ -122,7 +126,10 @@
   let holdTimer: ReturnType<typeof setTimeout> | null = null;
   const MODE_HOLD_MS = 550;
   function startModeHold(u: DaikinUnit) {
-    if (!u.online) return;
+    // `u.online` vient du dernier instantané et reste figé à true après la mort
+    // du bridge : sans `daikin.offline`, l'appui long partait dans le vide avec
+    // sa barre de progression et son retour haptique de confirmation.
+    if (!u.online || daikin.offline) return;
     cancelModeHold();
     holdUnitId = u.id;
     holdTimer = setTimeout(() => {
@@ -190,7 +197,11 @@
   // manque) : « Terrasse Ouest » (Thermo_ext) · extérieur Daikin · prévision AROME.
   function outdoorAvgFor(u: DaikinUnit): number | null {
     const ext = finiteNum(thermoByName('Thermo_ext')?.state?.temperature);
-    const daik = u.online ? finiteNum(u.outdoorTempC) : null;
+    // `daikin.connected` en plus de `u.online` : ce dernier vient du dernier
+    // instantané reçu, donc la sonde extérieure du split continuait d'entrer dans
+    // la moyenne indéfiniment après la mort du bridge. La ligne voisine (AROME)
+    // faisait déjà le bon garde-fou.
+    const daik = u.online && daikin.connected ? finiteNum(u.outdoorTempC) : null;
     const arome = weather.connected ? finiteNum(weather.tempC) : null;
     const vals = [ext, daik, arome].filter((v): v is number => v !== null);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
@@ -228,6 +239,21 @@
   <!-- ═══ Daikin Séjour + Salle de bain — cartes instrument ═══ -->
   <!-- iPhone portrait : 1 carte/ligne (confort) ; écran large : 2 colonnes. -->
   <section>
+    <!-- Bandeaux d'état de la clim — HORS de l'article verrouillé, au-dessus de
+         la grille. Réutilisent .az-offline-banner (classe existante, Airzone). -->
+    {#if daikin.everPolled && !daikin.hasRealData}
+      <div class="az-offline-banner" role="status">
+        <strong>Climatisation du séjour indisponible</strong>
+        <span>Impossible de la joindre pour l'instant. La reprise est automatique.</span>
+      </div>
+    {:else if dkOffline}
+      <div class="az-offline-banner" role="status">
+        <strong>Climatisation du séjour hors ligne</strong>
+        <span>
+          Elle ne répond plus : les valeurs affichées datent, et les boutons n'auront pas d'effet.
+        </span>
+      </div>
+    {/if}
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <!-- ╔═══════════════════════════════════════════════════════════════════╗
            ║ 🔒 CARTE SÉJOUR (Daikin) — VERROUILLÉE (validée par Laurent 2026-06-20). ║
@@ -248,7 +274,8 @@
         {@const consigne = tgt ?? unit.targetHeating}
         {@const TGT_MIN = 16}
         {@const TGT_MAX = 30}
-        {@const active = unit.onOff && unit.operationMode !== 'off'}
+        {@const live = unit.online && !dkOffline}
+        {@const active = live && unit.onOff && unit.operationMode !== 'off'}
         {@const outdoorAvg = outdoorAvgFor(unit)}
         {@const dHeat = unit.operationMode === 'heating'}
         {@const dCool = unit.operationMode === 'cooling'}
@@ -276,8 +303,8 @@
             <div class="flex min-w-0 items-center gap-1.5">
               <span
                 class="h-2 w-2 shrink-0 rounded-full"
-                style:background-color={unit.online ? '#4ade80' : '#f0606a'}
-                title={unit.online ? 'En ligne' : 'Hors ligne'}
+                style:background-color={live ? '#4ade80' : '#f0606a'}
+                title={live ? 'En ligne' : 'Ne répond plus'}
                 aria-hidden="true"
               ></span>
               <span class="dk-name truncate">{daikinLabel(unit)}</span>
@@ -325,7 +352,7 @@
                 aria-checked={unit.onOff}
                 aria-label="Allumer / éteindre {daikinLabel(unit)}"
                 onclick={() => tapOnOff(unit)}
-                disabled={!unit.online}
+                disabled={!live}
               >
                 <span class="toggle-knob"></span>
               </button>
@@ -412,7 +439,7 @@
               class:mt-cool={dCool}
               class:mt-holding={holdUnitId === unit.id}
               style="--hold: {MODE_HOLD_MS}ms;"
-              disabled={!unit.online}
+              disabled={!live}
               aria-label={`Mode ${dCool ? 'Froid' : 'Chaud'} — appui long pour changer`}
               title="Appui long pour changer chaud / froid"
               onpointerdown={() => startModeHold(unit)}
@@ -529,6 +556,17 @@
             commandes ne s'appliqueront pas. Vérifiez son alimentation et son réseau&nbsp;; la
             reprise est automatique au retour.
           </span>
+        </div>
+      </div>
+    {:else if airzone.commandError}
+      <!-- La phrase existait déjà, rédigée en français dans le store, et n'était
+           affichée NULLE PART : on appuyait sur +/−, l'optimiste tenait 7 s, le
+           re-poll défaisait tout, sans un mot. Le {:else if} évite d'empiler deux
+           bandeaux quand le boîtier est franchement hors ligne. -->
+      <div class="az-offline-banner" role="status" aria-live="polite">
+        <div class="azob-text">
+          <strong>Commande non appliquée</strong>
+          <span>{airzone.commandError}</span>
         </div>
       </div>
     {/if}
@@ -893,7 +931,13 @@
             </svg>
             Sanguinet
           </span>
-          <span class="text-[10px]" style="color: var(--color-muted-fg);">à l'instant</span>
+          <!-- L'étiquette était « à l'instant » EN DUR : quand Open-Meteo ne
+               répond pas, le store sert un placeholder fabriqué (21 °C, vent, UV,
+               3 jours de prévisions) et la carte le présentait comme une mesure
+               fraîche. On dit ce qu'il en est plutôt que d'affirmer. -->
+          <span class="text-[10px]" style="color: var(--color-muted-fg);">
+            {weather.showingMock ? 'Météo indisponible' : "à l'instant"}
+          </span>
         </div>
       </div>
 

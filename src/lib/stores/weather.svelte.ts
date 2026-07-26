@@ -43,6 +43,15 @@ class WeatherState {
   mode = $state<'mock' | 'direct'>('mock');
   connected = $state(false);
   lastUpdate = $state<Date | null>(new Date());
+  /** Une requête a-t-elle déjà été tentée ? `mode === 'mock'` ne suffit pas à
+   *  conclure à une panne : c'est aussi la valeur INITIALE, avant tout fetch.
+   *  Sans cette distinction, la carte annonce « Météo indisponible » à chaque
+   *  ouverture de l'app, le temps du premier appel. */
+  everPolled = $state(false);
+  /** Le placeholder fabriqué est-il affiché alors qu'on a vraiment essayé ? */
+  get showingMock(): boolean {
+    return this.everPolled && this.mode === 'mock';
+  }
 
   tempC = $state(0);
   humidity = $state(0); // %
@@ -120,6 +129,7 @@ class WeatherState {
   }
 
   async poll() {
+    this.everPolled = true;
     try {
       const res = await fetch('/api/weather', { signal: AbortSignal.timeout(13_000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

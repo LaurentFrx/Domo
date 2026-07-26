@@ -102,38 +102,30 @@ class DaikinState {
   lastError = $state<string | null>(null);
   lastUpdate = $state<Date | null>(null);
 
-  // Seed mock : sert d'affichage tant que le bridge n'a pas répondu (fallback
-  // gracieux — le dashboard ne casse pas avant que la clim soit connectée).
-  units = $state<DaikinUnit[]>([
-    {
-      id: 'salon',
-      name: 'Daikin Salon',
-      zone: 'Séjour',
-      online: true,
-      onOff: true,
-      operationMode: 'heating',
-      outdoorTempC: 14.5,
-      targetHeating: 22,
-      targetCooling: 24,
-      fanSpeed: 'auto',
-      swingHorizontal: 'off',
-      swingVertical: 'off'
-    },
-    {
-      id: 'sdb',
-      name: 'Daikin SdB',
-      zone: 'Salle de bain',
-      online: true,
-      onOff: false,
-      operationMode: 'heating',
-      outdoorTempC: 14.5,
-      targetHeating: 21,
-      targetCooling: 25,
-      fanSpeed: 'auto',
-      swingHorizontal: 'off',
-      swingVertical: 'off'
-    }
-  ]);
+  // Le seed MOCK a été supprimé. Il servait de « repli gracieux » avant la
+  // première réponse du bridge, mais il inventait deux unités marquées
+  // `online: true` — « Daikin Salon » à 22 °C en chauffage, et une « Daikin SdB »
+  // qui ne correspond à AUCUN split réel. Bridge mort au chargement, la page
+  // /climat affichait donc une carte entièrement fabriquée, plus une carte
+  // fantôme, toutes deux avec une pastille verte « En ligne ».
+  units = $state<DaikinUnit[]>([]);
+
+  /** Une réponse du bridge a-t-elle déjà été reçue ? Distingue « on ne sait pas
+   *  encore » (premier rendu, SSR) de « on a demandé et ça ne répond pas » — sans
+   *  quoi l'app annoncerait une panne à chaque ouverture. */
+  everPolled = $state(false);
+
+  /** Des unités RÉELLES sont-elles connues ? Faux tant que le bridge n'a jamais
+   *  répondu : il n'y a alors rien d'honnête à afficher. */
+  get hasRealData(): boolean {
+    return this.everPolled && this.units.length > 0;
+  }
+
+  /** Le bridge a répondu par le passé mais ne répond plus : les valeurs à l'écran
+   *  sont les dernières connues, et les commandes n'aboutiront pas. */
+  get offline(): boolean {
+    return this.everPolled && !this.connected;
+  }
 
   private intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -183,6 +175,10 @@ class DaikinState {
 
   private async poll() {
     this.status = 'polling';
+    // Marqué AVANT la requête : dès qu'on a essayé, on sait distinguer « pas
+    // encore interrogé » de « interrogé sans réponse » — c'est ce qui autorise
+    // les cartes à annoncer une panne sans le faire à chaque ouverture de l'app.
+    this.everPolled = true;
     try {
       const res = await fetch(`${API_BASE}/status`, {
         signal: AbortSignal.timeout(15_000)
@@ -204,7 +200,9 @@ class DaikinState {
       this.lastError = null;
       this.lastUpdate = new Date();
     } catch (e) {
-      // Réseau/bridge KO → on garde le dernier état affiché (ou le mock).
+      // Réseau/bridge KO → on garde le dernier état RÉEL connu, et `offline`
+      // devient vrai : la carte dit que ces valeurs datent et que les boutons
+      // n'auront pas d'effet, au lieu de faire comme si de rien n'était.
       this.connected = false;
       this.status = 'error';
       this.lastError = (e as Error).message;
