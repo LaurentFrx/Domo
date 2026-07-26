@@ -26,7 +26,8 @@ import type {
   CumulusRuntimeState,
   Decision,
   DecisionReason,
-  Anomaly
+  Anomaly,
+  CessionCause
 } from './types';
 
 const SEC = 1000;
@@ -36,6 +37,10 @@ export interface PilotWant {
   wantOn: boolean;
   reason: 'solar' | 'hc' | 'wait';
   note: string;
+  /** Cause de cession quand le pilote COUPE une chauffe en cours (achat réseau,
+   *  batteries, fin de grâce). Non nulle = coupure de PROTECTION : elle ne doit
+   *  jamais être différée par l'anti-court-cycle. */
+  cutCause?: CessionCause | null;
 }
 
 /** Sous-mode (couleur UI) déduit de la raison + de l'état du relais. */
@@ -81,9 +86,14 @@ export function decide(
   const surplusW = inputs.em50Available ? Math.round(inputs.cumulusPowerW - inputs.gridPowerW) : 0;
 
   // ── Suivi « relais physiquement ON depuis » (base des détections conso) ──
+  // relayOn === null = poll Shelly raté, PAS un relais éteint. Remettre onSinceTs
+  // à null sur un simple échec de lecture ré-armait toute l'amnistie de démarrage
+  // (graceStartupSec sans jugement, puis cutBuySustainSec de confirmation) : avec
+  // un tunnel instable, la coupure sur achat n'aboutissait jamais et le compteur
+  // d'alerte zéro-import repartait de zéro à chaque incident.
   if (inputs.relayOn === true) {
     if (next.onSinceTs === null) next.onSinceTs = now;
-  } else {
+  } else if (inputs.relayOn === false) {
     next.onSinceTs = null;
   }
 
@@ -205,6 +215,12 @@ export function decide(
     } else {
       desired = false;
       reason = 'pilot_wait';
+      // Coupure de protection : on la laisse passer l'anti-court-cycle. Un délai
+      // d'usure de contacteur ne doit pas maintenir 2,9 kW alors que la maison
+      // achète à EDF (jusqu'à ~130 s en config de production, four allumé, sur un
+      // abonnement 6 kVA). Le RALLUMAGE reste protégé par minOffSec/antiCyclingSec,
+      // donc pas de battement de relais.
+      if (pilotWant.cutCause) bypass = true;
     }
     note = pilotWant.note;
   } else {

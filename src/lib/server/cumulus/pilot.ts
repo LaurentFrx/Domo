@@ -61,6 +61,9 @@ export interface PilotStepResult {
   view: PilotView;
   events: ShadowEvent[];
   pilot: PilotState;
+  /** Cause de la coupure quand le pilote interrompt une chauffe (null sinon).
+   *  Transmise à decide() pour que la protection prime sur l'anti-court-cycle. */
+  cutCause: CessionCause | null;
 }
 
 export function defaultPilotState(): PilotState {
@@ -142,7 +145,25 @@ export function pilotStep(
   const buyW = Math.max(0, Math.round(inputs.gridPowerW)); // achat EDF réel (EM50 voie 0)
   const exportW = Math.max(0, Math.round(-inputs.gridPowerW)); // don au réseau réel
   const socs = inputs.batterySocPct.filter((s) => Number.isFinite(s));
+  // Moyenne ARITHMÉTIQUE des packs — garde son sens pour « chaque pack est-il
+  // plein ? » (battFullPct, réserve HC) : un pack plein est plein quelle que
+  // soit sa taille. Les seuils qui s'y réfèrent sont calibrés sur cette échelle.
   const socAvg = socs.length ? socs.reduce((a, b) => a + b, 0) / socs.length : null;
+  // SoC du PARC, pondéré par capacité — la seule grandeur qui a un sens pour
+  // « combien d'énergie reste-t-il ? », donc pour les coupures de décharge.
+  // La Max AC pèse 7,2 kWh contre 2×2,7 kWh aux SB3 : en moyenne arithmétique
+  // elle comptait pour 1/3 au lieu de 4/7, et avec 2 SB3 pleins le minimum
+  // atteignable était 66,7 % — le plancher batteryFloorCutPct (40 %) était
+  // STRUCTURELLEMENT hors d'atteinte. Même formule que la carte d'accueil.
+  // Garde de COHÉRENCE PHYSIQUE (pas un filtre de plausibilité) : stocker plus
+  // d'énergie que la capacité est impossible. Ça arrive si rated_energy_wh de la
+  // Max AC tombe à 0 en Modbus dégradé — la capacité ne compte alors que les SB3
+  // pendant que l'énergie compte les trois packs, et socParc dépasserait 100 %.
+  // Mesure absurde → pas de décision batterie dessus.
+  const socParc =
+    inputs.batteryCapacityWh > 0 && inputs.batteryEnergyWh <= inputs.batteryCapacityWh
+      ? (100 * inputs.batteryEnergyWh) / inputs.batteryCapacityWh
+      : null;
   const relayOn = inputs.relayOn === true;
   const onForMs = state.onSinceTs !== null ? now - state.onSinceTs : 0;
   const inGrace = relayOn && onForMs < p.graceStartupSec * SEC;
@@ -415,13 +436,22 @@ export function pilotStep(
         ) {
           cutCause = 'buy';
           note = `achat réseau ${buyW} W soutenu ${p.cutBuySustainSec} s — la maison a besoin de sa puissance`;
-        } else if (
-          socAvg !== null &&
-          pilot.socStartOfHeat !== null &&
-          (socAvg <= pilot.socStartOfHeat - p.batteryDropCutPts || socAvg < p.batteryFloorCutPct)
-        ) {
+        } else if (socParc !== null && socParc < p.batteryFloorCutPct) {
+          // PLANCHER — inconditionnel. Il était gardé par socStartOfHeat !== null,
+          // donc inerte dès qu'une chauffe démarrait sans SoC disponible (cloud +
+          // Modbus muets après une coupure de courant) : le ballon pouvait alors
+          // vider tout le parc sans qu'aucun test ne se déclenche.
           cutCause = 'battery';
-          note = `batteries ${Math.round(socAvg)} % (début ${Math.round(pilot.socStartOfHeat)} %) — réserve du soir protégée`;
+          note = `parc batterie ${Math.round(socParc)} % (plancher ${p.batteryFloorCutPct} %) — réserve du soir protégée`;
+        } else if (
+          socParc !== null &&
+          pilot.socStartOfHeat !== null &&
+          socParc <= pilot.socStartOfHeat - p.batteryDropCutPts
+        ) {
+          // CHUTE depuis le début de chauffe — a besoin d'un point de départ, par
+          // nature. Les deux valeurs sont exprimées sur l'échelle du parc pondéré.
+          cutCause = 'battery';
+          note = `parc batterie ${Math.round(socParc)} % (début ${Math.round(pilot.socStartOfHeat)} %) — réserve du soir protégée`;
         }
       }
       if (cutCause) {
@@ -470,7 +500,7 @@ export function pilotStep(
       }
     } else {
       countStart();
-      pilot.socStartOfHeat = socAvg;
+      pilot.socStartOfHeat = socParc;
       pilot.buyOverSinceTs = null;
       events.push({ ts: now, kind: 'phase', label: 'allumage', detail: note });
     }
@@ -492,9 +522,14 @@ export function pilotStep(
       detail: note
     });
   }
-  // Début de chauffe réel détecté (exploitation OU manuel observé) : mémoriser le SoC
-  if (relayOn && state.onSinceTs !== null && now - state.onSinceTs < 90 * SEC) {
-    if (pilot.socStartOfHeat === null && socAvg !== null) pilot.socStartOfHeat = socAvg;
+  // Ancrage du SoC de début de chauffe. La fenêtre de 90 s après onSinceTs a été
+  // retirée : quand la mesure manquait à l'allumage (cloud ET Modbus muets, cas
+  // classique après une coupure de courant), l'ancrage ne pouvait plus JAMAIS se
+  // faire et la coupure sur chute restait morte toute la chauffe. On ancre
+  // désormais dès que la mesure revient. Un ancrage tardif retarde la coupure sur
+  // chute, mais le plancher, lui, est inconditionnel et couvre l'intervalle.
+  if (relayOn && pilot.socStartOfHeat === null && socParc !== null) {
+    pilot.socStartOfHeat = socParc;
   }
   if (!relayOn && !observation) pilot.socStartOfHeat = null;
 
@@ -640,7 +675,10 @@ export function pilotStep(
     invisibleSurplusW: ctx.potential.invisibleSurplusW,
     potTotalW: ctx.potential.potTotalW,
     pApsW: Math.round(inputs.pvApsW),
-    socNow: socAvg !== null ? Math.round(socAvg) : null,
+    // Échelle PARC (pondérée), la même que socStart : la carte affiche
+    // « socNow − socStart pts », les deux doivent être comparables. C'est aussi
+    // le pourcentage montré par la carte Batterie de l'accueil.
+    socNow: socParc !== null ? Math.round(socParc) : null,
     socStart: pilot.socStartOfHeat !== null ? Math.round(pilot.socStartOfHeat) : null,
     solarStartsToday: pilot.solarStartsToday,
     resumesToday: pilot.resumesToday,
@@ -649,7 +687,7 @@ export function pilotStep(
     computedAt: now
   };
 
-  return { wantOn, reason: wantOn ? reason : 'wait', view, events, pilot };
+  return { wantOn, reason: wantOn ? reason : 'wait', view, events, pilot, cutCause };
 }
 
 function cond(key: string, label: string, ok: boolean, detail: string): PilotView['conds'][number] {

@@ -182,7 +182,8 @@ async function runTick(apply: boolean): Promise<TickResult> {
   const pilotWant: PilotWant = {
     wantOn: pilotRes.wantOn,
     reason: pilotRes.reason === 'wait' ? 'wait' : pilotRes.reason,
-    note: pilotRes.view.note
+    note: pilotRes.view.note,
+    cutCause: pilotRes.cutCause
   };
 
   // ── 3. Décision (protections + overrides par-dessus le pilote) ──
