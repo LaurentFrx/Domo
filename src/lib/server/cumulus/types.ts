@@ -97,6 +97,10 @@ export interface CumulusInputs {
   batteryCapacityWh: number; // capacité batterie totale (Wh)
   batteryChargeW: number; // puissance de CHARGE batterie (W, ≥ 0 = surplus en cours d'absorption)
   sbInputW: (number | null)[]; // PV ENTRANT par station (input_power_w) — pour la calibration de l'estimateur
+  /** Charge DC des SB3 (W ≥ 0) = surplus solaire RÉORIENTABLE vers le ballon (au même
+   *  titre que la charge Max AC : sous zéro-export, la SolarBank bascule de « charge »
+   *  vers « sortie AC » dès que la maison demande plus). Dérivée + bornée, cf. inputs.ts. */
+  sb3ChargeW: number;
   // ── Max AC en Modbus LOCAL (~2,5 s — classe « mesure locale », comme l'EM-50) ──
   // Depuis que la Max AC régule le compteur à zéro-export (boucle ~3 s avec le
   // Gen 2), le don franc a quasi disparu : le surplus vit dans SA charge. Ces

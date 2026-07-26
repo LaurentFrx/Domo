@@ -273,6 +273,51 @@ interface AnkerRead {
   batteryEnergyWhNoMaxAc: number;
   batteryCapacityWhNoMaxAc: number;
   sbInputW: (number | null)[]; // PV entrant par station (input_power_w) — calibration estimateur
+  /** Charge DC des SB3 (W ≥ 0) — surplus solaire RÉORIENTABLE vers le ballon.
+   *  Dérivée (les champs cloud charging_power_w sont cassés), cf. sb3ChargeFrom(). */
+  sb3ChargeW: number;
+}
+
+/**
+ * Charge DC des SolarBank 3 (hors Max AC), en W ≥ 0.
+ *
+ * Les champs cloud `charging_power_w` par station valent ≈ TOUJOURS 0 : la charge des
+ * SB3 était donc invisible du pilote, qui ne comptait comme surplus réorientable que la
+ * charge Max AC + le don réseau. Or sous régulation zéro-export, quand la maison demande
+ * plus, la SolarBank bascule de « charge batterie » vers « sortie AC » : cette puissance
+ * est bien réorientable vers le ballon, au même titre que celle de la Max AC.
+ * (Constaté le 25/07 : pilote 945 W vus vs ~2300 W réellement réorientables → jamais
+ * déclenché de la journée.)
+ *
+ * On la dérive donc du bilan physique de chaque station : PV entrant (DC) − sortie AC,
+ * BORNÉE par la place restante du pack — un pack quasi plein ne peut pas absorber son PV,
+ * il le passe en AC (et la sortie AC du cloud est intermittente, d'où la borne). Repli sur
+ * l'agrégat DC `solar_power_w` (fiable) ventilé quand le per-station est muet.
+ */
+const SB3_FILL_HORIZON_H = 0.25; // un pack n'encaisse que la place qui lui reste
+function sb3ChargeFrom(
+  noMax: {
+    soc?: number;
+    input_power_w?: number;
+    output_power_w?: number;
+    battery_capacity_wh?: number;
+  }[],
+  aggregateDcW: number
+): number {
+  if (!noMax.length) return 0;
+  const perUnitIn = noMax.map((b) => Math.max(0, num(b?.input_power_w)));
+  const havePerUnit = perUnitIn.reduce((s, v) => s + v, 0) > 1;
+  const share = Math.max(0, aggregateDcW) / noMax.length;
+  let total = 0;
+  for (let i = 0; i < noMax.length; i++) {
+    const b = noMax[i];
+    const pvIn = havePerUnit ? perUnitIn[i] : share;
+    const net = pvIn - Math.max(0, num(b?.output_power_w));
+    if (net <= 0) continue;
+    const roomWh = Math.max(0, num(b?.battery_capacity_wh) * (1 - Math.min(1, num(b?.soc) / 100)));
+    total += Math.min(net, roomWh / SB3_FILL_HORIZON_H);
+  }
+  return Math.round(total);
 }
 
 async function readAnker(): Promise<AnkerRead> {
@@ -289,7 +334,8 @@ async function readAnker(): Promise<AnkerRead> {
     socPctNoMaxAc: [],
     batteryEnergyWhNoMaxAc: 0,
     batteryCapacityWhNoMaxAc: 0,
-    sbInputW: []
+    sbInputW: [],
+    sb3ChargeW: 0
   };
   try {
     const r = await fetch(`${ankerUrl()}/api/status`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -307,6 +353,7 @@ async function readAnker(): Promise<AnkerRead> {
         battery_capacity_wh?: number;
         charging_power_w?: number;
         input_power_w?: number;
+        output_power_w?: number;
       }[];
     };
     const bats = Array.isArray(d.batteries) ? d.batteries : [];
@@ -332,7 +379,8 @@ async function readAnker(): Promise<AnkerRead> {
         typeof b?.input_power_w === 'number' && Number.isFinite(b.input_power_w)
           ? Math.round(b.input_power_w)
           : null
-      )
+      ),
+      sb3ChargeW: sb3ChargeFrom(noMax, num(d.solar_power_w))
     };
   } catch {
     return fail;
@@ -481,6 +529,7 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     maxAcSocPct: sbLocal.available ? sbLocal.soc_pct : null,
     maxAcChargeW: sbLocal.available ? Math.max(0, -sbLocal.battery_power_w) : null,
     sbInputW: anker.sbInputW,
+    sb3ChargeW: anker.sb3ChargeW,
     pvApsW: aps.powerW,
     apsAvailable: aps.available,
     apsAgeSec: aps.ageSec,

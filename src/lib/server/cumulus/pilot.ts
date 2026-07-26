@@ -305,7 +305,12 @@ export function pilotStep(
   // d'autant et le compteur reste à zéro. Budget de drain assumé :
   // heatPowerW − surplusOnW (~900 W), borné par les coupures (achat 150 W/30 s,
   // chute batteryDropCutPts, plancher batteryFloorCutPct) — inchangées.
-  const surplusDispoW = (inputs.maxAcChargeW ?? 0) + exportW;
+  // La charge DC des SB3 compte AUSSI comme surplus réorientable : sous régulation
+  // zéro-export, quand la maison demande plus, la SolarBank bascule de « charge
+  // batterie » vers « sortie AC ». L'ignorer rendait le pilote aveugle à l'essentiel du
+  // surplus (25/07 : 945 W vus vs ~2300 W réels → aucun allumage de la journée, ballon
+  // lancé à la main). Dérivée + bornée par la place des packs, cf. inputs.sb3ChargeFrom.
+  const surplusDispoW = (inputs.maxAcChargeW ?? 0) + inputs.sb3ChargeW + exportW;
   const saturationTrigger =
     inputs.maxAcAvailable &&
     inputs.maxAcSocPct !== null &&
@@ -553,7 +558,7 @@ export function pilotStep(
         return `attente d’un don franc au réseau (> ${p.exportOnW} W) — mesure locale muette`;
       return inputs.maxAcSocPct !== null && inputs.maxAcSocPct < p.maxAcSocOnPct
         ? `attente : la Max AC fait sa réserve (${Math.round(inputs.maxAcSocPct)} % / ${p.maxAcSocOnPct} %)`
-        : `attente de surplus — charge Max AC + don ${surplusDispoW} W / ${p.surplusOnW} W`;
+        : `attente de surplus — ${surplusDispoW} W réorientables / ${p.surplusOnW} W`;
     }
     if (!quotaOk) return 'quota d’allumages du jour épuisé';
     if (!delaysOk) return 'délais de protection du matériel en cours';
@@ -582,7 +587,7 @@ export function pilotStep(
         'Surplus disponible',
         exportFrank || (inputs.em50Available && buyW <= 50 && surplusDispoW >= p.surplusOnW),
         (inputs.maxAcAvailable
-          ? `${surplusDispoW} W réorientables (charge Max AC ${Math.round(inputs.maxAcChargeW ?? 0)} W + don ${exportW} W)`
+          ? `${surplusDispoW} W réorientables (Max AC ${Math.round(inputs.maxAcChargeW ?? 0)} W + SB3 ${inputs.sb3ChargeW} W + don ${exportW} W)`
           : exportW > 0
             ? `${exportW} W donnés (mesure locale muette)`
             : '≈ 0 W') + (buyW > 50 ? ` · achat ${buyW} W` : '')
