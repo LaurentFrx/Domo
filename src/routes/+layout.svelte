@@ -14,18 +14,16 @@
   import { player } from '$stores/plex.svelte';
   import { wledMusic } from '$stores/wledMusic.svelte';
   import Pager from '$lib/pager/Pager.svelte';
-  import { startDemoTicker, stopDemoTicker } from '$stores/demo-ticker.svelte';
   import { anker } from '$stores/anker.svelte';
   import { apsystems } from '$stores/apsystems.svelte';
   import { em50 } from '$stores/em50.svelte';
   import { ankerLocal } from '$stores/ankerLocal.svelte';
-  import { production } from '$stores/production.svelte';
   import { savings } from '$stores/savings.svelte';
   import { tariff } from '$stores/tariff.svelte';
-  import { dashboard } from '$stores/dashboard.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { settings } from '$stores/settings.svelte';
   import { health } from '$stores/health.svelte';
+  import { clock } from '$stores/clock.svelte';
   import { haptic } from '$utils/haptic';
 
   let { children } = $props();
@@ -146,10 +144,12 @@
     settings.hydrate();
   });
 
-  // ─── Démo ticker (mock) — actif tant qu'on n'a pas de vraie source ─────
+  // ─── Horloge partagée (âge des mesures) ────────────────────────────────
+  // Une seule pour toute l'app : sans elle, « mesuré il y a 4 min » se fige,
+  // et une horloge par carte multiplierait les timers. Visibility-aware.
   $effect(() => {
-    startDemoTicker();
-    return () => stopDemoTicker();
+    clock.connect();
+    return () => clock.disconnect();
   });
 
   // ─── Santé de la liaison domotique (bandeau d'alerte global) ───────────
@@ -206,28 +206,11 @@
     return () => tariff.disconnect();
   });
 
-  // ─── Synchro Anker → dashboard quand l'API est dispo ───────────────────
-  $effect(() => {
-    if (anker.connected) {
-      dashboard.connectionStatus = 'connected';
-      // Production = SolarBank (solar_power_w, cohérent avec l'app Anker) + APS EZ1.
-      dashboard.solarPower = (anker.solarPowerW + production.apsW) / 1000;
-      const soc = anker.averageSoc;
-      if (soc !== null) dashboard.batteryLevel = soc;
-      dashboard.batteryStatus = anker.batteryStatus;
-      // Surplus = injection réseau, depuis le réseau FIABLE dérivé du Linky (le brut
-      // instantané du cloud est figé/fantôme → faux surplus). Cf. anker.gridReliableW.
-      dashboard.solarSurplus = Math.max(0, -anker.gridReliableW);
-      // Compteur jour du bridge parfois figé (≈ lifetime) → on n'écrase que si fiable.
-      if (anker.dailyProductionReliable) dashboard.solarTotal24h = anker.dailyProductionWh / 1000;
-      if (anker.selfConsumptionRate !== null) {
-        dashboard.solarSelfConsumption = Math.round(anker.selfConsumptionRate);
-      }
-      if (anker.lastUpdate) dashboard.lastUpdate = anker.lastUpdate;
-    } else if (dashboard.connectionStatus === 'connected') {
-      dashboard.connectionStatus = 'mock';
-    }
-  });
+  // Le miroir « Anker → dashboard » a été SUPPRIMÉ avec le store dashboard :
+  // c'est lui qui décidait du mode « mock ». L'app démarrait en démonstration
+  // (connectionStatus valait 'mock' à l'initialisation) et y RETOURNAIT
+  // automatiquement dès qu'Anker décrochait — en production. Les cartes lisent
+  // désormais les stores de mesure directement.
 </script>
 
 <!-- Titre centralisé : avec le pager (plusieurs pages montées), un <title> par page

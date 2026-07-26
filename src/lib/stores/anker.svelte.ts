@@ -8,8 +8,10 @@
  * /api/debug du bridge. Tout passe désormais par SvelteKit, derrière l'auth.
  *
  * Tant que le .env du bridge ne contient pas ANKER_EMAIL/ANKER_PASSWORD,
- * la route renvoie 503 → on garde `connected=false`. Les autres stores
- * (dashboard) basculent alors sur le mock demo-ticker.
+ * la route renvoie 503 → on garde `connected=false`. Les cartes n'affichent
+ * alors PLUS RIEN pour les grandeurs concernées (le repli sur un générateur de
+ * démonstration a été supprimé : il peignait des valeurs plausibles et mouvantes
+ * pendant que rien ne répondait).
  */
 
 const STATUS_URL = '/api/anker/status';

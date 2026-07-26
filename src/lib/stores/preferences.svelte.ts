@@ -4,8 +4,6 @@
  * future au pilotage Cumulus.
  */
 
-import { startDemoTicker, stopDemoTicker } from './demo-ticker.svelte';
-
 const STORAGE_KEY = 'domo.preferences.v1';
 
 type PowerUnit = 'kW' | 'W';
@@ -114,11 +112,9 @@ class PreferencesState {
   setAnimationsEnabled(enabled: boolean) {
     this.animationsEnabled = enabled;
     this.persist();
-    if (enabled) {
-      startDemoTicker();
-    } else {
-      stopDemoTicker();
-    }
+    // (Ce réglage pilotait aussi le générateur de données de démonstration —
+    // une préférence de confort visuel commandait la fabrication de fausses
+    // mesures. Générateur supprimé.)
   }
   setTheme(theme: Theme) {
     this.theme = theme;

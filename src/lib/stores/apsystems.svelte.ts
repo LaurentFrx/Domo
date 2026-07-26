@@ -8,6 +8,9 @@
  * nuit) → `available:false` et `powerW` forcé à 0.
  */
 
+import { freshnessOf, type Freshness } from '$lib/utils/freshness';
+import { clock } from './clock.svelte';
+
 // ─── Contrat du bridge (/api/apsystems/status) ──────────────────────────
 interface BridgeStatus {
   available: boolean;
@@ -78,6 +81,27 @@ class ApsystemsState {
   /** Horodatage epoch (s) de la mesure côté bridge. */
   get ts(): number {
     return this.#snap.ts;
+  }
+
+  /**
+   * Fraîcheur de la MESURE (pas du fetch) — `frais` | `retard` | `mort`.
+   *
+   * `available` ne peut pas jouer ce rôle : il vaut `false` aussi bien quand le
+   * bridge est mort que quand l'onduleur dort la nuit, et il reste à sa dernière
+   * valeur quand le réseau échoue. On se fie donc à l'âge de `ts`, qui vient du
+   * bridge : un fetch raté laisse le snapshot intact, donc l'âge grandit tout
+   * seul, sans compteur d'échecs à maintenir.
+   *
+   * `ts === 0` = aucune réponse encore reçue → `null` (optimiste, pas de flash
+   * « en panne » au chargement).
+   */
+  get etat(): Freshness {
+    return freshnessOf({
+      ok: this.status === 'idle' ? null : this.status === 'live',
+      tsMs: this.#snap.ts > 0 ? this.#snap.ts * 1000 : null,
+      refreshMs: REFRESH_MS,
+      now: clock.now
+    });
   }
 
   connect() {

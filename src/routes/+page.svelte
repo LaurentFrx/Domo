@@ -6,10 +6,10 @@
   import { ankerLocal } from '$stores/ankerLocal.svelte';
   import { production } from '$stores/production.svelte';
   import { savings } from '$stores/savings.svelte';
-  import { dashboard } from '$stores/dashboard.svelte';
   import { em50 } from '$stores/em50.svelte';
   import { apsystems } from '$stores/apsystems.svelte';
-  import { shelly } from '$stores/shelly.svelte';
+  import { health } from '$stores/health.svelte';
+  import { clock } from '$stores/clock.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { pagerNav } from '$lib/pager/pager-nav.svelte';
   import { productionLifetime } from '$stores/productionLifetime.svelte';
@@ -17,7 +17,7 @@
   import { cubicOut } from 'svelte/easing';
   import { onMount, onDestroy } from 'svelte';
 
-  // ─── Source canonique : Anker quand connecté, mock sinon ─────────────
+  // ─── Sources : mesures réelles uniquement ────────────────────────────
   // Tout en watts, signed (+ import / − export).
   // Solaire séparé par pan (installation Sanguinet) :
   //   • Sud   = onduleur APS (EZ1) + SolarBank 1 (alias *-1)
@@ -26,20 +26,30 @@
   // FIABLE) ventilé par le dernier ratio par-unité connu (les champs par-unité sont
   // intermittents). Purement AFFICHAGE : n'entre JAMAIS dans le calcul d'économies
   // (recorder serveur, 100 % AC).
+  // Plus AUCUN repli inventé : `dashboard.solarPower` était une courbe fabriquée
+  // à partir de l'heure, animée toutes les 3 s par demo-ticker. Elle peignait une
+  // production plausible ET MOUVANTE alors que rien ne répondait — la nuit
+  // comprise — et écrasait au passage la mesure APS locale, elle bien vivante
+  // (l'onduleur EZ1 est lu sur le LAN et survit très bien à une panne du cloud
+  // Solix). Ce qui n'est pas mesuré n'est plus peint.
+  // APS « mort » ⇒ 0 : un 0 W muet serait indiscernable d'une nuit, donc le nœud
+  // disparaît du Sankey (FlowDiagram retire les nœuds à 0) et la mention passe
+  // par `sourcesMuettes` sous la carte.
+  const apsMesure = $derived(apsystems.etat !== 'mort');
   const pvSudW = $derived(
-    anker.connected
-      ? production.apsW + anker.sb1SolarW
-      : Math.round(dashboard.solarPower * 1000 * 0.6)
+    (apsMesure ? production.apsW : 0) + (anker.connected ? anker.sb1SolarW : 0)
   );
-  const pvOuestW = $derived(
-    anker.connected ? anker.sb2SolarW : Math.round(dashboard.solarPower * 1000 * 0.4)
-  );
+  const pvOuestW = $derived(anker.connected ? anker.sb2SolarW : 0);
   // Réseau FIABLE — PRIORITÉ à l'EM-50 (compteur local Shelly : mesure instantanée
   // signée, recoupée Anker à ±10 W — la raison d'être de son intégration). 1er repli :
   // le Smart Meter Gen 2 lu en Modbus LOCAL (même convention de signe, vérifiée ;
   // instantané, sans cloud). 2e repli : le dérivé Linky d'Anker (fiable mais lent,
   // ~5 min) ; le grid_power_w INSTANTANÉ du cloud Solix, lui, reste inexploitable
-  // (paliers figés, signe instable, fantômes). Mock Shelly en dernier recours.
+  // (paliers figés, signe instable, fantômes). Plus de mock en dernier recours :
+  // `shelly.gridPowerW` fabriquait un import/export à partir d'une courbe horaire
+  // + un bruit de ±90 W, recalculé toutes les 3 s — donc cohérent avec l'heure,
+  // donc parfaitement crédible. Et « Maison » se déduisant du réseau, la conso de
+  // la maison était fausse elle aussi.
   const gridPowerW = $derived(
     em50.available
       ? em50.gridPowerW
@@ -47,8 +57,38 @@
         ? ankerLocal.meterGridPowerW
         : anker.connected
           ? anker.gridReliableW
-          : shelly.gridPowerW
+          : 0
   );
+  /** Le réseau vient-il d'un compteur RÉEL ? Sinon on l'annonce, on ne le peint pas. */
+  const gridMesure = $derived(em50.available || ankerLocal.meterAvailable || anker.connected);
+  /**
+   * Délai de grâce avant d'annoncer quoi que ce soit — même principe que le
+   * bandeau `health` (GRACE_MS). Au rendu serveur et juste après l'hydratation,
+   * AUCUN store n'a encore répondu : sans cette garde, chaque chargement de page
+   * afficherait un « sans réponse » fugace, c'est-à-dire une fausse alerte à
+   * chaque ouverture de l'app. Calibré sur la source la plus lente : Anker poll
+   * à 15 s avec 15 s de timeout.
+   */
+  const ANNONCE_GRACE_MS = 35_000;
+  let monteA = $state<number | null>(null);
+  onMount(() => {
+    monteA = Date.now();
+  });
+
+  /**
+   * Ce qu'on NE mesure plus, dit en français. Le bandeau global (HealthBanner)
+   * annonce déjà « toute la maison est injoignable » : quand il parle, on se tait,
+   * sinon dix cartes crient la même panne sous un bandeau qui la dit déjà.
+   */
+  const sourcesMuettes = $derived.by((): string[] => {
+    if (health.linkDown) return [];
+    if (monteA === null || clock.now - monteA < ANNONCE_GRACE_MS) return [];
+    const out: string[] = [];
+    if (!gridMesure) out.push('Compteur électrique sans réponse');
+    if (!apsMesure) out.push('Panneaux du toit sans réponse');
+    if (!batteryOnline) out.push('Batteries sans réponse');
+    return out;
+  });
   // ─── Batterie : fusion cloud + LOCAL (Modbus Max AC) ─────────────────────
   // Depuis la reconfiguration des systèmes Anker (22/07), le bridge cloud
   // liste les TROIS batteries dans batteries[] — Max AC (A17E2) comprise.
@@ -72,7 +112,11 @@
       return den > 0 ? num / den : ankerLocal.socPct;
     }
     if (localBatteryUp) return ankerLocal.socPct;
-    return anker.connected ? (anker.averageSoc ?? 0) : dashboard.batteryLevel;
+    // Aucune source batterie : 0, et non plus une valeur fictive. L'affichage est
+    // déjà gardé par `batteryOnline`, mais la valeur inventée circulait quand même
+    // (tweenée puis passée au Sankey) — bombe amorcée pour le premier qui
+    // l'afficherait sans garde.
+    return anker.connected ? (anker.averageSoc ?? 0) : 0;
   });
   // ── Flux des SB3 RECONSTRUITS par bilan physique (les champs cloud sont CASSÉS) ──
   // `charging_power_w` / `discharging_power_w` par unité valent ≈ TOUJOURS 0 côté cloud.
@@ -117,8 +161,13 @@
       // Repli DÉGRADÉ (Modbus Max AC injoignable) : agrégats cloud, eux aussi peu fiables.
       if (anker.connected)
         return { charge: anker.batteryChargeW, discharge: anker.batteryDischargeW, perPack: [] };
-      const charging = dashboard.batteryStatus === 'charge';
-      return { charge: charging ? 400 : 0, discharge: charging ? 0 : 600, perPack: [] };
+      // Plus AUCUNE source batterie : ne rien peindre. C'étaient deux constantes
+      // arbitraires (400 W de charge ou 600 W de décharge) — le Sankey affichait
+      // donc « Batterie · charge 400 W » pendant que la carte Batterie juste
+      // au-dessus affichait « — » et « Hors ligne ». Deux affirmations
+      // contradictoires sur le même écran, et c'est la fausse qui avait l'air
+      // vivante. À 0, le nœud disparaît du Sankey.
+      return { charge: 0, discharge: 0, perPack: [] };
     }
     // (a) net brut par SB3 : PV DC entrant − sortie AC.
     const net = cloudSb3.map((b, i) => sb3PvInW[i] - Math.max(0, b.outputPowerW));
@@ -568,6 +617,18 @@
           {homeConfidence}
           batteries={batteryOnline ? batteryDetail : []}
         />
+        {#if sourcesMuettes.length}
+          <!-- Un nœud absent du schéma ne veut rien dire tout seul : sans cette
+               ligne, retirer les fausses valeurs remplacerait un mensonge par un
+               silence. Phrase courte, en français, sans nom de matériel. -->
+          <p
+            class="px-1 text-[13px] leading-snug"
+            style="color: var(--color-text-muted)"
+            role="status"
+          >
+            {sourcesMuettes.join(' · ')} — le schéma n'affiche que ce qui est réellement mesuré.
+          </p>
+        {/if}
         <!-- Énergie du jour : SOUS la carte apports/usages (mobile ET desktop). -->
         {@render flowsCard()}
       </div>
