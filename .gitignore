@@ -50,3 +50,10 @@ thermostat-bridge/.venv/
 
 # Backups .env (contiennent des secrets)
 .env.bak*
+
+# Rapports d'audit de SÉCURITÉ — ce dépôt est PUBLIC. Ces rapports citent le
+# domaine réel, la topologie des tunnels et le détail de failles pas encore
+# corrigées : les garder hors git (les copies vivent dans ~/files, servi par
+# Filebrowser derrière l'auth). Les audits de FIABILITÉ, eux, restent versionnés.
+docs/audit-ultracode-*.md
+docs/audit-securite-*.md
