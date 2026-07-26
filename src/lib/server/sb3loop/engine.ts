@@ -23,7 +23,8 @@ import {
   defaultSb3LoopConfig,
   defaultSb3LoopState,
   type Sb3DecisionLogEntry,
-  type Sb3LoopState
+  type Sb3LoopState,
+  type Sb3PlanSlot
 } from './types';
 
 import path from 'node:path';
@@ -56,6 +57,9 @@ export async function setSb3LoopEnabled(enabled: boolean): Promise<Sb3LoopState>
       s.autoDisabledReason = null;
       s.autoDisabledTs = null;
       s.confirmFailCount = 0;
+      // Repart sur un budget de restauration neuf : la boucle va de toute façon
+      // réécrire les créneaux, et un abandon passé ne doit pas la condamner.
+      s.restoreAttempts = 0;
     }
     await writeJsonAtomic(STATE_FILE, s);
     return s;
@@ -186,15 +190,31 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
     }
 
     if (!state.enabled) {
+      // Boucle à l'arrêt : tant qu'un créneau porte encore une consigne de la
+      // boucle, on le rend au plan statique avant de sortir.
+      const restore = await restoreStaticPlan(state, cfg, now);
+      if (restore) {
+        pushLog(state, {
+          ts: now,
+          mode: 'off',
+          reason: restore.note,
+          houseLoadW: null,
+          targetW: restore.writtenW,
+          beforeW: state.lastCmdW,
+          writtenW: restore.writtenW,
+          confirmedW: restore.confirmedW
+        });
+      }
       await writeJsonAtomic(STATE_FILE, state);
+      const base = state.autoDisabledReason ?? 'boucle désactivée';
       return result(
         state,
         'off',
-        state.autoDisabledReason ?? 'boucle désactivée',
+        restore ? `${base} — ${restore.note}` : base,
         null,
         null,
-        null,
-        null
+        restore?.writtenW ?? null,
+        restore?.confirmedW ?? null
       );
     }
 
@@ -207,6 +227,12 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
     let confirmedW: number | null = null;
     if (d.writeW !== null) {
       const beforeW = state.lastCmdW ?? inputs.cloud.sb3PresetW;
+      // Créneau marqué AVANT l'écriture : même non confirmée, elle a pu être
+      // appliquée côté cloud, donc ce créneau devra être rendu au plan statique.
+      const slot = planSlot(cfg, now);
+      if (slot !== null && !state.pendingRestoreSlots.includes(slot)) {
+        state.pendingRestoreSlots.push(slot);
+      }
       const w = await writePreset(d.writeW);
       writtenW = d.writeW;
       confirmedW = w.confirmedW;
@@ -224,7 +250,7 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
           state.autoDisabledTs = now;
           void sendPush({
             title: '🛑 Boucle SB3 désactivée',
-            body: `Le cloud Anker ne prend plus les consignes (${state.confirmFailCount}× de suite). La restauration du plan statique sera tentée aux prochains ticks.`,
+            body: `Le cloud Anker ne prend plus les consignes (${state.confirmFailCount}× de suite). Restauration du plan statique tentée aux prochains ticks (${cfg.restoreAttemptsMax} essais, puis notification si elle échoue).`,
             tag: 'sb3loop-disabled',
             severity: 'critical',
             url: '/energie'
@@ -266,11 +292,106 @@ const PARIS_HOUR_FMT = new Intl.DateTimeFormat('fr-FR', {
   hourCycle: 'h23'
 });
 
-/** Valeur du plan statique (les créneaux posés dans l'app) à l'instant t. */
-function staticPlanW(cfg: ReturnType<typeof defaultSb3LoopConfig>, ts: number): number {
-  const h = Number(PARIS_HOUR_FMT.format(new Date(ts)));
+/** Heure Paris (0-23), ou NaN si indéterminable.
+ *  formatToParts et PAS format() : en locale fr, format() rend « 23 h » et le
+ *  Number() d'origine donnait NaN — `night` était donc TOUJOURS faux et le plan
+ *  statique valait toujours la valeur JOUR, y compris en pleine nuit. */
+function parisHour(ts: number): number {
+  const part = PARIS_HOUR_FMT.formatToParts(new Date(ts)).find((p) => p.type === 'hour');
+  return part ? Number(part.value) : NaN;
+}
+
+/** Créneau du plan statique couvrant l'instant t, ou null si l'heure est
+ *  indéterminable — dans ce cas on n'écrit RIEN : graver la mauvaise valeur
+ *  dans un créneau la fige pour 7 jours. */
+function planSlot(cfg: ReturnType<typeof defaultSb3LoopConfig>, ts: number): Sb3PlanSlot | null {
+  const h = parisHour(ts);
+  if (!Number.isFinite(h)) return null;
   const night = h >= cfg.staticNightStartH || h < cfg.staticNightEndH;
-  return night ? cfg.staticNightW : cfg.staticDayW;
+  return night ? 'night' : 'day';
+}
+
+/** Valeur du plan statique (les créneaux posés dans l'app) pour un créneau. */
+function staticPlanW(cfg: ReturnType<typeof defaultSb3LoopConfig>, slot: Sb3PlanSlot): number {
+  return slot === 'night' ? cfg.staticNightW : cfg.staticDayW;
+}
+
+interface RestoreOutcome {
+  note: string;
+  writtenW: number | null;
+  confirmedW: number | null;
+}
+
+/**
+ * Restauration du plan statique après l'arrêt de la boucle (manuel OU auto).
+ *
+ * Sans elle, la dernière consigne écrite reste gravée dans le créneau Anker
+ * jusqu'à correction manuelle dans l'app : arrivé le 23/07/2026 (2 400 W laissés
+ * en place après auto-désactivation). Un arrêt de sécurité doit DÉSARMER
+ * l'actionneur, pas seulement cesser de le commander.
+ *
+ * Un créneau ne peut être restauré que PENDANT ce créneau (l'écriture cloud ne
+ * modifie que l'entrée couvrant l'heure locale). Si la boucle a touché le
+ * créneau jour et qu'on est passé en nuit, on attend le retour du jour — sans
+ * consommer de tentative.
+ */
+async function restoreStaticPlan(
+  state: Sb3LoopState,
+  cfg: ReturnType<typeof defaultSb3LoopConfig>,
+  now: number
+): Promise<RestoreOutcome | null> {
+  if (state.pendingRestoreSlots.length === 0) return null;
+  if (state.restoreAttempts >= cfg.restoreAttemptsMax) {
+    return {
+      note: 'restauration abandonnée — à corriger dans l’app Anker',
+      writtenW: null,
+      confirmedW: null
+    };
+  }
+
+  const slot = planSlot(cfg, now);
+  if (slot === null) return null;
+  if (!state.pendingRestoreSlots.includes(slot)) {
+    const waiting = state.pendingRestoreSlots.join('+');
+    return {
+      note: `restauration en attente du créneau ${waiting}`,
+      writtenW: null,
+      confirmedW: null
+    };
+  }
+
+  const target = staticPlanW(cfg, slot);
+  const w = await writePreset(target);
+  const confirmed =
+    w.ok && w.confirmedW !== null && Math.abs(w.confirmedW - target) <= cfg.confirmToleranceW;
+
+  if (confirmed) {
+    state.pendingRestoreSlots = state.pendingRestoreSlots.filter((s) => s !== slot);
+    state.restoreAttempts = 0;
+    // Plus rien de gravé par la boucle : l'ancrage du slew redevient nul.
+    if (state.pendingRestoreSlots.length === 0) state.lastCmdW = null;
+    return {
+      note: `plan statique restauré (créneau ${slot} → ${target} W)`,
+      writtenW: target,
+      confirmedW: w.confirmedW
+    };
+  }
+
+  state.restoreAttempts += 1;
+  if (state.restoreAttempts >= cfg.restoreAttemptsMax) {
+    void sendPush({
+      title: '⚠️ Plan SB3 non restauré',
+      body: `Impossible de rendre le créneau ${slot} à ${target} W après ${state.restoreAttempts} tentatives. La dernière consigne de la boucle reste ACTIVE dans le plan Anker — à corriger à la main dans l'app.`,
+      tag: 'sb3loop-restore-failed',
+      severity: 'critical',
+      url: '/energie'
+    });
+  }
+  return {
+    note: `échec restauration ${slot} (${state.restoreAttempts}/${cfg.restoreAttemptsMax})`,
+    writtenW: target,
+    confirmedW: w.confirmedW
+  };
 }
 
 function pushLog(state: Sb3LoopState, entry: Sb3DecisionLogEntry): void {

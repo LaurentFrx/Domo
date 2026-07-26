@@ -56,6 +56,10 @@ export interface Sb3LoopConfig {
   localMuteS: number;
   /** Écritures non confirmées consécutives avant auto-désactivation. */
   confirmFailMax: number;
+  /** Tentatives de restauration du plan statique avant abandon + notification.
+   *  Réarmé chaque jour Paris : un échec nocturne ne doit pas condamner la
+   *  restauration du lendemain. */
+  restoreAttemptsMax: number;
   /** Tolérance de confirmation (W) — step device 5-10 W + arrondis lib. */
   confirmToleranceW: number;
   /** Plan statique de référence (les créneaux posés dans l'app) : la valeur à
@@ -94,6 +98,11 @@ export interface Sb3LoopInputs {
 }
 
 export type Sb3LoopMode = 'off' | 'failsafe' | 'faillow' | 'day' | 'night' | 'rescue' | 'hold';
+
+/** Créneau du plan statique posé dans l'app Anker. Une écriture cloud ne
+ *  modifie QUE l'entrée couvrant l'heure locale courante : restaurer le créneau
+ *  jour exige d'écrire pendant le jour, et réciproquement. */
+export type Sb3PlanSlot = 'day' | 'night';
 
 export interface Sb3Decision {
   /** Consigne à écrire (W), ou null si aucune écriture ce cycle. */
@@ -143,6 +152,12 @@ export interface Sb3LoopState {
   lastTickTs: number | null;
   /** Tentatives de restauration du plan statique après arrêt (bornées à 3). */
   restoreAttempts: number;
+  /** Créneaux du plan que la boucle a MODIFIÉS et qui restent à restaurer.
+   *  Marqué à la TENTATIVE d'écriture, pas à sa confirmation : une écriture non
+   *  confirmée peut avoir été appliquée côté cloud (la confirmation est une
+   *  relecture, elle échoue aussi sur timeout ou créneau traversant minuit).
+   *  Vidé créneau par créneau, chacun quand il redevient le créneau courant. */
+  pendingRestoreSlots: Sb3PlanSlot[];
   /** Canary schéma + check version lib : une fois par jour Paris. */
   lastCanaryDayParis: string | null;
   lastVersionCheckDayParis: string | null;
@@ -162,6 +177,7 @@ export function defaultSb3LoopState(): Sb3LoopState {
     pendingDeadbandDir: null,
     lastTickTs: null,
     restoreAttempts: 0,
+    pendingRestoreSlots: [],
     lastCanaryDayParis: null,
     lastVersionCheckDayParis: null,
     decisions: []
@@ -189,6 +205,7 @@ export function defaultSb3LoopConfig(): Sb3LoopConfig {
     cloudStaleS: 180,
     localMuteS: 120,
     confirmFailMax: 2,
+    restoreAttemptsMax: 3,
     confirmToleranceW: 25,
     staticNightW: 300,
     staticDayW: 0,
