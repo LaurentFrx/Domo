@@ -7,7 +7,7 @@
   import { weather } from '$stores/weather.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
   import { airzone } from '$stores/airzone.svelte';
-  import { cumulus, type CumulusConfigClient } from '$stores/cumulus.svelte';
+  import { cumulus } from '$stores/cumulus.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { settings } from '$stores/settings.svelte';
   import { thermostat } from '$stores/thermostat.svelte';
@@ -34,12 +34,6 @@
     thermostat: 'M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0Z',
     tarifs: 'M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20Z M15 9a4 4 0 1 0 0 6 M8 11h5 M8 13.5h4',
     systeme: 'M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20Z M12 16v-4 M12 8h.01'
-  };
-
-  const cumulusProfileLabel: Record<string, string> = {
-    solar_first: "Solaire d'abord",
-    balanced: 'Équilibré',
-    comfort_first: 'Confort d’abord'
   };
 
   // ─── Tarif RÉEL en cours (store tariff, connecté app-wide via le layout) ──
@@ -160,17 +154,6 @@
         : 'var(--color-alert)';
   }
 
-  // ─── Config cumulus éditable (orchestrateur) ───────────────────────
-  // Copie locale bindable, seedée une fois la config réelle reçue du serveur ;
-  // chaque modification est persistée (PUT /api/cumulus/config, normalisé serveur).
-  let cumulusCfg = $state<CumulusConfigClient | null>(null);
-  $effect(() => {
-    if (cumulus.config && !cumulusCfg) cumulusCfg = { ...cumulus.config };
-  });
-  function saveCumulusCfg() {
-    if (cumulusCfg) cumulus.saveConfig($state.snapshot(cumulusCfg));
-  }
-
   // ─── Section 1 : Connexions ────────────────────────────────────────
   type ConnEntry = {
     name: string;
@@ -282,11 +265,7 @@
   const sumPreferences = $derived(
     `${preferences.autoTheme ? 'Auto' : preferences.theme === 'dark' ? 'Sombre' : 'Clair'} · Animations ${preferences.animationsEnabled ? 'on' : 'off'}`
   );
-  const sumCumulus = $derived(
-    cumulusCfg
-      ? `${cumulusProfileLabel[cumulusCfg.profile] ?? cumulusCfg.profile} · confort ${cumulusCfg.tminConfortC} °C`
-      : 'Chargement…'
-  );
+  const sumCumulus = 'Automatique · rien à régler';
   const sumThermostat = $derived(
     `Confort ${settings.thermostat?.presetTemps?.comfort ?? '—'} °C · TPI`
   );
@@ -482,265 +461,18 @@
       summary={sumCumulus}
       bind:openId={openSec}
     >
-      {#if cumulusCfg}
-        <!-- Profil de régulation -->
-        <label
-          class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-          style="background: var(--color-muted);"
-        >
-          <span
-            class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-            style="color: var(--color-muted-fg);"
-          >
-            Profil de régulation
-          </span>
-          <select
-            bind:value={cumulusCfg.profile}
-            onchange={saveCumulusCfg}
-            class="w-full bg-transparent text-[16px] font-semibold outline-none"
-            style="color: var(--color-fg);"
-          >
-            <option value="solar_first">Solaire d'abord (éco)</option>
-            <option value="balanced">Équilibré</option>
-            <option value="comfort_first">Confort d'abord</option>
-          </select>
-        </label>
-
-        <!-- Températures (°C) -->
-        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <label
-            class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-            style="background: var(--color-muted);"
-          >
-            <span
-              class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-              style="color: var(--color-muted-fg);">Confort mini (°C)</span
-            >
-            <input
-              type="number"
-              step="1"
-              bind:value={cumulusCfg.tminConfortC}
-              onchange={saveCumulusCfg}
-              class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
-              style="color: var(--color-fg);"
-            />
-          </label>
-          <label
-            class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-            style="background: var(--color-muted);"
-          >
-            <span
-              class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-              style="color: var(--color-muted-fg);">Max sécurité (°C)</span
-            >
-            <input
-              type="number"
-              step="1"
-              bind:value={cumulusCfg.tmaxSondeC}
-              onchange={saveCumulusCfg}
-              class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
-              style="color: var(--color-alert);"
-            />
-          </label>
-          <label
-            class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-            style="background: var(--color-muted);"
-          >
-            <span
-              class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-              style="color: var(--color-muted-fg);">Calibration sonde (°C)</span
-            >
-            <input
-              type="number"
-              step="0.5"
-              bind:value={cumulusCfg.tempOffsetC}
-              onchange={saveCumulusCfg}
-              class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
-              style="color: var(--color-fg);"
-            />
-          </label>
-        </div>
-
-        <!-- Durées, prévision -->
-        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <label
-            class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-            style="background: var(--color-muted);"
-          >
-            <span
-              class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-              style="color: var(--color-muted-fg);">Peu de soleil si &lt; (kWh)</span
-            >
-            <input
-              type="number"
-              step="1"
-              bind:value={cumulusCfg.forecastFaibleKwh}
-              onchange={saveCumulusCfg}
-              class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
-              style="color: var(--color-solar);"
-            />
-          </label>
-          <label
-            class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-            style="background: var(--color-muted);"
-          >
-            <span
-              class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-              style="color: var(--color-muted-fg);">Durée ON min (s)</span
-            >
-            <input
-              type="number"
-              step="30"
-              bind:value={cumulusCfg.minOnSec}
-              onchange={saveCumulusCfg}
-              class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
-              style="color: var(--color-fg);"
-            />
-          </label>
-          <label
-            class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-            style="background: var(--color-muted);"
-          >
-            <span
-              class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-              style="color: var(--color-muted-fg);">Anti-cycling (s)</span
-            >
-            <input
-              type="number"
-              step="30"
-              bind:value={cumulusCfg.antiCyclingSec}
-              onchange={saveCumulusCfg}
-              class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
-              style="color: var(--color-fg);"
-            />
-          </label>
-        </div>
-
-        <!-- Alerte « APS muet » (l'étalon de la détection solaire) -->
-        {#if cumulusCfg.pilot}
-          <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <label
-              class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-              style="background: var(--color-muted);"
-            >
-              <span
-                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-                style="color: var(--color-muted-fg);">APS périmé après (s)</span
-              >
-              <input
-                type="number"
-                step="30"
-                bind:value={cumulusCfg.pilot.apsStaleSec}
-                onchange={saveCumulusCfg}
-                class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
-                style="color: var(--color-fg);"
-              />
-            </label>
-            <label
-              class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-              style="background: var(--color-muted);"
-            >
-              <span
-                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-                style="color: var(--color-muted-fg);">APS muet si &le; (W)</span
-              >
-              <input
-                type="number"
-                step="5"
-                bind:value={cumulusCfg.pilot.apsMuteFloorW}
-                onchange={saveCumulusCfg}
-                class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
-                style="color: var(--color-fg);"
-              />
-            </label>
-            <label
-              class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-              style="background: var(--color-muted);"
-            >
-              <span
-                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-                style="color: var(--color-muted-fg);">Confirmé pendant (s)</span
-              >
-              <input
-                type="number"
-                step="60"
-                bind:value={cumulusCfg.pilot.apsMuteConfirmSec}
-                onchange={saveCumulusCfg}
-                class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
-                style="color: var(--color-fg);"
-              />
-            </label>
-            <label
-              class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-              style="background: var(--color-muted);"
-            >
-              <span
-                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-                style="color: var(--color-muted-fg);">Jumeaux SB1 &ge; (W)</span
-              >
-              <input
-                type="number"
-                step="50"
-                bind:value={cumulusCfg.pilot.apsTwinMinW}
-                onchange={saveCumulusCfg}
-                class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
-                style="color: var(--color-fg);"
-              />
-            </label>
-            <label
-              class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-              style="background: var(--color-muted);"
-            >
-              <span
-                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-                style="color: var(--color-muted-fg);">Surplus r&eacute;orientable &ge; (W)</span
-              >
-              <input
-                type="number"
-                step="100"
-                bind:value={cumulusCfg.pilot.surplusOnW}
-                onchange={saveCumulusCfg}
-                class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
-                style="color: var(--color-fg);"
-              />
-            </label>
-            <label
-              class="flex flex-col gap-1 rounded-[var(--radius-lg)] p-3"
-              style="background: var(--color-muted);"
-            >
-              <span
-                class="text-[10px] font-semibold tracking-[0.04em] uppercase"
-                style="color: var(--color-muted-fg);">R&eacute;serve Max AC &ge; (%)</span
-              >
-              <input
-                type="number"
-                step="5"
-                bind:value={cumulusCfg.pilot.maxAcSocOnPct}
-                onchange={saveCumulusCfg}
-                class="w-full bg-transparent text-[20px] font-bold tabular-nums outline-none"
-                style="color: var(--color-fg);"
-              />
-            </label>
-          </div>
-        {/if}
-
-        <p class="text-[11px] leading-relaxed" style="color: var(--color-muted-fg);">
-          PILOTE V2 — règle : le chauffe-eau ne cause JAMAIS d'achat de courant à EDF. Il s'allume
-          quand le surplus mesuré le permet (charge Max AC + don au réseau, ou surplus invisible
-          estimé), sept conditions tenues deux minutes, et cède la place dès que la maison a besoin
-          de sa puissance. C'est le CUMULUS (sa molette) qui décide la fin de chauffe (conso → 0
-          détectée). La nuit, une recharge en heures creuses garantit les douches du matin (fin
-          ~07:15), modulée par la météo de demain et d'après-demain (jour « gris » sous {cumulusCfg.forecastFaibleKwh}
-          kWh). On ne relance qu'après une baisse de {cumulusCfg.rechargeHysteresisC}°C sous la
-          dernière charge. Sécurité {cumulusCfg.tmaxSondeC}°C · watchdog auto-off {Math.round(
-            cumulusCfg.autoOffDelaySec / 60
-          )} min. Le détail des conditions vit sur la carte « Eau chaude » (bouton « pilote »).
-        </p>
-      {:else}
-        <p class="text-[12px]" style="color: var(--color-muted-fg);">
-          Chargement de la configuration…
-        </p>
-      {/if}
+      <!-- Réglages fins SUPPRIMÉS (décision Laurent, 26/07/2026) : le chauffe-eau
+           est piloté par les automatisations, il n'y a pas de réglage à faire ici,
+           et ces seuils étaient incompréhensibles pour un non-technicien. Le
+           « profil de régulation » n'était de toute façon lu par AUCUN code de
+           décision, et vider un champ numérique persistait silencieusement la
+           borne basse (cf. asNum, lot D de l'audit). Les valeurs vivent désormais
+           dans la config serveur uniquement. -->
+      <p class="text-[13px] leading-relaxed" style="color: var(--color-muted-fg);">
+        Le chauffe-eau est piloté automatiquement : il chauffe au soleil quand il y a du surplus, et
+        complète la nuit en heures creuses si la réserve d'eau chaude ne suffit pas. Rien à régler
+        ici.
+      </p>
 
       <a
         href="/cumulus-labo"
