@@ -1,15 +1,18 @@
 /**
- * Anker store — polling REST du microservice anker-bridge sur le RPi4,
- * proxié en HTTPS via Caddy (/anker/api/status).
+ * Anker store — polling du microservice anker-bridge (RPi4), via le proxy
+ * SERVEUR /api/anker/status.
+ *
+ * Le bridge n'est PAS joint directement par le navigateur : il l'était avant
+ * (https://domo.feroux.fr/anker/api/status, via un handle_path Caddy), ce qui
+ * court-circuitait le guard d'auth et rendait publics /docs, /openapi.json et
+ * /api/debug du bridge. Tout passe désormais par SvelteKit, derrière l'auth.
  *
  * Tant que le .env du bridge ne contient pas ANKER_EMAIL/ANKER_PASSWORD,
- * /api/status renvoie 503 → on garde `connected=false`. Les autres stores
+ * la route renvoie 503 → on garde `connected=false`. Les autres stores
  * (dashboard) basculent alors sur le mock demo-ticker.
  */
 
-import { env } from '$env/dynamic/public';
-
-const PUBLIC_ANKER_URL = env.PUBLIC_ANKER_URL || 'https://domo.feroux.fr/anker';
+const STATUS_URL = '/api/anker/status';
 
 // Polling client. Le bridge Anker (RPi4) sert un CACHE rafraîchi côté cloud
 // Solix toutes les ~60 s (mesuré : last_update figé 63 s puis saut). Poller plus
@@ -282,11 +285,6 @@ class AnkerState {
   connect() {
     if (typeof window === 'undefined') return;
     if (this.visibilityHandler !== null) return; // déjà connecté (layout + pages)
-    if (!PUBLIC_ANKER_URL) {
-      this.status = 'unconfigured';
-      this.lastError = 'PUBLIC_ANKER_URL non défini';
-      return;
-    }
     // Onglet/PWA en arrière-plan → on suspend le polling (rien à afficher, et on
     // épargne le bridge). Au retour au premier plan → refetch IMMÉDIAT pour une
     // carte à jour dès la réouverture, sans attendre le prochain tick.
@@ -326,7 +324,7 @@ class AnkerState {
   private async poll() {
     this.status = 'polling';
     try {
-      const res = await fetch(`${PUBLIC_ANKER_URL}/api/status`, {
+      const res = await fetch(STATUS_URL, {
         signal: AbortSignal.timeout(15_000)
       });
       if (res.status === 503) {
