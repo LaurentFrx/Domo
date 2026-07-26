@@ -50,6 +50,61 @@
   const nextSwitchAt = $derived(tariff.next.at); // 'HH:MM' local Paris
   const hoursUntilSwitch = $derived(tariff.nextInHours);
 
+  // ─── Barème HP/HC éditable (data/tariffs.json, via /api/tariffs/regime) ────
+  // Les anciens champs écrivaient dans settings.json, que PERSONNE ne relisait :
+  // les prix réellement appliqués (pilote cumulus, économies, ventilation HP/HC)
+  // viennent de tariffs.json. Le panneau était donc un réglage mort.
+  let regimeHp = $state<number | null>(null);
+  let regimeHc = $state<number | null>(null);
+  let regimeFrom = $state<string>(''); // date d'effet du barème affiché
+  let regimeMsg = $state<string | null>(null);
+  let regimeSaving = $state(false);
+
+  async function loadRegime() {
+    try {
+      const res = await fetch('/api/tariffs/regime');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = (await res.json()) as {
+        current: { from: string; hp_eur_kwh: number; hc_eur_kwh: number };
+      };
+      regimeHp = d.current.hp_eur_kwh;
+      regimeHc = d.current.hc_eur_kwh;
+      regimeFrom = d.current.from;
+    } catch {
+      regimeMsg = 'Barème illisible pour le moment.';
+    }
+  }
+
+  async function saveRegime() {
+    // Champ vidé → on ne poste rien : le serveur refuserait, et surtout un
+    // `null` ne doit jamais devenir un prix.
+    if (regimeHp === null || regimeHc === null) return;
+    regimeSaving = true;
+    regimeMsg = null;
+    try {
+      const res = await fetch('/api/tariffs/regime', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ hp_eur_kwh: regimeHp, hc_eur_kwh: regimeHc })
+      });
+      const d = (await res.json().catch(() => ({}))) as {
+        applied?: { from: string };
+        message?: string;
+      };
+      if (!res.ok) throw new Error(d.message || `HTTP ${res.status}`);
+      haptic('success');
+      regimeFrom = d.applied?.from ?? regimeFrom;
+      regimeMsg = `Barème appliqué à partir du ${regimeFrom}.`;
+      void tariff.poll(); // la pastille « tarif en cours » reflète le nouveau prix
+    } catch (e) {
+      // Un échec d'enregistrement de PRIX ne doit jamais être silencieux : sans
+      // ça, l'écran garde la valeur saisie et laisse croire qu'elle s'applique.
+      regimeMsg = `Non enregistré : ${(e as Error).message}`;
+    } finally {
+      regimeSaving = false;
+    }
+  }
+
   // Stores affichés dans « Connexions » + sections, refcountés (cf. $stores/refcount)
   // → partagés avec les pages voisines du pager sans coupure au démontage de l'une.
   // anker/apsystems restent app-wide (layout). matter est désormais RELÂCHÉ (avant :
@@ -58,6 +113,7 @@
   onMount(() => {
     preferences.hydrate();
     settings.hydrate();
+    void loadRegime(); // barème HP/HC en vigueur (data/tariffs.json)
     cumulus.refreshOrchestrator(); // config + état du moteur cumulus (one-shot)
     releases = [
       acquire(matter),
@@ -394,39 +450,6 @@
           />
           <span class="toggle-pill-knob"></span>
         </label>
-      </div>
-
-      <!-- Power unit -->
-      <div
-        class="flex items-center justify-between gap-3 py-3"
-        style="border-bottom: 1px solid var(--color-border);"
-      >
-        <div class="flex flex-col gap-0.5">
-          <span class="text-[13px] font-semibold">Unité de puissance</span>
-          <span class="text-[11px]" style="color: var(--color-muted-fg);">
-            Affichage par défaut
-          </span>
-        </div>
-        <div class="flex gap-1.5">
-          {#each ['W', 'kW'] as u (u)}
-            {@const active = preferences.powerUnit === u}
-            <button
-              type="button"
-              onclick={() => {
-                haptic('light');
-                preferences.setPowerUnit(u as 'W' | 'kW');
-              }}
-              class="rounded-full border px-3 py-1 text-[12px] font-medium transition-colors"
-              style="
-                border-color: {active ? 'var(--color-primary)' : 'var(--color-border)'};
-                background: {active ? 'var(--color-primary-muted)' : 'transparent'};
-                color: {active ? 'var(--color-primary)' : 'var(--color-muted-fg)'};
-              "
-            >
-              {u}
-            </button>
-          {/each}
-        </div>
       </div>
 
       <!-- Animations -->
@@ -1091,11 +1114,10 @@
           <input
             type="number"
             step="0.0001"
-            bind:value={settings.priceHc}
-            onchange={() => {
-              haptic('success');
-              settings.save();
-            }}
+            min="0.01"
+            max="2"
+            bind:value={regimeHc}
+            onchange={saveRegime}
             class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
             style="color: var(--color-hc);"
           />
@@ -1113,11 +1135,10 @@
           <input
             type="number"
             step="0.0001"
-            bind:value={settings.priceHp}
-            onchange={() => {
-              haptic('success');
-              settings.save();
-            }}
+            min="0.01"
+            max="2"
+            bind:value={regimeHp}
+            onchange={saveRegime}
             class="bg-transparent text-[18px] font-bold tabular-nums focus:outline-none"
             style="color: var(--color-hp);"
           />
@@ -1167,6 +1188,19 @@
           />
         </label>
       </div>
+
+      <p class="mt-1.5 px-1 text-[11px] leading-snug" style="color: var(--color-muted-fg);">
+        {#if regimeMsg}
+          {regimeMsg}
+        {:else if regimeFrom}
+          HP et HC pilotent le chauffe-eau et le calcul des économies. Barème en vigueur depuis le
+          {regimeFrom} ; une modification s'applique à partir d'aujourd'hui et ne change pas les économies
+          déjà calculées. Les heures creuses se règlent sur le serveur.
+        {/if}
+        {#if regimeSaving}
+          · enregistrement…
+        {/if}
+      </p>
 
       <!-- ═══ Installation — phases datées (matériel ajouté en plusieurs fois) ═══ -->
       <div class="mt-3 flex flex-col gap-2">
