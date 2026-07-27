@@ -101,6 +101,12 @@ export const handle: Handle = async ({ event, resolve }) => {
     return withApiCacheControl(pathname, await resolve(event));
   }
 
+  // Endpoint tick de la boucle de bridage APS : timer systemd en localhost, sans
+  // cookie. Auth par token (Bearer) appliquée dans la route. Match EXACT.
+  if (pathname === '/api/apsloop/tick') {
+    return withApiCacheControl(pathname, await resolve(event));
+  }
+
   // Endpoint tick de la collecte de température : timer systemd en localhost,
   // sans cookie. Auth par token (Bearer) appliquée dans la route. Match EXACT.
   if (pathname === '/api/temperature/tick') {
