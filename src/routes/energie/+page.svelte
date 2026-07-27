@@ -10,6 +10,7 @@
   import { energyMonthly, type MonthAgg } from '$stores/energyMonthly.svelte';
   import { cumulus } from '$stores/cumulus.svelte';
   import { sb3loop } from '$stores/sb3loop.svelte';
+  import { apsloop } from '$stores/apsloop.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { matter } from '$stores/matter.svelte';
   import { acquire, acquireFns } from '$stores/refcount';
@@ -29,6 +30,7 @@
   import HpHcSplitCard from '$components/cards/HpHcSplitCard.svelte';
   import AnkerLocalCard from '$components/cards/AnkerLocalCard.svelte';
   import Sb3LoopCard from '$components/cards/Sb3LoopCard.svelte';
+  import ApsLoopCard from '$components/cards/ApsLoopCard.svelte';
 
   // Stores page-scoped : refcountés → une page voisine (pager) qui se démonte ne
   // coupe pas un store encore utilisé par une autre. anker/apsystems restent
@@ -46,6 +48,7 @@
       // ankerLocal (Modbus Max AC + Gen 2) est APP-WIDE (layout) : l'accueil
       // fusionne son SoC/flux — ne pas le refcounter ici.
       acquire(sb3loop), // boucle lente d'allocation SB3 (tuile ci-dessous)
+      acquire(apsloop), // boucle de bridage de l'onduleur APS (tuile ci-dessous)
       acquire(forecast),
       acquire(productionHistory),
       acquire(energyMonthly), // ventilation mensuelle (tableau + KPI)
@@ -795,6 +798,9 @@
 
   <!-- ═══ Boucle lente d'allocation SB3 (consigne cloud, on/off + journal) ═══ -->
   <Sb3LoopCard />
+
+  <!-- ═══ Bridage de l'onduleur APS quand le surplus part chez EDF ═══ -->
+  <ApsLoopCard />
 
   <!-- ═══ Section 2 : Conso électroménager (Frigo, Lave-linge…) ═══ -->
   {#if appliancePlugs.length > 0 || matterPlugs.length > 0}

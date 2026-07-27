@@ -2,8 +2,9 @@
  * Moteur de la boucle de bridage APS — tick impur (lecture, décision, écriture).
  *
  * Sécurités structurelles :
- *  - DÉSACTIVÉE par défaut, et en OBSERVATION quand on l'active : elle journalise
- *    le plafond qu'elle AURAIT écrit sans rien commander. Passage au réel explicite.
+ *  - DÉSACTIVÉE par défaut, et en OBSERVATION à la première activation : elle
+ *    journalise le plafond qu'elle AURAIT écrit sans rien commander. Passage au
+ *    réel explicite, et retour forcé en observation après un arrêt de sécurité.
  *  - à l'arrêt (désactivation) elle REND le plafond au maximum : jamais d'onduleur
  *    laissé bridé par une boucle qui ne tourne plus.
  *  - deux échecs d'écriture consécutifs → auto-désactivation + restauration.
@@ -41,10 +42,27 @@ export interface ApsLogEntry {
   reason: string;
 }
 
+/**
+ * Photo du dernier tick. La carte lit ÇA plutôt que d'interroger le pont
+ * elle-même : une donnée vieille de 30 s suffit largement pour une boucle qui
+ * décide en minutes, et ça évite d'ajouter un appel réseau faillible à un
+ * endpoint qui doit rester lisible même quand le matériel est muet.
+ */
+export interface ApsObservation {
+  ts: number;
+  gridW: number;
+  apsW: number;
+  capW: number;
+  maxLimitW: number;
+  apsAvailable: boolean;
+  em50Available: boolean;
+}
+
 export interface ApsLoopStore {
   enabled: boolean;
   /** true = journalise sans écrire (banc d'observation). */
   observationMode: boolean;
+  lastObs: ApsObservation | null;
   autoDisabledReason: string | null;
   confirmFailCount: number;
   lastTickTs: number | null;
@@ -58,6 +76,7 @@ function defaultStore(): ApsLoopStore {
   return {
     enabled: false,
     observationMode: true,
+    lastObs: null,
     autoDisabledReason: null,
     confirmFailCount: 0,
     lastTickTs: null,
@@ -77,6 +96,7 @@ function normalize(raw: unknown): ApsLoopStore {
   return {
     enabled: typeof o.enabled === 'boolean' ? o.enabled : d.enabled,
     observationMode: typeof o.observationMode === 'boolean' ? o.observationMode : d.observationMode,
+    lastObs: o.lastObs && typeof o.lastObs === 'object' ? (o.lastObs as ApsObservation) : d.lastObs,
     autoDisabledReason: typeof o.autoDisabledReason === 'string' ? o.autoDisabledReason : null,
     confirmFailCount: (n(o.confirmFailCount, 0) as number) ?? 0,
     lastTickTs: n(o.lastTickTs, null),
@@ -107,6 +127,11 @@ export async function setApsLoopEnabled(enabled: boolean): Promise<ApsLoopStore>
     const s = await readApsLoop();
     s.enabled = enabled;
     if (enabled) {
+      // Reprise après un DÉCLENCHEMENT DE SÉCURITÉ : on repasse d'office en
+      // observation. Une panne qu'on n'a pas expliquée ne doit pas se remettre à
+      // commander du matériel d'un simple appui. Un arrêt manuel, lui, rend à
+      // Laurent le mode qu'il avait choisi.
+      if (s.autoDisabledReason) s.observationMode = true;
       s.autoDisabledReason = null;
       s.confirmFailCount = 0;
     } else {
@@ -244,6 +269,16 @@ export async function apsTick(): Promise<ApsTickResult> {
       apsMinLimitW: aps.minLimitW,
       apsMaxLimitW: aps.maxLimitW
     };
+    s.lastObs = {
+      ts: now,
+      gridW: inputs.gridW,
+      apsW: Math.round(inputs.apsW),
+      capW: inputs.apsMaxW,
+      maxLimitW: inputs.apsMaxLimitW,
+      apsAvailable: inputs.apsAvailable,
+      em50Available: inputs.em50Available
+    };
+
     const d = decideAps(inputs, defaultApsLoopConfig(), s.loop);
     s.loop = d.nextState;
 
