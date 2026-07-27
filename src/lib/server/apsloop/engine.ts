@@ -27,6 +27,8 @@ const TOKEN = () => env.APS_WRITE_TOKEN || '';
 const TIMEOUT = 8_000;
 const LOG_MAX = 40;
 const CONFIRM_FAIL_MAX = 2;
+/** Période de renouvellement du bail de plafond (bail du pont : 600 s). */
+const KEEPALIVE_MS = 120_000;
 
 export interface ApsLogEntry {
   ts: number;
@@ -245,19 +247,34 @@ export async function apsTick(): Promise<ApsTickResult> {
     const d = decideAps(inputs, defaultApsLoopConfig(), s.loop);
     s.loop = d.nextState;
 
+    // Renouvellement du bail. Le pont rend le plafond au maximum si personne ne le
+    // réaffirme (cf. chien de garde côté pont) : tant qu'on bride, on doit donner
+    // signe de vie. On réécrit la MÊME valeur — c'est aussi une re-confirmation sur
+    // l'appareil. Volontairement HORS de `s.loop` : ce n'est pas une décision, ça ne
+    // doit pas relancer l'horloge de dwell de decide().
+    let writeW = d.writeW;
+    if (
+      writeW === null &&
+      !s.observationMode &&
+      s.lastCmdW !== null &&
+      s.lastCmdW < aps.maxLimitW &&
+      (s.lastWriteTs === null || now - s.lastWriteTs >= KEEPALIVE_MS)
+    )
+      writeW = s.lastCmdW;
+
     let confirmedW: number | null = null;
-    if (d.writeW !== null && !s.observationMode) {
-      const w = await writeMax(d.writeW);
+    if (writeW !== null && !s.observationMode) {
+      const w = await writeMax(writeW);
       confirmedW = w.confirmedW;
       if (w.ok) {
         s.confirmFailCount = 0;
         s.lastWriteTs = now;
-        s.lastCmdW = d.writeW;
+        s.lastCmdW = writeW;
       } else {
         s.confirmFailCount += 1;
         if (s.confirmFailCount >= CONFIRM_FAIL_MAX) {
           s.enabled = false;
-          s.autoDisabledReason = `plafond non appliqué ${s.confirmFailCount}× (demandé ${d.writeW} W)`;
+          s.autoDisabledReason = `plafond non appliqué ${s.confirmFailCount}× (demandé ${writeW} W)`;
           await restoreMax().catch(() => {});
         }
       }
@@ -267,7 +284,7 @@ export async function apsTick(): Promise<ApsTickResult> {
       ts: now,
       mode: d.mode,
       writtenW: d.writeW,
-      confirmedW,
+      confirmedW: d.writeW !== null ? confirmedW : null,
       gridW: inputs.gridW,
       apsW: inputs.apsW,
       maxW: inputs.apsMaxW,
