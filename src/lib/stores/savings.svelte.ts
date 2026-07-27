@@ -27,6 +27,8 @@ export interface SavingsToday extends SavingsPeriod {
   coverage_pct: number;
   /** Énergie réellement soutirée du réseau aujourd'hui (kWh), filtrée transitoires. */
   import_kwh: number;
+  /** Injection réseau du jour (kWh). `null` = non mesurée — ne pas afficher 0. */
+  export_kwh: number | null;
 }
 
 export interface SavingsPayload {
@@ -38,7 +40,7 @@ export interface SavingsPayload {
 
 const EMPTY_PERIOD: SavingsPeriod = { eur: 0, eur_hp: 0, eur_hc: 0, kwh: 0, kwh_hp: 0, kwh_hc: 0 };
 const EMPTY: SavingsPayload = {
-  today: { ...EMPTY_PERIOD, rate_eur_h: 0, coverage_pct: 0, import_kwh: 0 },
+  today: { ...EMPTY_PERIOD, rate_eur_h: 0, coverage_pct: 0, import_kwh: 0, export_kwh: null },
   month: { ...EMPTY_PERIOD },
   year: { ...EMPTY_PERIOD },
   total: { ...EMPTY_PERIOD }
@@ -147,7 +149,11 @@ class SavingsState {
           ...normPeriod(p.today),
           rate_eur_h: num(p.today?.rate_eur_h),
           coverage_pct: num(p.today?.coverage_pct),
-          import_kwh: num(p.today?.import_kwh)
+          import_kwh: num(p.today?.import_kwh),
+          export_kwh:
+            typeof p.today?.export_kwh === 'number' && Number.isFinite(p.today.export_kwh)
+              ? p.today.export_kwh
+              : null
         },
         month: normPeriod(p.month),
         year: normPeriod(p.year),

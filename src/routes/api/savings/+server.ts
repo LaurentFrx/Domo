@@ -32,7 +32,14 @@ interface PeriodTotals {
 }
 
 interface SavingsPayload {
-  today: PeriodTotals & { rate_eur_h: number; coverage_pct: number; import_kwh: number };
+  today: PeriodTotals & {
+    rate_eur_h: number;
+    coverage_pct: number;
+    import_kwh: number;
+    /** Injection réseau du jour (kWh), mesurée par l'EM-50. `null` = NON MESURÉE :
+     *  l'appelant doit dire « inconnu », jamais peindre un 0 comme un fait. */
+    export_kwh: number | null;
+  };
   month: PeriodTotals;
   year: PeriodTotals;
   total: PeriodTotals;
@@ -66,7 +73,7 @@ function emptyPayload(now: Date): SavingsPayload {
   const z = toPeriod(ZERO_AGG);
   const b = applicableBaseline(now);
   return {
-    today: { ...z, rate_eur_h: 0, coverage_pct: 0, import_kwh: 0 },
+    today: { ...z, rate_eur_h: 0, coverage_pct: 0, import_kwh: 0, export_kwh: null },
     // DB vide/indispo, les totaux reflètent quand même les baselines (acquis
     // avant que le recorder n'existe).
     month: { ...z, eur: b.month.eur, kwh: b.month.kwh },
@@ -144,14 +151,21 @@ export const GET: RequestHandler = async () => {
     // fiable, table em50_daily de la même base) à l'import dérivé du cloud Anker
     // (sujet aux fantômes figés). Fallback Anker si la table est absente (base
     // pré-EM-50). Affine du même coup today.import_kwh (lu par le bilan Accueil).
+    // INJECTION du jour : même raisonnement, mais SANS repli sur le cloud. Le
+    // compteur cloud Anker (energy_analysis) est muet depuis la reconfiguration des
+    // systèmes, et l'export dérivé du cloud dans savings_daily est sous-compté par
+    // son filtre anti-fantôme `min(courant, précédent)` (~2× trop bas, mesuré). La
+    // seule mesure valable est l'intégrale du compteur LOCAL. Faute de quoi : null.
     let importWhToday = todayAgg.import_wh;
+    let exportWhToday: number | null = null;
     try {
-      const em = db.prepare('SELECT import_wh FROM em50_daily WHERE date = ?').get(today) as
-        | { import_wh: number }
-        | undefined;
+      const em = db
+        .prepare('SELECT import_wh, export_wh FROM em50_daily WHERE date = ?')
+        .get(today) as { import_wh: number; export_wh: number } | undefined;
       if (em && Number.isFinite(em.import_wh)) importWhToday = em.import_wh;
+      if (em && Number.isFinite(em.export_wh)) exportWhToday = em.export_wh;
     } catch {
-      /* table em50_daily absente (base pré-EM-50) : on conserve l'import Anker */
+      /* table em50_daily absente (base pré-EM-50) : import Anker conservé, export inconnu */
     }
     // Couverture solaire du jour : part de la conso couverte par le solaire.
     const kwhToday = (todayAgg.wh_hp + todayAgg.wh_hc) / 1000;
@@ -174,7 +188,8 @@ export const GET: RequestHandler = async () => {
         ...toPeriod(todayAgg),
         rate_eur_h: rateEurH,
         coverage_pct: coveragePct,
-        import_kwh: importKwhToday
+        import_kwh: importKwhToday,
+        export_kwh: exportWhToday === null ? null : exportWhToday / 1000
       },
       month: {
         ...monthPeriod,

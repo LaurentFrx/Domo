@@ -175,6 +175,27 @@ export const GET: RequestHandler = async ({ url }) => {
       }
     }
 
+    // ── Surplus : le compteur LOCAL prime sur l'intégrale du signal cloud ──
+    // `grid_export_w` vient du snapshot Anker, dont l'export instantané est
+    // quasi toujours nul (cache figé) : l'intégrale mesurait 12,2 kWh là où le
+    // compteur EM-50 en a compté 77,0 (juin-juillet 2026) — un facteur 6. La
+    // table em50_daily est l'intégrale trapèze du compteur local, à la minute.
+    // Repli sur l'intégrale cloud pour les mois ANTÉRIEURS à l'EM-50 seulement.
+    try {
+      const em = db
+        .prepare(
+          'SELECT CAST(substr(date,6,2) AS INTEGER) AS m, SUM(export_wh)/1000.0 AS kwh' +
+            ' FROM em50_daily WHERE substr(date,1,4) = ? GROUP BY m'
+        )
+        .all(String(year)) as { m: number; kwh: number }[];
+      for (const r of em) {
+        const i = r.m - 1;
+        if (i >= 0 && i < 12 && Number.isFinite(r.kwh)) months[i].surplus_kwh = Math.max(0, r.kwh);
+      }
+    } catch {
+      /* table em50_daily absente (base pré-EM-50) : on garde l'intégrale cloud */
+    }
+
     // ── Économies importées de HA (pré-recorder) ──
     // Comble savings_eur des mois SANS ligne enregistrée (tous antérieurs à
     // l'ancrage du recorder → aucun recouvrement). N'affecte que la colonne € ;

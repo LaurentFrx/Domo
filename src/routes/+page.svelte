@@ -142,6 +142,49 @@
     if (cloudSb3.length === 2) return [anker.sb1SolarW, anker.sb2SolarW];
     return cloudSb3.map(() => agg / Math.max(1, cloudSb3.length));
   });
+  /**
+   * Net BRUT par SB3 : PV DC entrant − sortie AC. C'est une DIFFÉRENCE de deux champs
+   * du même snapshot cloud qui ne se rafraîchissent pas ensemble — un décalage d'un
+   * cran suffit à fabriquer un flux qui n'existe pas.
+   * Mesuré (27/07, 112 échantillons, packs PLEINS et SoC figé à 100,0 %) : le net
+   * oscillait autour de **−2 W** avec des excursions à ±47 W… pendant que l'app
+   * annonçait « SB3 Ouest · décharge 68 W » et « DÉCHARGE −68 W » sur une batterie
+   * dont le SoC ne bougeait pas d'un pouce. Un flux instantané reconstruit par
+   * différence ne doit donc pas être AFFIRMÉ tel quel.
+   */
+  const sb3NetRaw = $derived(
+    cloudSb3.map((b, i) => (sb3PvInW[i] ?? 0) - Math.max(0, b.outputPowerW))
+  );
+  /**
+   * CONFIRMATION sur deux snapshots cloud distincts — même discipline que le filtre
+   * anti-fantôme du recorder. Un vrai flux PERSISTE (et garde son signe) ; le bruit
+   * d'échantillonnage change de signe d'un snapshot à l'autre. On retient donc la
+   * valeur de plus PETITE amplitude quand les deux s'accordent, et zéro quand ils se
+   * contredisent. Auto-calibré : aucun seuil inventé, et la vraie décharge du soir
+   * (plusieurs centaines de watts, stable) passe intacte.
+   */
+  let prevNet = $state<number[]>([]); // net du snapshot PRÉCÉDENT
+  let lastNet: number[] = []; // net du snapshot courant (ombre non réactive)
+  let lastSnapTs: number | null = null;
+  $effect(() => {
+    const ts = anker.snapshotTs;
+    const cur = sb3NetRaw;
+    if (ts && ts !== lastSnapTs) {
+      prevNet = lastNet;
+      lastNet = cur;
+      lastSnapTs = ts;
+    }
+  });
+  /** Net RETENU : brut au tout premier snapshot (rien à comparer), confirmé ensuite. */
+  const sb3Net = $derived(
+    sb3NetRaw.map((raw, i) => {
+      const prev = prevNet[i];
+      if (prev === undefined) return raw;
+      if (Math.sign(raw) !== Math.sign(prev)) return 0;
+      return Math.sign(raw) * Math.min(Math.abs(raw), Math.abs(prev));
+    })
+  );
+
   /** Horizon d'absorption : un pack ne peut encaisser que la PLACE qui lui reste.
    *  Un pack à 99 % (27 Wh de place) ne peut pas absorber 372 W — il passe en AC. */
   const SB3_FILL_HORIZON_H = 0.25;
@@ -173,8 +216,8 @@
       // vivante. À 0, le nœud disparaît du Sankey.
       return { charge: 0, discharge: 0, perPack: [] };
     }
-    // (a) net brut par SB3 : PV DC entrant − sortie AC.
-    const net = cloudSb3.map((b, i) => sb3PvInW[i] - Math.max(0, b.outputPowerW));
+    // (a) net par SB3 : PV DC entrant − sortie AC, CONFIRMÉ sur deux snapshots.
+    const net = sb3Net;
     // (b) contrainte 1 — plafond d'absorption par la place restante du pack.
     const perPack = net.map((n, i) => {
       if (n <= 0) return n;
@@ -371,16 +414,21 @@
   // Sources : auto & import = recorder (savings) ; surplus = cumul Linky du
   // bridge Anker (le recorder sous-estime le surplus faible).
   const solarSelfKwh = $derived(savings.today.kwh); // solaire consommé sur place
-  const gridImportKwh = $derived(savings.today.import_kwh); // soutiré à EDF (recorder)
-  const gridExportKwh = $derived(anker.gridExportTodayKwh); // surplus injecté (Linky)
-  const energyTotalKwh = $derived(solarSelfKwh + gridImportKwh + gridExportKwh);
+  const gridImportKwh = $derived(savings.today.import_kwh); // soutiré à EDF (EM-50)
+  /** Injection du jour — intégrale du compteur LOCAL EM-50 ; `null` = NON MESURÉE.
+   *  L'ancienne source (compteur cloud Anker) est muette depuis la reconfiguration
+   *  des systèmes, et l'app peignait ce silence en « Surplus 0,0 % » — un zéro
+   *  affirmé comme une mesure, sous un Sankey qui annonçait 969 W d'injection. */
+  const gridExportKwh = $derived(savings.today.export_kwh);
+  /** Consommation du jour = ce qui est ENTRÉ dans la maison. L'injection est SORTIE :
+   *  la mettre au dénominateur gonflait le total et écrasait les autres parts. */
+  const energyTotalKwh = $derived(solarSelfKwh + gridImportKwh);
   // `savings.connected` en plus du seuil : sans lui, la barre restait affichée
   // avec les pourcentages FIGÉS du dernier relevé, indéfiniment — pendant que la
   // carte Économies juste au-dessus affichait « — ». Deux cartes voisines, deux
   // comportements opposés sur la même source morte.
   const flowsReady = $derived(savings.connected && energyTotalKwh > 0.05);
   const solarSharePct = $derived(flowsReady ? (solarSelfKwh / energyTotalKwh) * 100 : 0);
-  const surplusSharePct = $derived(flowsReady ? (gridExportKwh / energyTotalKwh) * 100 : 0);
   const gridSharePct = $derived(flowsReady ? (gridImportKwh / energyTotalKwh) * 100 : 0);
   // Couleurs vives locales (les tokens gris/vert seraient trop discrets sur de
   // petits segments). Ne touchent pas aux tokens globaux (Sankey).
@@ -566,10 +614,6 @@
             ></div>
             <div
               class="h-full transition-[width] duration-700"
-              style="width: {surplusSharePct}%; background: {SURPLUS_RED};"
-            ></div>
-            <div
-              class="h-full transition-[width] duration-700"
               style="width: {gridSharePct}%; background: {EDF_BLUE};"
             ></div>
           </div>
@@ -584,12 +628,24 @@
               Solaire {fmtNumber(solarSharePct, 1)}%
             </span>
             <span class="flex items-center gap-1.5">
-              <span class="h-2 w-2 rounded-full" style="background: {SURPLUS_RED};"></span>
-              Surplus {fmtNumber(surplusSharePct, 1)}%
-            </span>
-            <span class="flex items-center gap-1.5">
               <span class="h-2 w-2 rounded-full" style="background: {EDF_BLUE};"></span>
               Réseau EDF {fmtNumber(gridSharePct, 1)}%
+            </span>
+          </div>
+
+          <!-- Surplus renvoyé à EDF : ce n'est PAS de la consommation, donc pas une
+               part de la barre — mais c'est le chiffre qui compte pour la convention
+               Enedis, donc il est écrit en clair. Non mesuré ⇒ on le dit. -->
+          <div
+            class="flex items-center justify-between border-t pt-2 text-[0.6875rem]"
+            style="border-color: var(--color-border); color: var(--color-muted-fg);"
+          >
+            <span class="flex items-center gap-1.5">
+              <span class="h-2 w-2 rounded-full" style="background: {SURPLUS_RED};"></span>
+              Renvoyé à EDF
+            </span>
+            <span class="font-semibold tabular-nums" style="color: var(--color-fg);">
+              {gridExportKwh === null ? 'non mesuré' : `${fmtNumber(gridExportKwh, 1)} kWh`}
             </span>
           </div>
         {:else}
