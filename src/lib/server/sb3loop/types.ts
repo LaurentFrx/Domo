@@ -38,6 +38,11 @@ export interface Sb3LoopConfig {
   dayApsW: number;
   /** SoC SB3 sous lequel, soleil levé, elles doivent charger (pas décharger). */
   daySocPct: number;
+  /** SoC SB3 sous lequel on REND la priorité à la charge après les avoir mises au
+   *  service de la maison. Bande d'hystérésis : sans elle, un pack plein qui débite
+   *  repasse sous daySocPct en 4 min et la boucle se met à écrire toutes les 5 min
+   *  (l'incident du 23/07 est né d'une oscillation de ce genre). */
+  dayResumeSocPct: number;
   /** Garde : SoC SB3 sous lequel on ne demande plus rien (réserve firmware 10 %). */
   sb3FloorPct: number;
   /** Exception « rescue » : Max AC sous ce SoC + SB3 chargées → suivre la charge même de jour. */
@@ -114,6 +119,8 @@ export interface Sb3Decision {
   reason: string;
   /** house_load estimée (W), null si inconnue. */
   houseLoadW: number | null;
+  /** Nouvel état « SB3 pleines au service de la maison » (persisté). */
+  sb3Serving: boolean;
   /** Nouveau compteur de bande morte (persisté). */
   pendingDeadband: number;
   /** Direction de l'excursion en cours (persistée avec le compteur). */
@@ -144,6 +151,9 @@ export interface Sb3LoopState {
   lastWriteTs: number | null;
   /** Écritures non confirmées consécutives. */
   confirmFailCount: number;
+  /** Les SB3 sont-elles PLEINES et mises au service de la maison ? Persisté pour
+   *  l'hystérésis (on ne rebascule pas au premier point de SoC perdu). */
+  sb3Serving: boolean;
   /** Évaluations consécutives hors bande morte (même direction). */
   pendingDeadband: number;
   /** Direction de l'excursion en cours ('up'/'down') — un changement de
@@ -173,6 +183,7 @@ export function defaultSb3LoopState(): Sb3LoopState {
     lastCmdW: null,
     lastWriteTs: null,
     confirmFailCount: 0,
+    sb3Serving: false,
     pendingDeadband: 0,
     pendingDeadbandDir: null,
     lastTickTs: null,
@@ -197,6 +208,7 @@ export function defaultSb3LoopConfig(): Sb3LoopConfig {
     settleS: 180,
     dayApsW: 100,
     daySocPct: 97,
+    dayResumeSocPct: 85,
     sb3FloorPct: 15,
     maxAcMinPct: 40,
     rescueSb3MinPct: 30,

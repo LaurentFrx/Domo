@@ -285,6 +285,7 @@
       import_kwh: 0,
       import_hc_kwh: 0,
       import_hp_kwh: 0,
+      import_split_source: null,
       import_live_kwh: 0,
       savings_eur: 0
     }));

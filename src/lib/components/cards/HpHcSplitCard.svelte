@@ -3,7 +3,9 @@
 
   // Répartition Heures Creuses / Heures Pleines des imports réseau, pour les 12
   // mois de l'année affichée (suit le sélecteur de la page Énergie via `data`).
-  // Lecture seule : la ventilation HP/HC vient des relevés compteur (tariffs.json).
+  // Lecture seule. Deux provenances possibles, distinguées visuellement : relevé
+  // compteur facturé (tariffs.json) ou ventilation dérivée de la mesure EM-50
+  // (mois pas encore relevés, dont le mois en cours) — hachurée + annoncée en clair.
   let { data, labels, year }: { data: MonthAgg[]; labels: string[]; year: number } = $props();
 
   const nf1 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
@@ -16,15 +18,34 @@
   const pctHc = $derived(totalAll > 0 ? Math.round((100 * totalHc) / totalAll) : 0);
   const pctHp = $derived(totalAll > 0 ? 100 - pctHc : 0);
 
-  // Échelle commune des barres = plus gros mois (HC + HP) de l'année affichée.
+  // Référence de volume = plus gros mois (HC + HP) de l'année affichée.
   const maxMonth = $derived(
     data.reduce((mx, m) => Math.max(mx, (m.import_hc_kwh || 0) + (m.import_hp_kwh || 0)), 0)
   );
 
   const monthTotal = (m: MonthAgg) => (m.import_hc_kwh || 0) + (m.import_hp_kwh || 0);
   const pct = (part: number, whole: number) => (whole > 0 ? Math.round((100 * part) / whole) : 0);
-  // Hauteur d'un segment en % de la piste (∝ kWh, échelle = maxMonth).
-  const segH = (v: number) => (maxMonth > 0 ? (100 * v) / maxMonth : 0);
+
+  // DEUX lectures dans une seule barre :
+  //  · la HAUTEUR dit la PART creuses/pleines du mois (chaque barre est pleine) —
+  //    c'est le sujet de la carte, et ça reste lisible même sur un mois minuscule ;
+  //  · la LARGEUR dit le VOLUME du mois. L'import va de 849 kWh en janvier à 15 en
+  //    juillet : à échelle de hauteur commune, tout l'été s'écrasait en filets de
+  //    2 px. Largeur en RACINE du volume (perception d'aire) et plancher à 38 % :
+  //    un petit mois reste cliquable et visible, un gros mois reste dominant.
+  // Largeur en PIXELS, pas en % : la colonne fait ~74 px en desktop pour une piste
+  // plafonnée à 26 px — un pourcentage du parent saturait le plafond dès 38 % et
+  // toutes les barres sortaient à la même largeur.
+  const TRACK_MAX_PX = 26;
+  const segH = (v: number, tot: number) => (tot > 0 ? (100 * v) / tot : 0);
+  const colW = (tot: number) =>
+    maxMonth > 0 && tot > 0
+      ? TRACK_MAX_PX * (0.38 + 0.62 * Math.sqrt(tot / maxMonth))
+      : TRACK_MAX_PX * 0.38;
+
+  // Mois dont la ventilation est estimée (mesure maison) et non relevée au compteur.
+  const isEst = (m: MonthAgg) => m.import_split_source === 'local' && monthTotal(m) > 0;
+  const estLabels = $derived(data.map((m, i) => (isEst(m) ? labels[i] : null)).filter(Boolean));
 </script>
 
 <section
@@ -64,37 +85,52 @@
       </div>
     </div>
 
-    <!-- Barres empilées par mois (kWh absolu, échelle commune) -->
-    <div class="bars" role="img" aria-label="Imports Heures Creuses / Pleines par mois">
+    <!-- Barres par mois : hauteur = part HC/HP, largeur = volume (cf. segH/colW) -->
+    <div
+      class="bars"
+      role="img"
+      aria-label="Part Heures Creuses / Pleines par mois — barre d'autant plus large que le mois a consommé"
+    >
       {#each data as m, i (i)}
         {@const tot = monthTotal(m)}
+        {@const est = isEst(m)}
         <div
           class="col"
           title={tot > 0
             ? `${labels[i]} ${year} — Creuses ${nf1.format(m.import_hc_kwh)} kWh (${pct(
                 m.import_hc_kwh,
                 tot
-              )} %) · Pleines ${nf1.format(m.import_hp_kwh)} kWh (${pct(m.import_hp_kwh, tot)} %)`
+              )} %) · Pleines ${nf1.format(m.import_hp_kwh)} kWh (${pct(m.import_hp_kwh, tot)} %)${
+                est ? ' · estimé (mesure maison)' : ''
+              }`
             : `${labels[i]} ${year} — pas de relevé`}
         >
           <span class="col-val">{tot > 0 ? nf0.format(tot) : ''}</span>
-          <div class="track">
-            <div class="seg seg-hp" style="height: {segH(m.import_hp_kwh)}%;"></div>
-            <div class="seg seg-hc" style="height: {segH(m.import_hc_kwh)}%;"></div>
+          <div class="track" style="width: {colW(tot)}px;">
+            <div class="seg seg-hp" class:est style="height: {segH(m.import_hp_kwh, tot)}%;"></div>
+            <div class="seg seg-hc" class:est style="height: {segH(m.import_hc_kwh, tot)}%;"></div>
           </div>
-          <span class="col-lbl">{labels[i]}</span>
+          <span class="col-lbl" class:est>{labels[i]}</span>
         </div>
       {/each}
     </div>
 
     <!-- Légende -->
-    <div class="flex items-center gap-4 text-[11px]" style="color: var(--color-muted-fg);">
-      <span class="inline-flex items-center gap-1.5">
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px]">
+      <span class="inline-flex items-center gap-1.5" style="color: var(--color-muted-fg);">
         <span class="dot" style="background: var(--color-hc);"></span> Heures creuses
       </span>
-      <span class="inline-flex items-center gap-1.5">
+      <span class="inline-flex items-center gap-1.5" style="color: var(--color-muted-fg);">
         <span class="dot" style="background: var(--color-hp);"></span> Heures pleines
       </span>
+      <span style="color: var(--color-muted-fg);">Barre large = gros mois</span>
+      {#if estLabels.length > 0}
+        <span class="inline-flex items-center gap-1.5" style="color: var(--color-muted-fg);">
+          <span class="dot dot-est"></span>
+          {estLabels.length === 1 ? estLabels[0] : estLabels.join(', ')} : mesuré à la maison, en attente
+          du relevé EDF
+        </span>
+      {/if}
     </div>
   {:else}
     <p class="py-3 text-[12px]" style="color: var(--color-muted-fg);">
@@ -148,17 +184,19 @@
     font-variant-numeric: tabular-nums;
     color: var(--color-muted-fg);
   }
-  /* Piste : barre empilée HP (haut) + HC (bas), ancrée en bas. */
+  /* Piste : barre empilée HP (haut) + HC (bas), ancrée en bas. La largeur est
+     posée en ligne (∝ volume du mois, cf. colW) ; le plafond en px garde des
+     colonnes fines sur iPhone. */
   .track {
     display: flex;
-    width: 100%;
-    max-width: 26px;
+    max-width: 100%; /* iPhone : la colonne peut être plus étroite que 26 px */
     height: 120px;
     flex-direction: column;
     justify-content: flex-end;
     overflow: hidden;
     border-radius: var(--radius-sm, 4px);
     background: var(--color-muted);
+    transition: width var(--duration-slow, 300ms) var(--ease-default, ease);
   }
   .seg {
     width: 100%;
@@ -180,5 +218,29 @@
     width: 8px;
     height: 8px;
     border-radius: 9999px;
+  }
+
+  /* Mois ESTIMÉ (ventilation dérivée de la mesure maison, relevé EDF pas encore
+     saisi) : hachures diagonales par-dessus la couleur sémantique — la teinte
+     HP/HC reste lisible, seule la texture change. Voile SOMBRE teinté charte
+     (hue 262, jamais noir pur) : --color-hc et --color-hp sont clairs (L 0,82 et
+     0,74) et identiques dans les deux thèmes, une hachure claire s'y noierait. */
+  .seg.est {
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent 0 3px,
+      oklch(0.32 0.06 262 / 0.34) 3px 6px
+    );
+  }
+  .col-lbl.est {
+    font-style: italic;
+  }
+  .dot-est {
+    background: var(--color-hc);
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent 0 1.5px,
+      oklch(0.32 0.06 262 / 0.55) 1.5px 3px
+    );
   }
 </style>

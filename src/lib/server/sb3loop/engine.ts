@@ -220,6 +220,7 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
 
     const inputs = await collectSb3Inputs(cfg);
     const d = decide(inputs, cfg, state);
+    state.sb3Serving = d.sb3Serving;
     state.pendingDeadband = d.pendingDeadband;
     state.pendingDeadbandDir = d.pendingDeadbandDir;
 

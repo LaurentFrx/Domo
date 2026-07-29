@@ -12,16 +12,22 @@
 const POLL_INTERVAL_MS = 5 * 60_000;
 const TIMEOUT_MS = 15_000;
 
+/** Provenance de la ventilation HC/HP d'un mois : `meter` = relevé compteur
+ * facturé (saisi dans tariffs.json), `local` = dérivée de la mesure EM-50 (donc
+ * estimée), `null` = inconnue. */
+export type SplitSource = 'meter' | 'local' | null;
+
 export interface MonthAgg {
   production_kwh: number;
   autoconso_kwh: number;
   surplus_kwh: number;
   import_kwh: number;
-  /** Ventilation de l'import : Heures Creuses / Heures Pleines (kWh). 0 si pas de
-   * relevé (le recorder ne ventile pas l'import → split connu seulement via les
-   * relevés compteur). */
+  /** Ventilation de l'import : Heures Creuses / Heures Pleines (kWh). Relevé
+   * compteur quand il existe, sinon dérivée de la mesure locale EM-50 ; 0 si
+   * aucune des deux (cf. `import_split_source`). */
   import_hc_kwh: number;
   import_hp_kwh: number;
+  import_split_source: SplitSource;
   /** Import MESURÉ par le recorder ce mois (≠ relevé compteur) — base du KPI
    * d'autosuffisance, cohérent en période avec autoconso_kwh. */
   import_live_kwh: number;
@@ -42,6 +48,7 @@ function zeroMonth(): MonthAgg {
     import_kwh: 0,
     import_hc_kwh: 0,
     import_hp_kwh: 0,
+    import_split_source: null,
     import_live_kwh: 0,
     savings_eur: 0
   };
@@ -64,6 +71,10 @@ function normMonth(m: Partial<MonthAgg> | undefined): MonthAgg {
     import_kwh: num(m?.import_kwh),
     import_hc_kwh: num(m?.import_hc_kwh),
     import_hp_kwh: num(m?.import_hp_kwh),
+    import_split_source:
+      m?.import_split_source === 'meter' || m?.import_split_source === 'local'
+        ? m.import_split_source
+        : null,
     import_live_kwh: num(m?.import_live_kwh),
     savings_eur: num(m?.savings_eur)
   };

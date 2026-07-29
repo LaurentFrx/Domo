@@ -11,9 +11,14 @@
  *     inutile de demander l'impossible).
  *  4. RESCUE : Max AC sous son SoC minimal + SB3 chargées → la consigne suit la
  *     charge maison même de jour (on préserve la réserve de la Max AC).
- *  5. JOUR (soleil levé ET (APS produit OU SB3 pas pleines)) : consigne 0 —
- *     les SB3 chargent en DC, APS + Max AC servent la maison. Le passthrough à
- *     SOC 100 % n'est pas notre affaire (la consigne ne gouverne que la décharge).
+ *  5. JOUR (soleil levé ET SB3 avec de la PLACE À REMPLIR) : consigne 0 — les SB3
+ *     chargent en DC, APS + Max AC servent la maison.
+ *     ⚠ La condition « avec de la place » est essentielle : le 28/07 la maison
+ *     tirait jusqu'à 2 079 W du réseau (cumulus 3 kW) pendant que les DEUX SB3
+ *     étaient à 100 % avec consigne 0 — 5,4 kWh immobiles — et que la Max AC
+ *     s'épuisait seule. « Jour » protège la CHARGE des SB3 ; un pack plein n'a
+ *     plus rien à charger, donc plus rien à protéger : il doit servir la maison.
+ *     Hystérésis daySocPct → dayResumeSocPct pour ne pas osciller.
  *  6. NUIT : consigne = clamp(house_load − marge, 0, max) — LÉGÈREMENT SOUS la
  *     charge : la Max AC couvre marge et pointes (asymétrie des coûts).
  *
@@ -30,6 +35,10 @@ export function decide(
   cfg: Sb3LoopConfig,
   state: Sb3LoopState
 ): Sb3Decision {
+  // Recalculé plus bas ; jusque-là on reconduit l'état persisté (les sorties
+  // précoces — fail-safe, cloud périmé — ne doivent RIEN changer à l'hystérésis).
+  let sb3Serving = state.sb3Serving;
+
   const noWrite = (
     mode: Sb3Decision['mode'],
     reason: string,
@@ -42,6 +51,7 @@ export function decide(
     mode,
     reason,
     houseLoadW,
+    sb3Serving,
     pendingDeadband,
     pendingDeadbandDir: null
   });
@@ -76,6 +86,7 @@ export function decide(
         mode: 'faillow',
         reason: `cloud périmé — décroissance ${currentW} → ${step} W`,
         houseLoadW: null,
+        sb3Serving,
         pendingDeadband: 0,
         pendingDeadbandDir: null
       };
@@ -132,8 +143,16 @@ export function decide(
   // en plein soleil (panne ≠ nuit) → on reste conservateur côté « jour »
   // (consigne 0, les SB3 chargent) plutôt que de les vider à midi. ──
   const sunUp = inputs.sunElevDeg > 0;
+  // Les SB3 ont-elles encore de la PLACE à remplir ? Hystérésis : une fois
+  // déclarées pleines et mises au service de la maison, elles le restent jusqu'à
+  // dayResumeSocPct — sinon un pack qui débite repasse sous le seuil en quelques
+  // minutes et la boucle bascule sans fin (chaque bascule = écriture cloud).
+  // SoC inconnu → on suppose qu'elles ont de la place (conservateur : charger).
+  sb3Serving =
+    sb3Soc === null ? false : sb3Serving ? sb3Soc > cfg.dayResumeSocPct : sb3Soc >= cfg.daySocPct;
   const isDay =
     sunUp &&
+    !sb3Serving &&
     (!inputs.aps.ok ||
       inputs.aps.powerW > cfg.dayApsW ||
       (sb3Soc !== null && sb3Soc < cfg.daySocPct));
@@ -149,14 +168,24 @@ export function decide(
     mode,
     rescue
       ? `rescue — Max AC ${Math.round(inputs.maxac.socPct)} % < ${cfg.maxAcMinPct} %, la consigne suit la charge`
-      : `nuit — charge maison ${houseLoadW} W, cible ${targetRaw} W (marge ${cfg.marginW} W)`
+      : sunUp && sb3Serving
+        ? `SB3 pleines (${Math.round(sb3Soc ?? 0)} %) — elles servent la maison : charge ${houseLoadW} W, cible ${targetRaw} W`
+        : `nuit — charge maison ${houseLoadW} W, cible ${targetRaw} W (marge ${cfg.marginW} W)`
   );
 
   /** Applique slew, bande morte (2 évaluations) et dwell à une cible brute. */
   function applyTarget(rawW: number, m: Sb3Decision['mode'], reason: string): Sb3Decision {
     // Slew depuis la consigne en place (ancrage cloud au premier cycle).
+    // MONTÉE D'URGENCE : quand le compteur voit un soutirage RÉEL, le déficit
+    // n'est pas estimé, il est MESURÉ — et à +300 W par écriture (une toutes les
+    // 5 min) il faudrait 40 min pour couvrir 2 kW, donc 40 min payées à EDF.
+    // On autorise alors un pas égal au soutirage constaté. Uniquement à la
+    // hausse, uniquement sur mesure locale : la descente reste patiente, et
+    // dwell/settle restent en place (pas de chasse au retard du cloud).
     const anchor = currentW ?? 0;
-    const slewed = Math.round(clamp(rawW, anchor - cfg.slewW, anchor + cfg.slewW));
+    const importW = inputs.em50.ok ? Math.max(0, inputs.em50.gridW) : 0;
+    const upStep = Math.max(cfg.slewW, importW > cfg.marginW ? importW : 0);
+    const slewed = Math.round(clamp(rawW, anchor - cfg.slewW, anchor + upStep));
 
     // Bande morte sur la consigne EN PLACE : ne pas s'agiter pour < deadbandW.
     if (currentW !== null && Math.abs(slewed - currentW) <= cfg.deadbandW) {
@@ -166,6 +195,7 @@ export function decide(
         mode: m,
         reason: `${reason} — dans la bande morte`,
         houseLoadW,
+        sb3Serving,
         pendingDeadband: 0,
         pendingDeadbandDir: null
       };
@@ -181,6 +211,7 @@ export function decide(
         mode: m,
         reason: `${reason} — hors bande (${pending}/${cfg.deadbandEvals})`,
         houseLoadW,
+        sb3Serving,
         pendingDeadband: pending,
         pendingDeadbandDir: dir
       };
@@ -195,6 +226,7 @@ export function decide(
         mode: m,
         reason: `${reason} — dwell en cours`,
         houseLoadW,
+        sb3Serving,
         pendingDeadband: pending,
         pendingDeadbandDir: dir
       };
@@ -205,6 +237,7 @@ export function decide(
       mode: m,
       reason,
       houseLoadW,
+      sb3Serving,
       pendingDeadband: 0,
       pendingDeadbandDir: null
     };

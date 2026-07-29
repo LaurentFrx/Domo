@@ -267,7 +267,10 @@ test('APS injoignable en plein soleil → mode jour conservateur (pas de déchar
     inp({
       sunElevDeg: 50,
       aps: { ok: false, powerW: 0 },
-      cloud: { ok: true, freshS: 30, sb3OutW: 0, sb3SocAvg: 99, sb3PresetW: 0, sceneMode: 3 }
+      // SoC volontairement SOUS daySocPct : le sujet de ce test est l'APS
+      // injoignable. Un pack PLEIN relève désormais d'une autre règle (il sert
+      // la maison) et masquerait celle qu'on veut vérifier ici.
+      cloud: { ok: true, freshS: 30, sb3OutW: 0, sb3SocAvg: 60, sb3PresetW: 0, sceneMode: 3 }
     }),
     cfg,
     st()
@@ -349,4 +352,111 @@ test('pas de rescue si les SB3 sont basses elles aussi', () => {
     st()
   );
   assert.equal(d.mode, 'day'); // elles doivent charger, pas se vider
+});
+
+// ─── SB3 PLEINES en plein jour : « jour » protège la charge, pas l'inaction ──
+// Régression du 28/07 : maison à 3,8 kW (cumulus), soutirage jusqu'à 2 079 W,
+// les DEUX SB3 à 100 % avec consigne 0 — 5,4 kWh immobiles — et la Max AC seule
+// à s'épuiser. Un pack plein n'a plus rien à charger : il doit servir.
+
+test('SB3 pleines en plein soleil → elles servent la maison (plus de consigne 0)', () => {
+  const d = decide(
+    inp({
+      sunElevDeg: 50,
+      aps: { ok: true, powerW: 650 },
+      em50: { ok: true, gridW: 900 },
+      maxac: { ok: true, socPct: 73, acNetW: 1900 },
+      cloud: { ok: true, freshS: 30, sb3OutW: 0, sb3SocAvg: 100, sb3PresetW: 0, sceneMode: 3 }
+    }),
+    cfg,
+    st({ lastCmdW: 0 })
+  );
+  assert.notEqual(d.mode, 'day');
+  assert.equal(d.sb3Serving, true);
+  assert.ok((d.targetW ?? 0) > 0, 'la consigne doit monter, pas rester à 0');
+});
+
+test('SB3 pas pleines en plein soleil → jour, consigne 0 (comportement inchangé)', () => {
+  const d = decide(
+    inp({
+      sunElevDeg: 50,
+      aps: { ok: true, powerW: 650 },
+      cloud: { ok: true, freshS: 30, sb3OutW: 0, sb3SocAvg: 60, sb3PresetW: 0, sceneMode: 3 }
+    }),
+    cfg,
+    st({ lastCmdW: 0 })
+  );
+  assert.equal(d.mode, 'day');
+  assert.equal(d.sb3Serving, false);
+});
+
+test('hystérésis : une fois au service, on y reste au-dessus de dayResumeSocPct', () => {
+  const d = decide(
+    inp({
+      sunElevDeg: 50,
+      aps: { ok: true, powerW: 650 },
+      em50: { ok: true, gridW: 500 },
+      cloud: { ok: true, freshS: 30, sb3OutW: 900, sb3SocAvg: 90, sb3PresetW: 900, sceneMode: 3 }
+    }),
+    cfg,
+    st({ lastCmdW: 900, sb3Serving: true })
+  );
+  assert.equal(d.sb3Serving, true, '90 % > dayResumeSocPct (85) → on continue de servir');
+  assert.notEqual(d.mode, 'day');
+});
+
+test('hystérésis : sous dayResumeSocPct la priorité revient à la charge', () => {
+  const d = decide(
+    inp({
+      sunElevDeg: 50,
+      aps: { ok: true, powerW: 650 },
+      cloud: { ok: true, freshS: 30, sb3OutW: 900, sb3SocAvg: 80, sb3PresetW: 900, sceneMode: 3 }
+    }),
+    cfg,
+    st({ lastCmdW: 900, sb3Serving: true })
+  );
+  assert.equal(d.sb3Serving, false);
+  assert.equal(d.mode, 'day');
+});
+
+test('montée d’urgence : le pas suit le soutirage MESURÉ, pas le slew nominal', () => {
+  const lent = decide(
+    inp({
+      sunElevDeg: 50,
+      em50: { ok: true, gridW: 20 }, // pas de soutirage réel
+      maxac: { ok: true, socPct: 73, acNetW: 1900 },
+      cloud: { ok: true, freshS: 30, sb3OutW: 0, sb3SocAvg: 100, sb3PresetW: 0, sceneMode: 3 }
+    }),
+    cfg,
+    st({ lastCmdW: 0 })
+  );
+  const urgent = decide(
+    inp({
+      sunElevDeg: 50,
+      em50: { ok: true, gridW: 2000 }, // 2 kW achetés à EDF, maintenant
+      maxac: { ok: true, socPct: 73, acNetW: 1900 },
+      cloud: { ok: true, freshS: 30, sb3OutW: 0, sb3SocAvg: 100, sb3PresetW: 0, sceneMode: 3 }
+    }),
+    cfg,
+    st({ lastCmdW: 0 })
+  );
+  assert.equal(lent.targetW, cfg.slewW, 'sans soutirage : pas nominal');
+  assert.ok(
+    (urgent.targetW ?? 0) >= 2000,
+    `avec 2 kW soutirés, la cible doit couvrir le déficit (obtenu ${urgent.targetW})`
+  );
+});
+
+test('montée d’urgence : la DESCENTE reste patiente (slew nominal)', () => {
+  const d = decide(
+    inp({
+      sunElevDeg: -15,
+      em50: { ok: true, gridW: 1500 },
+      maxac: { ok: true, socPct: 70, acNetW: 0 },
+      cloud: { ok: true, freshS: 30, sb3OutW: 2400, sb3SocAvg: 60, sb3PresetW: 2400, sceneMode: 3 }
+    }),
+    cfg,
+    st({ lastCmdW: 2400 })
+  );
+  assert.ok((d.targetW ?? 0) >= 2400 - cfg.slewW, 'jamais plus d’un palier vers le bas');
 });

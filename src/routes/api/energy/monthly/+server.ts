@@ -8,6 +8,9 @@
  *    recorder) → autoconso_kwh (wh_hp+wh_hc), import_kwh (import_wh),
  *    savings_eur (eur_hp+eur_hc). Mêmes chiffres que /api/savings et la
  *    SavingsCard → aucune contradiction sur la page.
+ *  · em50_daily (compteur LOCAL, intégré à la minute) → prime sur le cloud pour
+ *    l'import ET l'export, jour par jour ; sa ventilation HC/HP est reconstruite
+ *    depuis `pv_samples.em50_grid_w` pour les mois pas encore relevés.
  *  · pv_samples (puissance brute, epoch UTC) → production_kwh (∫ production_w)
  *    et surplus_kwh (∫ grid_export_w), intégrés à la volée (trapèze + plafond de
  *    gap 600 s, identique au recorder). Groupage par mois UTC (le serveur tourne
@@ -26,12 +29,20 @@ import { env } from '$env/dynamic/private';
 import Database from 'better-sqlite3';
 import {
   anchorMonthBaseline,
+  isHC,
   monthlyImportHcHistory,
   monthlyImportHpHistory,
   monthlySavingsHistory,
-  parisDate
+  parisDate,
+  regimeAt
 } from '$lib/server/tariffs';
 import type { RequestHandler } from './$types';
+
+/** D'où vient la ventilation HC/HP d'un mois : relevé compteur facturé (saisi
+ * dans tariffs.json) ou dérivée de la mesure locale EM-50. `null` = pas de
+ * ventilation connue. Exposé pour que la carte n'affiche pas une estimation
+ * comme un relevé. */
+type SplitSource = 'meter' | 'local' | null;
 
 interface MonthAgg {
   production_kwh: number;
@@ -45,6 +56,7 @@ interface MonthAgg {
    * autoconso_kwh → base du KPI d'autosuffisance (≠ import_kwh, qui privilégie le
    * relevé facturé pour le tableau). */
   import_live_kwh: number;
+  import_split_source: SplitSource;
   savings_eur: number;
 }
 
@@ -63,6 +75,7 @@ function zeroMonth(): MonthAgg {
     import_hc_kwh: 0,
     import_hp_kwh: 0,
     import_live_kwh: 0,
+    import_split_source: null,
     savings_eur: 0
   };
 }
@@ -83,6 +96,116 @@ function foldBaseline(months: MonthAgg[], year: number): void {
   if (!a || a.year !== year) return;
   months[a.monthIndex].savings_eur += a.eur;
   months[a.monthIndex].autoconso_kwh += a.kwh; // 0 aujourd'hui (month_kwh=0), mais correct
+}
+
+/** Cache mémoire des ratios HC/HP dérivés (cf. localHcShare). Quelques entrées au
+ * plus : une par jeu de mois non relevés d'une année consultée. */
+const shareCache = new Map<string, { at: number; shares: Map<number, number> }>();
+const SHARE_TTL_MS = 10 * 60_000;
+
+/**
+ * Taille de bucket d'intégration (s) alignée sur les frontières HC du régime, et
+ * son décalage. But : qu'aucun bucket ne CHEVAUCHE une bascule HP/HC — sinon son
+ * énergie serait classée en bloc du mauvais côté.
+ *
+ * Les fenêtres réelles (00:06 → 08:06) tombent à 6 min de l'heure ronde ; comme
+ * les décalages Paris↔UTC sont des heures entières, un bucket de 30 min décalé
+ * de 360 s cale EXACTEMENT sur les deux bascules, été comme hiver. Si les
+ * fenêtres du régime ne partagent pas ce reste (config exotique), on rétrograde
+ * à 60 s : toujours exact, juste plus de lignes à agréger.
+ */
+function bucketing(t: Date): { sizeS: number; offsetS: number } {
+  const wins = regimeAt(t).hc_windows ?? [];
+  const bounds = wins.flat();
+  const rests = bounds.map((hhmm) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    return ((h || 0) * 3600 + (m || 0) * 60) % 1800;
+  });
+  const same = rests.length > 0 && rests.every((r) => r === rests[0]);
+  return same ? { sizeS: 1800, offsetS: rests[0] } : { sizeS: 60, offsetS: 0 };
+}
+
+/**
+ * Ventilation HC/HP de l'import réseau DÉRIVÉE de la mesure locale, par mois.
+ *
+ * Pourquoi : la ventilation ne venait QUE des relevés compteur mensuels saisis à
+ * la main (tariffs.json) → le mois en cours n'avait jamais de barre, et l'année
+ * affichée sous-comptait de tous les mois pas encore relevés. Or l'EM-50
+ * échantillonne le réseau signé (`pv_samples.em50_grid_w`, ~30 s) : l'heure de
+ * chaque échantillon suffit à le classer HP/HC via le régime tarifaire.
+ *
+ * On n'en tire que le RATIO, jamais des kWh : l'EM-50 est une intégration
+ * d'instantanés, qui sous-compte l'import de ~23 % contre Enedis (validé sur
+ * l'export du 30/06/2026). L'appelant applique ce ratio au total de
+ * `savings_daily` — l'EM-50 dit la FORME de la journée, pas son niveau.
+ *
+ * RÉSERVE assumée : rien ne garantit que ce sous-comptage soit réparti à
+ * l'identique entre HC et HP (il vient des appels brefs, plus fréquents en
+ * journée) — le ratio penche donc probablement un peu trop vers HC. D'où
+ * `import_split_source = 'local'` et le marquage « estimé » sur la carte. Seule
+ * la courbe ½h Enedis lèvera le doute (cf. intégration MyElectricalData).
+ *
+ * `wanted` restreint le scan aux mois qui en ont besoin (ceux sans relevé) : la
+ * fenêtre window-function sur pv_samples grossit d'~500 k lignes par an, inutile
+ * de la balayer en entier pour ventiler le seul mois courant.
+ *
+ * Retour : index de mois (0-11) → part HC dans [0,1]. Mois absent = pas de mesure.
+ */
+function localHcShare(db: Database.Database, year: number, wanted: number[]): Map<number, number> {
+  const out = new Map<number, number>();
+  if (wanted.length === 0) return out;
+
+  // Cache : le balayage coûte ~0,5 s (window function sur ~50 k échantillons par
+  // mois) contre ~2 ms pour tout le reste de l'endpoint, et le poll revient
+  // toutes les 5 min. Un ratio HP/HC bouge de quelques dixièmes de point par
+  // jour : le recalculer à chaque appel ne rapporte rien.
+  const key = `${year}:${wanted.join(',')}`;
+  const hit = shareCache.get(key);
+  if (hit && Date.now() - hit.at < SHARE_TTL_MS) return hit.shares;
+
+  const { sizeS, offsetS } = bucketing(new Date(Date.UTC(year, 6, 1)));
+  const first = Math.min(...wanted);
+  const last = Math.max(...wanted);
+  const yStart = Math.floor(Date.UTC(year, first, 1) / 1000) - 7200; // marge de bord Paris
+  const yEnd = Math.floor(Date.UTC(year, last + 1, 1) / 1000) + 7200;
+
+  let rows: { bucket: number; wh: number }[];
+  try {
+    rows = db
+      .prepare(
+        'WITH d AS (' +
+          ' SELECT ts, ts - LAG(ts) OVER (ORDER BY ts) AS dt,' +
+          '  (MAX(0.0,em50_grid_w) + MAX(0.0,LAG(em50_grid_w) OVER (ORDER BY ts)))/2.0 AS avg_imp' +
+          '  FROM pv_samples WHERE em50_grid_w IS NOT NULL AND ts >= ? AND ts < ?' +
+          ') SELECT (ts - ?) / ? AS bucket,' +
+          ' COALESCE(SUM(CASE WHEN dt>0 AND dt<=600 THEN avg_imp*dt/3600.0 END),0) AS wh' +
+          ' FROM d GROUP BY bucket HAVING wh > 0'
+      )
+      .all(yStart, yEnd, offsetS, sizeS) as { bucket: number; wh: number }[];
+  } catch {
+    return out; // colonne em50_grid_w absente (base pré-EM-50)
+  }
+
+  // Accumulation par mois PARIS (le bord de mois UTC diffère de 1-2 h) × tranche.
+  const hc = new Array<number>(12).fill(0);
+  const hp = new Array<number>(12).fill(0);
+  for (const r of rows) {
+    if (!Number.isFinite(r.wh) || r.wh <= 0) continue;
+    // Milieu du bucket : à l'abri d'un arrondi de bord dans les deux classements.
+    const mid = new Date((r.bucket * sizeS + offsetS + sizeS / 2) * 1000);
+    const day = parisDate(mid);
+    if (day.slice(0, 4) !== String(year)) continue;
+    const i = Number(day.slice(5, 7)) - 1;
+    if (i < 0 || i > 11) continue;
+    if (isHC(mid)) hc[i] += r.wh;
+    else hp[i] += r.wh;
+  }
+  for (let i = 0; i < 12; i++) {
+    const tot = hc[i] + hp[i];
+    if (tot > 1) out.set(i, hc[i] / tot); // > 1 Wh : ignore le bruit d'un mois vide
+  }
+  shareCache.set(key, { at: Date.now(), shares: out });
+  return out;
 }
 
 export const GET: RequestHandler = async ({ url }) => {
@@ -141,6 +264,17 @@ export const GET: RequestHandler = async ({ url }) => {
         }
       }
     }
+
+    // ── NE PAS faire primer l'EM-50 sur le NIVEAU d'import ──
+    // Tentation naturelle (le compteur local semble plus « vrai » que le cloud),
+    // mais l'export Enedis du 30/06/2026 a tranché l'inverse sur 17 jours :
+    // `em50_daily.import_wh` sous-compte de −23 % (jusqu'à −59 % le 23/06, jour
+    // d'incident bridge), quand le proxy compteur-Anker de `savings_daily` colle à
+    // −4 %. Une intégration d'instantanés rate les appels brefs ; un compteur
+    // cumulé, non. Hiérarchie de l'import : Enedis (canonique, pas encore branché)
+    // > savings_daily > EM-50, qui ne sert qu'à la FORME intraday (ratio HC/HP
+    // ci-dessous). L'EXPORT, lui, reste sur l'EM-50 : le compteur cloud est muet
+    // (facteur 6) et Enedis ne publie rien en CACSI.
 
     // ── pv_samples (UTC) : production / surplus par mois (∫ trapèze, gap ≤ 600 s) ──
     // grid_export_w est NULL sur les anciennes lignes (colonne ajoutée après coup)
@@ -221,16 +355,35 @@ export const GET: RequestHandler = async ({ url }) => {
     // gardent le total recorder (sans ventilation → HC/HP restent à 0).
     const importHc = monthlyImportHcHistory();
     const importHp = monthlyImportHpHistory();
+    const noMeter: number[] = [];
     for (let i = 0; i < 12; i++) {
       const key = `${year}-${String(i + 1).padStart(2, '0')}`;
       const hc = importHc[key];
       const hp = importHp[key];
       const hasHc = typeof hc === 'number' && hc > 0;
       const hasHp = typeof hp === 'number' && hp > 0;
-      if (!hasHc && !hasHp) continue; // aucun relevé manuel → on garde le recorder
-      months[i].import_hc_kwh = hasHc ? hc : 0;
-      months[i].import_hp_kwh = hasHp ? hp : 0;
-      months[i].import_kwh = months[i].import_hc_kwh + months[i].import_hp_kwh;
+      if (hasHc || hasHp) {
+        months[i].import_hc_kwh = hasHc ? hc : 0;
+        months[i].import_hp_kwh = hasHp ? hp : 0;
+        months[i].import_kwh = months[i].import_hc_kwh + months[i].import_hp_kwh;
+        months[i].import_split_source = 'meter';
+      } else if (months[i].import_kwh > 0) {
+        noMeter.push(i); // candidat à la ventilation dérivée (cf. ci-dessous)
+      }
+    }
+
+    // Ventilation de repli, dérivée de la mesure locale (cf. localHcShare) : elle
+    // couvre les mois SANS relevé — dont le mois en cours, qui restait vide sur la
+    // carte HC/HP jusqu'à la saisie du relevé, un mois plus tard. Ratio local
+    // appliqué au total mesuré : seul le ratio est fiable, pas ses kWh bruts.
+    const hcShare = localHcShare(db, year, noMeter);
+    for (const i of noMeter) {
+      const share = hcShare.get(i);
+      if (share === undefined) continue;
+      const tot = months[i].import_kwh;
+      months[i].import_hc_kwh = tot * share;
+      months[i].import_hp_kwh = tot * (1 - share);
+      months[i].import_split_source = 'local';
     }
 
     // ── Borne basse du sélecteur d'année : première année avec des données ──
