@@ -15,6 +15,29 @@
  */
 
 export interface Sb3LoopConfig {
+  /** Durée pendant laquelle une correction écrite est considérée « en vol »,
+   *  c'est-à-dire commandée mais pas encore reflétée par le compteur (retard
+   *  d'écriture cloud + application device).
+   *  ⚠ RÉGLAGE CRITIQUE, mesuré et NON majoré : un prédicteur de Smith exige une
+   *  estimation JUSTE du retard. Trop long, il retranche une correction que le
+   *  compteur reflète DÉJÀ et la boucle sur-corrige — observé en direct le 28/07
+   *  avec 45 s (137 → 2 146 → 0 W en deux ticks). Mesure : une écriture de
+   *  −1 204 W à 16:48:16 était visible au compteur au tick suivant (20 s).
+   *  Donc le retard est < 1 tick et la fenêtre vaut UN tick, pas davantage. */
+  enVolS: number;
+  /** Puissance AC max de la Max AC (W) — borne le rééquilibrage de partage :
+   *  on ne déplace pas vers elle plus qu'elle ne peut fournir ou absorber. */
+  maxAcPowerW: number;
+  /** Fraction de l'écart de partage corrigée par cycle. Le rééquilibrage ENTRE
+   *  batteries est un objectif de confort, pas une réponse à la maison : il ne
+   *  doit pas bousculer l'équilibre du compteur que la règle 1 protège. La
+   *  règle 3 (« aucune réaction différée ») porte sur la CONSOMMATION du foyer,
+   *  qui est traitée à gain plein par le chemin « erreur compteur ».
+   *  ⚠ La PRÉCISION du partage vaut `deadbandW / shareGain` : en deçà, le pas
+   *  calculé tombe dans la bande morte et la convergence s'arrête. Avec 100 W et
+   *  0,5, le partage est tenu à ±200 W — négligeable devant les 2 400 W de
+   *  consigne, pour 2 à 3 écritures par rééquilibrage. */
+  shareGain: number;
   /** Réserve intouchable de chaque batterie (%) : l'énergie « utilisable » qui
    *  sert au prorata s'entend RÉSERVE DÉDUITE. Règle Laurent 28/07. */
   reservePct: number;
@@ -100,6 +123,8 @@ export interface Sb3Decision {
   reason: string;
   /** house_load estimée (W), null si inconnue. */
   houseLoadW: number | null;
+  /** Nouvelle file des corrections en vol (persistée). */
+  enVol: { ts: number; dW: number }[];
 }
 
 export interface Sb3DecisionLogEntry {
@@ -121,6 +146,10 @@ export interface Sb3LoopState {
   /** Raison d'une auto-désactivation (écritures non prises, canary…). */
   autoDisabledReason: string | null;
   autoDisabledTs: number | null;
+  /** Corrections COMMANDÉES mais pas encore visibles au compteur (prédicteur de
+   *  Smith) : {ts, deltaW}. Sans elles la boucle compte deux fois la même
+   *  correction et entre en cycle limite (docs/regulation-energie.md §3-4). */
+  enVol: { ts: number; dW: number }[];
   /** Dernière consigne ÉCRITE par la boucle (ancrage du slew). */
   lastCmdW: number | null;
   lastWriteTs: number | null;
@@ -147,6 +176,7 @@ export function defaultSb3LoopState(): Sb3LoopState {
     enabled: false, // JAMAIS actif par défaut — activation explicite (tuile)
     autoDisabledReason: null,
     autoDisabledTs: null,
+    enVol: [],
     lastCmdW: null,
     lastWriteTs: null,
     confirmFailCount: 0,
@@ -163,6 +193,9 @@ export function defaultSb3LoopState(): Sb3LoopState {
 export function defaultSb3LoopConfig(): Sb3LoopConfig {
   return {
     reservePct: 10,
+    enVolS: 20,
+    maxAcPowerW: 2000,
+    shareGain: 0.5,
     failLowStepW: 300,
     deadbandW: 100, // < marginW — sinon la cible « charge − marge » est piégée dans la bande
     failLowDwellS: 300,

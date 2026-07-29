@@ -46,12 +46,17 @@ export function decide(
   cfg: Sb3LoopConfig,
   state: Sb3LoopState
 ): Sb3Decision {
+  // ── PRÉDICTEUR DE SMITH : corrections déjà commandées, pas encore visibles ──
+  // On purge la file de ce qui a eu le temps d'agir ; ce qui reste est ce que le
+  // compteur n'a pas encore « vu ». Cf. docs/regulation-energie.md §3-4.
+  const enVol = (state.enVol ?? []).filter((c) => inputs.now - c.ts < cfg.enVolS * 1000);
+  const dejaCommandeW = enVol.reduce((s, c) => s + c.dW, 0);
   const noWrite = (
     mode: Sb3Decision['mode'],
     reason: string,
     houseLoadW: number | null = null,
     targetW: number | null = null
-  ): Sb3Decision => ({ writeW: null, targetW, mode, reason, houseLoadW });
+  ): Sb3Decision => ({ writeW: null, targetW, mode, reason, houseLoadW, enVol });
 
   // Consigne « en place » de référence : la dernière écrite par la boucle, sinon
   // celle vue par le cloud (ancrage au premier cycle). CLAMPÉE : une valeur cloud
@@ -80,7 +85,8 @@ export function decide(
         targetW: step,
         mode: 'faillow',
         reason: `cloud périmé — décroissance ${currentW} → ${step} W`,
-        houseLoadW: null
+        houseLoadW: null,
+        enVol: can ? [...enVol, { ts: inputs.now, dW: step - currentW }] : enVol
       };
     }
     return noWrite('faillow', 'cloud périmé — consigne déjà basse, rien à faire');
@@ -144,13 +150,21 @@ export function decide(
   // nulle. Réponse immédiate ET stable, sans le moindre délai.
   const gridW = inputs.em50.gridW; // + acheté à EDF / − injecté
   const base = currentW ?? sb3Out;
+  // Erreur EFFECTIVE = ce que le compteur montre MOINS ce qu'on a déjà commandé
+  // et qu'il n'a pas encore vu. Sans ce retranchement, on commande deux fois la
+  // même correction : mesuré en service le 28/07, cycle limite de période 2 min
+  // (soutirage 800 W → injection 786 W → soutirage 814 W…), 864 écritures/jour.
+  // Avec, le retard sort de la boucle : correction PLEINE et immédiate, stable.
+  const erreurW = Math.round(gridW - dejaCommandeW);
 
-  if (Math.abs(gridW) > cfg.deadbandW) {
+  if (Math.abs(erreurW) > cfg.deadbandW) {
+    const cible = clamp(base + erreurW, 0, cfg.maxPresetW);
+    const enAttente = dejaCommandeW !== 0 ? ` (${Math.round(dejaCommandeW)} W déjà en vol)` : '';
     return applyTarget(
-      base + gridW,
+      base + erreurW,
       gridW > 0
-        ? `SOUTIRAGE ${gridW} W — consigne ${base} → ${clamp(base + gridW, 0, cfg.maxPresetW)} W`
-        : `injection ${-gridW} W — consigne ${base} → ${clamp(base + gridW, 0, cfg.maxPresetW)} W`
+        ? `SOUTIRAGE ${gridW} W${enAttente} — consigne ${base} → ${cible} W`
+        : `injection ${-gridW} W${enAttente} — consigne ${base} → ${cible} W`
     );
   }
 
@@ -169,9 +183,30 @@ export function decide(
     );
   }
   const battTotalW = Math.max(0, sb3Out + inputs.maxac.acNetW);
+  // BORNE PHYSIQUE DU RÉÉQUILIBRAGE (règle 1 avant règle 2). Déplacer la part
+  // des SB3 vers la Max AC n'est possible que si la Max AC peut effectivement
+  // reprendre le relais : baisser la consigne de Δ lui demande Δ de plus, la
+  // monter de Δ lui demande d'absorber Δ. Au-delà de sa réserve de puissance,
+  // le rééquilibrage crée un SOUTIRAGE — mesuré en direct le 28/07 : un saut
+  // de −1 291 W a produit 867 W d'achat EDF instantané, que la boucle a dû
+  // rattraper au tick suivant. Le partage est un confort ; acheter est interdit.
+  const marge = Math.max(0, cfg.maxAcPowerW - Math.abs(inputs.maxac.acNetW));
+  const cibleBrute = shareSb3 * battTotalW;
+  // Approche PROGRESSIVE de la cible de partage. Sauter dessus d'un coup fait
+  // basculer la charge d'une batterie à l'autre plus vite que la Max AC ne peut
+  // suivre : mesuré le 28/07, un saut de −1 291 W a créé 867 W d'achat EDF
+  // instantané. On corrige une fraction de l'écart par cycle, en restant dans la
+  // marge de puissance de la Max AC. Cela ne diffère AUCUNE réponse à la maison :
+  // le soutirage et l'injection sont traités à gain plein juste au-dessus.
+  const base0 = currentW ?? 0;
+  const progressif = base0 + cfg.shareGain * (cibleBrute - base0);
+  const borne = clamp(progressif, base0 - marge, base0 + marge);
   return applyTarget(
-    shareSb3 * battTotalW,
+    borne,
     `répartition — part SB3 ${pctSb3} % de ${battTotalW} W batterie ` +
+      (Math.abs(cibleBrute - borne) > 1
+        ? `[borné par la marge Max AC ${Math.round(marge)} W] `
+        : '') +
       `(${Math.round(sb3UsableWh / 100) / 10}/${Math.round(parkUsableWh / 100) / 10} kWh utilisables)`
   );
 
@@ -181,6 +216,16 @@ export function decide(
     if (currentW !== null && Math.abs(targetW - currentW) <= cfg.deadbandW) {
       return noWrite('allocate', `${reason} — dans la bande morte`, houseLoadW, targetW);
     }
-    return { writeW: targetW, targetW, mode: 'allocate', reason, houseLoadW };
+    // La correction part « en vol » : elle sera retranchée de l'erreur mesurée
+    // tant que le compteur n'a pas eu le temps de la refléter.
+    const dW = targetW - (currentW ?? 0);
+    return {
+      writeW: targetW,
+      targetW,
+      mode: 'allocate',
+      reason,
+      houseLoadW,
+      enVol: [...enVol, { ts: inputs.now, dW }]
+    };
   }
 }

@@ -110,7 +110,9 @@ export async function collectSb3Inputs(cfg: Sb3LoopConfig): Promise<Sb3LoopInput
       ? {
           ok: true,
           socPct: maxacRaw.soc_pct,
-          acNetW: maxacRaw.ac_power_w,
+          // ac_power_w (10208) est une SORTIE seule : 0 pendant la charge. Le flux
+          // NET signé vient du registre batterie (cf. docs/regulation-energie.md §5).
+          acNetW: maxacRaw.ac_net_w,
           ratedEnergyWh: maxacRaw.rated_energy_wh ?? 0
         }
       : { ok: false, socPct: 0, acNetW: 0, ratedEnergyWh: 0 },

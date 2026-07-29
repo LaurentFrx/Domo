@@ -188,8 +188,16 @@ export interface AnkerSolarbankStatus {
   soc_pct: number;
   /** Puissance batterie signée (W) : + décharge vers la maison / − charge. */
   battery_power_w: number;
-  /** Sortie AC vers la maison (W, signée même convention) — ac_grid_output_power. */
+  /** Sortie AC vers la maison (W) — registre 10208 `ac_grid_output_power`.
+   *  ⚠ NON SIGNÉ : vérifié sur l'appareil, il vaut 0 pendant que la batterie
+   *  charge à 2 050 W, et il n'est jamais négatif sur 18 148 échantillons
+   *  historisés. Ne JAMAIS l'utiliser comme flux net (cf. docs/regulation-energie.md §5). */
   ac_power_w: number;
+  /** Flux AC NET signé (W) : + vers la maison / − absorbé par la Max AC.
+   *  Reconstruit du flux BATTERIE (10008/10009), lui vraiment signé, corrigé du
+   *  rendement de conversion. La Max AC n'a pas de PV propre (couplée AC) :
+   *  côté AC on a donc η·P_batt en décharge et P_batt/η en charge. */
+  ac_net_w: number;
   /** PV total (W) = PV du PCS + PV tiers (comme le capteur officiel). */
   pv_power_w: number;
   /** Conso maison vue par la Solarbank (W). */
@@ -211,6 +219,7 @@ const SB_OFFLINE: AnkerSolarbankStatus = {
   soc_pct: 0,
   battery_power_w: 0,
   ac_power_w: 0,
+  ac_net_w: 0,
   pv_power_w: 0,
   load_power_w: 0,
   battery_status: 'unknown',
@@ -228,6 +237,9 @@ const SB_OFFLINE: AnkerSolarbankStatus = {
  *   FC 04 @10250 ×2  → rated_energy (UINT32, gain 10 → kWh×10)
  *   FC 03 @10064 ×1  → operating_mode (plage holding)
  */
+/** Rendement de conversion DC↔AC de la Max AC (onduleur + pertes), ~5 %. */
+const CONV_ETA = 0.95;
+
 async function fetchSolarbank(): Promise<AnkerSolarbankStatus> {
   const [main, ac, rated, mode] = await readMany(solarbankTarget(), [
     { fc: 4, address: 10001, count: 15 },
@@ -236,13 +248,17 @@ async function fetchSolarbank(): Promise<AnkerSolarbankStatus> {
     { fc: 3, address: 10064, count: 1 }
   ]);
   const socPct = main[13];
+  // Flux batterie SIGNÉ (10008/10009) : + décharge / − charge. Vérifié en direct
+  // le 28/07 (−2 050 W en charge) — c'est la SEULE source signée de l'appareil.
+  const battW = i32(main[7], main[8]);
   // rated_energy : UINT32 gain 10 (dixièmes de kWh) → Wh. Vérifié en réel : 7,2 kWh.
   const ratedWh = ((((rated[0] & 0xffff) << 16) | (rated[1] & 0xffff)) >>> 0) * 100;
   return {
     available: true,
     soc_pct: socPct,
-    battery_power_w: i32(main[7], main[8]),
+    battery_power_w: battW,
     ac_power_w: i32(ac[0], ac[1]),
+    ac_net_w: Math.round(battW >= 0 ? battW * CONV_ETA : battW / CONV_ETA),
     pv_power_w: i32(main[1], main[2]) + i32(main[3], main[4]),
     load_power_w: i32(main[9], main[10]),
     battery_status: BATTERY_STATUS[main[0]] ?? 'unknown',
