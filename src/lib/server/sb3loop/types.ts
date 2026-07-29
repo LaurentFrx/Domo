@@ -26,7 +26,11 @@ export interface Sb3LoopConfig {
    *  Donc le retard est < 1 tick et la fenêtre vaut UN tick, pas davantage. */
   enVolS: number;
   /** Puissance AC max de la Max AC (W) — borne le rééquilibrage de partage :
-   *  on ne déplace pas vers elle plus qu'elle ne peut fournir ou absorber. */
+   *  on ne déplace pas vers elle plus qu'elle ne peut fournir ou absorber.
+   *  MESURÉ sur history.db (18 259 points) : p99,9 = 3 530 W, max 3 540 W —
+   *  cohérent avec les 3 600 W annoncés par le constructeur. La valeur de 2 000 W
+   *  posée initialement était FAUSSE (dépassée 2 % du temps) et gelait le
+   *  rééquilibrage dès que la Max AC débitait fort : marge calculée à 0. */
   maxAcPowerW: number;
   /** Fraction de l'écart de partage corrigée par cycle. Le rééquilibrage ENTRE
    *  batteries est un objectif de confort, pas une réponse à la maison : il ne
@@ -194,7 +198,7 @@ export function defaultSb3LoopConfig(): Sb3LoopConfig {
   return {
     reservePct: 10,
     enVolS: 20,
-    maxAcPowerW: 2000,
+    maxAcPowerW: 3600,
     shareGain: 0.5,
     failLowStepW: 300,
     deadbandW: 100, // < marginW — sinon la cible « charge − marge » est piégée dans la bande
