@@ -1,64 +1,61 @@
 /**
  * Loi de commande de la boucle SB3 — fonction PURE (testable sans réseau).
  *
- * Hiérarchie des règles (ordre d'évaluation strict) :
- *  1. FAIL-SAFE local : EM-50 ou Modbus Max AC muets → AUCUNE écriture (on ne
- *     sait rien du réel, on ne touche à rien).
- *  2. FAIL-LOW cloud : données cloud périmées → on ne connaît plus house_load ;
- *     si une consigne > 0 est en place, on la DESCEND d'un palier par cycle
- *     (une consigne haute figée = recyclage permanent ; basse = inoffensive).
- *  3. Garde SoC SB3 : sous le plancher, consigne 0 (le firmware coupe à ~10 %,
- *     inutile de demander l'impossible).
- *  4. RESCUE : Max AC sous son SoC minimal + SB3 chargées → la consigne suit la
- *     charge maison même de jour (on préserve la réserve de la Max AC).
- *  5. JOUR (soleil levé ET SB3 avec de la PLACE À REMPLIR) : consigne 0 — les SB3
- *     chargent en DC, APS + Max AC servent la maison.
- *     ⚠ La condition « avec de la place » est essentielle : le 28/07 la maison
- *     tirait jusqu'à 2 079 W du réseau (cumulus 3 kW) pendant que les DEUX SB3
- *     étaient à 100 % avec consigne 0 — 5,4 kWh immobiles — et que la Max AC
- *     s'épuisait seule. « Jour » protège la CHARGE des SB3 ; un pack plein n'a
- *     plus rien à charger, donc plus rien à protéger : il doit servir la maison.
- *     Hystérésis daySocPct → dayResumeSocPct pour ne pas osciller.
- *  6. NUIT : consigne = clamp(house_load − marge, 0, max) — LÉGÈREMENT SOUS la
- *     charge : la Max AC couvre marge et pointes (asymétrie des coûts).
+ * ⛔ RÈGLES ABSOLUES posées par Laurent (28/07/2026), dans cet ordre :
+ *   1. NE JAMAIS SOUTIRER SUR LE RÉSEAU EDF. Tant qu'il reste de l'énergie
+ *      utilisable dans le parc, elle sort. AUCUNE convention de « charge
+ *      prioritaire » ne bloque jamais la décharge d'une Solarbank.
+ *   2. Charge et décharge se répartissent AU PRORATA des kWh utilisables de
+ *      chaque batterie, réserve de 10 % déduite — pour qu'elles atteignent leur
+ *      plancher EN MÊME TEMPS, jamais l'une vidée pendant que l'autre est pleine.
+ *   3. AUCUN PALIER, AUCUNE RÉACTION DIFFÉRÉE : « une consommation électrique du
+ *      foyer est immédiate et jamais graduelle ». Plus de rampe (slew), plus de
+ *      temporisation (dwell), plus de confirmation sur N évaluations.
  *
- * Amortisseurs (appliqués à la cible) : slew ±slewW par cycle, bande morte
- * deadbandW tenue deadbandEvals évaluations, dwell (hausse dwellUpS, baisse
- * dwellDownS) entre écritures.
+ * Ce que ça a remplacé : une règle « jour » qui posait consigne 0 « parce que les
+ * SB3 chargent » — le 28/07 la maison achetait 2 079 W à EDF pendant que 5,4 kWh
+ * dormaient dans deux packs pleins et que la Max AC s'épuisait seule.
+ *
+ * Hiérarchie d'évaluation :
+ *  1. FAIL-SAFE local : EM-50 ou Modbus Max AC muets → AUCUNE écriture (sans les
+ *     yeux, pas de mains).
+ *  2. FAIL-LOW cloud : données cloud périmées → house_load inconnue ; on redescend
+ *     par paliers (seul endroit où un palier subsiste : c'est une dégradation de
+ *     sûreté, pas une réponse à la charge).
+ *  3. Mode Anker ≠ manuel → nos écritures ne gouvernent rien, on attend.
+ *  4. ALLOCATION PROPORTIONNELLE + couverture intégrale du soutirage mesuré.
+ *
+ * Seul amortisseur conservé : une bande morte EN WATTS, qui n'introduit aucun
+ * retard — elle évite de réécrire une valeur quasi identique (chaque écriture est
+ * un login propriétaire sur le cloud Anker). La substitution `settle` n'est pas
+ * un délai non plus : elle remplace une lecture cloud périmée par la consigne
+ * réellement écrite, ce qui rend l'estimation PLUS juste.
  */
 import type { Sb3Decision, Sb3LoopConfig, Sb3LoopInputs, Sb3LoopState } from './types';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
+
+/** Énergie réellement disponible d'un pack (Wh), réserve déduite. */
+export function usableWh(socPct: number, capacityWh: number, reservePct: number): number {
+  if (!Number.isFinite(socPct) || !Number.isFinite(capacityWh) || capacityWh <= 0) return 0;
+  return Math.max(0, capacityWh * (Math.min(100, Math.max(0, socPct)) - reservePct)) / 100;
+}
 
 export function decide(
   inputs: Sb3LoopInputs,
   cfg: Sb3LoopConfig,
   state: Sb3LoopState
 ): Sb3Decision {
-  // Recalculé plus bas ; jusque-là on reconduit l'état persisté (les sorties
-  // précoces — fail-safe, cloud périmé — ne doivent RIEN changer à l'hystérésis).
-  let sb3Serving = state.sb3Serving;
-
   const noWrite = (
     mode: Sb3Decision['mode'],
     reason: string,
     houseLoadW: number | null = null,
-    targetW: number | null = null,
-    pendingDeadband = 0
-  ): Sb3Decision => ({
-    writeW: null,
-    targetW,
-    mode,
-    reason,
-    houseLoadW,
-    sb3Serving,
-    pendingDeadband,
-    pendingDeadbandDir: null
-  });
+    targetW: number | null = null
+  ): Sb3Decision => ({ writeW: null, targetW, mode, reason, houseLoadW });
 
-  // Consigne « en place » de référence : la dernière écrite par la boucle,
-  // sinon celle vue par le cloud (ancrage au premier cycle). CLAMPÉE : une
-  // valeur cloud aberrante ne doit jamais servir d'ancre au slew.
+  // Consigne « en place » de référence : la dernière écrite par la boucle, sinon
+  // celle vue par le cloud (ancrage au premier cycle). CLAMPÉE : une valeur cloud
+  // aberrante ne doit jamais servir de référence à la bande morte.
   const rawCurrent = state.lastCmdW ?? inputs.cloud.sb3PresetW;
   const currentW = rawCurrent === null ? null : clamp(rawCurrent, 0, cfg.maxPresetW);
 
@@ -75,9 +72,7 @@ export function decide(
     inputs.cloud.ok && inputs.cloud.freshS !== null && inputs.cloud.freshS <= cfg.cloudStaleS;
   if (!cloudFresh) {
     if (currentW !== null && currentW > 0) {
-      const step = Math.max(0, currentW - cfg.slewW);
-      // Dwell dédié (failLowDwellS) : un palier toutes les 5 min, pas un login
-      // cloud par minute — la descente complète 2400 → 0 prend ~40 min.
+      const step = Math.max(0, currentW - cfg.failLowStepW);
       const can =
         state.lastWriteTs === null || inputs.now - state.lastWriteTs >= cfg.failLowDwellS * 1000;
       return {
@@ -85,10 +80,7 @@ export function decide(
         targetW: step,
         mode: 'faillow',
         reason: `cloud périmé — décroissance ${currentW} → ${step} W`,
-        houseLoadW: null,
-        sb3Serving,
-        pendingDeadband: 0,
-        pendingDeadbandDir: null
+        houseLoadW: null
       };
     }
     return noWrite('faillow', 'cloud périmé — consigne déjà basse, rien à faire');
@@ -100,152 +92,95 @@ export function decide(
     return noWrite('hold', `mode Anker ${inputs.cloud.sceneMode} ≠ manuel — écritures suspendues`);
   }
 
-  const sb3Soc = inputs.cloud.sb3SocAvg;
-  // Après une écriture, le sb3Out CLOUD traîne 1-3 min derrière la réalité
-  // (le device applique en secondes) : pendant settleS on lui substitue la
-  // consigne écrite — sinon la boucle chasse son propre retard (cycle limite).
+  // Après une écriture, le sb3Out CLOUD traîne 1-3 min derrière la réalité (le
+  // device applique en secondes) : pendant settleS on lui substitue la consigne
+  // écrite — sinon la boucle chasse son propre retard (cycle limite).
   const settling =
     state.lastWriteTs !== null &&
     state.lastCmdW !== null &&
     inputs.now - state.lastWriteTs < cfg.settleS * 1000;
   const sb3Out = settling ? (state.lastCmdW as number) : (inputs.cloud.sb3OutW ?? 0);
 
-  // house_load : import réseau + APS + sortie SB3 + flux AC net Max AC SIGNÉ.
+  // house_load — INFORMATIF SEULEMENT (journal, carte). Elle ne pilote plus rien :
+  // voir « pilotage sur l'erreur mesurée » plus bas.
+  // Réseau signé + APS + sortie SB3 + flux AC net Max AC SIGNÉ.
   // Le SIGNE est vital (revue 23/07) : en régime de recyclage (consigne > charge
-  // réelle, la Max AC absorbe l'excédent à compteur nul), sa CHARGE −(C−H)
-  // annule l'excès compté dans sb3Out et l'estimation redonne H — sans le
-  // signe, l'estimation dégénérait en « consigne + APS » et toute consigne trop
-  // haute s'auto-confirmait (figement/emballement).
+  // réelle, la Max AC absorbe l'excédent à compteur nul), sa CHARGE −(C−H) annule
+  // l'excès compté dans sb3Out et l'estimation redonne H — sans le signe, elle
+  // dégénérait en « consigne + APS » et toute consigne trop haute s'auto-confirmait.
   const houseLoadW = Math.max(
     0,
     Math.round(inputs.em50.gridW + inputs.aps.powerW + sb3Out + inputs.maxac.acNetW)
   );
 
-  // ── 3. Garde plancher SB3. ──
-  if (sb3Soc !== null && sb3Soc < cfg.sb3FloorPct) {
-    return applyTarget(0, 'day', `SB3 à ${Math.round(sb3Soc)} % — plancher, consigne 0`);
+  // ── RÈGLE 2 — part des SB3 au prorata de l'énergie UTILISABLE du parc. ──
+  // Les trois batteries doivent atteindre leur réserve en même temps : chacune
+  // fournit à hauteur de ce qu'elle peut encore donner. La Max AC n'est pas
+  // commandée (elle asservit le compteur à zéro toute seule) — on ne pilote que
+  // la part SB3, et elle prend automatiquement le reste.
+  const sb3UsableWh = inputs.cloud.sb3Packs.reduce(
+    (s, p) => s + usableWh(p.socPct, p.capacityWh, cfg.reservePct),
+    0
+  );
+  const maxAcUsableWh = usableWh(inputs.maxac.socPct, inputs.maxac.ratedEnergyWh, cfg.reservePct);
+  const parkUsableWh = sb3UsableWh + maxAcUsableWh;
+  const shareSb3 = parkUsableWh > 0 ? sb3UsableWh / parkUsableWh : 0;
+  const pctSb3 = Math.round(shareSb3 * 100);
+
+  // Plus rien d'utilisable dans les SB3 : demander leur décharge est sans objet.
+  if (sb3UsableWh <= 0) {
+    return applyTarget(0, `SB3 à leur réserve (${cfg.reservePct} %) — plus rien à donner`);
   }
 
-  // ── 4. Rescue : préserver la Max AC — SEULEMENT si elle se vide RÉELLEMENT.
-  // Incident 23/07 : rescue ne regardait que le SoC → il s'est déclenché tout
-  // un matin ensoleillé alors que la Max AC (basse mais EN CHARGE, acNet < 0)
-  // n'était pas en danger, drainant les SB3 jusqu'à 10 % au lieu de les laisser
-  // charger. Le vrai signal de détresse = la Max AC DÉCHARGE (acNet > seuil)
-  // ET reste basse ET les SB3 ont du stock à céder. Une Max AC en charge ou au
-  // repos ne déclenche jamais de rescue → pas de vol de la recharge diurne. ──
-  const rescue =
-    inputs.maxac.socPct < cfg.maxAcMinPct &&
-    inputs.maxac.acNetW > cfg.rescueMaxAcDischargeW &&
-    sb3Soc !== null &&
-    sb3Soc > cfg.rescueSb3MinPct;
+  // ── PILOTAGE SUR L'ERREUR MESURÉE, jamais sur une charge estimée ──────────
+  // Piège trouvé en direct le 28/07 : asservir la consigne à `house_load` la fait
+  // figurer dans sa PROPRE entrée (house_load contient sb3Out, et sb3Out ≈ la
+  // consigne). Sans temporisation pour masquer le retard du cloud, l'estimation
+  // s'emballait — 2 876 → 5 948 → 2 884 W en trois cycles, et la consigne sautait
+  // au plafond à chaque bosse. Restaurer une temporisation aurait violé la règle 3.
+  // La sortie est structurelle : le COMPTEUR est la seule grandeur instantanée et
+  // fiable, et il donne directement l'ERREUR. Déplacer la consigne de l'erreur
+  // mesurée ne referme aucune boucle sur elle-même : à l'équilibre, correction
+  // nulle. Réponse immédiate ET stable, sans le moindre délai.
+  const gridW = inputs.em50.gridW; // + acheté à EDF / − injecté
+  const base = currentW ?? sb3Out;
 
-  // ── 5/6. Jour / nuit par éphémérides + production réelle. APS injoignable
-  // en plein soleil (panne ≠ nuit) → on reste conservateur côté « jour »
-  // (consigne 0, les SB3 chargent) plutôt que de les vider à midi. ──
-  const sunUp = inputs.sunElevDeg > 0;
-  // Les SB3 ont-elles encore de la PLACE à remplir ? Hystérésis : une fois
-  // déclarées pleines et mises au service de la maison, elles le restent jusqu'à
-  // dayResumeSocPct — sinon un pack qui débite repasse sous le seuil en quelques
-  // minutes et la boucle bascule sans fin (chaque bascule = écriture cloud).
-  // SoC inconnu → on suppose qu'elles ont de la place (conservateur : charger).
-  sb3Serving =
-    sb3Soc === null ? false : sb3Serving ? sb3Soc > cfg.dayResumeSocPct : sb3Soc >= cfg.daySocPct;
-  const isDay =
-    sunUp &&
-    !sb3Serving &&
-    (!inputs.aps.ok ||
-      inputs.aps.powerW > cfg.dayApsW ||
-      (sb3Soc !== null && sb3Soc < cfg.daySocPct));
-
-  if (isDay && !rescue) {
-    return applyTarget(0, 'day', 'jour — les SB3 chargent, consigne 0');
+  if (Math.abs(gridW) > cfg.deadbandW) {
+    return applyTarget(
+      base + gridW,
+      gridW > 0
+        ? `SOUTIRAGE ${gridW} W — consigne ${base} → ${clamp(base + gridW, 0, cfg.maxPresetW)} W`
+        : `injection ${-gridW} W — consigne ${base} → ${clamp(base + gridW, 0, cfg.maxPresetW)} W`
+    );
   }
 
-  const mode = rescue ? 'rescue' : 'night';
-  const targetRaw = clamp(houseLoadW - cfg.marginW, 0, cfg.maxPresetW);
+  // Compteur à l'équilibre : rien d'urgent. On profite du calme pour rééquilibrer
+  // le PARTAGE entre batteries — mais uniquement sur une mesure SB3 VALIDE. Juste
+  // après une écriture le cloud traîne : rééquilibrer sur ce chiffre-là reviendrait
+  // à courir après son propre retard. On ne diffère AUCUNE réponse à la maison
+  // (l'erreur compteur passe toujours en premier), on attend seulement la donnée
+  // nécessaire à un réglage qui, lui, n'a rien d'urgent.
+  if (settling) {
+    return noWrite(
+      'allocate',
+      `compteur à l'équilibre — mesure SB3 en cours de rafraîchissement`,
+      houseLoadW,
+      base
+    );
+  }
+  const battTotalW = Math.max(0, sb3Out + inputs.maxac.acNetW);
   return applyTarget(
-    targetRaw,
-    mode,
-    rescue
-      ? `rescue — Max AC ${Math.round(inputs.maxac.socPct)} % < ${cfg.maxAcMinPct} %, la consigne suit la charge`
-      : sunUp && sb3Serving
-        ? `SB3 pleines (${Math.round(sb3Soc ?? 0)} %) — elles servent la maison : charge ${houseLoadW} W, cible ${targetRaw} W`
-        : `nuit — charge maison ${houseLoadW} W, cible ${targetRaw} W (marge ${cfg.marginW} W)`
+    shareSb3 * battTotalW,
+    `répartition — part SB3 ${pctSb3} % de ${battTotalW} W batterie ` +
+      `(${Math.round(sb3UsableWh / 100) / 10}/${Math.round(parkUsableWh / 100) / 10} kWh utilisables)`
   );
 
-  /** Applique slew, bande morte (2 évaluations) et dwell à une cible brute. */
-  function applyTarget(rawW: number, m: Sb3Decision['mode'], reason: string): Sb3Decision {
-    // Slew depuis la consigne en place (ancrage cloud au premier cycle).
-    // MONTÉE D'URGENCE : quand le compteur voit un soutirage RÉEL, le déficit
-    // n'est pas estimé, il est MESURÉ — et à +300 W par écriture (une toutes les
-    // 5 min) il faudrait 40 min pour couvrir 2 kW, donc 40 min payées à EDF.
-    // On autorise alors un pas égal au soutirage constaté. Uniquement à la
-    // hausse, uniquement sur mesure locale : la descente reste patiente, et
-    // dwell/settle restent en place (pas de chasse au retard du cloud).
-    const anchor = currentW ?? 0;
-    const importW = inputs.em50.ok ? Math.max(0, inputs.em50.gridW) : 0;
-    const upStep = Math.max(cfg.slewW, importW > cfg.marginW ? importW : 0);
-    const slewed = Math.round(clamp(rawW, anchor - cfg.slewW, anchor + upStep));
-
-    // Bande morte sur la consigne EN PLACE : ne pas s'agiter pour < deadbandW.
-    if (currentW !== null && Math.abs(slewed - currentW) <= cfg.deadbandW) {
-      return {
-        writeW: null,
-        targetW: slewed,
-        mode: m,
-        reason: `${reason} — dans la bande morte`,
-        houseLoadW,
-        sb3Serving,
-        pendingDeadband: 0,
-        pendingDeadbandDir: null
-      };
+  /** Bande morte EN WATTS : une résolution, pas un délai. */
+  function applyTarget(rawW: number, reason: string): Sb3Decision {
+    const targetW = Math.round(clamp(rawW, 0, cfg.maxPresetW));
+    if (currentW !== null && Math.abs(targetW - currentW) <= cfg.deadbandW) {
+      return noWrite('allocate', `${reason} — dans la bande morte`, houseLoadW, targetW);
     }
-    // Compteur DIRECTIONNEL : une excursion haute suivie d'une basse ne doit
-    // pas totaliser 2 — un changement de direction repart à 1 (revue 23/07).
-    const dir: 'up' | 'down' = currentW !== null && slewed < currentW ? 'down' : 'up';
-    const pending = state.pendingDeadbandDir === dir ? state.pendingDeadband + 1 : 1;
-    if (pending < cfg.deadbandEvals) {
-      return {
-        writeW: null,
-        targetW: slewed,
-        mode: m,
-        reason: `${reason} — hors bande (${pending}/${cfg.deadbandEvals})`,
-        houseLoadW,
-        sb3Serving,
-        pendingDeadband: pending,
-        pendingDeadbandDir: dir
-      };
-    }
-
-    // Dwell : hausses patientes, baisses plus réactives (jamais < dwellDownS).
-    const down = currentW !== null && slewed < currentW;
-    if (!canWrite(inputs.now, state, cfg, down)) {
-      return {
-        writeW: null,
-        targetW: slewed,
-        mode: m,
-        reason: `${reason} — dwell en cours`,
-        houseLoadW,
-        sb3Serving,
-        pendingDeadband: pending,
-        pendingDeadbandDir: dir
-      };
-    }
-    return {
-      writeW: slewed,
-      targetW: slewed,
-      mode: m,
-      reason,
-      houseLoadW,
-      sb3Serving,
-      pendingDeadband: 0,
-      pendingDeadbandDir: null
-    };
+    return { writeW: targetW, targetW, mode: 'allocate', reason, houseLoadW };
   }
-}
-
-function canWrite(now: number, state: Sb3LoopState, cfg: Sb3LoopConfig, down: boolean): boolean {
-  if (state.lastWriteTs === null) return true;
-  const dwellS = down ? cfg.dwellDownS : cfg.dwellUpS;
-  return now - state.lastWriteTs >= dwellS * 1000;
 }

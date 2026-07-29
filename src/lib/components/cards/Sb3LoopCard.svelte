@@ -12,9 +12,7 @@
     off: 'À l’arrêt',
     failsafe: 'Capteurs muets — gelée',
     faillow: 'Cloud douteux — repli bas',
-    day: 'Jour — les SB3 chargent',
-    night: 'Nuit — allocation active',
-    rescue: 'Secours Max AC',
+    allocate: 'Répartition au prorata',
     hold: 'En attente (mode Anker)'
   };
 
@@ -60,7 +58,7 @@
         <span class="text-[14px] font-semibold">Boucle batteries · nuit</span>
       </div>
       <span class="text-[11px]" style="color: var(--color-muted-fg);">
-        Les SB3 se vident en premier, la Max AC couvre marge et pointes
+        Chaque batterie donne au prorata de ce qu'elle peut encore fournir
       </span>
     </div>
     <button

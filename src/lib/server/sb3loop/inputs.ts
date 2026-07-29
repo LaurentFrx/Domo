@@ -53,6 +53,7 @@ async function readCloud(now: number): Promise<Sb3LoopInputs['cloud']> {
     freshS: null,
     sb3OutW: null,
     sb3SocAvg: null,
+    sb3Packs: [],
     sb3PresetW: null,
     sceneMode: null
   };
@@ -65,19 +66,26 @@ async function readCloud(now: number): Promise<Sb3LoopInputs['cloud']> {
       sb3_output_power_w?: number;
       sb3_current_preset_w?: number;
       sb3_scene_mode?: number;
-      batteries?: { model?: string; soc?: number }[];
+      batteries?: { model?: string; soc?: number; battery_capacity_wh?: number }[];
     };
     if (d.connected === false) return fail;
-    const socs = (d.batteries ?? [])
+    // A17C5 = Solarbank 3 E2700 Pro. On garde SoC ET capacité par pack : le
+    // prorata d'énergie utilisable se calcule pack par pack, pas sur une moyenne.
+    const packs = (d.batteries ?? [])
       .filter((b) => b.model === 'A17C5')
-      .map((b) => num(b.soc))
-      .filter((v): v is number => v !== null);
+      .map((b) => ({ socPct: num(b.soc), capacityWh: num(b.battery_capacity_wh) }))
+      .filter(
+        (p): p is { socPct: number; capacityWh: number } =>
+          p.socPct !== null && p.capacityWh !== null && p.capacityWh > 0
+      );
+    const socs = packs.map((p) => p.socPct);
     const lu = num(d.last_update);
     return {
       ok: true,
       freshS: lu !== null ? Math.max(0, Math.round(now / 1000 - lu)) : null,
       sb3OutW: num(d.sb3_output_power_w),
       sb3SocAvg: socs.length ? socs.reduce((a, b) => a + b, 0) / socs.length : null,
+      sb3Packs: packs,
       sb3PresetW: num(d.sb3_current_preset_w),
       sceneMode: num(d.sb3_scene_mode)
     };
@@ -99,8 +107,13 @@ export async function collectSb3Inputs(cfg: Sb3LoopConfig): Promise<Sb3LoopInput
     em50,
     aps,
     maxac: maxacRaw.available
-      ? { ok: true, socPct: maxacRaw.soc_pct, acNetW: maxacRaw.ac_power_w }
-      : { ok: false, socPct: 0, acNetW: 0 },
+      ? {
+          ok: true,
+          socPct: maxacRaw.soc_pct,
+          acNetW: maxacRaw.ac_power_w,
+          ratedEnergyWh: maxacRaw.rated_energy_wh ?? 0
+        }
+      : { ok: false, socPct: 0, acNetW: 0, ratedEnergyWh: 0 },
     cloud,
     sunElevDeg: sunPosition(now, cfg.latDeg, cfg.lonDeg).elevationDeg
   };
