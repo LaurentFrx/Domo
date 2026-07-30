@@ -23,17 +23,18 @@ en pratique tout en croyant l'appliquer.
 
 ## 1. Le système, en grandeurs physiques
 
-| Élément                       | Rôle                    | Commandable ?                                     | Mesure                               |
-| ----------------------------- | ----------------------- | ------------------------------------------------- | ------------------------------------ |
-| **2 × Solarbank 3 E2700 Pro** | 2 × 2 688 Wh, PV propre | consigne AC 0–2 400 W, **via le cloud Anker**     | SoC + sortie (cloud, retard 1–3 min) |
-| **Solarbank Max AC**          | 7 200 Wh                | **non** — asservit le compteur à zéro toute seule | Modbus **local**, ~2 s               |
-| **Onduleur APS EZ1**          | PV AC, 0–960 W          | plafond, **local**                                | local, ~10 s                         |
-| **Compteur Shelly EM-50**     | réseau signé            | —                                                 | **local, instantané**                |
+| Élément                       | Rôle                     | Commandable ?                                     | Mesure                               |
+| ----------------------------- | ------------------------ | ------------------------------------------------- | ------------------------------------ |
+| **2 × Solarbank 3 E2700 Pro** | 2 × 2 688 Wh, PV propre  | consigne AC 0–2 400 W, **via le cloud Anker**     | SoC + sortie (cloud, retard 1–3 min) |
+| **Solarbank Max AC**          | 7 200 Wh, **3 540 W AC** | **non** — asservit le compteur à zéro toute seule | Modbus **local**, ~2 s               |
+| **Onduleur APS EZ1**          | PV AC, 0–960 W           | plafond, **local**                                | local, ~10 s                         |
+| **Compteur Shelly EM-50**     | réseau signé             | —                                                 | **local, instantané**                |
 
 Deux boucles imbriquées :
 
 - **interne, rapide, matérielle** : la Max AC ramène le compteur à zéro en quelques
-  secondes, dans la limite de sa puissance (~2 000 W) et de son énergie ;
+  secondes, dans la limite de sa puissance (**3 540 W mesurés**, 3 600 W constructeur)
+  et de son énergie ;
 - **externe, lente, logicielle** : Domo alloue l'énergie **entre** batteries en
   agissant sur la seule consigne SB3.
 
@@ -220,3 +221,73 @@ et le plancher PV (réfuté au §6 — le firmware s'en charge).
 
 **Ordre** : 1 et 2 d'abord (correctifs de justesse, effet mesurable immédiat),
 observation, puis 3 et 4.
+
+---
+
+## 8. La capacité de puissance, et ce qu'il reste d'irréductible
+
+_Ajouté le 30/07 après une précision de Laurent : avant l'achat de la Max AC, la
+puissance de sortie du parc ne couvrait pas les fortes demandes (cumulus 2,9 kW +
+talon + usage domestique), d'où des compléments EDF. Vérification._
+
+**Mise en service de la Max AC : 22/07/2026 19:16** (première trace dans `history.db`).
+Puissance simultanée observée depuis : **5 608 W** batteries seules, **6 125 W** avec
+l'APS — cohérent avec les ~5 900 W annoncés par Laurent.
+
+**Achat EDF pendant que le cumulus chauffe**, mesuré au compteur EM-50 :
+
+| période          | durée  | chauffe   | achat pendant chauffe | par jour  |
+| ---------------- | ------ | --------- | --------------------- | --------- |
+| **avant** Max AC | 39,1 j | 111,1 kWh | 4 906 Wh (**4,42 %**) | 125 Wh    |
+| **après** Max AC | 7,5 j  | 16,7 kWh  | 177 Wh (**1,06 %**)   | **24 Wh** |
+
+**Facteur 5 par jour.** L'explication de Laurent est validée : c'était une limite de
+PUISSANCE, pas un défaut de régulation. Mon constat antérieur (« la règle zéro achat est
+déjà enfreinte, 2,9 kWh sur 30 jours ») portait sur une fenêtre dont 80 % précède la
+Max AC — il était juste mais trompeur.
+
+### D'où vient le résidu de 1 % ?
+
+Les 46 instants de soutirage en chauffe depuis la Max AC ont tous lieu **de jour**
+(10 h–15 h), parc à **90 % de SoC médian** — donc pas un parc vide. Et surtout :
+
+- **Max AC à sa butée (3 510–3 530 W) dans 89 % des cas** ;
+- **SB3 à 1 341 W médian, jamais au-delà de 1 851 W** — soit ~1 000 W de réserve inutilisée
+  sous leur plafond de 2 400 W.
+
+Ce qui ressemble à une faute de pilotage n'en est pas une. Le détail des épisodes le
+montre :
+
+```
+15:12:33   cumulus 2988   réseau  −50   SB3 1277   MaxAC 2060
+15:13:08   cumulus 2952   réseau +1451  SB3 1277   MaxAC 3510   ← échelon ~1,5 kW
+15:14:48   cumulus 2985   réseau   +14  SB3 1264   MaxAC 1560   ← résorbé
+```
+
+Un **échelon de charge de 1,5 à 2,8 kW** apparaît, la Max AC monte à sa butée en quelques
+secondes (elle est locale), le réseau comble la différence pendant ~30 à 60 s, puis tout
+rentre dans l'ordre. **Les SB3 ne bougent pas** — et elles ne peuvent pas : leur commande
+passe par le **cloud Anker**, soit un tick de 20 s plus l'aller-retour. L'événement est
+terminé avant qu'elles aient pu répondre.
+
+### Conséquence pour la règle 1
+
+Le résidu n'est pas réductible par la loi de commande. Il est fixé par la chaîne
+d'actionnement :
+
+- la seule batterie assez rapide pour un transitoire est la **Max AC**, et elle atteint
+  déjà sa butée ;
+- les SB3 ont la réserve de puissance, mais pas la réactivité.
+
+Les deux seules voies pour aller plus loin, par ordre de valeur :
+
+1. **une commande LOCALE des SB3** (Modbus ou MQTT) — supprimerait le retard cloud ;
+   vérifié le 29/07 : les tunnels 1502/1503 ne desservent que le compteur Gen 2 et la
+   Max AC, les SB3 ne sont pas exposées. À chercher côté firmware SB3.
+2. **anticiper l'échelon connu** : le seul échelon de 2,9 kW prévisible est le cumulus
+   lui-même, puisque c'est NOUS qui l'allumons. Monter la consigne SB3 _avant_ de fermer
+   le relais supprimerait le transitoire à la source — sans rien deviner, puisque
+   l'instant est choisi.
+
+La seconde est gratuite et sûre : elle n'ajoute aucune prédiction météo ni aucun seuil,
+seulement l'ordre correct de deux actions que l'on commande déjà.
