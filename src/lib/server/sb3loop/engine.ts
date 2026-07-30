@@ -71,7 +71,35 @@ interface WriteResult {
   confirmedW: number | null;
 }
 
-async function writePreset(presetW: number): Promise<WriteResult> {
+/**
+ * Battement de cœur du BAIL de consigne — appel LOCAL au pont, AUCUN appel cloud.
+ * En mode personnalisé, une écriture GRAVE la valeur dans le créneau du plan, et
+ * l'entrée couvrant week=[0..6] elle vaut les SEPT JOURS : si Domo meurt, la
+ * dernière consigne reste en place et un système SB3 SANS COMPTEUR la débiterait
+ * à l'aveugle chaque jour. Le pont rend donc le plan statique de lui-même si ce
+ * battement s'arrête. Il est volontairement LOCAL : renouveler par une réécriture
+ * cloud coûterait des centaines d'écritures par jour et ruinerait à la fois le
+ * quota Anker et la mesure du taux d'écriture en cours.
+ */
+async function heartbeatLease(safePresetW: number | null): Promise<void> {
+  const token = env.SB3_BRIDGE_WRITE_TOKEN;
+  if (!token) return;
+  try {
+    await fetch(`${bridgeUrl()}/api/sb3/heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      // Le battement porte AUSSI le repli : un bail ouvert juste avant un
+      // redéploiement garderait sinon `safe: null` et resterait NON protégé
+      // jusqu'à la prochaine écriture (constaté le 30/07).
+      body: JSON.stringify({ safe_preset: safePresetW }),
+      signal: AbortSignal.timeout(8_000)
+    });
+  } catch {
+    /* le pont est injoignable : c'est justement le cas que son bail couvre */
+  }
+}
+
+async function writePreset(presetW: number, safePresetW: number | null): Promise<WriteResult> {
   const token = env.SB3_BRIDGE_WRITE_TOKEN;
   if (!token) return { ok: false, confirmedW: null };
   presetW = Math.round(Math.min(2400, Math.max(0, presetW)));
@@ -79,7 +107,10 @@ async function writePreset(presetW: number): Promise<WriteResult> {
     const r = await fetch(`${bridgeUrl()}/api/sb3/output`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ preset: presetW }),
+      // safe_preset = valeur du plan STATIQUE pour le créneau courant : c'est elle
+      // que le pont rendra tout seul si le bail expire. Le plan statique reste
+      // défini ici (config Domo), le pont ne le devine pas.
+      body: JSON.stringify({ preset: presetW, safe_preset: safePresetW }),
       signal: AbortSignal.timeout(45_000) // login owner + POST + relecture cloud
     });
     if (!r.ok) return { ok: false, confirmedW: null };
@@ -218,6 +249,14 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
       );
     }
 
+    // Le bail se renouvelle à chaque tick, même quand aucune écriture n'a lieu :
+    // c'est précisément la bande morte (donc l'absence d'écriture) qui rendrait un
+    // renouvellement par réécriture cloud absurde.
+    {
+      const hbSlot = planSlot(cfg, now);
+      void heartbeatLease(hbSlot !== null ? staticPlanW(cfg, hbSlot) : null);
+    }
+
     const inputs = await collectSb3Inputs(cfg);
     const d = decide(inputs, cfg, state);
     state.enVol = d.enVol;
@@ -232,7 +271,7 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
       if (slot !== null && !state.pendingRestoreSlots.includes(slot)) {
         state.pendingRestoreSlots.push(slot);
       }
-      const w = await writePreset(d.writeW);
+      const w = await writePreset(d.writeW, slot !== null ? staticPlanW(cfg, slot) : null);
       writtenW = d.writeW;
       confirmedW = w.confirmedW;
       const confirmed =
@@ -360,7 +399,9 @@ async function restoreStaticPlan(
   }
 
   const target = staticPlanW(cfg, slot);
-  const w = await writePreset(target);
+  // On écrit le plan statique ET on le déclare comme repli : le pont referme
+  // alors le bail (plus rien à surveiller).
+  const w = await writePreset(target, target);
   const confirmed =
     w.ok && w.confirmedW !== null && Math.abs(w.confirmedW - target) <= cfg.confirmToleranceW;
 
