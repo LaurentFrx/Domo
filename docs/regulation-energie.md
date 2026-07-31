@@ -369,7 +369,7 @@ Et l'arbitrage entre les deux lectures de la règle 2 (prorata de la place, qui 
 les SoC, contre ordre de mérite, qui minimise les pertes) ne vaut de toute façon que
 **14 à 40 Wh/jour** — contre **~2 000 Wh/jour** pour la question « déverser ou non ».
 
-### 9.6 Défaut collatéral vérifié : le prédicteur de Smith est INERTE
+### 9.6 Défaut collatéral vérifié : le prédicteur de Smith est INERTE — et c'est CORRECT (voir la réfutation en fin de section)
 
 Sa fenêtre `enVolS` vaut **20 s**, la période réelle du tick **23,2 s** (médiane, min 20,
 max 25) : **100 % des ticks dépassent la fenêtre**, la file des corrections en vol est
@@ -381,3 +381,64 @@ Correction dérivable : la fenêtre doit survivre à exactement un tick, donc ê
 entre T et 2T, soit **30 s** (à 45 s elle survivait deux ticks et sur-corrigeait —
 mesuré : 137 → 2 146 → 0 W). Non appliqué : le système est stable, rallumer un
 prédicteur resté inerte demande un test dédié.
+
+**⚠️ RÉFUTÉ le 31/07 par le test dédié (§10).** Le raisonnement « survivre à un tick »
+suppose que la correction n'est **pas encore visible** au tick suivant. Or la visibilité
+mesurée (écriture → compteur) est de 8-25 s, **le plus souvent INFÉRIEURE au pas de
+tick** (20-25 s) : à la relecture, la correction est déjà dans le chiffre du compteur.
+Une fenêtre ≥ tick la retranche quand même — la boucle voit alors une « injection »
+fantôme et **annule sa propre écriture**, en continu. Banc apparié (mêmes tirages,
+seule la fenêtre change), régime saturé dimensionnant : enVolS 30 s = **18 écritures
+par 9 min contre 1**, énergie hors équilibre **43 Wh contre 6**. L'asymétrie tranche :
+fenêtre trop courte = double correction bornée, auto-réparée en un tick ; trop longue =
+inversions fantômes entretenues. **enVolS reste à 20 s.**
+
+---
+
+## 10. Feedforward de l'échelon cumulus — banc du 31/07 et mise en œuvre
+
+_Banc : `docs/etudes/verif_prearm_fenetre.py` (SymPy + Monte Carlo temps continu,
+dt = 1 s, 2 000 événements **appariés** — mêmes tirages physiques pour chaque
+stratégie, graines fixées). Modèle calé sur les mesures : butée Max AC 3 540 W,
+τ ≈ 2 s, absorption en charge défaillante ~50 % du temps (§9.3), visibilité
+d'écriture 8-25 s, tick 20-25 s, part SB3 40-60 %, charge concurrente 500-2 000 W
+dans 35 % des cas (le scénario « cumulus + lave-linge » de la règle 0)._
+
+### 10.1 Ce que le banc a tranché
+
+| décision                                                            | verdict                   | preuve                                                                                                                                                                                             |
+| ------------------------------------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **enVolS 30 s (§9.6)**                                              | **RÉFUTÉ** — reste à 20 s | achat ×4, écritures ×6 en régime saturé (contre-épreuve appariée)                                                                                                                                  |
+| **Pré-armement** (consigne SB3 montée AVANT la fermeture du relais) | **ADOPTÉ**                | achat −71 % sur les allumages qui achetaient (5,3 → 1,5 Wh méd), p90 5,7 → 1,6 Wh, **jamais pire** (0 % des tirages appariés négatifs), surcoût d'injection nul avec la fermeture sur confirmation |
+| **Désarmement** (part SB3 rendue à l'ouverture)                     | **ADOPTÉ**                | recyclage SB3→Max AC 64 → 9 Wh/extinction, injection 33 → 4 Wh, achat induit 1,7 → 0,5 Wh — gagne sur TOUS les critères                                                                            |
+
+Le séquencement du pré-armement compte : fermer le relais **sur confirmation** de
+l'écriture (budget borné 22 s) réduit la fenêtre d'injection à ~2 s. Une variante
+« fermer au tick suivant » coûtait ~9,5 Wh d'injection par allumage — rejetée.
+
+### 10.2 Mise en œuvre (31/07)
+
+- `sb3loop/decide.ts` : `feedforwardTarget()` **pure** — part au prorata de
+  l'énergie utilisable (règle 2), mêmes yeux que `decide()` (EM-50 + Modbus
+  vivants, cloud frais, mode Anker manuel), bande morte respectée.
+- `sb3loop/engine.ts` : `feedforwardCumulusStep(stepW)` — sous le même verrou
+  d'état que le tick, écriture bornée à 15 s, marquage `pendingRestoreSlots`
+  avant écriture, `settle` armé ; **best-effort** : tout refus ⇒ comportement
+  d'avant. Pas d'escalade `confirmFailCount` (la politique d'auto-désactivation
+  appartient à la boucle).
+- `ffHoldUntilTs` (30 s) : entre l'écriture et l'échelon, l'excédent transitoire
+  est VOULU — les **baisses** sont suspendues, les **montées restent libres**
+  (règle 1 intouchée, testé).
+- `cumulus/engine.ts` : OFF→ON ⇒ pré-armement de `heatPowerW` (2 900 W) attendu
+  au plus 22 s puis fermeture ; ON→OFF ⇒ ouverture **immédiate** puis
+  désarmement de la puissance **mesurée** (EM-50 voie ballon) en arrière-plan.
+  S'applique à tous les déclencheurs (pilote, HC, boost, manuel) — comme le
+  veto de soutirage.
+
+### 10.3 Ce que ça ne règle pas
+
+Les échelons **imprévisibles** (autre appareil, passage nuageux) restent bornés
+par la chaîne cloud des SB3 (~20-45 s) — mais le pré-armement laisse à la Max AC
+sa **marge de puissance** pendant la chauffe, ce qui absorbe localement une
+partie de ces échelons-là aussi. La vraie sortie reste une commande LOCALE des
+SB3 (§8, voie 1), toujours introuvable côté firmware.
