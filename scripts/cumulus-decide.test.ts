@@ -252,3 +252,62 @@ test('désinfection tracée dès 60°C', () => {
   const d = decide(inp({ tempC: 61 }), cfg(), st({ lastDisinfectTs: null }), wantWait);
   assert.equal(d.nextState.lastDisinfectTs, NOW);
 });
+
+// ─── VETO ABSOLU DE SOUTIRAGE — règle 1, tous modes confondus ────────────
+// « ON NE DOIT JAMAIS POMPER SUR LE RÉSEAU EDF. » Mesuré sur 30 jours :
+// manual_on et boost portaient 86 % des achats EDF du cumulus (1 491 Wh sur
+// 1 727) parce qu'ils posaient bypass = true sans jamais regarder le compteur.
+
+test('VETO : le BOOST ne chauffe plus sur EDF', () => {
+  const d = decide(
+    inp({ gridPowerW: 800, cumulusPowerW: 2950 }),
+    cfg(),
+    st({ boostUntilFull: true, relayOn: true, onSinceTs: NOW - min(20) })
+  );
+  assert.equal(d.relayDesired, false);
+  assert.equal(d.reason, 'grid_veto');
+});
+
+test('VETO : le mode MANUEL ne chauffe plus sur EDF', () => {
+  const d = decide(
+    inp({ gridPowerW: 800, cumulusPowerW: 2950 }),
+    cfg(),
+    st({ autoMode: 'manual', manualRelayOn: true, relayOn: true, onSinceTs: NOW - min(20) })
+  );
+  assert.equal(d.relayDesired, false);
+  assert.equal(d.reason, 'grid_veto');
+});
+
+test('VETO : il FRANCHIT l’anti-court-cycle (2,9 kW sur EDF ne se négocie pas)', () => {
+  const d = decide(
+    inp({ gridPowerW: 900, cumulusPowerW: 2950 }),
+    cfg(),
+    // allumé il y a 10 s : minOnSec bloquerait normalement toute coupure
+    st({
+      boostUntilFull: true,
+      relayOn: true,
+      onSinceTs: NOW - 10_000,
+      lastTransitionTs: NOW - 10_000
+    })
+  );
+  assert.equal(d.relayDesired, false, 'la coupure doit passer malgré minOnSec');
+});
+
+test('VETO : sous le seuil d’achat franc, le boost continue normalement', () => {
+  const d = decide(
+    inp({ gridPowerW: 120, cumulusPowerW: 2950 }),
+    cfg(),
+    st({ boostUntilFull: true, relayOn: true, onSinceTs: NOW - min(20) })
+  );
+  assert.equal(d.reason, 'boost');
+  assert.equal(d.relayDesired, true);
+});
+
+test('VETO : compteur muet → on ne coupe pas à l’aveugle', () => {
+  const d = decide(
+    inp({ em50Available: false, gridPowerW: 900, cumulusPowerW: 2950 }),
+    cfg(),
+    st({ boostUntilFull: true, relayOn: true, onSinceTs: NOW - min(20) })
+  );
+  assert.notEqual(d.reason, 'grid_veto');
+});
