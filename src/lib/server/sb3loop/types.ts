@@ -23,7 +23,12 @@ export interface Sb3LoopConfig {
    *  compteur reflète DÉJÀ et la boucle sur-corrige — observé en direct le 28/07
    *  avec 45 s (137 → 2 146 → 0 W en deux ticks). Mesure : une écriture de
    *  −1 204 W à 16:48:16 était visible au compteur au tick suivant (20 s).
-   *  Donc le retard est < 1 tick et la fenêtre vaut UN tick, pas davantage. */
+   *  Donc le retard est < 1 tick et la fenêtre vaut UN tick, pas davantage.
+   *  ⚠ NE PAS « réparer » avec 30 s (idée du §9.6 de l'étude) : le banc apparié
+   *  du 31/07 (docs/etudes/verif_prearm_fenetre.py) la RÉFUTE — la visibilité
+   *  (8-25 s) étant le plus souvent < au pas de tick, une fenêtre ≥ tick
+   *  retranche des corrections DÉJÀ visibles et la boucle annule ses propres
+   *  écritures en continu (achat ×4, écritures ×6 en régime saturé). */
   enVolS: number;
   /** Puissance AC max de la Max AC (W) — borne le rééquilibrage de partage :
    *  on ne déplace pas vers elle plus qu'elle ne peut fournir ou absorber.
@@ -42,6 +47,13 @@ export interface Sb3LoopConfig {
    *  0,5, le partage est tenu à ±200 W — négligeable devant les 2 400 W de
    *  consigne, pour 2 à 3 écritures par rééquilibrage. */
   shareGain: number;
+  /** Durée du blocage des BAISSES de consigne après un pré-armement cumulus
+   *  (feedforward) : la consigne montée AVANT la fermeture du relais crée un
+   *  excédent transitoire que la boucle prendrait pour une injection à
+   *  corriger — elle annulerait le pré-armement juste avant l'échelon. Les
+   *  MONTÉES restent libres (règle 1 intouchée). Vérifié par le banc apparié
+   *  du 31/07 (docs/etudes/verif_prearm_fenetre.py). */
+  ffHoldS: number;
   /** RÈGLE 0 — rééquilibrage de CHARGE. Écart de remplissage relatif au-delà
    *  duquel on détourne le PV des SB3 vers la Max AC. Bande d'hystérésis : en
    *  deçà on ne touche à rien (le détour coûte une conversion de plus). */
@@ -163,6 +175,10 @@ export interface Sb3LoopState {
    *  Smith) : {ts, deltaW}. Sans elles la boucle compte deux fois la même
    *  correction et entre en cycle limite (docs/regulation-energie.md §3-4). */
   enVol: { ts: number; dW: number }[];
+  /** Jusqu'à cet instant, les BAISSES de consigne sont suspendues : un
+   *  pré-armement cumulus vient de monter la consigne AVANT l'échelon de
+   *  charge — l'excédent que voit le compteur est voulu et éphémère. */
+  ffHoldUntilTs: number | null;
   /** Dernière consigne ÉCRITE par la boucle (ancrage du slew). */
   lastCmdW: number | null;
   lastWriteTs: number | null;
@@ -190,6 +206,7 @@ export function defaultSb3LoopState(): Sb3LoopState {
     autoDisabledReason: null,
     autoDisabledTs: null,
     enVol: [],
+    ffHoldUntilTs: null,
     lastCmdW: null,
     lastWriteTs: null,
     confirmFailCount: 0,
@@ -207,6 +224,7 @@ export function defaultSb3LoopConfig(): Sb3LoopConfig {
   return {
     reservePct: 10,
     enVolS: 20,
+    ffHoldS: 30,
     maxAcPowerW: 3600,
     shareGain: 0.5,
     rebalanceBandFrac: 0.1,

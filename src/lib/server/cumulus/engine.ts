@@ -13,6 +13,7 @@
  */
 
 import { decide, type PilotWant } from './decide';
+import { feedforwardCumulusStep } from '../sb3loop/engine';
 import { collectInputs } from './inputs';
 import { readCumulusConfig } from './config';
 import { readCumulusState, writeCumulusState } from './state-store';
@@ -37,6 +38,10 @@ import { sendPush } from '../monitor/push';
 import type { AutoMode, DecisionLogEntry, ShadowEvent, DesirShadowSample } from './types';
 
 const TICK_TIMEOUT_MS = 45_000; // < intervalle timer (60 s)
+// Budget d'attente du PRÉ-ARMEMENT SB3 avant fermeture du relais : au-delà, on
+// ferme quand même (repli = comportement d'avant) et l'écriture, si elle
+// aboutit en retard, atterrit juste après la fermeture — encore utile.
+const PREARM_BUDGET_MS = 22_000;
 const SHADOW_HEAT_W = 500; // conso EM-50 voie cumulus au-dessus → « en chauffe » (timeline)
 const SHADOW_LOG_MAX = 80; // taille du journal (timeline du jour)
 const DESIR_SHADOW_MAX = 240; // journal du modèle shadow de désirabilité (~4,3 h à 65 s/tick)
@@ -204,11 +209,41 @@ async function runTick(apply: boolean): Promise<TickResult> {
     const needChange = relayOn !== desired;
     const needRearm = desired === true; // ré-armer le watchdog Shelly tant qu'on veut ON
     if (needChange || needRearm) {
+      // ── FEEDFORWARD SB3 (étude §8 + banc du 31/07) : l'échelon du cumulus est
+      // le SEUL échelon prévisible — c'est nous qui choisissons l'instant. ──
+      if (needChange && desired) {
+        // PRÉ-ARMEMENT : monter la part SB3 AVANT de fermer le relais, pour que
+        // la Max AC n'ait pas à monter seule en butée pendant que les SB3
+        // attendent le cloud (~30-60 s d'achat EDF sinon). Attente BORNÉE :
+        // budget dépassé ⇒ on ferme quand même, l'écriture suit et aide encore.
+        const note = await Promise.race([
+          feedforwardCumulusStep(config.pilot.heatPowerW).then((r) => r.note),
+          new Promise<string>((resolve) => {
+            const t = setTimeout(
+              () =>
+                resolve(`budget ${PREARM_BUDGET_MS / 1000} s dépassé — fermeture sans attendre`),
+              PREARM_BUDGET_MS
+            );
+            t.unref?.(); // jamais retenir l'arrêt du service (leçon SIGTERM)
+          })
+        ]);
+        console.log(`[cumulus] pré-armement SB3 : ${note}`);
+      }
       const res = await setRelay(desired, desired ? config.autoOffDelaySec : undefined);
       if (res.ok) {
         applied = needChange;
         if (res.on !== null) relayOn = res.on;
         if (res.on !== null && res.on !== desired) next.anomaly = 'desync';
+        // DÉSARMEMENT : à l'ouverture, rendre la part SB3 de la puissance
+        // MESURÉE du ballon (EM-50 voie 1) — sinon la descente progressive
+        // laisse les SB3 sur-livrer plusieurs minutes (recyclage vers la
+        // Max AC + injection quand elle n'absorbe pas). L'ouverture, elle, ne
+        // se diffère JAMAIS : l'écriture part en arrière-plan, après coup.
+        if (needChange && !desired && inputs.cumulusPowerW > SHADOW_HEAT_W) {
+          void feedforwardCumulusStep(-inputs.cumulusPowerW).then((r) =>
+            console.log(`[cumulus] désarmement SB3 : ${r.note}`)
+          );
+        }
       } else {
         next.anomaly = 'relay_unreachable';
       }

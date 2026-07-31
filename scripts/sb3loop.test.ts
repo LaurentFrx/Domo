@@ -10,7 +10,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, usableWh } from '../src/lib/server/sb3loop/decide.ts';
+import { decide, feedforwardTarget, usableWh } from '../src/lib/server/sb3loop/decide.ts';
 import {
   defaultSb3LoopConfig,
   defaultSb3LoopState,
@@ -563,4 +563,123 @@ test('RÈGLE 0 : baisse interdite → on RÉÉQUILIBRE au lieu d’attendre', ()
   );
   assert.match(d.reason, /RÉÉQUILIBRAGE/);
   assert.ok((d.writeW ?? 0) > 241, 'la consigne doit MONTER pour soulager la Max AC');
+});
+
+// ─── FEEDFORWARD — pré-armement / désarmement de l'échelon cumulus ────────
+// L'échelon du cumulus est le seul échelon prévisible (c'est nous qui
+// l'allumons) : la part SB3 monte AVANT la fermeture du relais et se rend à
+// l'ouverture. Banc apparié du 31/07 : docs/etudes/verif_prearm_fenetre.py.
+
+test('FEEDFORWARD : pré-armement au prorata de l’énergie utilisable', () => {
+  // SB3 2×2688 à 80 % → 3 763,2 Wh ; Max AC 7 200 à 60 % → 3 600 Wh
+  // part SB3 = 3763,2/7363,2 ≈ 51 % ; +2 900 W → +1 482 W sur la consigne.
+  const t = feedforwardTarget(
+    inp({ cloud: { ...inp().cloud, sb3Packs: packs(80), sb3PresetW: 300 } }),
+    cfg,
+    st({ lastCmdW: 300 }),
+    2900
+  );
+  assert.ok(t.ok);
+  if (t.ok) {
+    assert.equal(t.baseW, 300);
+    assert.ok(Math.abs(t.targetW - 1782) <= 5, `cible ≈ 1782 W (obtenu ${t.targetW})`);
+    assert.equal(t.sharePct, 51);
+  }
+});
+
+test('FEEDFORWARD : désarmement — la part SB3 mesurée est rendue', () => {
+  const t = feedforwardTarget(
+    inp({ cloud: { ...inp().cloud, sb3Packs: packs(80) } }),
+    cfg,
+    st({ lastCmdW: 1800 }),
+    -2900
+  );
+  assert.ok(t.ok);
+  if (t.ok) assert.ok(Math.abs(t.targetW - 318) <= 5, `cible ≈ 318 W (obtenu ${t.targetW})`);
+});
+
+test('FEEDFORWARD : la cible est écrêtée au plafond de consigne', () => {
+  const t = feedforwardTarget(
+    inp({ cloud: { ...inp().cloud, sb3Packs: packs(80) } }),
+    cfg,
+    st({ lastCmdW: 2000 }),
+    2900
+  );
+  assert.ok(t.ok);
+  if (t.ok) assert.equal(t.targetW, cfg.maxPresetW);
+});
+
+test('FEEDFORWARD : SB3 à leur réserve → rien à pré-armer', () => {
+  const t = feedforwardTarget(
+    inp({ cloud: { ...inp().cloud, sb3Packs: packs(10) } }),
+    cfg,
+    st(),
+    2900
+  );
+  assert.ok(!t.ok && /réserve/.test(t.ok ? '' : t.reason));
+});
+
+test('FEEDFORWARD : cloud périmé ou mode Anker ≠ manuel → pas de mains', () => {
+  const stale = feedforwardTarget(inp({ cloud: { ...inp().cloud, freshS: 999 } }), cfg, st(), 2900);
+  assert.ok(!stale.ok);
+  const badMode = feedforwardTarget(
+    inp({ cloud: { ...inp().cloud, sceneMode: 1 } }),
+    cfg,
+    st(),
+    2900
+  );
+  assert.ok(!badMode.ok);
+});
+
+test('FEEDFORWARD : un pas sous la bande morte ne s’écrit pas', () => {
+  const t = feedforwardTarget(
+    inp({ cloud: { ...inp().cloud, sb3Packs: packs(80) } }),
+    cfg,
+    st({ lastCmdW: 300 }),
+    150 // ×51 % ≈ 77 W < bande morte 100 W
+  );
+  assert.ok(!t.ok);
+});
+
+// ─── HOLD du pré-armement : les baisses attendent, les montées jamais ─────
+
+test('HOLD : pendant le pré-armement, l’injection transitoire n’est PAS corrigée', () => {
+  // Consigne montée à 1 800 W, relais pas encore fermé : le compteur voit une
+  // injection. Sans le hold, la boucle annulerait le pré-armement.
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: -400 },
+      maxac: { ok: true, socPct: 60, acNetW: -50, ratedEnergyWh: 7200 }, // absorbe un peu
+      cloud: { ...inp().cloud, sb3OutW: 1800, sb3Packs: packs(80) }
+    }),
+    cfg,
+    st({ lastCmdW: 1800, lastWriteTs: NOW - 5_000, ffHoldUntilTs: NOW + 20_000 })
+  );
+  assert.ok(d.writeW === null || d.writeW >= 1800, `pas de baisse (obtenu ${d.writeW})`);
+});
+
+test('HOLD : la RÈGLE 1 prime — un soutirage pendant le hold monte quand même', () => {
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: 800 },
+      maxac: { ok: true, socPct: 60, acNetW: 2500, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 1800, sb3Packs: packs(80) }
+    }),
+    cfg,
+    st({ lastCmdW: 1800, lastWriteTs: NOW - 5_000, ffHoldUntilTs: NOW + 20_000 })
+  );
+  assert.ok((d.writeW ?? 0) >= 2400, `le soutirage est couvert (obtenu ${d.writeW})`);
+});
+
+test('HOLD : expiré → la baisse redevient normale', () => {
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: -600 },
+      maxac: { ok: true, socPct: 60, acNetW: -800, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 2000, sb3PvW: 500, sb3Packs: packs(90) }
+    }),
+    cfg,
+    st({ lastCmdW: 2000, ffHoldUntilTs: NOW - 1_000 })
+  );
+  assert.ok((d.writeW ?? 2000) < 2000, 'hold expiré : on baisse');
 });

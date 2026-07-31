@@ -41,6 +41,56 @@ export function usableWh(socPct: number, capacityWh: number, reservePct: number)
   return Math.max(0, capacityWh * (Math.min(100, Math.max(0, socPct)) - reservePct)) / 100;
 }
 
+export type FeedforwardTarget =
+  | { ok: true; targetW: number; baseW: number; sharePct: number }
+  | { ok: false; reason: string };
+
+/**
+ * Cible de FEEDFORWARD pour un échelon de charge que NOUS commandons
+ * (cumulus : fermeture ou ouverture du relais). L'instant de l'échelon étant
+ * choisi, monter la part SB3 AVANT de fermer — et la rendre à l'ouverture —
+ * supprime le transitoire à la source, sans prédiction (étude §8, banc §10).
+ *
+ * stepW SIGNÉ : + la charge va apparaître (pré-armement), − elle disparaît.
+ * La part suit la RÈGLE 2 : prorata de l'énergie utilisable, la Max AC prend
+ * automatiquement le complément. Mêmes yeux que decide() : sans mesures
+ * locales fraîches ni mode manuel Anker, pas de mains.
+ */
+export function feedforwardTarget(
+  inputs: Sb3LoopInputs,
+  cfg: Sb3LoopConfig,
+  state: Sb3LoopState,
+  stepW: number
+): FeedforwardTarget {
+  if (!inputs.em50.ok || !inputs.maxac.ok) {
+    return { ok: false, reason: 'mesures locales muettes — pas de feedforward' };
+  }
+  const cloudFresh =
+    inputs.cloud.ok && inputs.cloud.freshS !== null && inputs.cloud.freshS <= cfg.cloudStaleS;
+  if (!cloudFresh) return { ok: false, reason: 'cloud périmé — pas de feedforward' };
+  if (inputs.cloud.sceneMode !== 3) {
+    return { ok: false, reason: `mode Anker ${inputs.cloud.sceneMode} ≠ manuel` };
+  }
+
+  const sb3UsableWh = inputs.cloud.sb3Packs.reduce(
+    (s, p) => s + usableWh(p.socPct, p.capacityWh, cfg.reservePct),
+    0
+  );
+  if (stepW > 0 && sb3UsableWh <= 0) {
+    return { ok: false, reason: `SB3 à leur réserve (${cfg.reservePct} %) — rien à pré-armer` };
+  }
+  const maxAcUsableWh = usableWh(inputs.maxac.socPct, inputs.maxac.ratedEnergyWh, cfg.reservePct);
+  const parkUsableWh = sb3UsableWh + maxAcUsableWh;
+  const share = parkUsableWh > 0 ? sb3UsableWh / parkUsableWh : 0;
+
+  const base = clamp(state.lastCmdW ?? inputs.cloud.sb3PresetW ?? 0, 0, cfg.maxPresetW);
+  const targetW = Math.round(clamp(base + share * stepW, 0, cfg.maxPresetW));
+  if (Math.abs(targetW - base) <= cfg.deadbandW) {
+    return { ok: false, reason: 'écart dans la bande morte — rien à écrire' };
+  }
+  return { ok: true, targetW, baseW: base, sharePct: Math.round(share * 100) };
+}
+
 export function decide(
   inputs: Sb3LoopInputs,
   cfg: Sb3LoopConfig,
@@ -169,7 +219,11 @@ export function decide(
   // 3 110 à 3 170 W de décharge et de 15 % à 14 % pendant que les SB3 montaient
   // à 35 %. Cercle vicieux exact.
   const maxAcDebite = inputs.maxac.acNetW > cfg.deadbandW;
-  const baisseInterdite = erreurW < 0 && maxAcDebite;
+  // Pré-armement cumulus en cours : la consigne vient d'être montée EXPRÈS,
+  // AVANT l'échelon de charge — l'excédent transitoire n'est pas une erreur à
+  // corriger. Baisses suspendues quelques secondes ; montées toujours libres.
+  const ffHold = (state.ffHoldUntilTs ?? 0) > inputs.now;
+  const baisseInterdite = erreurW < 0 && (maxAcDebite || ffHold);
 
   if (Math.abs(erreurW) > cfg.deadbandW && !baisseInterdite) {
     const cible = clamp(base + erreurW, 0, cfg.maxPresetW);

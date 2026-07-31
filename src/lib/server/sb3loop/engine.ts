@@ -18,7 +18,7 @@ import { readJsonSafe, writeJsonAtomic, withFileLock } from '$lib/server/atomic-
 import { sendPush } from '$lib/server/monitor/push';
 import { parisDate } from '$lib/server/tariffs';
 import { collectSb3Inputs } from './inputs';
-import { decide } from './decide';
+import { decide, feedforwardTarget } from './decide';
 import {
   defaultSb3LoopConfig,
   defaultSb3LoopState,
@@ -99,7 +99,15 @@ async function heartbeatLease(safePresetW: number | null): Promise<void> {
   }
 }
 
-async function writePreset(presetW: number, safePresetW: number | null): Promise<WriteResult> {
+/** Écriture de la consigne via le pont (login owner + POST + relecture cloud).
+ *  `timeoutMs` : le tick de la boucle laisse le plein budget (45 s) ; le
+ *  pré-armement cumulus, lui, est borné plus court — au-delà, on ferme le
+ *  relais quand même et l'écriture atterrit juste après (toujours utile). */
+async function writePreset(
+  presetW: number,
+  safePresetW: number | null,
+  timeoutMs = 45_000
+): Promise<WriteResult> {
   const token = env.SB3_BRIDGE_WRITE_TOKEN;
   if (!token) return { ok: false, confirmedW: null };
   presetW = Math.round(Math.min(2400, Math.max(0, presetW)));
@@ -111,7 +119,7 @@ async function writePreset(presetW: number, safePresetW: number | null): Promise
       // que le pont rendra tout seul si le bail expire. Le plan statique reste
       // défini ici (config Domo), le pont ne le devine pas.
       body: JSON.stringify({ preset: presetW, safe_preset: safePresetW }),
-      signal: AbortSignal.timeout(45_000) // login owner + POST + relecture cloud
+      signal: AbortSignal.timeout(timeoutMs)
     });
     if (!r.ok) return { ok: false, confirmedW: null };
     const d = (await r.json()) as { ok?: boolean; confirmed_w?: number | null };
@@ -172,6 +180,91 @@ async function checkLibVersion(): Promise<void> {
   } catch {
     /* check best-effort — jamais bloquant */
   }
+}
+
+/** Budget d'écriture du feedforward : bien plus court que les 45 s du tick —
+ *  l'appelant (moteur cumulus) ne peut pas attendre le plein aller-retour. */
+const FF_WRITE_TIMEOUT_MS = 15_000;
+
+export interface FeedforwardOutcome {
+  /** Écriture posée ET confirmée par le pont. */
+  wrote: boolean;
+  targetW: number | null;
+  note: string;
+}
+
+/**
+ * FEEDFORWARD de l'échelon cumulus (étude §8, banc apparié §10) : le seul
+ * échelon de 2,9 kW PRÉVISIBLE est celui que nous commandons nous-mêmes.
+ *
+ *  - stepW > 0 (pré-armement) : monter la part SB3 AVANT de fermer le relais
+ *    supprime le transitoire d'achat EDF à la source (−71 % mesuré au banc sur
+ *    les allumages qui achetaient) — la Max AC n'a plus à monter seule en
+ *    butée pendant que les SB3 attendent le cloud.
+ *  - stepW < 0 (désarmement) : rendre la part SB3 à l'ouverture évite le
+ *    recyclage SB3 → Max AC de la descente progressive (64 → 9 Wh au banc)
+ *    et l'injection qui l'accompagne quand la Max AC n'absorbe pas.
+ *
+ * Best-effort par construction : boucle inactive, mesures muettes, cloud
+ * périmé ou mode Anker ≠ manuel ⇒ aucune écriture, l'appelant continue comme
+ * aujourd'hui. La part suit la RÈGLE 2 (prorata d'énergie utilisable) ; les
+ * protections zéro-import du pilote cumulus restent le filet.
+ */
+export async function feedforwardCumulusStep(stepW: number): Promise<FeedforwardOutcome> {
+  return withFileLock(STATE_FILE, async () => {
+    const cfg = defaultSb3LoopConfig();
+    const state = await loadState();
+    if (!state.enabled || state.autoDisabledReason !== null) {
+      return { wrote: false, targetW: null, note: 'boucle SB3 inactive — pas de feedforward' };
+    }
+    const now = Date.now();
+    const inputs = await collectSb3Inputs(cfg);
+    const t = feedforwardTarget(inputs, cfg, state, stepW);
+    if (!t.ok) return { wrote: false, targetW: null, note: t.reason };
+
+    // Créneau marqué AVANT l'écriture (même logique que le tick) : non
+    // confirmée, elle a pu être appliquée côté cloud → à restaurer plus tard.
+    const slot = planSlot(cfg, now);
+    if (slot !== null && !state.pendingRestoreSlots.includes(slot)) {
+      state.pendingRestoreSlots.push(slot);
+    }
+    const w = await writePreset(
+      t.targetW,
+      slot !== null ? staticPlanW(cfg, slot) : null,
+      FF_WRITE_TIMEOUT_MS
+    );
+    const confirmed =
+      w.ok && w.confirmedW !== null && Math.abs(w.confirmedW - t.targetW) <= cfg.confirmToleranceW;
+    if (confirmed) {
+      state.lastCmdW = t.targetW;
+      state.lastWriteTs = now; // settle : la boucle substitue la consigne écrite
+      if (stepW > 0) {
+        // L'excédent transitoire d'ici la fermeture du relais est VOULU : la
+        // boucle ne doit pas le « corriger » en annulant le pré-armement.
+        // (Les montées restent libres — règle 1 intouchée.)
+        state.ffHoldUntilTs = now + cfg.ffHoldS * 1000;
+      }
+    }
+    // Pas d'escalade confirmFailCount ici : la politique d'auto-désactivation
+    // appartient aux écritures de la boucle elle-même — un feedforward raté
+    // laisse simplement le comportement d'aujourd'hui.
+    const note =
+      `${stepW > 0 ? 'PRÉ-ARMEMENT' : 'DÉSARMEMENT'} cumulus ${stepW > 0 ? '+' : '−'}` +
+      `${Math.abs(Math.round(stepW))} W — part SB3 ${t.sharePct} % : consigne ` +
+      `${t.baseW} → ${t.targetW} W${confirmed ? '' : ' (NON confirmée)'}`;
+    pushLog(state, {
+      ts: now,
+      mode: 'allocate',
+      reason: note,
+      houseLoadW: null,
+      targetW: t.targetW,
+      beforeW: t.baseW,
+      writtenW: t.targetW,
+      confirmedW: w.confirmedW
+    });
+    await writeJsonAtomic(STATE_FILE, state);
+    return { wrote: confirmed, targetW: t.targetW, note };
+  });
 }
 
 export interface Sb3TickResult {
