@@ -291,3 +291,93 @@ Les deux seules voies pour aller plus loin, par ordre de valeur :
 
 La seconde est gratuite et sûre : elle n'ajoute aucune prédiction météo ni aucun seuil,
 seulement l'ordre correct de deux actions que l'on commande déjà.
+
+---
+
+## 9. La recharge du parc — étude 31/07, et pourquoi la loi n'a PAS été écrite
+
+### 9.1 Le constat de départ
+
+Le parc DIVERGE : le 30/07, SB3 à 95 % et 81 %, Max AC à 17 %. En régime de surplus
+(45 % de la journée), le PV DC des SB3 valait 1 105 W médian, leur sortie AC **0 W**,
+donc **877 W restaient dans des packs déjà quasi pleins** pendant que la Max AC vide
+n'avait aucun accès au bus AC. Rapport sortie/PV : médiane **0,00**.
+
+Verrou identifié à la ligne près — `decide.ts:185` :
+
+```
+battTotalW = max(0, sb3Out + maxac.acNetW)
+```
+
+En surplus `acNetW` est négatif (la Max AC charge), la somme passe sous zéro, `max(0,·)`
+la ramène à 0, et la cible devient `part × 0 = 0`. **La correction du flux signé, juste
+en elle-même, a resserré ce verrou** : avant, `acNetW` non signé valait 0 en charge et
+`battTotal` valait au moins `sb3Out`.
+
+### 9.2 Le rendement du routage est inobservable — et ça n'a pas d'importance
+
+Ni mesurable : la charge de la Max AC n'est pas enregistrée (**0 valeur négative sur
+22 600 échantillons** — registre 10208, sortie seule), et le stock est quantifié à
+**16 Wh** quand 1 000 W pendant 33 s n'en font que 9,2.
+
+Ni nécessaire : le chemin routé compte **deux conversions** contre **une** pour le
+direct, donc `η_r < η_d` avec certitude. Or
+
+> ∂E/∂x_direct − ∂E/∂x_routé = η_d − η_r > 0
+
+ne dépend que du **signe**. L'ordre de mérite — remplir le direct, déverser ensuite —
+est donc optimal pour **toute** valeur du rendement inconnu.
+
+### 9.3 …mais la prémisse s'effondre à la mesure
+
+L'ordre de mérite suppose qu'on **peut** déverser vers la Max AC. Sur les 1 017 instants
+d'injection > 300 W avec place disponible (8,6 jours depuis la Max AC) :
+
+| grandeur                        | médiane                                                 |
+| ------------------------------- | ------------------------------------------------------- |
+| PV DC des SB3                   | 1 582 W                                                 |
+| sortie AC des SB3               | 1 563 W (**≥ 0,9·PV dans 90 % des cas → packs pleins**) |
+| APS                             | 48 W (bridé par la boucle anti-injection)               |
+| bus AC fourni                   | 1 630 W                                                 |
+| injection                       | **931 W**                                               |
+| **charge déduite de la Max AC** | **99 W** — < 1 000 W dans 97 % des cas, max 2 112 W     |
+
+**La Max AC n'est ni pleine ni à un plafond de puissance : elle n'absorbe pas.**
+Déverser davantage vers le bus AC ne ferait donc qu'injecter davantage.
+
+Hypothèses écartées par la mesure : désaccord des compteurs (Gen 2 vs EM-50, écart
+mesuré 4 à 39 W — ils concordent) ; plafond de charge (0 % des instants au-dessus de
+2 000 W).
+
+### 9.4 Ce qui reste incertain, honnêtement
+
+La « place » est déduite de `batt_energy_wh` (cloud), qui **gèle** : médiane 5,4 min
+entre deux changements, p90 15,8 min, **maximum 2,6 h**, avec des sauts jusqu'à
+15 points. Le chiffre de **11,37 kWh récupérables sur 8,6 jours (1 317 Wh/jour,
+≈ 96 €/an)** porte cette incertitude. Il a d'ailleurs déjà été corrigé une fois : ma
+première estimation de 2 022 Wh/jour comptait la tolérance de régulation zéro-export
+(injection médiane 34 W, p90 62 W), qui n'est pas récupérable.
+
+### 9.5 Décision
+
+**La loi de recharge n'est pas écrite**, et ce n'est pas un renoncement : écrire une loi
+de déversement alors que le puits n'absorbe pas produirait exactement l'effet inverse de
+celui recherché. La question à trancher d'abord est **matérielle, pas logicielle** :
+pourquoi la Max AC n'absorbe-t-elle pas le surplus du bus AC ?
+
+Et l'arbitrage entre les deux lectures de la règle 2 (prorata de la place, qui égalise
+les SoC, contre ordre de mérite, qui minimise les pertes) ne vaut de toute façon que
+**14 à 40 Wh/jour** — contre **~2 000 Wh/jour** pour la question « déverser ou non ».
+
+### 9.6 Défaut collatéral vérifié : le prédicteur de Smith est INERTE
+
+Sa fenêtre `enVolS` vaut **20 s**, la période réelle du tick **23,2 s** (médiane, min 20,
+max 25) : **100 % des ticks dépassent la fenêtre**, la file des corrections en vol est
+purgée avant d'être lue. Le prédicteur ne retranche jamais rien.
+
+La chute du taux d'écriture (864 → 118/jour) est donc à mettre au crédit de la **borne de
+marge de la Max AC** et de l'**approche progressive du partage**, pas du prédicteur.
+Correction dérivable : la fenêtre doit survivre à exactement un tick, donc être comprise
+entre T et 2T, soit **30 s** (à 45 s elle survivait deux ticks et sur-corrigeait —
+mesuré : 137 → 2 146 → 0 W). Non appliqué : le système est stable, rallumer un
+prédicteur resté inerte demande un test dédié.
