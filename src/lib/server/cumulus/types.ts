@@ -29,7 +29,8 @@ export type DecisionReason =
   | 'anticycle_hold' // transition bloquée par l'anti-court-cycle → maintien
   | 'pilot_solar' // PILOTE V2 : chauffe solaire (règle zéro achat EDF) → ON
   | 'pilot_hc' // PILOTE V2 : recharge de fin de nuit en heures creuses → ON
-  | 'pilot_wait'; // PILOTE V2 : conditions non réunies → OFF
+  | 'pilot_wait' // PILOTE V2 : conditions non réunies → OFF
+  | 'grid_veto'; // VETO ABSOLU (règle 1) : achat EDF pendant une chauffe, TOUS modes
 
 /** Anomalie détectée (visible dans l'UI, non bloquante sauf heater_fault). */
 export type Anomaly =

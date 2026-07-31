@@ -73,7 +73,10 @@ const SWITCH_NAMES: Record<number, { name: string; room: string }> = {
   // Prise des outils de l'atelier. Nom VOLONTAIREMENT distinct de la lumière
   // Zigbee « lumiere_atelier » : deux tuiles « Atelier » côte à côte sur /pieces
   // seraient indiscernables à l'usage.
-  28: { name: 'Outils atelier', room: 'Atelier' }
+  28: { name: 'Outils atelier', room: 'Atelier' },
+  // node 29 commissionné le 2026-07-31 — aspirateur de l'atelier, asservi à la
+  // consommation du node 28 (l'outil).
+  29: { name: 'Aspirateur', room: 'Atelier' }
 };
 
 // Prises à ALIMENTATION CRITIQUE : suivies en conso mais JAMAIS commandables

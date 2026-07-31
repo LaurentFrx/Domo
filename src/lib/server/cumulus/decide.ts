@@ -229,6 +229,29 @@ export function decide(
     note = 'pilote indisponible — veille';
   }
 
+  // ══ VETO ABSOLU DE SOUTIRAGE — s'applique à TOUS LES MODES, sans exception ══
+  // RÈGLE 1 de Laurent : « ON NE DOIT JAMAIS POMPER SUR LE RÉSEAU EDF ». Elle ne
+  // souffre aucun mode privilégié. Jusqu'ici `manual_on` et `boost` posaient
+  // bypass = true et chauffaient à l'aveugle : mesuré sur 30 jours, ils portaient
+  // 86 % des achats EDF du cumulus (1 491 Wh sur 1 727), contre 0,78 % pour le
+  // pilote automatique. Le 31/07, trois épisodes dans la même journée — dont un à
+  // 795 W d'achat avec les SB3 à leur butée de 2 400 W et la Max AC à sa réserve :
+  // aucune loi de commande sur les batteries ne pouvait le corriger, le seul
+  // levier restant était la charge elle-même.
+  //
+  // Le veto ne débat pas du mode : si le compteur mesure un achat franc pendant
+  // que le ballon chauffe, on ouvre. Le boost garde son sens — « chauffer jusqu'au
+  // plein » — mais avec le solaire disponible, pas avec EDF. Il reprendra de
+  // lui-même dès que ce sera gratuit, sans rien perdre de son intention.
+  // Seuil : le même « achat franc » que le pilote (config.pilot.cutBuyHardW).
+  const vetoSeuilW = config.pilot?.cutBuyHardW ?? 500;
+  if (desired && inputs.em50Available && inputs.gridPowerW > vetoSeuilW) {
+    desired = false;
+    reason = 'grid_veto';
+    bypass = true; // franchit l'anti-court-cycle : ne pas maintenir 2,9 kW sur EDF
+    note = `VETO EDF : ${Math.round(inputs.gridPowerW)} W achetés — chauffe suspendue (reprise dès que gratuit)`;
+  }
+
   // ── Mode OBSERVATION : le pilote journalise, le relais n'est PAS commandé ──
   if (config.observationMode && desired && (reason === 'pilot_solar' || reason === 'pilot_hc')) {
     note = `observation : aurait allumé (${reason}) — relais NON commandé`;
