@@ -517,3 +517,50 @@ test('RÈGLE 0 : le détour est PROGRESSIF, il ne saute pas sur la cible', () =>
   );
   assert.ok((d.writeW ?? 0) < 200 + 1200, 'pas de saut sur la totalité du PV gardé');
 });
+
+test('RÈGLE 0 : INTERDIT de baisser la consigne pendant que la Max AC débite', () => {
+  // Cas réel du 31/07 : injection de 134 W (dépassement de la régulation Max AC),
+  // Max AC qui décharge 3 170 W à 14 % pendant que les SB3 gardent leur PV.
+  // Baisser reporterait encore plus sur elle : c'est la puissance du parc qu'on tue.
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: -134 },
+      maxac: { ok: true, socPct: 14, acNetW: 3170, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 241, sb3PvW: 2050, sb3Packs: packs(35) }
+    }),
+    cfg,
+    st({ lastCmdW: 241 })
+  );
+  assert.ok(
+    d.writeW === null || d.writeW >= 241,
+    `la consigne ne doit PAS baisser (obtenu ${d.writeW})`
+  );
+  assert.doesNotMatch(d.reason, /injection/);
+});
+
+test('RÈGLE 0 : la baisse reste PERMISE si la Max AC charge (elle, elle absorbe)', () => {
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: -600 },
+      maxac: { ok: true, socPct: 60, acNetW: -800, ratedEnergyWh: 7200 }, // charge
+      cloud: { ...inp().cloud, sb3OutW: 2000, sb3PvW: 500, sb3Packs: packs(90) }
+    }),
+    cfg,
+    st({ lastCmdW: 2000 })
+  );
+  assert.ok((d.writeW ?? 2000) < 2000, 'sur-livraison réelle : on baisse');
+});
+
+test('RÈGLE 0 : baisse interdite → on RÉÉQUILIBRE au lieu d’attendre', () => {
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: -134 },
+      maxac: { ok: true, socPct: 14, acNetW: 3170, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 241, sb3PvW: 2050, sb3Packs: packs(35) }
+    }),
+    cfg,
+    st({ lastCmdW: 241 })
+  );
+  assert.match(d.reason, /RÉÉQUILIBRAGE/);
+  assert.ok((d.writeW ?? 0) > 241, 'la consigne doit MONTER pour soulager la Max AC');
+});

@@ -157,7 +157,21 @@ export function decide(
   // Avec, le retard sort de la boucle : correction PLEINE et immédiate, stable.
   const erreurW = Math.round(gridW - dejaCommandeW);
 
-  if (Math.abs(erreurW) > cfg.deadbandW) {
+  // ── GARDE RÈGLE 0 : ne JAMAIS baisser la consigne pendant que la Max AC débite ──
+  // Invariant physique : à charge maison donnée, baisser la sortie des SB3 reporte
+  // exactement autant sur la Max AC. Si elle DÉCHARGE déjà, la baisser l'épuise —
+  // et comme elle porte 3 540 W des 5 940 W du parc, c'est la puissance du parc
+  // qu'on détruit. Une Max AC qui débite prouve d'ailleurs que les SB3 ne sur-
+  // livrent PAS (sinon elle chargerait) : l'injection vient de SA propre
+  // régulation, pas de nous. Baisser serait donc doublement faux.
+  // Mesuré le 31/07 : injection de 30 à 227 W (dépassement de la régulation Max AC)
+  // → la boucle a descendu la consigne 381 → 242 → 15 W, la Max AC est passée de
+  // 3 110 à 3 170 W de décharge et de 15 % à 14 % pendant que les SB3 montaient
+  // à 35 %. Cercle vicieux exact.
+  const maxAcDebite = inputs.maxac.acNetW > cfg.deadbandW;
+  const baisseInterdite = erreurW < 0 && maxAcDebite;
+
+  if (Math.abs(erreurW) > cfg.deadbandW && !baisseInterdite) {
     const cible = clamp(base + erreurW, 0, cfg.maxPresetW);
     const enAttente = dejaCommandeW !== 0 ? ` (${Math.round(dejaCommandeW)} W déjà en vol)` : '';
     return applyTarget(
@@ -212,7 +226,9 @@ export function decide(
   const pvGardeW = Math.max(0, (inputs.cloud.sb3PvW ?? 0) - sb3Out);
 
   if (
-    Math.abs(gridW) <= cfg.deadbandW && // règle 1 servie : rien d'urgent
+    // Règle 1 servie (rien d'urgent), OU baisse interdite par la règle 0 : dans
+    // les deux cas le rééquilibrage est la bonne action, pas l'attente.
+    (Math.abs(gridW) <= cfg.deadbandW || baisseInterdite) &&
     !settling &&
     fracMaxAc < fracSb3 - cfg.rebalanceBandFrac && // la Max AC est la retardataire
     pvGardeW > cfg.deadbandW // il y a réellement du PV à détourner
