@@ -55,6 +55,7 @@ async function readCloud(now: number): Promise<Sb3LoopInputs['cloud']> {
     sb3SocAvg: null,
     sb3Packs: [],
     sb3PresetW: null,
+    sb3PvW: null,
     sceneMode: null
   };
   try {
@@ -65,6 +66,7 @@ async function readCloud(now: number): Promise<Sb3LoopInputs['cloud']> {
       last_update?: number;
       sb3_output_power_w?: number;
       sb3_current_preset_w?: number;
+      solar_power_w?: number;
       sb3_scene_mode?: number;
       batteries?: { model?: string; soc?: number; battery_capacity_wh?: number }[];
     };
@@ -87,6 +89,7 @@ async function readCloud(now: number): Promise<Sb3LoopInputs['cloud']> {
       sb3SocAvg: socs.length ? socs.reduce((a, b) => a + b, 0) / socs.length : null,
       sb3Packs: packs,
       sb3PresetW: num(d.sb3_current_preset_w),
+      sb3PvW: num(d.solar_power_w),
       sceneMode: num(d.sb3_scene_mode)
     };
   } catch {

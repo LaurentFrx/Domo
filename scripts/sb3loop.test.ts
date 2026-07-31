@@ -40,6 +40,7 @@ function inp(o: Partial<Sb3LoopInputs> = {}): Sb3LoopInputs {
       sb3SocAvg: 100,
       sb3Packs: packs(100),
       sb3PresetW: 0,
+      sb3PvW: 0,
       sceneMode: 3
     },
     sunElevDeg: 50,
@@ -444,4 +445,75 @@ test('le rééquilibrage ne dépasse jamais la marge de puissance de la Max AC',
     d.writeW === null || d.writeW >= 2400 - marge - 1,
     `baisse limitée à ${marge} W, obtenu ${d.writeW}`
   );
+});
+
+// ─── RÈGLE 0 — la PUISSANCE du parc doit rester disponible ───────────────
+// 31/07 : SB3 à 44/45 %, Max AC à 10 %. Même stock (1 854 Wh), mais 2 400 W
+// mobilisables au lieu de 5 940 — et 800 W achetés à EDF. Le prorata en
+// décharge CONSERVE le déséquilibre (invariant) : seule la recharge répare.
+
+test('RÈGLE 0 : Max AC en retard + PV gardé par les SB3 → on DÉTOURNE vers elle', () => {
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: 0 }, // règle 1 servie
+      maxac: { ok: true, socPct: 15, acNetW: 0, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 200, sb3PvW: 1400, sb3Packs: packs(80) }
+    }),
+    cfg,
+    st({ lastCmdW: 200 })
+  );
+  assert.ok((d.writeW ?? 0) > 200, `la consigne doit MONTER pour détourner (obtenu ${d.writeW})`);
+  assert.match(d.reason, /RÉÉQUILIBRAGE/);
+});
+
+test('RÈGLE 0 : parc déjà équilibré → aucun détour (le détour coûte une conversion)', () => {
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: 0 },
+      maxac: { ok: true, socPct: 80, acNetW: 0, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 200, sb3PvW: 1400, sb3Packs: packs(80) }
+    }),
+    cfg,
+    st({ lastCmdW: 200 })
+  );
+  assert.doesNotMatch(d.reason, /RÉÉQUILIBRAGE/);
+});
+
+test('RÈGLE 0 : pas de PV gardé → rien à détourner, on ne s’agite pas', () => {
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: 0 },
+      maxac: { ok: true, socPct: 15, acNetW: 0, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 1400, sb3PvW: 1400, sb3Packs: packs(80) }
+    }),
+    cfg,
+    st({ lastCmdW: 1400 })
+  );
+  assert.doesNotMatch(d.reason, /RÉÉQUILIBRAGE/);
+});
+
+test('RÈGLE 1 PRIME sur la règle 0 : un soutirage passe avant le rééquilibrage', () => {
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: 900 }, // on achète : priorité absolue
+      maxac: { ok: true, socPct: 15, acNetW: 0, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 200, sb3PvW: 1400, sb3Packs: packs(80) }
+    }),
+    cfg,
+    st({ lastCmdW: 200 })
+  );
+  assert.match(d.reason, /SOUTIRAGE/);
+});
+
+test('RÈGLE 0 : le détour est PROGRESSIF, il ne saute pas sur la cible', () => {
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: 0 },
+      maxac: { ok: true, socPct: 15, acNetW: 0, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 200, sb3PvW: 1400, sb3Packs: packs(80) }
+    }),
+    cfg,
+    st({ lastCmdW: 200 })
+  );
+  assert.ok((d.writeW ?? 0) < 200 + 1200, 'pas de saut sur la totalité du PV gardé');
 });

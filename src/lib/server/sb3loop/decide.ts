@@ -182,6 +182,50 @@ export function decide(
       base
     );
   }
+  // ── RÈGLE 0 — RÉÉQUILIBRAGE DE CHARGE : rendre la puissance du parc au parc ──
+  // Les 5 900 W émissibles doivent rester disponibles EN PERMANENCE. La Max AC
+  // porte 3 540 W des 5 940 : la laisser sous sa réserve, c'est perdre 60 % de la
+  // puissance du parc — mesuré le 31/07, 1 854 Wh encore en stock mais seulement
+  // 2 400 W mobilisables, et 800 W achetés à EDF pour un cumulus de 2,9 kW.
+  //
+  // Le prorata en DÉCHARGE ne peut pas réparer ça : avec dEᵢ/dt = −Eᵢ·P/ΣE on a
+  // d(Eᵢ/Eⱼ)/dt = 0 — le rapport entre batteries est un INVARIANT. Il conserve le
+  // déséquilibre au lieu de le corriger, et une batterie à sa réserve a une part
+  // nulle : elle en est exclue définitivement. SEULE LA RECHARGE rééquilibre.
+  //
+  // Le levier : les SB3 ont leur PV en DC. Ce qu'elles n'envoient pas en AC, elles
+  // le gardent pour elles. Monter la consigne DÉTOURNE ce PV vers le bus AC, où la
+  // Max AC peut l'absorber (vérifié en direct : elle charge à 150-290 W, réseau
+  // tenu à ±70 W). C'est le seul chemin qui la remonte.
+  const fracLibre = (soc: number): number =>
+    Math.max(0, Math.min(1, (soc - cfg.reservePct) / (100 - cfg.reservePct)));
+  const fracMaxAc = fracLibre(inputs.maxac.socPct);
+  // SoC moyen des SB3 pondéré par leur CAPACITÉ (deux packs identiques ici, mais
+  // la pondération reste juste si l'un est remplacé par un modèle différent).
+  const capSb3 = inputs.cloud.sb3Packs.reduce((a, p) => a + p.capacityWh, 0);
+  const socSb3 =
+    capSb3 > 0
+      ? inputs.cloud.sb3Packs.reduce((a, p) => a + p.socPct * p.capacityWh, 0) / capSb3
+      : null;
+  const fracSb3 = socSb3 === null ? fracMaxAc : fracLibre(socSb3);
+  // PV que les SB3 gardent en DC — c'est exactement ce qui est détournable.
+  const pvGardeW = Math.max(0, (inputs.cloud.sb3PvW ?? 0) - sb3Out);
+
+  if (
+    Math.abs(gridW) <= cfg.deadbandW && // règle 1 servie : rien d'urgent
+    !settling &&
+    fracMaxAc < fracSb3 - cfg.rebalanceBandFrac && // la Max AC est la retardataire
+    pvGardeW > cfg.deadbandW // il y a réellement du PV à détourner
+  ) {
+    const cible = sb3Out + cfg.rebalanceGain * pvGardeW;
+    return applyTarget(
+      cible,
+      `RÉÉQUILIBRAGE — Max AC à ${Math.round(fracMaxAc * 100)} % de sa plage contre ` +
+        `${Math.round(fracSb3 * 100)} % pour les SB3 : ${Math.round(pvGardeW)} W de PV détournables ` +
+        `vers elle (consigne ${base} → ${Math.round(clamp(cible, 0, cfg.maxPresetW))} W)`
+    );
+  }
+
   const battTotalW = Math.max(0, sb3Out + inputs.maxac.acNetW);
   // BORNE PHYSIQUE DU RÉÉQUILIBRAGE (règle 1 avant règle 2). Déplacer la part
   // des SB3 vers la Max AC n'est possible que si la Max AC peut effectivement

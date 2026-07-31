@@ -42,6 +42,12 @@ export interface Sb3LoopConfig {
    *  0,5, le partage est tenu à ±200 W — négligeable devant les 2 400 W de
    *  consigne, pour 2 à 3 écritures par rééquilibrage. */
   shareGain: number;
+  /** RÈGLE 0 — rééquilibrage de CHARGE. Écart de remplissage relatif au-delà
+   *  duquel on détourne le PV des SB3 vers la Max AC. Bande d'hystérésis : en
+   *  deçà on ne touche à rien (le détour coûte une conversion de plus). */
+  rebalanceBandFrac: number;
+  /** Fraction du PV détournable corrigée par cycle (même rôle que shareGain). */
+  rebalanceGain: number;
   /** Réserve intouchable de chaque batterie (%) : l'énergie « utilisable » qui
    *  sert au prorata s'entend RÉSERVE DÉDUITE. Règle Laurent 28/07. */
   reservePct: number;
@@ -104,6 +110,9 @@ export interface Sb3LoopInputs {
      *  CHACUN, pas sur une moyenne (deux packs identiques peuvent diverger). */
     sb3Packs: { socPct: number; capacityWh: number }[];
     sb3PresetW: number | null;
+    /** PV DC total entrant dans les SB3 (W) — ce qu'elles peuvent DÉTOURNER vers
+     *  le bus AC en montant la consigne. Sans lui, la règle 0 est aveugle. */
+    sb3PvW: number | null;
     sceneMode: number | null;
   };
   /** Élévation solaire (°) — sun.ts, lat/lon de la config. */
@@ -200,6 +209,8 @@ export function defaultSb3LoopConfig(): Sb3LoopConfig {
     enVolS: 20,
     maxAcPowerW: 3600,
     shareGain: 0.5,
+    rebalanceBandFrac: 0.1,
+    rebalanceGain: 0.5,
     failLowStepW: 300,
     deadbandW: 100, // < marginW — sinon la cible « charge − marge » est piégée dans la bande
     failLowDwellS: 300,
