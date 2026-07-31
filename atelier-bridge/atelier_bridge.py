@@ -58,6 +58,14 @@ VACUUM_NODE_ID = int(os.environ.get("VACUUM_NODE_ID", "29"))  # prise « Aspirat
 # l'aspirateur en boucle (usure mécanique, et bruit insupportable à l'atelier).
 # On démarre au-dessus de ON_W, on ne considère l'outil arrêté qu'en dessous de
 # OFF_W, et l'écart entre les deux est la zone morte.
+#
+# Valeurs CALÉES SUR MESURE (essai du 2026-07-31, capture des événements Matter) :
+#   outil à l'arrêt ......... 0,0 W (exactement zéro, pas de veille)
+#   outil en marche ......... 103 à 195 W (pic de 195 W au démarrage)
+# La zone morte 10–20 W est donc à un ordre de grandeur du bruit comme du signal.
+# ⚠️ Si un jour une multiprise avec un appareil en veille (chargeur, LED) est
+# branchée sur la prise de l'outil, le repos ne sera plus à 0 W : REMESURER
+# plutôt que de pousser les seuils au jugé.
 ON_W = float(os.environ.get("ON_W", "20"))
 OFF_W = float(os.environ.get("OFF_W", "10"))
 

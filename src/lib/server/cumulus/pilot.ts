@@ -160,10 +160,22 @@ export function pilotStep(
   // Max AC tombe à 0 en Modbus dégradé — la capacité ne compte alors que les SB3
   // pendant que l'énergie compte les trois packs, et socParc dépasserait 100 %.
   // Mesure absurde → pas de décision batterie dessus.
-  const socParc =
+  const socParcMesure =
     inputs.batteryCapacityWh > 0 && inputs.batteryEnergyWh <= inputs.batteryCapacityWh
       ? (100 * inputs.batteryEnergyWh) / inputs.batteryCapacityWh
       : null;
+  // ── REPLI CONSERVATEUR : une PROTECTION ne doit jamais être désarmée par une
+  // entrée manquante. Le parc pondéré vient de batteryEnergyWh/batteryCapacityWh,
+  // deux champs CLOUD : muets (coupure, panne bridge), socParc valait `null` et
+  // les DEUX gardes batterie — plancher 40 % et chute de 20 points — devenaient
+  // inertes SANS AUCUN SIGNAL. Le ballon pouvait alors vider tout le parc.
+  // À défaut, on prend le SoC le PLUS BAS disponible : pour une protection, c'est
+  // le maillon faible qui décide, jamais une moyenne qui le dilue.
+  const socsDispo = [
+    ...inputs.batterySocPct,
+    ...(inputs.maxAcSocPct !== null && inputs.maxAcSocPct !== undefined ? [inputs.maxAcSocPct] : [])
+  ].filter((v) => typeof v === 'number' && Number.isFinite(v));
+  const socParc = socParcMesure ?? (socsDispo.length > 0 ? Math.min(...socsDispo) : null);
   const relayOn = inputs.relayOn === true;
   const onForMs = state.onSinceTs !== null ? now - state.onSinceTs : 0;
   const inGrace = relayOn && onForMs < p.graceStartupSec * SEC;
@@ -331,7 +343,13 @@ export function pilotStep(
   // batterie » vers « sortie AC ». L'ignorer rendait le pilote aveugle à l'essentiel du
   // surplus (25/07 : 945 W vus vs ~2300 W réels → aucun allumage de la journée, ballon
   // lancé à la main). Dérivée + bornée par la place des packs, cf. inputs.sb3ChargeFrom.
-  const surplusDispoW = (inputs.maxAcChargeW ?? 0) + inputs.sb3ChargeW + exportW;
+  // ⚠️ CHAQUE terme est gardé. `maxAcChargeW` l'était, `sb3ChargeW` ne l'était PAS :
+  // une seule valeur absente rendait la somme NaN, et `NaN >= surplusOnW` étant
+  // toujours faux, le déclencheur « saturation » mourait EN SILENCE. Même famille
+  // de panne que socParc à null qui désarmait les gardes batterie : une entrée
+  // manquante ne doit jamais éteindre une fonction sans le dire.
+  const nb = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const surplusDispoW = nb(inputs.maxAcChargeW) + nb(inputs.sb3ChargeW) + nb(exportW);
   const saturationTrigger =
     inputs.maxAcAvailable &&
     inputs.maxAcSocPct !== null &&

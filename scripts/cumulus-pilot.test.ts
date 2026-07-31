@@ -143,6 +143,7 @@ function inp(o: Partial<CumulusInputs> = {}): CumulusInputs {
     batteryEnergyWh: 5000,
     batteryCapacityWh: 5360,
     batteryChargeW: 0,
+    sb3ChargeW: 0,
     sbInputW: [null, null],
     // Max AC locale muette par défaut : la voie saturation est inerte, les tests
     // historiques du chemin « don franc » gardent leur sens tel quel.
@@ -461,7 +462,16 @@ test('achat FRANC 800 W (> 500) → coupure IMMÉDIATE (la cuisine d’abord)', 
 
 test('protection batterie : SoC −20 points depuis l’allumage → coupure (cause battery)', () => {
   const r = pilotStep(
-    inp({ relayOn: true, cumulusPowerW: 2900, gridPowerW: 10, batterySocPct: [78, 78] }),
+    // ⚠️ Le pilote calcule le SoC du PARC sur batteryEnergyWh/batteryCapacityWh,
+    // pas sur batterySocPct : régler le second sans le premier laissait la fixture
+    // à 93 % et la protection ne pouvait pas se déclencher. 78 % de 5 360 Wh.
+    inp({
+      relayOn: true,
+      cumulusPowerW: 2900,
+      gridPowerW: 10,
+      batterySocPct: [78, 78],
+      batteryEnergyWh: 0.78 * 5360
+    }),
     cfg(),
     st({ onSinceTs: NOON - min(60), lastOnTs: NOON - min(60) }, { socStartOfHeat: 99 }),
     ctx()
@@ -472,7 +482,13 @@ test('protection batterie : SoC −20 points depuis l’allumage → coupure (ca
 
 test('protection batterie : plancher 40 % → coupure même sans grosse chute', () => {
   const r = pilotStep(
-    inp({ relayOn: true, cumulusPowerW: 2900, gridPowerW: 10, batterySocPct: [38, 39] }),
+    inp({
+      relayOn: true,
+      cumulusPowerW: 2900,
+      gridPowerW: 10,
+      batterySocPct: [38, 39],
+      batteryEnergyWh: 0.38 * 5360
+    }),
     cfg(),
     st({ onSinceTs: NOON - min(60), lastOnTs: NOON - min(60) }, { socStartOfHeat: 50 }),
     ctx()
@@ -841,4 +857,27 @@ test('fenêtre fermée (avant ouverture) : la prochaine action mentionne l’heu
     ctx({ hourLocal: 4, minuteOfDay: 240, eAvailWh: 14000 })
   );
   assert.match(r.view.nextAction, /ouverture prévue \d{2}:\d{2}/);
+});
+
+test('protection batterie : le PLANCHER tient même si le parc pondéré est indisponible', () => {
+  // Régression : batteryEnergyWh/batteryCapacityWh sont des champs CLOUD. Muets
+  // (coupure, panne de pont), socParc valait null et les DEUX gardes batterie
+  // devenaient inertes SANS AUCUN SIGNAL — le ballon pouvait vider tout le parc.
+  // Repli conservateur : à défaut du parc pondéré, c'est le SoC le PLUS BAS qui
+  // décide. Pour une protection, le maillon faible, jamais une moyenne.
+  const r = pilotStep(
+    inp({
+      relayOn: true,
+      cumulusPowerW: 2900,
+      gridPowerW: 10,
+      batterySocPct: [38, 39],
+      batteryEnergyWh: 0,
+      batteryCapacityWh: 0
+    }),
+    cfg(),
+    st({ onSinceTs: NOON - min(60), lastOnTs: NOON - min(60) }, { socStartOfHeat: 50 }),
+    ctx()
+  );
+  assert.equal(r.wantOn, false);
+  assert.equal(r.pilot.lastCessionCause, 'battery');
 });
