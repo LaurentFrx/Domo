@@ -13,6 +13,8 @@
   import { preferences } from '$stores/preferences.svelte';
   import { pagerNav } from '$lib/pager/pager-nav.svelte';
   import { productionLifetime } from '$stores/productionLifetime.svelte';
+  import { sb3loop } from '$stores/sb3loop.svelte';
+  import { acquire } from '$stores/refcount';
   import { Tween } from 'svelte/motion';
   import { cubicOut } from 'svelte/easing';
   import { onMount, onDestroy } from 'svelte';
@@ -185,6 +187,28 @@
     })
   );
 
+  /**
+   * Sortie AC FRAÎCHE du système SB3 : la consigne que la sb3loop vient d'écrire.
+   * Les sorties cloud accusent un snapshot ~60 s + la confirmation 2 snapshots
+   * ci-dessus (jusqu'à 2-3 min de retard) : après un échelon de charge
+   * (extinction du cumulus, −2,3 kW d'un coup), le résidu « Maison » avalait
+   * l'écart entre l'ancien monde cloud et les mesures fraîches — ~900 W
+   * fantômes constatés le 01/08. Or la boucle CONNAÎT la sortie qu'elle impose
+   * (écriture < 20 s, confirmée ±25 W par relecture du schedule, bail bridge en
+   * cas de mort) — son `settle` interne substitue déjà la consigne au sb3Out
+   * cloud, on étend le même principe à l'affichage. En vigueur ⟺ boucle
+   * active ET tick vivant ET `lastCmdW` non nul (l'engine le repose à null
+   * quand le plan statique est restauré : plus aucune consigne ne s'applique).
+   * `clock.now` (10 s) garde la condition vivante même si le poll du store gèle.
+   */
+  const SB3LOOP_TICK_STALE_MS = 180_000; // aligné sur tickAlive du store
+  const sb3CmdOutW = $derived.by((): number | null => {
+    if (!sb3loop.connected || !sb3loop.enabled) return null;
+    const tick = sb3loop.lastTickTs;
+    if (tick === null || clock.now - tick > SB3LOOP_TICK_STALE_MS) return null;
+    return sb3loop.lastCmdW;
+  });
+
   /** Horizon d'absorption : un pack ne peut encaisser que la PLACE qui lui reste.
    *  Un pack à 99 % (27 Wh de place) ne peut pas absorber 372 W — il passe en AC. */
   const SB3_FILL_HORIZON_H = 0.25;
@@ -197,7 +221,8 @@
    * La conso Maison n'est mesurée nulle part (l'EM-50 ne voit que réseau + cumulus) :
    * elle est forcément déduite. Elle n'est donc juste que si TOUS les autres flux le
    * sont — or la sortie AC des SB3 est la seule grandeur ni mesurée ni fiable côté
-   * cloud. On la traite comme l'inconnue, en l'encadrant par deux contraintes
+   * cloud (SAUF quand la consigne sb3loop est en vigueur : voie fraîche ci-dessus).
+   * On la traite comme l'inconnue, en l'encadrant par deux contraintes
    * PHYSIQUES au lieu de laisser l'erreur s'écraser sur la Maison :
    *   1. un pack ne peut pas absorber plus que sa place restante (sinon il sort en AC) ;
    *   2. la Maison ne peut pas descendre sous sa veille incompressible.
@@ -216,8 +241,23 @@
       // vivante. À 0, le nœud disparaît du Sankey.
       return { charge: 0, discharge: 0, perPack: [] };
     }
-    // (a) net par SB3 : PV DC entrant − sortie AC, CONFIRMÉ sur deux snapshots.
-    const net = sb3Net;
+    // (a) net par SB3 : PV DC entrant − sortie AC. Sortie = consigne sb3loop quand
+    // elle est en vigueur — fraîche par construction, ventilée au prorata du PV de
+    // chaque pack (répartition interne Anker vérifiée en réel le 01/08 : sorties
+    // 846/687 W pour PV 955/796 W, mêmes ratios), à parts égales la nuit (PV nul).
+    // Le PV cloud reste utilisable même périmé : le soleil ne fait pas d'échelon.
+    // Sinon : sorties cloud CONFIRMÉES sur deux snapshots. En régime établi les
+    // deux voies coïncident (consigne confirmée ±25 W) : aucune marche à la bascule.
+    let net: number[];
+    if (sb3CmdOutW === null) {
+      net = sb3Net;
+    } else {
+      const cmd = sb3CmdOutW;
+      const pvTot = sb3PvInW.reduce((s, v) => s + v, 0);
+      net = sb3PvInW.map(
+        (pv) => pv - cmd * (pvTot > 1 ? pv / pvTot : 1 / Math.max(1, sb3PvInW.length))
+      );
+    }
     // (b) contrainte 1 — plafond d'absorption par la place restante du pack.
     const perPack = net.map((n, i) => {
       if (n <= 0) return n;
@@ -356,12 +396,20 @@
       ankerLocal.clearBoost();
     }
   });
-  onMount(() => productionLifetime.connect());
+  // sb3loop via refcount : /energie l'acquiert aussi — le pager monte les deux
+  // pages en même temps, un connect/disconnect binaire couperait l'autre.
+  let releaseSb3loop: (() => void) | null = null;
+  onMount(() => {
+    productionLifetime.connect();
+    releaseSb3loop = acquire(sb3loop);
+  });
   onDestroy(() => {
     em50.clearBoost();
     apsystems.clearBoost();
     ankerLocal.clearBoost();
     productionLifetime.disconnect();
+    releaseSb3loop?.();
+    releaseSb3loop = null;
   });
   // ─── Fraîcheur de la part « batterie » de la conso (cloud Solix ~60 s) ───────
   // La conso Maison mêle réseau (frais) et part SolarBank (cloud). Le snapshot Anker
