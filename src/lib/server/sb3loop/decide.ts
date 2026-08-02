@@ -182,20 +182,6 @@ export function decide(
   const parkUsableWh = sb3UsableWh + maxAcUsableWh;
   const shareSb3 = parkUsableWh > 0 ? sb3UsableWh / parkUsableWh : 0;
   const pctSb3 = Math.round(shareSb3 * 100);
-  // Fractions de plage utilisée (0 = à la réserve, 1 = plein) — servent au
-  // rééquilibrage (règle 0) ET à la garde « Max AC retardataire » de la
-  // descente d'excès, évaluée plus tôt dans le flux.
-  const fracLibre = (soc: number): number =>
-    Math.max(0, Math.min(1, (soc - cfg.reservePct) / (100 - cfg.reservePct)));
-  const fracMaxAc = fracLibre(inputs.maxac.socPct);
-  // SoC moyen des SB3 pondéré par leur CAPACITÉ (deux packs identiques ici, mais
-  // la pondération reste juste si l'un est remplacé par un modèle différent).
-  const capSb3 = inputs.cloud.sb3Packs.reduce((a, p) => a + p.capacityWh, 0);
-  const socSb3 =
-    capSb3 > 0
-      ? inputs.cloud.sb3Packs.reduce((a, p) => a + p.socPct * p.capacityWh, 0) / capSb3
-      : null;
-  const fracSb3 = socSb3 === null ? fracMaxAc : fracLibre(socSb3);
 
   // Plus rien d'utilisable dans les SB3 : demander leur décharge est sans objet.
   if (sb3UsableWh <= 0) {
@@ -250,53 +236,6 @@ export function decide(
     );
   }
 
-  // ── DESCENTE D'EXCÈS — retirer immédiatement le recyclage SB3 → Max AC ──
-  // On arrive ici compteur SERVI (la branche erreur a déjà return sinon). Si la
-  // Max AC CHARGE à compteur nul, les sorties AC dépassent le besoin : l'excédent
-  // repart en batterie via deux conversions (~12-15 % de pertes). L'ancien chemin
-  // (répartition progressive gain 0,5, bloquée settleS entre deux pas) mettait
-  // ~12 min à rentrer après un appel bref — mesuré le 02/08 : bouilloire 1 404 W
-  // × 1 min → ~300 Wh recyclés, SB3 −7 pts pendant que la Max AC +4, sans aucun
-  // chemin de retour (les SB3 ne chargent qu'en DC). Ici rien ne vient du cloud
-  // (consigne courante + Modbus acNet 2,5 s) : la branche passe AVANT le settling
-  // et retire EN UNE ÉCRITURE l'excès mesuré. Elle ne demande JAMAIS à la Max AC
-  // de fournir davantage — on ne retire que ce qu'elle ABSORBE (rien à voir avec
-  // le saut de partage du 28/07 qui lui demandait +1 291 W et a créé 867 W
-  // d'achat) : pas de soutirage possible ; une sur-descente au pire la fait
-  // absorber moins, et la répartition remonte au tick suivant. Gardes :
-  //   - ffHold : l'excédent d'un pré-armement cumulus est VOULU, on n'y touche pas ;
-  //   - visibilité (enVolS) : notre propre écriture met ~un tick à paraître dans
-  //     acNet — redescendre avant compterait le même excès deux fois. (La descente
-  //     n'est PAS inscrite « en vol » : absorbée par la Max AC, elle n'atteindra
-  //     jamais le compteur — cf. applyTarget.) ;
-  //   - Max AC retardataire : la RÈGLE 0 la remonte EXPRÈS en la faisant absorber,
-  //     on ne défait pas ce travail. Demi-bande d'hystérésis : entre band/2 et
-  //     band, ni détour ni descente (zone neutre anti-battement) ;
-  //   - plancher = part prorata (règle 2) : on retire l'excès, jamais la part.
-  const excesRecycleW = Math.max(0, -inputs.maxac.acNetW);
-  const maxAcRetardataire = fracMaxAc < fracSb3 - cfg.rebalanceBandFrac / 2;
-  const ecritureVisible =
-    state.lastWriteTs === null || inputs.now - state.lastWriteTs >= cfg.enVolS * 1000;
-  if (
-    excesRecycleW > cfg.deadbandW &&
-    !ffHold &&
-    ecritureVisible &&
-    !maxAcRetardataire &&
-    currentW !== null
-  ) {
-    const plancherW = shareSb3 * Math.max(0, sb3Out + inputs.maxac.acNetW);
-    const cibleW = Math.max(plancherW, currentW - excesRecycleW);
-    if (currentW - cibleW > cfg.deadbandW) {
-      return applyTarget(
-        cibleW,
-        `DESCENTE D'EXCÈS — la Max AC absorbe ${Math.round(excesRecycleW)} W de recyclage ` +
-          `à compteur nul : consigne ${currentW} → ${Math.round(clamp(cibleW, 0, cfg.maxPresetW))} W ` +
-          `(plancher part ${Math.round(plancherW)} W)`,
-        true
-      );
-    }
-  }
-
   // Compteur à l'équilibre : rien d'urgent. On profite du calme pour rééquilibrer
   // le PARTAGE entre batteries — mais uniquement sur une mesure SB3 VALIDE. Juste
   // après une écriture le cloud traîne : rééquilibrer sur ce chiffre-là reviendrait
@@ -326,6 +265,17 @@ export function decide(
   // le gardent pour elles. Monter la consigne DÉTOURNE ce PV vers le bus AC, où la
   // Max AC peut l'absorber (vérifié en direct : elle charge à 150-290 W, réseau
   // tenu à ±70 W). C'est le seul chemin qui la remonte.
+  const fracLibre = (soc: number): number =>
+    Math.max(0, Math.min(1, (soc - cfg.reservePct) / (100 - cfg.reservePct)));
+  const fracMaxAc = fracLibre(inputs.maxac.socPct);
+  // SoC moyen des SB3 pondéré par leur CAPACITÉ (deux packs identiques ici, mais
+  // la pondération reste juste si l'un est remplacé par un modèle différent).
+  const capSb3 = inputs.cloud.sb3Packs.reduce((a, p) => a + p.capacityWh, 0);
+  const socSb3 =
+    capSb3 > 0
+      ? inputs.cloud.sb3Packs.reduce((a, p) => a + p.socPct * p.capacityWh, 0) / capSb3
+      : null;
+  const fracSb3 = socSb3 === null ? fracMaxAc : fracLibre(socSb3);
   // PV que les SB3 gardent en DC — c'est exactement ce qui est détournable.
   const pvGardeW = Math.max(0, (inputs.cloud.sb3PvW ?? 0) - sb3Out);
 
@@ -374,13 +324,8 @@ export function decide(
       `(${Math.round(sb3UsableWh / 100) / 10}/${Math.round(parkUsableWh / 100) / 10} kWh utilisables)`
   );
 
-  /** Bande morte EN WATTS : une résolution, pas un délai.
-   *  `absorbedByMaxAc` : la correction sera ABSORBÉE par la Max AC (tampon du
-   *  bus), jamais reflétée au compteur — l'inscrire « en vol » fabriquerait un
-   *  faux soutirage de +|dW| au tick suivant (erreur = grid − déjà-commandé)
-   *  et la boucle annulerait sa propre descente. On ne l'inscrit pas ; la
-   *  garde de visibilité de la branche remplace le prédicteur. */
-  function applyTarget(rawW: number, reason: string, absorbedByMaxAc = false): Sb3Decision {
+  /** Bande morte EN WATTS : une résolution, pas un délai. */
+  function applyTarget(rawW: number, reason: string): Sb3Decision {
     const targetW = Math.round(clamp(rawW, 0, cfg.maxPresetW));
     if (currentW !== null && Math.abs(targetW - currentW) <= cfg.deadbandW) {
       return noWrite('allocate', `${reason} — dans la bande morte`, houseLoadW, targetW);
@@ -394,7 +339,7 @@ export function decide(
       mode: 'allocate',
       reason,
       houseLoadW,
-      enVol: absorbedByMaxAc ? enVol : [...enVol, { ts: inputs.now, dW }]
+      enVol: [...enVol, { ts: inputs.now, dW }]
     };
   }
 }
