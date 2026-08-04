@@ -21,6 +21,7 @@
    */
   import { wled, previewColor, type RGB } from '$stores/wled.svelte';
   import { wledMusic } from '$stores/wledMusic.svelte';
+  import { familyOf, gradientStops, stateLabel } from '$lib/wled/preview-model';
 
   interface Props {
     /** Animer les effets dynamiques (sinon image fixe). */
@@ -71,172 +72,9 @@
     };
   });
 
-  // Palettes « couleur » (= utilisent la couleur du segment, pas un dégradé).
-  const COLOR_PALETTES = new Set([
-    'Default',
-    'Random Cycle',
-    '* Random Cycle',
-    'Color 1',
-    '* Color 1',
-    'Colors 1&2',
-    '* Colors 1&2',
-    'Color Gradient',
-    '* Color Gradient',
-    'Colors Only'
-  ]);
-
-  const RAINBOW = ['#ff0040', '#ff8000', '#ffff00', '#00ff40', '#00ffff', '#0040ff', '#8000ff'];
-
-  const RAINBOW_FX = new Set([
-    'Rainbow',
-    'Rainbow Runner',
-    'Colorful',
-    'Colorloop',
-    'Colorwaves',
-    'Pride 2015',
-    'Aurora',
-    'Palette',
-    'Blends',
-    'Plasma',
-    'Flow',
-    'Noise Pal'
-  ]);
-
-  // Effets à mouvement spatial (un point/segment qui balaye).
-  const SWEEP_FX = new Set([
-    'Scan',
-    'Scan Dual',
-    'Scanner',
-    'Scanner Dual',
-    'Wipe',
-    'Wipe Random',
-    'Tri Wipe',
-    'Sweep',
-    'Sweep Random',
-    'Running',
-    'Running Dual',
-    'Chase',
-    'Chase Random',
-    'Chase Rainbow',
-    'Chase Flash',
-    'Chase Flash Rnd',
-    'Chase 2',
-    'Chase 3',
-    'Lighthouse',
-    'Loading',
-    'Meteor',
-    'Meteor Smooth',
-    'Multi Comet',
-    'Drip',
-    'Sinelon',
-    'Sinelon Dual',
-    'Sinelon Rainbow',
-    'Two Dots',
-    'Stream',
-    'Stream 2',
-    'Rolling Balls',
-    'Bouncing Balls',
-    'Popcorn',
-    'ICU',
-    'Railway',
-    'Android',
-    'Tetrix',
-    'Percent'
-  ]);
-
-  // Effets « scintillants » (flamme, étincelles, strobe…).
-  const FLICKER_FX = new Set([
-    'Fire 2012',
-    'Fire Flicker',
-    'Candle',
-    'Candle Multi',
-    'Lightning',
-    'Halloween Eyes',
-    'Fireworks',
-    'Fireworks Starburst',
-    'Fireworks 1D',
-    'Sparkle',
-    'Sparkle Dark',
-    'Sparkle+',
-    'Glitter',
-    'Solid Glitter',
-    'Strobe',
-    'Strobe Rainbow',
-    'Strobe Mega',
-    'Blink',
-    'Blink Rainbow',
-    'Twinkle',
-    'Twinklefox',
-    'Twinklecat',
-    'Twinkleup',
-    'Fairytwinkle',
-    'Fairy',
-    'Colortwinkles',
-    'Dissolve',
-    'Dissolve Rnd',
-    'Random Colors'
-  ]);
-
-  // Dégradés représentatifs des palettes WLED courantes (fallback = couleur effective).
-  const PALETTE_GRADIENTS: Record<string, string[]> = {
-    Party: ['#ff00b0', '#ff0040', '#ffb000', '#ffe000', '#00d0ff', '#7000ff'],
-    Rainbow: RAINBOW,
-    'Rainbow Bands': RAINBOW,
-    Sunset: ['#2b1a4a', '#7a2e6b', '#e0533f', '#ff9e4f', '#ffd66b'],
-    'Sunset 2': ['#3a1d6e', '#c0395f', '#ff6a3c', '#ffb24f', '#ffe08a'],
-    Ocean: ['#012a4a', '#0353a4', '#2c7da0', '#61a5c2', '#a9d6e5'],
-    Atlantica: ['#003049', '#0077b6', '#00b4d8', '#90e0ef'],
-    Forest: ['#0b3d0b', '#1e6b1e', '#3fa34d', '#9bd17a', '#d8f3a0'],
-    Lava: ['#1a0000', '#5a0000', '#b30000', '#ff6a00', '#ffd000'],
-    Fire: ['#1a0000', '#7a0000', '#ff3000', '#ff9a00', '#ffe000'],
-    Cloud: ['#0a1a4a', '#2a52be', '#6fa8dc', '#bcd6f2', '#ffffff'],
-    Pastel: ['#ffd1dc', '#ffe7c2', '#fff7c2', '#c2f0d8', '#cfe3ff', '#e6d1ff'],
-    Beach: ['#1d6fa3', '#36a0c2', '#7fd1c4', '#f6e7b4', '#f2c14e'],
-    'April Night': ['#001b2e', '#0a4d68', '#088395', '#05bfdb', '#a0f0ff'],
-    Temperature: ['#0000ff', '#00ffff', '#00ff00', '#ffff00', '#ff0000'],
-    C9: ['#ff0000', '#00b000', '#0040ff', '#ffb000', '#ffffff'],
-    Yelblu: ['#ffe000', '#80c0ff', '#0040ff'],
-    Magenta: ['#ff00ff', '#ff66ff', '#cc00cc'],
-    'Orange & Teal': ['#ff7a00', '#ffd0a0', '#1fb6b6', '#0a6b6b']
-  };
-
-  // Libellés FR des effets courants (sinon nom brut WLED).
-  const FX_FR: Record<string, string> = {
-    Solid: 'Couleur fixe',
-    Breathe: 'Respiration',
-    Fade: 'Fondu',
-    Candle: 'Bougie',
-    'Candle Multi': 'Bougies',
-    'Fire 2012': 'Feu',
-    'Fire Flicker': 'Feu',
-    Colorloop: 'Boucle de couleurs',
-    Colorwaves: 'Vagues de couleur',
-    Blends: 'Fondu de couleurs',
-    Rainbow: 'Arc-en-ciel',
-    'Rainbow Runner': 'Arc-en-ciel',
-    Aurora: 'Aurore',
-    Pacifica: 'Océan',
-    Twinklefox: 'Scintillement',
-    Twinkle: 'Scintillement',
-    Scanner: 'Balayage',
-    Scan: 'Balayage',
-    Meteor: 'Comète',
-    'Multi Comet': 'Comètes',
-    Sparkle: 'Étincelles',
-    Glitter: 'Paillettes',
-    Blink: 'Clignotement',
-    Strobe: 'Stroboscope',
-    Plasma: 'Plasma',
-    Lightning: 'Éclair',
-    Heartbeat: 'Battement',
-    Drip: 'Gouttes'
-  };
-
   function rgbCss([r, g, b]: RGB): string {
     return `rgb(${r} ${g} ${b})`;
   }
-
-  type Family = 'solid' | 'scroll' | 'sweep' | 'flicker' | 'pulse';
 
   interface Model {
     id: number;
@@ -252,21 +90,6 @@
     spotPaint: string;
     spotDur: number;
     shadow: string;
-  }
-
-  function gradientStops(fxName: string, palName: string): string[] | null {
-    const bare = palName.replace(/^\* /, '');
-    if (!COLOR_PALETTES.has(palName) && PALETTE_GRADIENTS[bare]) return PALETTE_GRADIENTS[bare];
-    if (RAINBOW_FX.has(fxName)) return RAINBOW;
-    return null;
-  }
-
-  function familyOf(fxName: string, stops: string[] | null): Family {
-    if (fxName === 'Solid') return 'solid';
-    if (stops) return 'scroll';
-    if (SWEEP_FX.has(fxName)) return 'sweep';
-    if (FLICKER_FX.has(fxName)) return 'flicker';
-    return 'pulse';
   }
 
   const models = $derived.by<Model[]>(() =>
@@ -337,24 +160,21 @@
         }
       }
 
-      // En mode musique, l'état parlant est le STYLE suivi, pas l'effet interne
-      // (en pause le module repasse en Solid → « Couleur fixe » serait trompeur).
+      // Légende d'état : logique PARTAGÉE avec la tuile (preview-model).
       // Mode musique : les ÉTATS vivent ici (seule ligne assez large pour les
       // écrire en entier) ; le STYLE, lui, est déjà surligné dans la grille
       // juste en dessous — ne pas le répéter.
-      const desc = !on
-        ? 'Éteint'
-        : wledMusic.enabled
-          ? wledMusic.analyzing
-            ? 'Musique · analyse du morceau…'
-            : !wledMusic.trackKey
-              ? 'Musique · en attente de lecture'
-              : wledMusic.playing
-                ? 'Musique'
-                : 'Musique · en pause'
-          : whiteOnly && fxName === 'Solid'
-            ? 'Blanc 4000K'
-            : (FX_FR[fxName] ?? fxName);
+      const desc = stateLabel({
+        on,
+        fxName,
+        whiteOnly,
+        music: {
+          enabled: wledMusic.enabled,
+          analyzing: wledMusic.analyzing,
+          trackKey: wledMusic.trackKey,
+          playing: wledMusic.playing
+        }
+      });
 
       return {
         id: seg.id,

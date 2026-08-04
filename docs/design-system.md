@@ -116,6 +116,17 @@ Reproduit le bouton **natif iOS** (validé « sensation d'app pro »). Mécanism
 
 **Réglages faciles** : profondeur d'enfoncement = `scale()` de `[data-pressed]` (`app.css`) ; moment du haptique = `click` → `pointerdown` si un jour on le veut dès le toucher. Tout gated `prefers-reduced-motion`.
 
+**Commande d'un objet : tuile + feuille** (motif de référence — `WledTile` / `WledSheet`, éclairage terrasse)
+
+Un appareil riche ne s'étale pas en panneau de contrôle empilé au milieu d'une page dense. Il prend **une tuile** qui montre son état et porte les 2 gestes du quotidien, et **tout le reste va dans une `BottomSheet`** :
+
+- **La tuile EST l'objet** : son fond porte l'état physique (ici la couleur réelle du ruban, remplie sur la largeur = luminosité). Le lavage de couleur reste **discret et dissous** (plafond ~0.32 en clair, ~0.26 en sombre) — au-delà le texte passe sous la barre de contraste, et un bloc net se lit « barre de progression ». La lecture **précise** est portée par un élément vif dédié (le ruban en bas de la tuile), pas par le lavage.
+- **Teinte, pas couleur perçue** : pour teinter une surface, normaliser la teinte à pleine luminance (`vividTint`, `$lib/wled/preview-model`). Une couleur déjà atténuée par la luminosité donne un **brun sale** (un blanc 4000K à mi-course = `rgb(132 115 99)`).
+- **Glissé HORIZONTAL** pour la valeur continue, jamais vertical : `touch-action: pan-y` rend le défilement de la page au navigateur, sinon la tuile devient une zone morte. Le Pager ne navigue qu'à **deux doigts** → pas de conflit (+ `data-swipe-ignore` en ceinture). Trancher tap / scroll / glissé avec un seuil (~6 px) et ne capturer le pointeur **qu'après** avoir tranché.
+- **Surface de geste et contenu séparés** : la surface `role="slider"` (avec `aria-valuenow`/`aria-valuetext` + flèches clavier) couvre la tuile ; le contenu est en `pointer-events: none` et seules les vraies commandes (interrupteur, bouton Réglages) le réarment. Le tap-partout ouvre la feuille, mais **un bouton explicite** doit toujours l'ouvrir aussi (chemin accessible).
+- **Feuille = un SEUL niveau d'onglets.** Ce qui est vrai en permanence (aperçu, valeur, interrupteur) reste au-dessus des onglets ; imbriquer onglets + accordéon + sous-onglets, c'est le panneau empilé qui revient par la fenêtre.
+- ⚠️ `focusout` est aussi émis quand le nœud focalisé est **retiré du DOM** (fermeture d'une feuille) : écrire un `$state` dans ce handler lève `state_unsafe_mutation` en plein démontage d'effets. Repousser d'une microtâche (cf. `TabBar`).
+
 > Le haptique lui-même : hack `<label><input switch></label>` rendu en **sr-only** (1px + `clip`, mais dans l'arbre de rendu), cliqué via `label.click()` (`src/lib/utils/haptic.ts`). Android : `navigator.vibrate`. Prérequis appareil iOS : ≥ 17.4 + Réglages → Sons et vibrations → **« Vibrations système » activé** (sinon no-op silencieux). Reste un hack non officiel.
 
 ## 11. Pièges techniques (déjà rencontrés)
