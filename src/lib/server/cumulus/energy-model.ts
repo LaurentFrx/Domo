@@ -76,7 +76,7 @@ export interface EnergyTickResult {
   probeC: number | null;
   /** Relaxation post-plein absorbée ce tick (°C), pour trace debug ; null = non applicable. */
   relaxAbsorbedC: number | null;
-  /** Calibration courante (lecture, pour affichage /reglages ou carte — voir probe-relax-calib.ts). */
+  /** Calibration courante (lecture, pour affichage menu ou carte — voir probe-relax-calib.ts). */
   relaxAmplitudeC: number;
   relaxTauMin: number;
 }

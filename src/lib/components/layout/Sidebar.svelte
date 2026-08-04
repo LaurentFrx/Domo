@@ -1,19 +1,20 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { navItems, isActive, type NavItem } from './nav-items';
+  import { MENU_ICON, isMenuDestination } from './menu-items';
+  import { menuSheet, openMenu } from './menu-state.svelte';
 
   interface Section {
     title?: string;
     items: NavItem[];
   }
 
-  // Mêmes entrées que la TabBar (source unique : nav-items.ts), regroupées en
-  // deux sections : les 5 premières = « Pilotage », la dernière (Réglages) =
-  // « Système ». Le découpage suit l'ordre de navItems.
-  const sections: Section[] = [
-    { title: 'Pilotage', items: navItems.slice(0, 5) },
-    { title: 'Système', items: navItems.slice(5) }
-  ];
+  // Mêmes entrées que la TabBar (source unique : nav-items.ts). Il ne reste qu'une
+  // section : la navigation ne porte plus que le pilotage quotidien — réglages et
+  // technique sont passés derrière le bouton « ☰ » du pied de barre.
+  const sections: Section[] = [{ title: 'Pilotage', items: navItems }];
+
+  const inMenu = $derived(isMenuDestination(page.url.pathname));
 </script>
 
 <aside
@@ -80,6 +81,33 @@
         {/each}
       </div>
     {/each}
+
+    <!-- Menu « ☰ » : même feuille que sur iPhone (centrée sur grand écran). Poussé
+         en bas de la colonne — c'est le tiroir, pas une destination de pilotage. -->
+    <button
+      type="button"
+      onclick={openMenu}
+      class="sidebar-item sidebar-menu relative mt-auto flex items-center justify-center rounded-md transition-colors lg:justify-start lg:gap-3"
+      class:sidebar-item-active={inMenu || menuSheet.open}
+      aria-haspopup="dialog"
+      aria-expanded={menuSheet.open}
+      title="Menu — réglages et informations techniques"
+    >
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.9"
+        stroke-linecap="round"
+        aria-hidden="true"
+        class="shrink-0"
+      >
+        <path d={MENU_ICON} />
+      </svg>
+      <span class="hidden text-[13px] lg:inline">Menu</span>
+    </button>
   </nav>
 
   <!-- User footer -->
@@ -111,6 +139,18 @@
     .sidebar-item {
       padding: 8px 12px;
     }
+  }
+  /* Le pied de barre est un <button> au milieu de liens : on neutralise le rendu
+     natif pour qu'il soit visuellement indiscernable d'un item de navigation. */
+  .sidebar-menu {
+    width: 100%;
+    background: none;
+    border: 0;
+    -webkit-appearance: none;
+    appearance: none;
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
   }
   .sidebar-item:hover {
     background: var(--color-sidebar-hover);

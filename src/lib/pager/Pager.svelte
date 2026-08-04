@@ -54,10 +54,10 @@
     pagerNav.current = currentHref;
   });
 
-  // Pré-chargement des chunks voisins (prêts avant le geste). /maison exclue (3D).
+  // Pré-chargement des chunks voisins (prêts avant le geste).
   $effect(() => {
     for (const it of [navItems[curIdx - 1], navItems[curIdx + 1]]) {
-      if (it && it.href !== '/maison') preloadCode(it.href);
+      if (it) preloadCode(it.href);
     }
   });
 
@@ -278,7 +278,7 @@
       {@const off = navItems.findIndex((n) => n.href === it.href) - curIdx}
       <div class="pager-cell" class:is-current={off === 0} style:left={`${off * 100}%`}>
         <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
-          <PagerCell href={it.href} active={off === 0} />
+          <PagerCell href={it.href} />
         </div>
       </div>
     {/each}

@@ -14,7 +14,6 @@ export interface NavItem {
 
 export const navItems: NavItem[] = [
   { href: '/', label: 'Accueil', icon: 'M3 11 L12 3 L21 11 V20 H3 Z' },
-  { href: '/energie', label: 'Énergie', icon: 'M13 2 L4 14 H11 L9 22 L20 8 H13 Z' },
   {
     href: '/climat',
     label: 'Climat',
@@ -26,25 +25,22 @@ export const navItems: NavItem[] = [
     icon: 'M3 3 H10 V10 H3 Z M14 3 H21 V10 H14 Z M3 14 H10 V21 H3 Z M14 14 H21 V21 H14 Z'
   },
   {
-    href: '/maison',
-    label: 'Maison',
-    icon: 'M12 2 L21 7 V17 L12 22 L3 17 V7 Z M3 7 L12 12 L21 7 M12 12 V22'
-  },
-  {
     href: '/musique',
     label: 'Musique',
     icon: 'M9 18 V5 L21 3 V16 M9 18 A3 3 0 1 1 3 18 A3 3 0 1 1 9 18 M21 16 A3 3 0 1 1 15 16 A3 3 0 1 1 21 16'
-  },
-  {
-    href: '/reglages',
-    label: 'Réglages',
-    icon: 'M12 8 A4 4 0 1 1 12 16 A4 4 0 1 1 12 8 Z M12 2 V5 M12 19 V22 M2 12 H5 M19 12 H22 M4.5 4.5 L6.5 6.5 M17.5 17.5 L19.5 19.5 M4.5 19.5 L6.5 17.5 M17.5 6.5 L19.5 4.5'
   }
 ];
 
+// Ce qui n'est PAS ici vit derrière le bouton « ☰ » (cf. `menu-items.ts`) :
+// réglages, informations techniques, automatismes de fond — mais aussi Énergie et
+// Maison, qu'on ouvre à l'occasion et non dix fois par jour. La barre ne porte donc
+// que le geste quotidien, ce qui la laisse respirer sur iPhone (4 onglets + menu).
+// Conséquence à connaître : le pager (swipe 2 doigts) ne balaie QUE ces pages —
+// c'est ce qui a permis de retirer le cas particulier WebGL de /maison.
+
 // Suivi du lien actif par SEGMENT (et non par simple préfixe de chaîne) :
-// `/maison` ne s'allume pas pour un hypothétique `/maisonnette`, mais `/reglages`
-// reste actif sur `/reglages/planning`. Fonction pure (path passé en argument)
+// `/maison` ne s'allume pas pour un hypothétique `/maisonnette`, mais un href
+// resterait actif sur ses sous-routes. Fonction pure (path passé en argument)
 // pour rester testable et découplée du store de page.
 export function isActive(path: string, href: string): boolean {
   if (href === '/') return path === '/';

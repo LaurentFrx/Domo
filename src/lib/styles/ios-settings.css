@@ -1,0 +1,438 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   KIT « RÉGLAGES iOS » — langage visuel PROPRE À L'ESPACE MENU (☰)
+   ══════════════════════════════════════════════════════════════════════════
+   Reproduit au plus juste l'app Réglages d'iOS : fond gris groupé, listes
+   « inset grouped » (blocs à coins arrondis, marges latérales), cellules de
+   44 pt, icônes en carré arrondi coloré, séparateurs fins DÉCALÉS sous le
+   texte, valeur secondaire grise à droite, chevron, en-têtes et notes de
+   groupe. Volontairement affranchi du design system Yeldra/OVNI (verre
+   plexiglass, halos, ombres dirigées) : ici on lit des réglages, pas un décor.
+
+   Fidélité — les points qui font qu'« on y croit » :
+     • métriques réelles d'iOS : cellule 44 pt, icône 29×29 (rayon 7), gouttière
+       de groupe 16 pt, rayon de groupe 10 pt, séparateur décalé de 60 pt quand
+       il y a une icône (16 + 29 + 15) et de 16 pt sinon ;
+     • typographie SYSTÈME en tête de pile (-apple-system) : sur iPhone/iPad
+       c'est San Francisco — la vraie police des Réglages. Repli Inter ailleurs ;
+     • tailles iOS : 17 px pour les cellules, 13 px pour en-têtes et notes,
+       34 px pour le grand titre ;
+     • palette système iOS (blue/green/red/orange/…) plutôt que les couleurs
+       énergie de l'app : dans ce tiroir, rien n'est « solaire » ou « batterie ».
+
+   Écart ASSUMÉ vs iOS : ni noir ni blanc purs (règle d'or du projet) — le fond
+   sombre est un quasi-noir légèrement bleuté et les cellules claires un blanc
+   cassé. À l'œil, indiscernable ; à la mesure, conforme à la charte.
+
+   Portée : tout descendant de `.ios`. Le kit vit dans un fichier à part (et non
+   dans app.css) pour que ces règles ne puissent pas fuir dans les pages de
+   pilotage.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.ios {
+  /* ── Fonds & surfaces (systemGroupedBackground / secondarySystemGrouped) ── */
+  --ios-bg: oklch(0.967 0.003 286);
+  --ios-cell: oklch(0.9975 0 0);
+  --ios-cell-press: oklch(0.945 0.003 286);
+  --ios-field: oklch(0.925 0.004 286);
+
+  /* ── Texte (label / secondaryLabel / tertiaryLabel) ── */
+  --ios-label: oklch(0.16 0.004 286);
+  --ios-label2: oklch(0.555 0.012 286);
+  --ios-label3: oklch(0.7 0.01 286);
+  --ios-separator: oklch(0.855 0.006 286);
+
+  /* ── Couleurs système iOS ── */
+  --ios-blue: oklch(0.596 0.212 258);
+  --ios-green: oklch(0.742 0.185 146);
+  --ios-red: oklch(0.637 0.234 29);
+  --ios-orange: oklch(0.755 0.176 62);
+  --ios-yellow: oklch(0.855 0.166 92);
+  --ios-purple: oklch(0.598 0.226 314);
+  --ios-teal: oklch(0.788 0.121 227);
+  --ios-indigo: oklch(0.516 0.207 285);
+  --ios-pink: oklch(0.635 0.248 13);
+  --ios-gray: oklch(0.646 0.008 286);
+
+  /* Police SYSTÈME d'abord : sur iPhone/iPad = San Francisco, exactement les
+     Réglages. Inter (police de l'app) sert de repli sur les autres plateformes. */
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter Variable', 'Inter', system-ui,
+    sans-serif;
+  font-feature-settings: normal; /* neutralise les alternates Inter de l'app */
+  font-variant-numeric: normal;
+  letter-spacing: -0.01em; /* SF a un crénage plus serré que la valeur par défaut */
+  color: var(--ios-label);
+  background: var(--ios-bg);
+  -webkit-tap-highlight-color: transparent;
+}
+
+[data-theme='dark'] .ios {
+  /* iOS sombre : fond quasi noir, cellules #1C1C1E. On reste au-dessus du noir
+     pur (charte Domo) — l'écart n'est pas perceptible, la conformité si. */
+  --ios-bg: oklch(0.155 0.004 286);
+  --ios-cell: oklch(0.226 0.005 286);
+  --ios-cell-press: oklch(0.28 0.006 286);
+  --ios-field: oklch(0.3 0.006 286);
+
+  --ios-label: oklch(0.98 0.002 286);
+  --ios-label2: oklch(0.68 0.012 286);
+  --ios-label3: oklch(0.52 0.012 286);
+  --ios-separator: oklch(0.345 0.007 286);
+
+  --ios-blue: oklch(0.68 0.18 254);
+  --ios-green: oklch(0.79 0.19 148);
+  --ios-red: oklch(0.68 0.21 25);
+  --ios-orange: oklch(0.79 0.17 65);
+  --ios-yellow: oklch(0.88 0.17 95);
+  --ios-purple: oklch(0.68 0.2 312);
+  --ios-teal: oklch(0.82 0.11 227);
+  --ios-indigo: oklch(0.62 0.18 285);
+  --ios-pink: oklch(0.68 0.23 13);
+  --ios-gray: oklch(0.62 0.008 286);
+}
+
+/* ══ Barre de navigation & titres ═══════════════════════════════════════════ */
+
+/* Bouton retour : chevron + libellé de l'écran précédent, en bleu système. */
+.ios-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  align-self: flex-start;
+  margin-left: -5px; /* le chevron déborde de la gouttière, comme sur iOS */
+  padding: 6px 6px 6px 0;
+  min-height: 34px;
+  font-size: 17px;
+  color: var(--ios-blue);
+  text-decoration: none;
+}
+
+/* Grand titre (large title) : 34 pt gras, aligné sur la gouttière de 16 pt. */
+.ios-large-title {
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.022em;
+  line-height: 1.12;
+  padding: 2px 0 8px;
+}
+
+/* ══ Recherche ═════════════════════════════════════════════════════════════ */
+.ios-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 8px;
+  margin-bottom: 18px;
+  border-radius: 10px;
+  background: var(--ios-field);
+  color: var(--ios-label2);
+}
+.ios-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 17px;
+  color: var(--ios-label);
+  padding: 0;
+}
+.ios-search input::placeholder {
+  color: var(--ios-label2);
+}
+.ios-search input:focus {
+  outline: none;
+}
+.ios-search-clear {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--ios-label3);
+  font-size: 17px;
+  line-height: 1;
+  padding: 4px;
+  cursor: pointer;
+}
+
+/* ══ Groupes « inset grouped » ═════════════════════════════════════════════ */
+
+/* En-tête de groupe : 13 pt gris, décalé de la gouttière. */
+.ios-group-header {
+  font-size: 13px;
+  line-height: 1.25;
+  color: var(--ios-label2);
+  padding: 0 16px 7px;
+}
+/* Note sous un groupe : l'explication en petit gris, signature des Réglages. */
+.ios-group-footer {
+  font-size: 13px;
+  line-height: 1.33;
+  color: var(--ios-label2);
+  padding: 7px 16px 0;
+}
+/* Le bloc lui-même : fond de cellule, coins 10 pt, marges latérales 16 pt.
+   overflow: hidden pour que la 1re et la dernière cellule épousent les coins. */
+.ios-group {
+  background: var(--ios-cell);
+  border-radius: 10px;
+  overflow: hidden;
+}
+/* Espace entre deux groupes successifs (≈ 35 pt sur iOS). */
+.ios-section + .ios-section {
+  margin-top: 32px;
+}
+
+/* ══ Cellules ══════════════════════════════════════════════════════════════ */
+.ios-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  min-height: 44px;
+  padding: 7px 16px;
+  color: inherit;
+  text-decoration: none;
+  font-size: 17px;
+  background: transparent;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  letter-spacing: inherit;
+  touch-action: manipulation;
+}
+/* Séparateur fin DÉCALÉ : commence après l'icône (60 pt) quand la cellule en a
+   une, sinon à la gouttière (16 pt). Jamais sous la dernière cellule. C'est ce
+   détail qui distingue une vraie liste iOS d'un empilement de bordures. */
+.ios-cell:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 16px;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--ios-separator);
+  transform: scaleY(0.5); /* hairline : 0,5 px sur écran non-Retina */
+  transform-origin: bottom;
+}
+.ios-cell.has-icon:not(:last-child)::after {
+  left: 60px;
+}
+/* Pression : la cellule se grise (comportement natif d'une ligne tapable).
+   data-pressed est posé par la délégation globale de +layout.svelte. */
+a.ios-cell[data-pressed],
+button.ios-cell[data-pressed] {
+  background: var(--ios-cell-press);
+}
+@media (hover: hover) {
+  a.ios-cell:hover,
+  button.ios-cell:hover {
+    background: var(--ios-cell-press);
+  }
+}
+
+/* Icône : carré arrondi 29×29, glyphe blanc centré, couleur système au fond. */
+.ios-icon {
+  flex: 0 0 auto;
+  width: 29px;
+  height: 29px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: oklch(1 0 0);
+  background: var(--ios-gray);
+}
+
+.ios-cell-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ios-cell-label {
+  font-size: 17px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Sous-titre : iOS l'emploie avec parcimonie (12-13 pt gris). */
+.ios-cell-sub {
+  font-size: 12.5px;
+  line-height: 1.25;
+  color: var(--ios-label2);
+}
+/* Valeur secondaire à droite (« Général > iPhone ») — grise. */
+.ios-cell-value {
+  flex: 0 0 auto;
+  font-size: 17px;
+  color: var(--ios-label2);
+  text-align: right;
+}
+.ios-cell-value.is-green {
+  color: var(--ios-green);
+}
+.ios-cell-value.is-red {
+  color: var(--ios-red);
+}
+.ios-cell-value.is-orange {
+  color: var(--ios-orange);
+}
+.ios-chevron {
+  flex: 0 0 auto;
+  color: var(--ios-label3);
+  margin-left: -4px;
+}
+
+/* Pastille de compteur (badge rouge des Réglages). */
+.ios-badge {
+  flex: 0 0 auto;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--ios-red);
+  color: oklch(1 0 0);
+  font-size: 13px;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+}
+
+/* Cellule-bouton : libellé bleu (destructif = rouge), sans chevron. */
+.ios-cell.is-action {
+  color: var(--ios-blue);
+}
+.ios-cell.is-destructive {
+  color: var(--ios-red);
+}
+.ios-cell:disabled {
+  opacity: 0.4;
+}
+
+/* ══ Contrôles ═════════════════════════════════════════════════════════════ */
+
+/* Interrupteur iOS : 51×31, pastille blanche ombrée, vert système à l'état ON. */
+.ios-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 51px;
+  height: 31px;
+  cursor: pointer;
+}
+.ios-switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+.ios-switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 15.5px;
+  background: var(--ios-field);
+  transition: background-color 200ms ease;
+}
+.ios-switch-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: oklch(1 0 0);
+  box-shadow:
+    0 3px 8px oklch(0 0 0 / 0.15),
+    0 1px 1px oklch(0 0 0 / 0.16);
+  transition: transform 220ms cubic-bezier(0.3, 0.9, 0.4, 1);
+}
+.ios-switch input:checked + .ios-switch-track {
+  background: var(--ios-green);
+}
+.ios-switch input:checked + .ios-switch-track::after {
+  transform: translateX(20px);
+}
+.ios-switch input:focus-visible + .ios-switch-track {
+  outline: 2px solid var(--ios-blue);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ios-switch-track,
+  .ios-switch-track::after {
+    transition: none;
+  }
+}
+
+/* Champ dans une cellule : libellé à gauche, valeur saisissable à droite —
+   pattern des Réglages (ex. réglage d'une alarme). */
+.ios-input {
+  flex: 0 0 auto;
+  width: 8rem;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 17px;
+  color: var(--ios-blue);
+  text-align: right;
+  padding: 0;
+  min-width: 0;
+}
+.ios-input:focus {
+  outline: none;
+}
+.ios-input::placeholder {
+  color: var(--ios-label3);
+}
+/* Champ texte long (libellé de matériel) : prend la largeur restante. */
+.ios-input.is-wide {
+  flex: 1 1 auto;
+  width: auto;
+}
+
+/* Contrôle segmenté (Clair / Sombre) — pilule grise, segment actif surélevé. */
+.ios-segmented {
+  flex: 0 0 auto;
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--ios-field);
+}
+.ios-segment {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ios-label);
+  padding: 5px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.ios-segment[aria-pressed='true'] {
+  background: var(--ios-cell);
+  font-weight: 600;
+  box-shadow:
+    0 3px 8px oklch(0 0 0 / 0.12),
+    0 1px 1px oklch(0 0 0 / 0.04);
+}
+
+/* ══ Focus clavier (iPad + clavier Bluetooth) ══════════════════════════════ */
+.ios a:focus-visible,
+.ios button:focus-visible,
+.ios input:focus-visible {
+  outline: 2px solid var(--ios-blue);
+  outline-offset: -2px;
+}
+
+/* ══ iPad paysage / desktop : liste centrée, comme les Réglages sur iPad ═══ */
+@media (min-width: 768px) {
+  .ios-list {
+    max-width: 44rem;
+    margin-inline: auto;
+  }
+}

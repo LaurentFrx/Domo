@@ -36,7 +36,7 @@ export type ThermostatTransition = {
 
 /**
  * Config de régulation — miroir TS de la config daemon. Source de vérité =
- * settings.json côté Domo (éditée dans /reglages), poussée au daemon via
+ * settings.json côté Domo (éditée dans /menu/chauffage), poussée au daemon via
  * /command. Le daemon a les mêmes valeurs par défaut au cas où.
  */
 export type ThermostatConfig = {
@@ -282,7 +282,7 @@ class ThermostatState {
     this.sendCommand({ clear_override: true });
   }
 
-  /** Pousse la config de régulation au daemon (après édition dans /reglages). */
+  /** Pousse la config de régulation au daemon (après édition dans /menu/chauffage). */
   pushConfig(config: ThermostatConfig) {
     return this.sendCommand({ config: snakeConfig(config) });
   }

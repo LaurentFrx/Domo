@@ -3,7 +3,8 @@
 Daemon 24/7 qui asservit l'**aspirateur de l'atelier** (prise Matter **node 29**)
 à la consommation de la prise des **outils** (**node 28**) : l'outil démarre →
 l'aspirateur part avec lui ; l'outil s'arrête → l'aspirateur s'arrête après un
-délai de traînage (**5 s**, demandé par Laurent le 2026-07-31).
+délai de traînage (**2 s** — 5 s à la mise en service, ramenés à 2 s par Laurent
+après essai en conditions réelles le 2026-07-31).
 
 > **À déployer sur le RPi4**, à côté du matter-server — comme les autres bridges.
 > Le code vit ici pour être versionné ; il **ne tourne pas** sur le VPS. Faire
@@ -45,8 +46,8 @@ viennent de cette capture.
 - **Démarrage** : l'aspirateur part **~2 s après** l'outil.
 - **Arrêt** : la prise peut mettre jusqu'à **~4 s** à annoncer le passage à 0 W
   (mesuré : 4,1 s sur l'essai). Extinction réelle = ce délai + `OFF_DELAY_S`,
-  soit **5 à 9 s** après l'arrêt de l'outil. Le « 5 s » demandé est le délai
-  *ajouté*, pas le total — la prise ne sait pas faire mieux.
+  soit **2 à 6 s** après l'arrêt de l'outil. `OFF_DELAY_S` est le délai *ajouté*,
+  pas le total — la prise ne sait pas faire mieux.
 
 ## Installation (RPi4)
 
@@ -68,7 +69,7 @@ Journal : `docker logs -f atelier-bridge`.
 | `TOOL_NODE_ID` | `28` | prise « Outils atelier » |
 | `VACUUM_NODE_ID` | `29` | prise « Aspirateur » |
 | `ON_W` / `OFF_W` | `20` / `10` | hystérésis de détection (W) |
-| `OFF_DELAY_S` | `5` | traînage après l'arrêt de l'outil |
+| `OFF_DELAY_S` | `2` | traînage après l'arrêt de l'outil |
 | `OBSERVE_ONLY` | `0` | `1` = journalise sans commander le relais |
 | `STATE_PATH` | `/data/atelier_state.json` | propriété persistée |
 
@@ -86,4 +87,10 @@ n'est là pour l'éteindre.
   prendrait sa propre commande pour une intervention humaine et lâcherait la
   propriété aussitôt après l'avoir prise.
 - **Éteindre la prise de l'outil** (node 28) met sa puissance à 0 W : l'outil est
-  donc vu « arrêté », et l'aspirateur suit. C'est voulu.
+  donc vu « arrêté », et l'aspirateur suit. C'est voulu. En revanche, prise des
+  outils coupée = automatisme mort **en silence** — rien ne se déclenchera plus.
+- **`docker restart` ne relit PAS le `.env`.** Les variables d'un `--env-file`
+  sont figées à la CRÉATION du conteneur. Après avoir modifié `.env` il faut
+  `docker rm -f atelier-bridge` puis relancer le `docker run` — sinon le daemon
+  repart avec l'ancien réglage en affirmant le contraire dans son journal. (Même
+  piège que les autres bridges du RPi4 : `down`/`up`, jamais `restart`.)

@@ -1,7 +1,7 @@
 /**
  * Régimes tarifaires — lecture et ÉCRITURE des prix HP/HC.
  *
- * Avant cette route, les 4 champs « Tarifs EDF » de /reglages écrivaient dans
+ * Avant cette route, les 4 champs « Tarifs EDF » des réglages écrivaient dans
  * `data/settings.json` et n'étaient relus par PERSONNE : les prix réellement
  * appliqués (pilote cumulus, économies, ventilation HP/HC) viennent de
  * `data/tariffs.json`, qui n'était éditable qu'à la main sur le serveur. Le

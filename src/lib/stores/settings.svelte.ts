@@ -58,7 +58,7 @@ function normalizePhases(arr: unknown): InstallationPhase[] {
   if (!Array.isArray(arr)) return [];
   // Filet de sécurité : un settings.json déjà corrompu (doublons d'id hérités du
   // compteur qui repartait de 0) doit quand même produire des clés #each UNIQUES,
-  // sinon /reglages replante au rendu client. On réattribue un id frais à toute
+  // sinon /menu/bilan replante au rendu client. On réattribue un id frais à toute
   // collision (ou id manquant) → la page rend toujours ; le prochain save()
   // persiste les ids dédupliqués et soigne le fichier.
   const seen = new Set<string>();

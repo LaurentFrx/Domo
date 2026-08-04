@@ -1,7 +1,15 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { navItems } from './nav-items';
+  import { MENU_ICON, isMenuDestination } from './menu-items';
+  import { menuSheet, openMenu } from './menu-state.svelte';
   import { activeNavHref } from '$lib/pager/pager-nav.svelte';
+
+  // Dans une destination du menu (/menu/…, mais aussi /energie et /maison qu'il
+  // ouvre), AUCUN onglet de pilotage ne doit s'allumer : `activeNavHref` retombe
+  // sur '/' par défaut (le pager n'y est pas monté), ce qui ferait briller Accueil
+  // à tort. C'est le bouton « ☰ » qui porte l'état actif.
+  const inMenu = $derived(isMenuDestination(page.url.pathname));
 
   // ─── Clavier iOS : garder la barre vraiment collée en bas ──────────────────
   // Une barre `position: fixed` est ancrée au viewport de MISE EN PAGE, pas au
@@ -74,7 +82,7 @@
 >
   <div class="flex h-[60px] items-center justify-around px-2">
     {#each navItems as tab (tab.href)}
-      {@const active = tab.href === activeNavHref(page.url.pathname)}
+      {@const active = !inMenu && tab.href === activeNavHref(page.url.pathname)}
       <a
         href={tab.href}
         class="tabbar-item flex h-full flex-1 flex-col items-center justify-center gap-1 rounded-lg"
@@ -110,6 +118,46 @@
         {/if}
       </a>
     {/each}
+
+    <!-- Menu « ☰ » : dernier de la barre, à la place qu'occupait Réglages. C'est un
+         BOUTON (il ouvre une feuille), pas un lien — mais il s'allume comme un onglet
+         quand on est dans l'espace /menu, pour qu'on sache d'où l'on vient. -->
+    <button
+      type="button"
+      onclick={openMenu}
+      class="tabbar-item flex h-full flex-1 flex-col items-center justify-center gap-1 rounded-lg"
+      class:tabbar-item-active={inMenu || menuSheet.open}
+      aria-haspopup="dialog"
+      aria-expanded={menuSheet.open}
+      aria-label="Menu — réglages et informations techniques"
+    >
+      <svg
+        width="22"
+        height="22"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.9"
+        stroke-linecap="round"
+        aria-hidden="true"
+      >
+        <path d={MENU_ICON} />
+      </svg>
+      <span
+        class="text-[10px] leading-none"
+        class:font-semibold={inMenu || menuSheet.open}
+        class:font-medium={!(inMenu || menuSheet.open)}
+      >
+        Menu
+      </span>
+      {#if inMenu}
+        <span
+          class="absolute bottom-1 left-1/2 h-[3px] w-1 -translate-x-1/2 rounded-full"
+          style="background: var(--color-primary-active);"
+          aria-hidden="true"
+        ></span>
+      {/if}
+    </button>
   </div>
 </nav>
 
@@ -137,6 +185,12 @@
     position: relative;
     color: var(--color-muted-fg);
     min-height: 44px;
+    /* Le dernier item est un <button> (menu) : sans ça, iOS lui peindrait un fond
+       et une bordure natifs au milieu d'une rangée de liens. */
+    background: none;
+    border: 0;
+    -webkit-appearance: none;
+    appearance: none;
     transition: color var(--duration-fast) var(--ease-default);
     /* Polish tactile iOS : pas de rectangle gris au tap, pas de zoom double-tap,
        pas de sélection de texte parasite sur un lourd appui. */

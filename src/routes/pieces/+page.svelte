@@ -306,19 +306,15 @@
       </div>
     {/if}
 
-    <!-- ═══ Vue condensée — Ligne 1 : Bureau / Chargeur / Atelier (3 sur une ligne) ═══ -->
-    {#if bureauSwitch || chargeurSwitch || atelierDevice}
-      <div class="grid grid-cols-3 gap-2.5 sm:gap-3">
+    <!-- ═══ Vue condensée — Ligne 1 : Bureau / Chargeur / Atelier / Portail ═══ -->
+    <!-- 4 commandes sur une seule ligne : ce sont les mêmes gestes (un appui, un
+         état), elles se lisent d'un coup d'œil. Les libellés sont déjà tronqués
+         proprement dans les tuiles (`truncate`), ce qui tient sur un iPhone étroit. -->
+    {#if bureauSwitch || chargeurSwitch || atelierDevice || portailDevice}
+      <div class="grid grid-cols-4 gap-2.5 sm:gap-3">
         {#if bureauSwitch}<SwitchTile sw={bureauSwitch} />{/if}
         {#if chargeurSwitch}<SwitchTile sw={chargeurSwitch} />{/if}
         {#if atelierDevice}<ZigbeeGenericTile device={atelierDevice} />{/if}
-      </div>
-    {/if}
-
-    <!-- ═══ Ligne 2 : Imprimante / Portail ═══ -->
-    {#if printerPlug || portailDevice}
-      <div class="grid grid-cols-[2fr_1fr] gap-2.5 sm:gap-3">
-        {#if printerPlug}<PrinterTile plug={printerPlug} />{/if}
         {#if portailDevice}<ZigbeeGenericTile device={portailDevice} />{/if}
       </div>
     {/if}
@@ -359,6 +355,14 @@
   <!-- ═══ Éclairage terrasse (WLED — QuinLed Dig-Uno) — indépendant de Matter,
        donc HORS du bloc conditionnel ci-dessus (toujours visible). ═══ -->
   <WledCard />
+
+  <!-- ═══ Imprimante — descendue sous l'éclairage terrasse : on la consulte
+       (niveaux d'encre), on ne la commande pas au quotidien. Elle sort du bloc
+       conditionnel Matter au passage, ce qui est CORRECT : c'est une prise Zigbee,
+       elle n'a jamais eu de raison de disparaître quand le hub Matter décroche. ═══ -->
+  {#if printerPlug}
+    <PrinterTile plug={printerPlug} />
+  {/if}
 
   <!-- ═══ Appareils Apple « Localiser » (findmy-bridge → MQTT) — bas de page ═══ -->
   <FindMyCard />

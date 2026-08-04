@@ -125,6 +125,26 @@ Reproduit le bouton **natif iOS** (validé « sensation d'app pro »). Mécanism
 - Respecter **`prefers-reduced-transparency`** : repli cartes opaques, sans flou.
 - ⚠️ **Ne jamais `pnpm build` sans `sudo systemctl restart domo`** (le dossier `/home/laurent/domo` est à la fois dev **et** WorkingDirectory du service → 500 `ERR_MODULE_NOT_FOUND` sinon). `pnpm check` (svelte-check) est en lecture seule, sûr.
 
+## 11 bis. Surface « Réglages iOS » — l'espace menu ☰ (SEULE exception au design system)
+
+Depuis le 03/08/2026, la barre de navigation ne porte plus que le geste quotidien — **Accueil, Climat, Pièces, Musique** — plus un bouton **☰**. Tout le reste (réglages, informations techniques, automatismes de fond, mais aussi **Énergie** et **Maison 3D**) vit derrière ce bouton. Le menu reproduit **l'app Réglages d'iOS** : c'est le seul endroit de Domo affranchi du langage Yeldra.
+
+**Architecture**
+
+- `src/lib/components/layout/menu-items.ts` — registre UNIQUE, en **groupes** (comme les sections des Réglages) : `header`, `footer`, cellules avec `icon` + `tint` (couleur système) + `keywords` (recherche). Une cellule marquée `external: true` pointe vers une page qui **garde le design de l'app** (`/energie`, `/maison`) : ce sont des écrans de données riches — graphes, Sankey, 3D — les habiller en liste de réglages n'aurait aucun sens. Elles portent en tête un retour « ← Menu ».
+- `src/lib/components/layout/MenuList.svelte` — la liste, **partagée** par la feuille et la page `/menu` (sinon les deux divergent à la première rubrique ajoutée). Porte la recherche, qui **filtre réellement** (libellé + mots-clés métier, accents ignorés) — un champ inerte serait un faux affordance.
+- `src/lib/components/layout/MenuSheet.svelte` — feuille modale iOS (grabber, coins 14 pt, bouton rond de fermeture), montée **une seule fois** dans `+layout.svelte`, ouverte par la TabBar (iPhone) et la Sidebar (iPad/desktop) via `menu-state.svelte.ts`.
+- `src/lib/styles/ios-settings.css` — le kit `.ios-*`. Métriques réelles d'iOS : cellule **44 pt**, icône **29×29** (rayon 7), gouttière **16 pt**, rayon de groupe **10 pt**, séparateur **décalé à 60 pt** quand la cellule a une icône (16 + 29 + 15) et à 16 pt sinon, interrupteur **51×31** vert système. Typo `-apple-system` en tête de pile → **San Francisco sur iPhone/iPad**, la vraie police des Réglages (repli Inter ailleurs). Portée = tout descendant de `.ios`.
+- `app.css` → `html[data-surface='ios']` (posé/retiré par `/menu/+layout.svelte`) : éteint `.app-ambient`, bascule `--color-bg`, et **aplatit les cartes réutilisées** (`--color-card` opaque, rayons 10 pt, `box-shadow: none`, pas de `backdrop-filter`).
+
+⚠️ **Les valeurs de `html[data-surface='ios']` (app.css) et de `.ios` (ios-settings.css) DOIVENT rester alignées** — sinon une bande grise apparaît dans la gouttière des blocs.
+
+**Pourquoi l'aplatissement compte** : les cartes techniques déplacées dans le menu (boucle SB3, bridage APS, Modbus local) sont des écrans **EN SERVICE** qui pilotent du réel — on ne les réécrit pas pour une question de rangement. Le thème les aplatit depuis l'extérieur, sans qu'une ligne de leur code ne bouge.
+
+**Ce qui reste HORS de cette surface** : les écrans d'usage ouverts depuis une rubrique — `/planning` (« Mes matins », l'écran d'Isabelle), `/cumulus-labo`, et les pages `external`. Leur titre d'onglet vient de `pageTitleFor` (`menu-items.ts`), sauf si la page porte déjà son propre `<svelte:head><title>` (cas de `/planning`).
+
+**Conséquence sur le pager** : le swipe 2 doigts ne balaie que les 4 pages de `navItems`. C'est ce qui a permis de supprimer le cas particulier WebGL de `/maison` dans `PagerCell`.
+
 ## 12. Règles d'or (ne jamais casser)
 
 1. **Lisibilité d'abord** (contraste texte suffisant).
@@ -134,3 +154,4 @@ Reproduit le bouton **natif iOS** (validé « sensation d'app pro »). Mécanism
 5. **iOS-first**, mais vérifier **iPad paysage**.
 6. **Centraliser dans `app.css`** : un seul réglage de token se propage à toute l'app.
 7. **Boutons « façon iOS »** (§10) : l'enfoncement + le haptique de confirmation + l'anti-sélection sont **centralisés** (`+layout.svelte` + `app.css`) — ne pas les recâbler ni les casser par composant. Marquer `data-no-haptic` / `.selectable` au besoin.
+8. **Le kit `.ios-*` (§11 bis) ne sort pas de `/menu`** — et réciproquement, aucune carte en verre n'entre dans le menu sans être aplatie par `html[data-surface='ios']`. Deux langages, une frontière nette : le pilotage Yeldra d'un côté, les Réglages iOS de l'autre.

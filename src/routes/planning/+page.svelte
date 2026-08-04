@@ -210,8 +210,10 @@
 <div class="flex flex-col gap-6 py-4">
   <!-- En-tête -->
   <div class="flex flex-col gap-1">
-    <a href="/reglages" class="text-[12px] font-medium" style="color: var(--color-primary);">
-      ← Réglages
+    <!-- Écran d'usage FAMILIAL (Isabelle) : volontairement hors de l'espace /menu,
+         qui porte une surface technique dense. Il garde le langage de l'app. -->
+    <a href="/menu/chauffage" class="text-[12px] font-medium" style="color: var(--color-primary);">
+      ← Chauffage salle de bain
     </a>
     <div class="flex items-center justify-between gap-3">
       <h1 class="text-2xl font-semibold tracking-tight">Mes matins</h1>

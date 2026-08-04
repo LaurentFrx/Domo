@@ -435,3 +435,55 @@ label[for] {
     radial-gradient(60% 58% at 84% 100%, oklch(0.82 0.24 152 / 0.22), transparent 70%),
     radial-gradient(72% 62% at 42% 58%, oklch(0.6 0.26 293 / 0.12), transparent 76%);
 }
+
+/* ════════════════════════════════════════════════════════════════════════ */
+/*   Surface « Réglages iOS » — espace du menu (☰) uniquement                */
+/*   -------------------------------------------------------------------   */
+/*   Les pages /menu/… reproduisent l'app Réglages d'iOS (cf.               */
+/*   src/lib/styles/ios-settings.css) : fond gris groupé, listes plates.    */
+/*   Le fond de PAGE doit suivre — sinon un bloc mat flotte sur le dégradé  */
+/*   vert→bleu, ce qui est pire que les deux styles pris séparément.        */
+/*                                                                          */
+/*   Basculé par un attribut sur <html> (posé/retiré par /menu/+layout) :   */
+/*   on redéfinit --color-bg (le conteneur racine et <body> le lisent déjà, */
+/*   overscroll compris) et on éteint le calque d'ambiance. Aucun hack de   */
+/*   largeur (100vw ⇒ débordement avec une barre de défilement).            */
+/*   Spécificité : html[data-surface] (0,1,1) bat [data-theme='dark']       */
+/*   (0,1,0) → la variante sombre DOIT cumuler les deux attributs.          */
+/*   Les valeurs sont celles du kit (--ios-bg / --ios-cell) : les deux      */
+/*   fichiers DOIVENT rester alignés, sinon une bande grise apparaît dans   */
+/*   la gouttière des blocs.                                                */
+/* ════════════════════════════════════════════════════════════════════════ */
+html[data-surface='ios'] {
+  --color-bg: oklch(0.967 0.003 286);
+  /* Cartes RÉUTILISÉES telles quelles dans le menu (boucle SB3, bridage APS,
+     Modbus…) : on ne les réécrit pas — ce sont des écrans EN SERVICE, testés,
+     qui pilotent des automatismes. On aplatit leur matière depuis le thème pour
+     qu'elles se fondent dans la liste : surface opaque de cellule, rayon 10 pt
+     (celui des blocs iOS), bordure effacée. Pas une ligne de leur code ne bouge. */
+  --color-card: oklch(0.9975 0 0);
+  --color-card-hover: oklch(0.945 0.003 286);
+  --color-muted: oklch(0.945 0.003 286);
+  --color-border: oklch(0.855 0.006 286);
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 10px;
+  --radius-3xl: 12px;
+}
+html[data-surface='ios'][data-theme='dark'] {
+  --color-bg: oklch(0.155 0.004 286);
+  --color-card: oklch(0.226 0.005 286);
+  --color-card-hover: oklch(0.28 0.006 286);
+  --color-muted: oklch(0.28 0.006 286);
+  --color-border: oklch(0.345 0.007 286);
+}
+html[data-surface='ios'] .app-ambient {
+  display: none;
+}
+/* Ni relief plexiglass ni flou d'arrière-plan dans le menu : le verre est le
+   langage des pages de pilotage, pas celui des réglages. */
+html[data-surface='ios'] [style*='background: var(--color-card)'] {
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}

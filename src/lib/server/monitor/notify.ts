@@ -31,7 +31,7 @@ export async function notifyNewIncidents(): Promise<number> {
       body: i.message,
       tag: i.key,
       severity: i.severity,
-      url: '/reglages'
+      url: '/menu/systeme'
     });
     markNotified(i.key);
     sent += n;
@@ -59,7 +59,7 @@ export async function notifyResolved(keys: string[]): Promise<number> {
       body: recoveryMessage(inc),
       tag: `ok:${key}`,
       severity: 'info',
-      url: '/reglages'
+      url: '/menu/systeme'
     });
   }
   return sent;

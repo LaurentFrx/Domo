@@ -1,6 +1,5 @@
 <script lang="ts">
   import FlowDiagram from '$components/charts/FlowDiagram.svelte';
-  import KpiCard from '$components/cards/KpiCard.svelte';
   import SavingsCard from '$components/cards/SavingsCard.svelte';
   import { anker } from '$stores/anker.svelte';
   import { ankerLocal } from '$stores/ankerLocal.svelte';
@@ -12,7 +11,6 @@
   import { clock } from '$stores/clock.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { pagerNav } from '$lib/pager/pager-nav.svelte';
-  import { productionLifetime } from '$stores/productionLifetime.svelte';
   import { sb3loop } from '$stores/sb3loop.svelte';
   import { acquire } from '$stores/refcount';
   import { Tween } from 'svelte/motion';
@@ -400,14 +398,12 @@
   // pages en même temps, un connect/disconnect binaire couperait l'autre.
   let releaseSb3loop: (() => void) | null = null;
   onMount(() => {
-    productionLifetime.connect();
     releaseSb3loop = acquire(sb3loop);
   });
   onDestroy(() => {
     em50.clearBoost();
     apsystems.clearBoost();
     ankerLocal.clearBoost();
-    productionLifetime.disconnect();
     releaseSb3loop?.();
     releaseSb3loop = null;
   });
@@ -445,14 +441,33 @@
       : 'live'
   );
 
-  // ─── Énergie stockée en batterie (kWh) — pour la carte Batterie ───────
+  // ─── Énergie UTILE en batterie (kWh) — pour la carte Batterie ─────────
+  // Ce qu'on peut réellement sortir des packs, RÉSERVE DÉDUITE — et non le
+  // contenu brut. Un parc à 15 % n'offre pas 15 % de son énergie : les Solarbank
+  // s'arrêtent à leur réserve, le reste ne sortira jamais. Afficher le brut, c'est
+  // promettre des kWh qui n'arriveront pas.
+  //
+  // Formule ALIGNÉE sur la source de vérité du pilotage — `usableWh()` de
+  // `src/lib/server/sb3loop/decide.ts`, qui répartit charge et décharge au prorata
+  // des kWh utilisables : utile = capacité × (SoC − réserve) / 100, borné à 0.
+  // Elle est recopiée (et non importée) parce que `$lib/server` ne peut pas partir
+  // au navigateur. Si la réserve change côté boucle, la changer ici aussi.
+  const RESERVE_PCT = 10; // = Sb3LoopConfig.reservePct par défaut
+  const usableWhOf = (socPct: number, capacityWh: number): number =>
+    !Number.isFinite(socPct) || !Number.isFinite(capacityWh) || capacityWh <= 0
+      ? 0
+      : Math.max(0, capacityWh * (Math.min(100, Math.max(0, socPct)) - RESERVE_PCT)) / 100;
+
   // Local up : SB3 cloud (sans l'entrée Max AC, dédupliquée) + Max AC locale.
-  // Local down : total cloud tel quel (il inclut désormais la Max AC).
-  const storedKwh = $derived.by(() => {
-    if (localBatteryUp) {
-      return (cloudSb3.reduce((s, b) => s + b.energyWh, 0) + ankerLocal.energyWh) / 1000;
-    }
-    return anker.totalBatteryEnergyWh / 1000;
+  // Local down : les batteries du cloud, qui incluent désormais la Max AC.
+  const usableKwh = $derived.by(() => {
+    const packs = localBatteryUp
+      ? [
+          ...cloudSb3.map((b) => ({ soc: b.soc, cap: b.capacityWh })),
+          { soc: ankerLocal.socPct, cap: ankerLocal.ratedEnergyWh }
+        ]
+      : anker.batteries.map((b) => ({ soc: b.soc, cap: b.capacityWh }));
+    return packs.reduce((sum, p) => sum + usableWhOf(p.soc, p.cap), 0) / 1000;
   });
 
   // ─── Bilan énergie du JOUR — répartition de toute l'énergie brassée ──────
@@ -483,17 +498,9 @@
   const EDF_BLUE = 'oklch(0.62 0.19 256)'; // réseau EDF (import)
   const SURPLUS_RED = 'oklch(0.62 0.21 27)'; // surplus renvoyé
 
-  // ─── Cards lifetime — production cumulée de TOUTE l'installation ──────
-  // Source FIABLE : /api/production/lifetime = MAX des compteurs MATÉRIELS historisés
-  // par le recorder (APS EZ1 ~1276 kWh + SolarBank ~2042 kWh). Robuste au bug cloud
-  // « daily-as-lifetime » : depuis la reconfiguration des systèmes Anker (22/07), le
-  // cloud SolarBank renvoie la production du JOUR (~25 kWh) à la place du cumul — d'où
-  // le total et l'équivalent VE jadis FAUX. Le max recorder ne redescend jamais.
-  const hasLifetime = $derived(productionLifetime.available && productionLifetime.totalKwh > 0);
-  // Équivalent VE : l'énergie produite depuis l'installation, convertie en km
-  // qu'une voiture électrique parcourrait (conso ~16,7 kWh/100 km → 6 km/kWh).
-  const EV_KM_PER_KWH = 6;
-  const evKm = $derived(productionLifetime.totalKwh * EV_KM_PER_KWH);
+  // Le cumul « depuis l'installation » (production totale, équivalent VE) a
+  // déménagé dans le menu ☰ → « Bilan & installation » (/menu/bilan), qui porte
+  // désormais le store productionLifetime.
 
   function fmtNumber(n: number, decimals = 0): string {
     return n.toLocaleString('fr-FR', {
@@ -528,7 +535,6 @@
         class="bat-card flex flex-col gap-3 rounded-[var(--radius-xl)] border px-4 py-3"
         class:is-charging={batteryOnline && batChargeA > 1}
         class:is-discharging={batteryOnline && batDischargeA > 1}
-        class:is-low={batteryOnline && socA <= 20}
         class:is-offline={!batteryOnline}
         style="background: var(--color-card); border-color: var(--color-border);"
       >
@@ -554,38 +560,53 @@
                 >
               {/if}
             </div>
-            <div class="mt-1.5 flex items-center gap-1.5">
-              <span class="bat-dot h-1.5 w-1.5 shrink-0 rounded-full"></span>
+            <!-- Le MOT « Charge » / « Décharge » puis le POINT de couleur ont été
+                 retirés (03/08/2026) : le flux signé à droite (+1 234 W / −1 234 W),
+                 lui-même coloré, porte déjà le sens. Ne restent que les états que le
+                 chiffre ne porte PAS : hors ligne (rien à mesurer) et repos (flux
+                 nul, où « — » seul serait muet). L'état complet est repris en
+                 aria-label du flux — il ne doit pas rester une pure couleur. -->
+            {#if !batteryOnline || (batChargeA <= 1 && batDischargeA <= 1)}
               <span
-                class="text-[0.6875rem] leading-none font-semibold tracking-wide uppercase"
+                class="mt-1.5 text-[0.6875rem] leading-none font-semibold tracking-wide uppercase"
                 style="color: var(--color-muted-fg);"
               >
-                {#if !batteryOnline}Hors ligne{:else if batChargeA > 1}Charge{:else if batDischargeA > 1}Décharge{:else}Repos{/if}
+                {batteryOnline ? 'Repos' : 'Hors ligne'}
               </span>
-            </div>
+            {/if}
           </div>
 
           <!-- Droite : flux (W) + énergie stockée -->
           <div class="flex shrink-0 flex-col items-end">
-            <span class="bat-flow text-sm leading-none font-semibold tabular-nums">
+            <span
+              class="bat-flow text-sm leading-none font-semibold tabular-nums"
+              aria-label={!batteryOnline
+                ? 'Batteries hors ligne'
+                : batChargeA > 1
+                  ? `En charge, ${fmtW(batChargeA)} watts`
+                  : batDischargeA > 1
+                    ? `En décharge, ${fmtW(batDischargeA)} watts`
+                    : 'Batteries au repos'}
+            >
               {#if batteryOnline && batChargeA > 1}+{fmtW(batChargeA)} W{:else if batteryOnline && batDischargeA > 1}−{fmtW(
                   batDischargeA
                 )} W{:else}—{/if}
             </span>
-            {#if batteryOnline && storedKwh > 0}
+            {#if batteryOnline && usableKwh > 0}
+              <!-- « utiles » : sans ce mot, l'écart avec le % affiché à gauche
+                   (réserve déduite ici, pas là) passerait pour une incohérence. -->
               <span
                 class="mt-1.5 text-[0.6875rem] leading-none font-medium tabular-nums"
-                style="color: var(--color-muted-fg);">{storedKwh.toFixed(1)} kWh</span
+                style="color: var(--color-muted-fg);">{usableKwh.toFixed(1)} kWh utiles</span
               >
             {/if}
           </div>
         </div>
         <!-- Les 3 batteries EN BARRES DE PROGRESSION : SB3-1 / SB3-2 / Max AC -->
         {#if batteryOnline && batteryDetail.length}
-          <div
-            class="flex flex-col gap-2 border-t pt-2.5"
-            style="border-color: var(--color-border);"
-          >
+          <!-- Pas de filet de séparation : l'espacement suffit à détacher les barres
+               du résumé, et un trait de plus dans une carte de verre l'alourdit. -->
+          <div class="flex flex-col gap-2 pt-1">
             {#each batteryDetail as b (b.label)}
               {@const flow = b.chargeW - b.dischargeW}
               {@const soc = Math.max(0, Math.min(100, b.soc))}
@@ -748,81 +769,35 @@
         {@render flowsCard()}
       </div>
 
-      <!-- Colonne stats : remplit la hauteur du Sankey (justify-between) ─────── -->
-      <div class="flex flex-col gap-4 lg:justify-between">
+      <!-- Colonne stats ──────────────────────────────────────────────────────
+           Les KPI « depuis l'installation » (production totale, équivalent VE) ont
+           rejoint le menu ☰ → « Bilan & installation » : un cumul de plusieurs
+           années ne bouge pas d'un jour à l'autre, il n'a rien à faire sur l'écran
+           qu'on ouvre dix fois par jour. Reste ici ce qui change en direct. -->
+      <div class="flex flex-col gap-4">
         <!-- Batterie : colonne droite dès lg (sur mobile elle passe au-dessus du
              Sankey, cf. snippet batteryCard rendu plus haut). -->
         <div class="hidden lg:block">{@render batteryCard()}</div>
-
-        <!-- ═══ KPI lifetime (SolarBank + APsystems, vraies données) ═══ -->
-        {#if hasLifetime}
-          <div class="grid grid-cols-2 gap-3">
-            <KpiCard
-              label="Production totale"
-              value={fmtNumber(productionLifetime.totalKwh, 0)}
-              unit="kWh"
-              trend="depuis l'installation"
-              domain="solar"
-            />
-            <KpiCard
-              label="Équivalent VE"
-              value={fmtNumber(evKm, 0)}
-              unit="km"
-              trend="en voiture électrique"
-              domain="battery"
-            />
-          </div>
-        {:else}
-          <!-- Anker pas connecté : carte unique d'état -->
-          <div
-            class="rounded-[var(--radius-xl)] border p-4"
-            style="background: var(--color-card); border-color: var(--color-border);"
-          >
-            <span
-              class="text-[11px] font-semibold tracking-[0.08em] uppercase"
-              style="color: var(--color-muted-fg);"
-            >
-              Statistiques
-            </span>
-            <p class="mt-1 text-[13px]" style="color: var(--color-muted-fg);">
-              Compteurs de production en cours de relevé.
-            </p>
-          </div>
-        {/if}
       </div>
     </div>
   </div>
 </div>
 
 <style>
-  /* ═══ Carte Batterie : point d'état + flux (le NIVEAU est dans les 3 barres) ═══ */
-  .bat-dot {
-    background: var(--color-muted-fg);
-    transition: background-color 300ms ease;
-  }
+  /* ═══ Carte Batterie : le flux porte l'état (le NIVEAU est dans les 3 barres) ═══ */
   .bat-flow {
     color: var(--color-muted-fg);
   }
-  /* ── CHARGE : point + flux verts ── */
-  .bat-card.is-charging .bat-dot {
-    background: var(--color-battery);
-    box-shadow: 0 0 6px var(--color-battery);
-  }
+  /* ── CHARGE : flux vert ── */
   .bat-card.is-charging .bat-flow {
     color: var(--color-battery);
   }
-  /* ── DÉCHARGE : point + flux orange ── */
-  .bat-card.is-discharging .bat-dot {
-    background: var(--color-solar);
-    box-shadow: 0 0 6px var(--color-solar);
-  }
+  /* ── DÉCHARGE : flux orange ── */
   .bat-card.is-discharging .bat-flow {
     color: var(--color-solar);
   }
-  /* ── NIVEAU BAS parc (≤ 20 %) : point orange (les barres passent au corail) ── */
-  .bat-card.is-low .bat-dot {
-    background: var(--color-solar);
-  }
+  /* (La classe `is-low` a disparu avec le point : elle ne pilotait que sa couleur.
+     Le niveau bas reste signalé — chaque barre passe au corail sous 20 %.) */
   /* ── HORS LIGNE : désature le SOC ── */
   .bat-card.is-offline .bat-soc {
     opacity: 0.6;

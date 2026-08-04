@@ -3,7 +3,7 @@
  * de `data/settings.json` (réutilise settings-store.ts : merge + écriture atomique).
  *
  * Les défauts encodent le profil « Solaire d'abord » (autoconsommation maximale,
- * confort mini garanti). Tout est éditable via /reglages (PUT /api/settings).
+ * confort mini garanti). Tout est éditable via PUT /api/settings.
  */
 
 import { readSettings, writeSettings } from '../settings-store';

@@ -121,6 +121,19 @@ export const handle: Handle = async ({ event, resolve }) => {
     throw redirect(303, '/denied');
   }
 
+  // « Réglages » n'existe plus comme page : son contenu vit derrière le menu ☰
+  // (/menu). On redirige plutôt que de laisser un 404 aux liens déjà partis dans
+  // la nature — notifications Web Push envoyées avant la refonte, raccourci
+  // iPhone, favori. /reglages/planning suivait le thermostat → sa nouvelle
+  // rubrique. APRÈS l'auth : une redirection ne doit pas révéler la carte des
+  // routes à un visiteur non authentifié.
+  if (pathname === '/reglages/planning') {
+    throw redirect(307, '/planning');
+  }
+  if (pathname === '/reglages' || pathname.startsWith('/reglages/')) {
+    throw redirect(307, '/menu');
+  }
+
   // Anti-CSRF explicite (défense en profondeur, en plus du checkOrigin SvelteKit) :
   // une commande d'actuateur ou une écriture déclenchée par un AUTRE site, dans le
   // navigateur d'un utilisateur authentifié, est bloquée. Fetch Metadata :

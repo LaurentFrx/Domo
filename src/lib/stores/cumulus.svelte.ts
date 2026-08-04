@@ -210,7 +210,7 @@ class CumulusState {
   #orchTimer: ReturnType<typeof setInterval> | null = null;
   #orchVis: (() => void) | null = null;
 
-  // ─── Configuration (modifiable via /reglages) ────
+  // ─── Configuration (côté serveur ; plus d'édition dans l'UI) ────
   /** Seuil surplus PV pour ON (W). */
   surplusOnThreshold = $state(1500);
   /** Seuil surplus PV pour OFF (W). */

@@ -39,7 +39,7 @@ export const POST: RequestHandler = async ({ request }) => {
       title: '✅ Domo — test',
       body: 'Les alertes fonctionnent. Vous serez prévenu en cas d’anomalie.',
       tag: 'domo-test',
-      url: '/reglages'
+      url: '/menu/systeme'
     });
     return json({ ok: true, sent });
   }

@@ -3,10 +3,12 @@
   import { page, updated } from '$app/state';
   import { beforeNavigate } from '$app/navigation';
   import { navItems } from '$components/layout/nav-items';
+  import { pageTitleFor } from '$components/layout/menu-items';
   import { activeNavHref } from '$lib/pager/pager-nav.svelte';
   import { onMount } from 'svelte';
   import Sidebar from '$components/layout/Sidebar.svelte';
   import TabBar from '$components/layout/TabBar.svelte';
+  import MenuSheet from '$components/layout/MenuSheet.svelte';
   import PullToRefresh from '$components/layout/PullToRefresh.svelte';
   import HealthBanner from '$components/layout/HealthBanner.svelte';
   import TempHistorySheet from '$components/temperature/TempHistorySheet.svelte';
@@ -33,9 +35,21 @@
   // suit pas le pushState d'un swipe).
   const activeHref = $derived(activeNavHref(page.url.pathname));
   const curIdx = $derived(navItems.findIndex((it) => it.href === activeHref));
-  // Le pager ne pilote que les routes EXACTES de navItem ; les sous-routes
-  // (/reglages/planning…) restent rendues par le routeur (children).
+  // Le pager ne pilote que les routes EXACTES de navItem ; les sous-routes et
+  // l'espace du menu (/menu/…) restent rendus par le routeur (children).
   const onNavItem = $derived(navItems.some((n) => n.href === page.url.pathname));
+
+  // Titre d'onglet : une SEULE source (plusieurs pages sont montées à la fois sous
+  // le pager, un <title> par page se télescoperait). Les pages hors navigation
+  // (menu, planning, labo) ont leur propre registre ; sinon on suit le pager.
+  const offNavTitle = $derived(pageTitleFor(page.url.pathname));
+  const docTitle = $derived(
+    offNavTitle
+      ? `${offNavTitle} · Domo`
+      : curIdx <= 0
+        ? 'Domo'
+        : `${navItems[curIdx].label} · Domo`
+  );
 
   // ─── Pager (rail unifié, physique de ressort) ─────────────────────────
   // Rendu CÔTÉ CLIENT après hydratation : SSR + 1er paint = la page du routeur
@@ -132,7 +146,7 @@
   }
 
   // ─── Hydrater les préférences (theme, animations…) global, dès le mount ─
-  // Sans ça, un reload sur n'importe quelle page autre que /reglages
+  // Sans ça, un reload sur n'importe quelle page autre que /menu/apparence
   // perd le theme dark.
   $effect(() => {
     preferences.hydrate();
@@ -216,7 +230,7 @@
 <!-- Titre centralisé : avec le pager (plusieurs pages montées), un <title> par page
      se télescoperait. Une seule source = la page active (curIdx). -->
 <svelte:head>
-  <title>{curIdx <= 0 ? 'Domo' : `${navItems[curIdx].label} · Domo`}</title>
+  <title>{docTitle}</title>
 </svelte:head>
 
 <!-- Délégation PASSIVE : gère seulement l'enfoncement visuel + le retour haptique
@@ -261,7 +275,7 @@
     {#if pagerReady && onNavItem}
       <Pager />
     {:else}
-      <!-- SSR/1er paint + sous-routes (/reglages/planning…) : rendu par le routeur -->
+      <!-- SSR/1er paint + espace du menu (/menu/…) : rendu par le routeur -->
       <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
         {@render children()}
       </div>
@@ -269,6 +283,10 @@
   </main>
 
   <TabBar />
+
+  <!-- Feuille « ☰ » GLOBALE : montée une seule fois, ouverte par la TabBar (iPhone)
+       comme par la Sidebar (iPad/desktop). -->
+  <MenuSheet />
 
   <!-- Mini-player musique GLOBAL (+ feuille Now Playing) : n'apparaît que si une
        file de lecture existe. L'audio vit dans le store `player` (module-level),

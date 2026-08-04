@@ -100,6 +100,15 @@
 <div class="flex flex-col gap-6 py-4">
   <header class="flex items-start justify-between gap-3">
     <div class="flex flex-col gap-1">
+      <!-- Cette page n'est dans aucune barre de navigation : sans ce retour, on y
+           serait en impasse (elle s'ouvre depuis le menu ☰ → Eau chaude). -->
+      <a
+        href="/menu/eau-chaude"
+        class="text-[12px] font-medium"
+        style="color: var(--color-primary);"
+      >
+        ← Eau chaude
+      </a>
       <h1 class="text-2xl font-semibold tracking-tight">Labo cumulus — modèle shadow</h1>
       <span class="text-[12px]" style="color: var(--color-muted-fg);">
         Ce que le modèle mathématique <em>aurait</em> décidé, tick par tick.
@@ -391,9 +400,9 @@
 
     <p class="px-1 text-[11px] leading-relaxed" style="color: var(--color-muted-fg);">
       Le modèle « shadow » calcule et journalise, mais <strong>ne commande jamais le relais</strong>
-      : le cumulus reste piloté par la logique en service. Ce banc sert à comparer, sur plusieurs
-      jours, ce que le modèle <em>aurait</em> fait au réel avant toute décision. Fenêtre ~4 h ·
-      dernier tick {fmtTime(cumulusShadow.lastTickTs)}.
+      : le cumulus reste piloté par la logique en service. Ce banc sert à comparer, sur plusieurs jours,
+      ce que le modèle <em>aurait</em> fait au réel avant toute décision. Fenêtre ~4 h · dernier
+      tick {fmtTime(cumulusShadow.lastTickTs)}.
     </p>
   {/if}
 </div>

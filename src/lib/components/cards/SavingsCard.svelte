@@ -8,6 +8,11 @@
    * glossy + lueurs douces) — seules animations : le count-up et l'apparition,
    * one-shot (aucune boucle GPU continue, pour ne pas faire chauffer le device).
    * `compact` = variante tassée. Store non connecté → « — » propre.
+   *
+   * Le DÉTAIL a quitté cette carte le 03/08/2026 (sous-titre « auto-consommation
+   * valorisée », débit €/h, ventilation Pleines/Creuses) : il vit dans le menu ☰ →
+   * « Bilan & installation ». L'accueil garde le chiffre qu'on vient y chercher,
+   * pas sa décomposition.
    */
   import { savings } from '$stores/savings.svelte';
   import { preferences } from '$stores/preferences.svelte';
@@ -88,11 +93,13 @@
     }
   };
 
+  // `live` a disparu avec l'anneau pulsant du disque « Aujourd'hui » (03/08/2026) :
+  // les quatre médailles se ressemblent maintenant, seule la couleur les distingue.
   const orbs = $derived([
-    { key: 'today', label: "Aujourd'hui", v: tToday.current, final: today.eur, live: true },
-    { key: 'month', label: 'Mois', v: tMonth.current, final: month.eur, live: false },
-    { key: 'year', label: 'Année', v: tYear.current, final: year.eur, live: false },
-    { key: 'total', label: 'Total', v: tTotal.current, final: total.eur, live: false }
+    { key: 'today', label: "Aujourd'hui", v: tToday.current, final: today.eur },
+    { key: 'month', label: 'Mois', v: tMonth.current, final: month.eur },
+    { key: 'year', label: 'Année', v: tYear.current, final: year.eur },
+    { key: 'total', label: 'Total', v: tTotal.current, final: total.eur }
   ]);
 
   function orbStyle(key: string, i: number): string {
@@ -190,7 +197,6 @@
     <div class="content relative flex flex-col gap-5">
       <header class="hero-head">
         <span class="hero-title">Économies solaires</span>
-        <span class="hero-sub">Auto-consommation valorisée</span>
       </header>
 
       <!-- Les 4 médailles (1 ligne superposée sur iPhone, 4 colonnes dès sm) -->
@@ -198,8 +204,7 @@
         {#each orbs as o, i (o.key)}
           <div class="orb-wrap" style={orbStyle(o.key, i)}>
             <span class="orb-halo" aria-hidden="true"></span>
-            <div class="orb" class:live={o.live}>
-              {#if o.live}<span class="ring" aria-hidden="true"></span>{/if}
+            <div class="orb">
               <span class="orb-value" style="--fz: {uniformFz}">{connected ? eur(o.v) : DASH}</span>
               <span class="orb-label">{o.label}</span>
             </div>
@@ -207,23 +212,6 @@
           </div>
         {/each}
       </div>
-
-      <!-- Pied : débit live €/h · ventilation HP/HC -->
-      <footer class="hero-foot">
-        {#if showRate}
-          <span class="rate">+{eur(rate)}/h</span>
-        {/if}
-        <span class="split">
-          <!-- « HP » / « HC » écrits en toutes lettres : ce sont des sigles de
-               facture d'électricité, jamais explicités à l'écran, sur la carte la
-               plus regardée de l'app. Couleurs inchangées (tokens globaux
-               corail/cyan, harmonisés partout). -->
-          <span style="color: var(--color-hp);">Pleines {connected ? eur(today.eur_hp) : DASH}</span
-          >
-          <span style="color: var(--color-hc);">Creuses {connected ? eur(today.eur_hc) : DASH}</span
-          >
-        </span>
-      </footer>
     </div>
   </section>
 {/if}
@@ -273,13 +261,6 @@
     background-clip: text;
     color: transparent;
   }
-  .hero-sub {
-    font-size: 11px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--color-muted-fg);
-  }
-
   /* ───────────── Médailles ───────────── */
   .orbs {
     display: flex;
@@ -386,17 +367,6 @@
     opacity: 0.6;
     z-index: 0;
   }
-  /* Anneau « live » sur la sphère Aujourd'hui — pulse en OPACITÉ (compositée). */
-  .ring {
-    position: absolute;
-    inset: -2px;
-    border-radius: inherit;
-    box-shadow: 0 0 0 2px var(--orb-glow);
-    z-index: 2;
-  }
-  .solar-hero.animate .ring {
-    animation: ring-pulse 2.8s ease-in-out infinite;
-  }
   .orb-value {
     position: relative;
     z-index: 3;
@@ -421,42 +391,6 @@
   }
   .disconnected .orb {
     filter: saturate(0.3) opacity(0.7);
-  }
-
-  /* ───────────── Pied ───────────── */
-  .hero-foot {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.45rem 0.9rem;
-    padding-top: 0.45rem;
-  }
-  .rate {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    font-size: 12px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    color: var(--color-battery);
-  }
-  .rate::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 9999px;
-    background: var(--color-battery);
-    box-shadow: 0 0 6px var(--color-battery);
-  }
-  .split {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.7rem;
-    margin-left: auto; /* ventilation HP/HC alignée à droite, seule (nuit) ou avec le +€/h */
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-    color: var(--color-muted-fg);
   }
 
   @keyframes fade-in {
@@ -485,20 +419,9 @@
       opacity: 0.95;
     }
   }
-  @keyframes ring-pulse {
-    0%,
-    100% {
-      opacity: 0.85;
-    }
-    50% {
-      opacity: 0.3;
-    }
-  }
-
   @media (prefers-reduced-motion: reduce) {
     .solar-hero.animate .orb-wrap,
-    .solar-hero.animate .orb-halo,
-    .solar-hero.animate .ring {
+    .solar-hero.animate .orb-halo {
       animation: none;
     }
   }

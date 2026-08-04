@@ -8,7 +8,7 @@
  *
  * Le pager écrit ici l'href de sa page centrale ; la TabBar et le titre s'y réfèrent
  * via `activeNavHref`. `current` est null quand le pager n'est pas monté (SSR,
- * sous-route type /reglages/planning) → repli automatique sur le routeur.
+ * sous-route type /menu/systeme) → repli automatique sur le routeur.
  */
 import { navItems, isActive } from '$components/layout/nav-items';
 

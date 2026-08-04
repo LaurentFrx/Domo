@@ -15,7 +15,7 @@ import type { Component } from 'svelte';
 type Loader = () => Promise<{ default: Component }>;
 
 // Deux globs explicites : '*' = une route de 1er niveau, + la racine (Accueil).
-// On évite '**' (qui ratisserait les sous-routes type /reglages/planning, /denied).
+// On évite '**' (qui ratisserait les sous-routes type /menu/systeme).
 const modules: Record<string, () => Promise<unknown>> = {
   ...import.meta.glob('/src/routes/+page.svelte'),
   ...import.meta.glob('/src/routes/*/+page.svelte')

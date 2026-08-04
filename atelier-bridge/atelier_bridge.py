@@ -70,8 +70,9 @@ ON_W = float(os.environ.get("ON_W", "20"))
 OFF_W = float(os.environ.get("OFF_W", "10"))
 
 # Traînage : le temps que l'aspirateur finit d'avaler ce qui est encore dans le
-# tuyau après l'arrêt de l'outil. 5 s demandés par Laurent.
-OFF_DELAY_S = float(os.environ.get("OFF_DELAY_S", "5"))
+# tuyau après l'arrêt de l'outil. 5 s à la mise en service, ramenés à 2 s par
+# Laurent après essai en conditions réelles (2026-07-31).
+OFF_DELAY_S = float(os.environ.get("OFF_DELAY_S", "2"))
 
 # Mode observation : le daemon journalise ce qu'il FERAIT sans rien commander.
 # Sert à valider les seuils sur un vrai outil avant de laisser la machine

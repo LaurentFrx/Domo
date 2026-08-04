@@ -17,6 +17,9 @@
 {/snippet}
 
 <div class="flex flex-col gap-4 py-4">
+  <!-- Page ouverte DEPUIS le menu ☰ (elle n'est plus dans la barre du bas) : ce
+       retour évite l'impasse, comme sur /energie et /planning. -->
+  <a href="/menu" class="text-[12px] font-medium" style="color: var(--color-primary);"> ← Menu </a>
   <header class="flex items-center justify-between">
     <h1 class="text-2xl font-semibold tracking-tight">Maison</h1>
     <span class="text-[12px]" style="color: var(--color-muted-fg);"> Plan 3D · pièces </span>

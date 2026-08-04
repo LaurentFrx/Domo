@@ -1,7 +1,7 @@
 /**
  * GET/PUT /api/cumulus/config — config de l'orchestrateur (section `cumulus` de
  * settings.json). Le PUT merge + normalise (bornes saines) et renvoie la version
- * effective. Derrière l'auth cookie (édité depuis /reglages).
+ * effective. Derrière l'auth cookie (la config vit côté serveur).
  */
 
 import { json, error } from '@sveltejs/kit';

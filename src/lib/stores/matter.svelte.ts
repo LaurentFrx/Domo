@@ -35,6 +35,9 @@ export interface Switch {
   /** Alimentation critique : suivie en conso mais JAMAIS commandable (exclue de la
    *  page Pièces et des actions groupées). Ex. prise du concentrateur Matter. */
   monitorOnly?: boolean;
+  /** Pilotée par un automatisme externe (atelier-bridge) : retirée de l'écran et
+   *  des actions groupées, mais toujours lue pour le suivi de conso. */
+  automated?: boolean;
 }
 
 export interface DeviceGroup {
@@ -84,6 +87,17 @@ const SWITCH_NAMES: Record<number, { name: string; room: string }> = {
 // node 26 (Home cinéma) alimente l'Apple TV qui sert de CONCENTRATEUR Matter —
 // la couper tuerait tout le réseau Matter.
 const MONITOR_ONLY = new Set<number>([26]);
+
+// Prises pilotées par un AUTOMATISME EXTERNE, retirées de l'écran à la demande
+// de Laurent (31/07/2026) : les commander à la main n'a plus de sens.
+//   node 28 « Outils atelier » — doit rester ALLUMÉE en permanence : c'est elle
+//     qui alimente l'outil ET qui sert de capteur à l'asservissement ;
+//   node 29 « Aspirateur » — suit l'outil, via le daemon `atelier-bridge` sur le
+//     RPi4 (voir atelier-bridge/README.md).
+// Distinct de MONITOR_ONLY, qui désigne une alimentation qu'on ne DOIT jamais
+// couper — ici rien n'est dangereux, c'est juste hors de portée de la main.
+// Elles restent dans `switches` (donc lisibles pour le suivi de conso).
+const AUTOMATED = new Set<number>([28, 29]);
 
 // ─── Stores bridés (sécurité matérielle) ───────────────────────────────
 // La position du module (rapportée ET commandée via GoToLiftPercentage) va de
@@ -191,7 +205,8 @@ function parseSwitch(node: Record<string, unknown>): Switch | null {
     available,
     isOn,
     powerW,
-    monitorOnly: MONITOR_ONLY.has(nodeId)
+    monitorOnly: MONITOR_ONLY.has(nodeId),
+    automated: AUTOMATED.has(nodeId)
   };
 }
 
@@ -206,10 +221,11 @@ class MatterState {
   everConnected = $state(false);
   private client: MatterClient | null = null;
 
-  /** Switches commandables : exclut les monitorOnly (alimentation critique). À
-   *  utiliser pour l'AFFICHAGE et la commande ; `switches` (tout) reste exposé
-   *  pour le suivi conso (page Énergie). */
-  commandableSwitches = $derived(this.switches.filter((s) => !s.monitorOnly));
+  /** Switches commandables : exclut les monitorOnly (alimentation critique) et
+   *  les automated (pilotés par un daemon, cf. atelier-bridge). À utiliser pour
+   *  l'AFFICHAGE et la commande ; `switches` (tout) reste exposé pour le suivi
+   *  conso (page Énergie). */
+  commandableSwitches = $derived(this.switches.filter((s) => !s.monitorOnly && !s.automated));
 
   rooms = $derived.by<DeviceGroup[]>(() => {
     const grouped = new Map<string, DeviceGroup>();
@@ -379,18 +395,17 @@ class MatterState {
   }
 
   async switchesOnInRoom(room: string) {
-    for (const sw of this.switches.filter(
-      (s) => s.available && s.room === room && !s.monitorOnly
-    )) {
+    for (const sw of this.commandableSwitches.filter((s) => s.available && s.room === room)) {
       await this.client?.turnOn(sw.nodeId);
     }
   }
 
   async switchesOffInRoom(room: string) {
-    // !monitorOnly : un « tout éteindre » de pièce ne doit pas couper une alim critique.
-    for (const sw of this.switches.filter(
-      (s) => s.available && s.room === room && !s.monitorOnly
-    )) {
+    // commandableSwitches : un « tout éteindre » de pièce ne doit couper ni une
+    // alim critique (monitorOnly), ni une prise asservie à un automatisme
+    // (automated) — couper la prise des outils tuerait l'asservissement de
+    // l'aspirateur, sans que rien ne le signale.
+    for (const sw of this.commandableSwitches.filter((s) => s.available && s.room === room)) {
       await this.client?.turnOff(sw.nodeId);
     }
   }
