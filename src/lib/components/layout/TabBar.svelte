@@ -54,8 +54,14 @@
       }
     };
     const onFocusOut = () => {
+      // `focusout` est aussi émis quand le nœud focalisé est RETIRÉ du DOM —
+      // typiquement à la fermeture d'une BottomSheet, donc en plein démontage
+      // d'effets Svelte, où toute écriture d'état lève `state_unsafe_mutation`.
+      // 1) aucun champ-clavier n'était suivi → il n'y a rien à annuler ;
+      // 2) sinon on repousse l'écriture d'une microtâche, hors du démontage.
+      if (!focused) return;
       focused = false;
-      sync();
+      queueMicrotask(sync);
     };
     document.addEventListener('focusin', onFocusIn);
     document.addEventListener('focusout', onFocusOut);

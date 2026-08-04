@@ -1,67 +1,72 @@
-<script module lang="ts">
-  /** Vues de la feuille — exportée pour que la carte ouvre directement la bonne. */
-  export type WledTab = 'scenes' | 'couleur' | 'effet' | 'lignes';
-</script>
-
 <script lang="ts">
   /**
-   * Feuille de réglage de l'éclairage terrasse — les SOUS-VUES de la carte.
+   * Feuille de réglages de l'éclairage terrasse (ouverte depuis WledTile).
    *
-   * Pourquoi une feuille : tout ce contenu (8 ambiances, 24 styles musicaux, le
-   * sélecteur de couleur, 100+ effets, le pilotage par ligne) vivait dépliable
-   * DANS la carte, qui atteignait plusieurs écrans de haut sur iPhone. La carte
-   * ne garde désormais que ce qu'on touche en passant ; le reste s'ouvre ici,
-   * en plein écran, avec de vraies cibles tactiles — le geste des applications
-   * d'éclairage de référence (Hue, Nanoleaf, l'app WLED elle-même).
+   * La tuile porte l'essentiel au quotidien (allumé/éteint + luminosité) ; TOUT
+   * le reste vit ici, avec la place de respirer. Structure : ce qui est vrai en
+   * permanence en haut (la barre de lumière + luminosité + interrupteur), puis
+   * UNE décision à la fois via un seul niveau d'onglets — l'ancien empilement
+   * scènes / styles / accordéon / sous-onglets faisait deux niveaux imbriqués.
    *
-   * UNE décision à la fois : un sélecteur segmenté en tête, une seule vue à
-   * l'écran. On n'empile pas quatre panneaux ouverts.
+   * Le mode Musique est un état SERVEUR partagé (SSE /api/wled/music/live) : la
+   * bascule, les styles et la légende reflètent le ruban réel, jamais un flag
+   * local à l'appareil.
    *
-   * Les stores sont lus DIRECTEMENT (module-level) : rien à faire redescendre en
-   * props, et la feuille reste synchrone avec la carte qui l'a ouverte.
+   * BottomSheet ne rend ses enfants que lorsqu'elle est ouverte : l'aperçu
+   * animé (et sa boucle rAF) ne vit donc que le temps de la feuille.
    */
-  import { wled, WLED_AMBIANCES, type WledSegment } from '$stores/wled.svelte';
-  import { wledMusic, WLED_MUSIC_STYLES } from '$stores/wledMusic.svelte';
   import BottomSheet from '$components/ui/BottomSheet.svelte';
   import WledColorPicker from './WledColorPicker.svelte';
+  import WledPreview from './WledPreview.svelte';
+  import { wled, WLED_AMBIANCES, type WledSegment } from '$stores/wled.svelte';
+  import { wledMusic, WLED_MUSIC_STYLES } from '$stores/wledMusic.svelte';
+  import { preferences } from '$stores/preferences.svelte';
   import { haptic } from '$utils/haptic';
 
-  let {
-    open = false,
-    tab = $bindable<WledTab>('scenes'),
-    selectedId = 0,
-    onClose
-  }: {
-    open?: boolean;
-    tab?: WledTab;
-    selectedId?: number;
+  interface Props {
+    open: boolean;
     onClose: () => void;
-  } = $props();
+  }
+  let { open, onClose }: Props = $props();
 
+  type Tab = 'ambiances' | 'musique' | 'couleur' | 'effet' | 'lignes';
+  let tab = $state<Tab>('ambiances');
+  let selectedId = $state(0);
   let showAllFx = $state(false);
   let fxQuery = $state('');
 
   const isTogether = $derived(wled.scope === 'together');
+  /** Segment ciblé par Couleur / Effet : l'unique en Ensemble, la ligne
+   *  sélectionnée (tap sur sa barre dans l'aperçu) en Par ligne. */
   const target = $derived(
     isTogether
       ? (wled.segments[0] ?? null)
       : (wled.segments.find((s) => s.id === selectedId) ?? wled.segments[0] ?? null)
   );
-  const ctlDisabled = $derived(!wled.on);
-  const effLoaded = $derived(wled.effects.length > 0);
 
-  // Titre : dire SUR QUOI on agit. En pilotage séparé, le nom de la ligne ciblée
-  // est la seule chose qui distingue deux ouvertures de la feuille.
-  const title = $derived(
-    !isTogether && target ? `Terrasse — ${target.name}` : 'Éclairage terrasse'
-  );
+  $effect(() => {
+    if (!isTogether && wled.segments.length && !wled.segments.some((s) => s.id === selectedId)) {
+      selectedId = wled.segments[0].id;
+    }
+  });
 
-  const TABS: { key: WledTab; label: string }[] = [
-    { key: 'scenes', label: 'Scènes' },
+  // L'onglet Lignes n'existe que si le découpage a un sens sur ce module.
+  const tabs = $derived<{ key: Tab; label: string }[]>([
+    { key: 'ambiances', label: 'Ambiances' },
+    { key: 'musique', label: 'Musique' },
     { key: 'couleur', label: 'Couleur' },
     { key: 'effet', label: 'Effet' },
-    { key: 'lignes', label: 'Lignes' }
-  ];
+    ...(wled.canSplit || !isTogether ? [{ key: 'lignes' as Tab, label: 'Lignes' }] : [])
+  ]);
+  // Le module peut perdre sa 2ᵉ ligne pendant que la feuille est ouverte :
+  // l'onglet disparaîtrait en laissant un panneau vide.
+  $effect(() => {
+    if (!tabs.some((t) => t.key === tab)) tab = 'ambiances';
+  });
+
+  const briPct = $derived(Math.round((wled.bri / 255) * 100));
+  const ctlDisabled = $derived(!wled.on);
+  const effLoaded = $derived(wled.effects.length > 0);
 
   // ─── Effets curés (terrasse) : libellés FR → premier nom WLED présent ───
   const CURATED_FX: { label: string; names: string[] }[] = [
@@ -97,109 +102,175 @@
   }
 </script>
 
-<BottomSheet {open} {title} {onClose}>
-  <!-- Sélecteur de vue : segmenté iOS, une seule vue affichée à la fois. -->
-  <div class="seg" role="tablist" aria-label="Que voulez-vous régler ?">
-    {#each TABS as t (t.key)}
-      <button
-        type="button"
-        class="seg-item"
-        class:active={tab === t.key}
-        role="tab"
-        aria-selected={tab === t.key}
-        onclick={() => {
-          haptic('light');
-          tab = t.key;
-        }}
+<BottomSheet {open} title="Éclairage terrasse" {onClose}>
+  {#if wled.segments.length === 0}
+    <p class="py-4 text-center text-[13px]" style="color: var(--color-muted-fg);">
+      {wled.connected ? 'Aucun segment configuré.' : 'Connexion au module LED…'}
+    </p>
+  {:else}
+    <!-- ─── Toujours vrai : la lumière, sa luminosité, son interrupteur ─── -->
+    <WledPreview
+      animated={preferences.animationsEnabled}
+      selectable={!isTogether}
+      {selectedId}
+      onselect={(id) => {
+        haptic('light');
+        selectedId = id;
+      }}
+    />
+
+    <div class="master-row">
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="var(--color-muted-fg)"
+        stroke-width="2"
+        stroke-linecap="round"
+        aria-hidden="true"
+        class="shrink-0"
       >
-        {t.label}
-      </button>
-    {/each}
-  </div>
-
-  {#if tab === 'scenes'}
-    <!-- ─── SCÈNES : vignettes larges (couleur + nom), puis la musique ─── -->
-    <div class="tile-grid" role="group" aria-label="Ambiances">
-      {#each WLED_AMBIANCES as a (a.key)}
-        <button
-          type="button"
-          class="tile"
-          class:tile-off={a.off}
-          onclick={() => {
-            haptic('medium');
-            manual();
-            wled.applyAmbiance(a.key);
-          }}
-        >
-          <span
-            class="tile-swatch"
-            style={a.off ? '' : `background: ${a.swatch};`}
-            aria-hidden="true"
-          ></span>
-          <span class="tile-label">{a.label}</span>
-        </button>
-      {/each}
-    </div>
-
-    <div class="music-head">
-      <div class="flex min-w-0 flex-col">
-        <span class="text-[14px] font-semibold" style="color: var(--color-fg);"
-          >Suivre la musique</span
-        >
-        <span class="text-[11px]" style="color: var(--color-muted-fg);">
-          Le ruban réagit à ce qui joue sur Domo
-        </span>
-      </div>
-      <label class="toggle-pill" aria-label="Suivre la musique">
+        <circle cx="12" cy="12" r="4" />
+        <path
+          d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M19.1 4.9l-2.2 2.2M7.1 16.9l-2.2 2.2"
+        />
+      </svg>
+      <input
+        type="range"
+        class="bri-range"
+        min="0"
+        max="255"
+        value={wled.bri}
+        disabled={ctlDisabled}
+        oninput={(e) => wled.setBri(+(e.currentTarget as HTMLInputElement).value)}
+        onchange={() => haptic('light')}
+        aria-label="Luminosité générale"
+      />
+      <span class="bri-pct tabular-nums">{briPct}%</span>
+      <label class="toggle-pill" aria-label="Allumer / éteindre l'éclairage terrasse">
         <input
           type="checkbox"
-          checked={wledMusic.enabled}
+          checked={wled.on}
           onchange={(e) => {
-            haptic('medium');
-            wledMusic.setEnabled((e.currentTarget as HTMLInputElement).checked);
+            haptic('light');
+            wled.setOn((e.currentTarget as HTMLInputElement).checked);
           }}
         />
         <span class="toggle-pill-knob"></span>
       </label>
     </div>
 
-    {#if wledMusic.enabled}
-      <!-- Un effet ♪ ne suit QUE le volume — c'est sa conception WLED : le dire
-           évite de chercher des fréquences là où il n'y en aura jamais. -->
-      <div role="radiogroup" aria-label="Style musical" class="flex flex-col gap-2">
-        {#each [{ kind: 'freq', title: 'Réagit aux fréquences' }, { kind: 'vol', title: 'Réagit au volume' }] as grp (grp.kind)}
-          <span class="group-title">{grp.title}</span>
-          <div class="chip-grid">
-            {#each WLED_MUSIC_STYLES.filter((s) => s.kind === grp.kind || (grp.kind === 'freq' && s.kind === 'ambiance')) as st (st.key)}
-              <button
-                type="button"
-                class="chip"
-                class:active={wledMusic.style === st.key}
-                role="radio"
-                aria-checked={wledMusic.style === st.key}
-                title={st.hint}
-                onclick={() => {
-                  haptic('light');
-                  wledMusic.setStyle(st.key);
-                }}
-              >
-                {st.label}
-              </button>
-            {/each}
-          </div>
+    <!-- ─── UNE décision à la fois — un SEUL niveau d'onglets ─── -->
+    <div class="tabs" role="tablist" aria-label="Que voulez-vous régler ?">
+      {#each tabs as t (t.key)}
+        <button
+          type="button"
+          class="tab"
+          class:active={tab === t.key}
+          role="tab"
+          aria-selected={tab === t.key}
+          onclick={() => (tab = t.key)}
+        >
+          {t.label}
+        </button>
+      {/each}
+    </div>
+
+    {#if tab === 'ambiances'}
+      <!-- Toutes les ambiances, d'un coup : la feuille a la place que la carte
+           n'avait pas (fini le « … » qui dépliait une 2ᵉ rangée). -->
+      <div class="scene-grid" role="group" aria-label="Ambiances">
+        {#each WLED_AMBIANCES as a (a.key)}
+          <button
+            type="button"
+            class="scene"
+            onclick={() => {
+              haptic('medium');
+              manual();
+              wled.applyAmbiance(a.key);
+            }}
+          >
+            <span
+              class="scene-dot"
+              class:scene-off={a.off}
+              style={a.off ? '' : `background: ${a.swatch};`}
+              aria-hidden="true"
+            ></span>
+            <span class="scene-label">{a.label}</span>
+          </button>
         {/each}
       </div>
+    {:else if tab === 'musique'}
+      <div class="flex flex-col gap-3">
+        <div class="master-row">
+          <span class="flex-1 text-[13px] font-semibold" style="color: var(--color-fg);">
+            Suivre la musique
+          </span>
+          <label class="toggle-pill" aria-label="Suivre la musique">
+            <input
+              type="checkbox"
+              checked={wledMusic.enabled}
+              onchange={(e) => {
+                haptic('medium');
+                wledMusic.setEnabled((e.currentTarget as HTMLInputElement).checked);
+              }}
+            />
+            <span class="toggle-pill-knob"></span>
+          </label>
+        </div>
+
+        {#if wledMusic.enabled}
+          <!-- Un effet ♪ ne suit QUE le volume — c'est sa conception WLED : le
+               dire évite de chercher des fréquences là où il n'y en aura jamais. -->
+          <div role="radiogroup" aria-label="Style musical" class="flex flex-col gap-1.5">
+            {#each [{ kind: 'freq', title: 'Réagit aux fréquences' }, { kind: 'vol', title: 'Réagit au volume' }] as grp (grp.kind)}
+              <span class="group-title">{grp.title}</span>
+              <div class="chip-grid">
+                {#each WLED_MUSIC_STYLES.filter((s) => s.kind === grp.kind || (grp.kind === 'freq' && s.kind === 'ambiance')) as st (st.key)}
+                  <button
+                    type="button"
+                    class="chip"
+                    class:active={wledMusic.style === st.key}
+                    role="radio"
+                    aria-checked={wledMusic.style === st.key}
+                    title={st.hint}
+                    onclick={() => {
+                      haptic('light');
+                      wledMusic.setStyle(st.key);
+                    }}
+                  >
+                    {st.label}
+                  </button>
+                {/each}
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="text-[12.5px]" style="color: var(--color-muted-fg);">
+            Le ruban suivra le morceau en cours de lecture, pour tous les appareils.
+          </p>
+        {/if}
+      </div>
+    {:else if target}
+      {#if !isTogether}
+        <span class="applies-to">
+          S'applique à <strong>{target.name}</strong> — touchez une barre ci-dessus pour changer de ligne.
+        </span>
+      {/if}
+      {#if tab === 'couleur'}
+        {@render colorPanel(target)}
+      {:else if tab === 'effet'}
+        {@render effectPanel(target)}
+      {:else if tab === 'lignes'}
+        {@render linesPanel()}
+      {/if}
     {/if}
-  {:else if tab === 'couleur' && target}
-    {@render colorView(target)}
-  {:else if tab === 'effet' && target}
-    {@render effectView(target)}
-  {:else if tab === 'lignes'}
-    {@render linesView()}
   {/if}
 </BottomSheet>
 
-{#snippet colorView(s: WledSegment)}
+{#snippet colorPanel(s: WledSegment)}
+  <!-- Vue COULEUR : les pastilles, le blanc — rien d'autre. -->
   <div class="flex flex-col gap-3" class:dimmed={ctlDisabled}>
     <WledColorPicker
       color={s.col}
@@ -210,11 +281,11 @@
       }}
     />
     {#if wled.rgbw}
-      <div class="slider-line">
-        <span class="slider-label">Blanc 4000K</span>
+      <div class="master-row">
+        <span class="mini-label">Blanc 4000K</span>
         <input
           type="range"
-          class="range"
+          class="bri-range white-range"
           min="0"
           max="255"
           value={s.white}
@@ -226,18 +297,19 @@
           onchange={() => haptic('light')}
           aria-label="Canal blanc 4000K"
         />
-        <span class="slider-pct tabular-nums">{Math.round((s.white / 255) * 100)}%</span>
+        <span class="bri-pct tabular-nums">{Math.round((s.white / 255) * 100)}%</span>
       </div>
     {/if}
   </div>
 {/snippet}
 
-{#snippet effectView(s: WledSegment)}
+{#snippet effectPanel(s: WledSegment)}
   {@const isSolid = !effLoaded || (wled.effects[s.fx] ?? 'Solid') === 'Solid'}
-  <!-- Des noms simples + UNE vitesse. Le catalogue complet reste replié.
-       (Choisir un effet remet ses couleurs par défaut : zéro « palette » à comprendre.) -->
+  <!-- Vue EFFET : des noms simples + UNE vitesse. Le reste est un catalogue
+       replié. (Choisir un effet remet ses couleurs par défaut : zéro réglage
+       de « palette » à comprendre.) -->
   <div class="flex flex-col gap-3" class:dimmed={ctlDisabled}>
-    <div class="chip-grid">
+    <div class="chip-wrap">
       {#each curatedFx as c (c.idx)}
         <button
           type="button"
@@ -248,7 +320,7 @@
           onclick={() => {
             manual();
             wled.setSegEffect(s.id, c.idx);
-            wled.setSegPalette(s.id, 0);
+            wled.setSegPalette(s.id, 0); // couleurs par défaut de l'effet
           }}
         >
           {c.label}
@@ -257,11 +329,11 @@
     </div>
 
     {#if effLoaded && !isSolid}
-      <div class="slider-line">
-        <span class="slider-label">Vitesse</span>
+      <div class="master-row">
+        <span class="mini-label">Vitesse</span>
         <input
           type="range"
-          class="range"
+          class="bri-range"
           min="0"
           max="255"
           value={s.sx}
@@ -288,13 +360,13 @@
     {#if showAllFx}
       <input
         type="search"
-        class="search"
+        class="fx-search"
         placeholder="Rechercher un effet…"
         bind:value={fxQuery}
         disabled={ctlDisabled}
         aria-label="Rechercher un effet"
       />
-      <div class="chip-grid" role="listbox" aria-label="Tous les effets">
+      <div class="fx-grid" role="listbox" aria-label="Tous les effets">
         {#each fxFiltered as e (e.i)}
           <button
             type="button"
@@ -316,11 +388,12 @@
   </div>
 {/snippet}
 
-{#snippet linesView()}
+{#snippet linesPanel()}
+  <!-- Vue LIGNES : piloter ensemble ou séparément, et la ligne choisie. -->
   <div class="flex flex-col gap-3">
     <button
       type="button"
-      class="scope-toggle"
+      class="split-toggle"
       onclick={() => {
         haptic('light');
         wled.setScope(isTogether ? 'perLine' : 'together');
@@ -328,256 +401,341 @@
     >
       {isTogether ? 'Régler les lignes séparément' : 'Piloter toutes les lignes ensemble'}
     </button>
-
-    {#if !isTogether}
-      <!-- Toutes les lignes, pas seulement la ciblée : dans cette vue on compare
-           et on ajuste — obliger à ressortir pour changer de ligne serait absurde. -->
-      {#each wled.segments as seg (seg.id)}
-        <div class="line-card" class:dimmed={ctlDisabled}>
-          <div class="flex items-center justify-between gap-3">
-            <span class="text-[14px] font-semibold" style="color: var(--color-fg);">{seg.name}</span
-            >
-            <label class="toggle-pill" aria-label="Allumer / éteindre {seg.name}">
-              <input
-                type="checkbox"
-                checked={seg.on}
-                disabled={!wled.on}
-                onchange={(e) => {
-                  haptic('light');
-                  wled.setSegOn(seg.id, (e.currentTarget as HTMLInputElement).checked);
-                }}
-              />
-              <span class="toggle-pill-knob"></span>
-            </label>
-          </div>
-          <div class="slider-line">
-            <span class="slider-label">Luminosité</span>
+    {#if !isTogether && target}
+      <div class="line-panel" class:dimmed={ctlDisabled}>
+        <div class="flex items-center justify-between">
+          <span class="text-[13px] font-semibold" style="color: var(--color-fg);">
+            {target.name}
+          </span>
+          <label class="toggle-pill" aria-label="Allumer / éteindre {target.name}">
             <input
-              type="range"
-              class="range"
-              min="0"
-              max="255"
-              value={seg.bri}
-              disabled={ctlDisabled || !seg.on}
-              oninput={(e) => wled.setSegBri(seg.id, +(e.currentTarget as HTMLInputElement).value)}
-              onchange={() => haptic('light')}
-              aria-label="Luminosité {seg.name}"
+              type="checkbox"
+              checked={target.on}
+              disabled={!wled.on}
+              onchange={(e) => {
+                haptic('light');
+                wled.setSegOn(target.id, (e.currentTarget as HTMLInputElement).checked);
+              }}
             />
-            <span class="slider-pct tabular-nums">{Math.round((seg.bri / 255) * 100)}%</span>
-          </div>
+            <span class="toggle-pill-knob"></span>
+          </label>
         </div>
-      {/each}
-    {:else}
-      <p class="text-[13px] leading-relaxed" style="color: var(--color-muted-fg);">
-        Les {wled.segments.length} lignes suivent le même réglage. Passez en mode séparé pour leur donner
-        chacune une couleur, un effet et une luminosité.
-      </p>
+        <div class="master-row">
+          <span class="mini-label">Luminosité</span>
+          <input
+            type="range"
+            class="bri-range"
+            min="0"
+            max="255"
+            value={target.bri}
+            disabled={ctlDisabled}
+            oninput={(e) => wled.setSegBri(target.id, +(e.currentTarget as HTMLInputElement).value)}
+            onchange={() => haptic('light')}
+            aria-label="Luminosité {target.name}"
+          />
+          <span class="bri-pct tabular-nums">{Math.round((target.bri / 255) * 100)}%</span>
+        </div>
+      </div>
     {/if}
   </div>
 {/snippet}
 
 <style>
-  /* ─── Sélecteur segmenté (une décision à la fois) ─── */
-  .seg {
-    display: flex;
-    gap: 2px;
-    padding: 3px;
-    border-radius: var(--radius-lg);
-    background: var(--color-muted);
-  }
-  .seg-item {
-    flex: 1 1 0;
-    padding: 7px 4px;
-    border: 0;
-    border-radius: calc(var(--radius-lg) - 3px);
-    background: transparent;
-    color: var(--color-muted-fg);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
-  }
-  .seg-item.active {
-    background: var(--color-card-hover);
-    color: var(--color-fg);
-  }
-  .seg-item:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: -2px;
-  }
-
-  /* ─── Vignettes de scène : la couleur d'abord, le nom ensuite ─── */
-  .tile-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-  @media (min-width: 480px) {
-    .tile-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-  }
-  .tile {
+  /* ─── Rangée générique [libellé/icône | slider | valeur | interrupteur] ─── */
+  .master-row {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px;
-    min-height: 52px;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--color-border);
-    background: var(--color-muted);
+    min-width: 0;
+  }
+  .bri-pct {
+    font-size: 12px;
+    font-weight: 600;
     color: var(--color-fg);
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
+    min-width: 38px;
+    text-align: right;
   }
-  .tile-swatch {
-    flex: 0 0 auto;
-    width: 26px;
-    height: 26px;
-    border-radius: 9999px;
-    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.25);
-  }
-  .tile-off .tile-swatch {
-    background: transparent;
-    box-shadow: inset 0 0 0 1.5px var(--color-muted-fg);
-  }
-  .tile-label {
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.15;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* ─── Bloc musique ─── */
-  .music-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding-top: 4px;
-    border-top: 1px solid var(--color-border);
-    margin-top: 4px;
-  }
-  .group-title {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+  .mini-label {
+    font-size: 12px;
     color: var(--color-muted-fg);
+    white-space: nowrap;
   }
 
-  /* ─── Pastilles (styles musicaux, effets) ─── */
-  .chip-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .chip {
-    padding: 7px 11px;
-    border-radius: var(--radius-pill);
-    border: 1px solid var(--color-border);
+  .bri-range {
+    width: 100%;
+    min-width: 0;
+    flex: 1;
+    height: 6px;
+    appearance: none;
     background: var(--color-muted);
-    color: var(--color-muted-fg);
-    font-size: 12.5px;
+    border-radius: 9999px;
+    cursor: pointer;
+  }
+  .bri-range:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+  .bri-range::-webkit-slider-thumb {
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--color-primary);
+    cursor: pointer;
+    box-shadow: 0 1px 3px oklch(0 0 0 / 0.25);
+  }
+  .bri-range::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border: none;
+    border-radius: 50%;
+    background: var(--color-primary);
+    cursor: pointer;
+  }
+  .bri-range:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 3px;
+  }
+  .white-range {
+    background: linear-gradient(90deg, var(--color-muted), rgb(255 223 191));
+  }
+
+  /* ─── Onglets : un seul niveau, défilables si l'écran est étroit ─── */
+  .tabs {
+    display: flex;
+    gap: 3px;
+    padding: 4px;
+    border-radius: var(--radius-lg);
+    background: var(--color-muted);
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .tab {
+    /* Serré pour que les 5 onglets tiennent d'un bloc sur iPhone (le
+       défilement horizontal reste le filet de sécurité, pas la norme). */
+    flex: 1 0 auto;
+    min-height: 44px;
+    padding: 8px 9px;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    background: transparent;
+    font-size: 12px;
     font-weight: 600;
+    white-space: nowrap;
+    color: var(--color-muted-fg);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
+    transition: all var(--duration-fast) var(--ease-default);
   }
-  .chip.active {
+  .tab.active {
     border-color: var(--color-primary);
     background: var(--color-primary-muted);
     color: var(--color-primary);
   }
-  .chip:disabled {
-    opacity: 0.45;
+  .tab:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
   }
 
-  /* ─── Curseurs ─── */
-  .slider-line {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .slider-label {
-    flex: 0 0 auto;
-    font-size: 11px;
-    font-weight: 600;
+  .applies-to {
+    font-size: 12px;
     color: var(--color-muted-fg);
   }
-  .slider-pct {
-    flex: 0 0 auto;
-    min-width: 2.5rem;
-    text-align: right;
-    font-size: 12px;
-    font-weight: 700;
+  .applies-to strong {
     color: var(--color-fg);
   }
-  .range {
-    flex: 1 1 auto;
-    min-width: 0;
-    height: 28px;
-    accent-color: var(--color-primary);
+
+  /* ─── Ambiances : grille de pastilles (toutes visibles) ─── */
+  .scene-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+    gap: 6px;
+    padding: 2px;
   }
-  .dimmed {
-    opacity: 0.45;
-    pointer-events: none;
+  .scene {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 4px;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .scene:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+  .scene-dot {
+    display: inline-flex;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1px solid oklch(1 0 0 / 0.25);
+    box-shadow:
+      inset 0 1px 2px oklch(1 0 0 / 0.4),
+      0 1px 4px oklch(0.1 0.01 286 / 0.2);
+  }
+  .scene-off {
+    background:
+      linear-gradient(
+        45deg,
+        transparent 45%,
+        var(--color-alert) 45%,
+        var(--color-alert) 55%,
+        transparent 55%
+      ),
+      var(--color-muted);
+  }
+  .scene-label {
+    font-size: 11px;
+    color: var(--color-muted-fg);
+    max-width: 84px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  /* ─── Divers ─── */
+  /* ─── Chips (styles musicaux, effets) ─── */
+  .group-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-muted-fg);
+    padding-top: 2px;
+  }
+  .chip-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: 6px;
+    padding: 2px;
+  }
+  .chip-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .fx-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 6px;
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 2px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .chip {
+    min-height: 40px;
+    padding: 8px 14px;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border);
+    background: transparent;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-muted-fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: all var(--duration-fast) var(--ease-default);
+  }
+  .chip:hover:not(:disabled) {
+    border-color: var(--color-border-strong);
+  }
+  .chip.active {
+    border-color: var(--color-primary);
+    background: var(--color-primary-muted);
+    color: var(--color-primary-active);
+    font-weight: 600;
+  }
+  .chip:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+  .chip:disabled {
+    cursor: not-allowed;
+  }
+
+  .fx-search {
+    width: 100%;
+    padding: 9px 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-card-hover);
+    color: var(--color-fg);
+    font-size: 16px;
+  }
+  .fx-search:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+  }
+
+  /* ─── Bascule Ensemble ⇄ Par ligne (action rare → discrète) ─── */
+  .split-toggle {
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    padding: 6px 14px;
+    border: none;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-primary);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .split-toggle:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+    border-radius: var(--radius-md);
+  }
+
+  .line-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+
+  /* ─── Bouton dépliant (catalogue d'effets) ─── */
   .disclosure {
     display: flex;
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    padding: 9px 2px;
-    border: 0;
+    min-height: 40px;
+    padding: 8px 4px;
     background: transparent;
+    border: none;
+    border-top: 1px solid var(--color-border);
     color: var(--color-muted-fg);
-    font-size: 12.5px;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .disclosure:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
   }
   .chevron {
-    transition: transform var(--duration-fast) var(--ease-default);
+    transition: transform var(--duration-normal) var(--ease-default);
   }
   .chevron.open {
     transform: rotate(180deg);
-  }
-  .search {
-    width: 100%;
-    padding: 9px 12px;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--color-border);
-    background: var(--color-muted);
-    color: var(--color-fg);
-    font-size: 16px; /* ≥16px : pas de zoom iOS à la mise au point */
-  }
-  .scope-toggle {
-    width: 100%;
-    padding: 11px;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--color-border);
-    background: var(--color-muted);
-    color: var(--color-fg);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    touch-action: manipulation;
-  }
-  .line-card {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 12px;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--color-border);
-    background: var(--color-muted);
   }
 
   /* ─── Interrupteur (toggle-pill iOS, 44×24) ─── */
@@ -586,17 +744,19 @@
     display: inline-block;
     width: 44px;
     height: 24px;
-    flex: 0 0 auto;
+    flex-shrink: 0;
     cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
   }
   .toggle-pill input {
     position: absolute;
     inset: 0;
-    opacity: 0;
+    z-index: 1;
     margin: 0;
     cursor: pointer;
-    z-index: 1;
+    opacity: 0;
+  }
+  .toggle-pill input:disabled {
+    cursor: not-allowed;
   }
   .toggle-pill-knob {
     position: absolute;
@@ -614,8 +774,8 @@
     width: 18px;
     height: 18px;
     border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 1px 2px oklch(0.1 0.01 286 / 0.15);
+    background: oklch(0.99 0.004 286);
+    box-shadow: 0 1px 2px oklch(0.1 0.01 286 / 0.18);
     transition: transform var(--duration-normal) var(--ease-spring);
   }
   .toggle-pill input:checked + .toggle-pill-knob {
@@ -625,18 +785,12 @@
   .toggle-pill input:checked + .toggle-pill-knob::after {
     transform: translateX(20px);
   }
-  .toggle-pill input:disabled + .toggle-pill-knob {
-    opacity: 0.45;
-  }
   .toggle-pill input:focus-visible + .toggle-pill-knob {
     outline: 2px solid var(--color-primary);
     outline-offset: 2px;
   }
-  @media (prefers-reduced-motion: reduce) {
-    .toggle-pill-knob,
-    .toggle-pill-knob::after,
-    .chevron {
-      transition: none;
-    }
+
+  .dimmed {
+    opacity: 0.45;
   }
 </style>
