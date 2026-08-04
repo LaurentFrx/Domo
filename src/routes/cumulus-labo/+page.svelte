@@ -391,9 +391,9 @@
 
     <p class="px-1 text-[11px] leading-relaxed" style="color: var(--color-muted-fg);">
       Le modèle « shadow » calcule et journalise, mais <strong>ne commande jamais le relais</strong>
-      : le cumulus reste piloté par la logique en service. Ce banc sert à comparer, sur plusieurs
-      jours, ce que le modèle <em>aurait</em> fait au réel avant toute décision. Fenêtre ~4 h ·
-      dernier tick {fmtTime(cumulusShadow.lastTickTs)}.
+      : le cumulus reste piloté par la logique en service. Ce banc sert à comparer, sur plusieurs jours,
+      ce que le modèle <em>aurait</em> fait au réel avant toute décision. Fenêtre ~4 h · dernier
+      tick {fmtTime(cumulusShadow.lastTickTs)}.
     </p>
   {/if}
 </div>
