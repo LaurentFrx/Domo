@@ -68,9 +68,6 @@
       aria-label="Menu"
       onclick={(e) => e.stopPropagation()}
     >
-      <!-- Grabber : la poignée grise des feuilles iOS. Décorative. -->
-      <span class="ms-grabber" aria-hidden="true"></span>
-
       <header class="ms-header">
         <h1 class="ios-large-title">Menu</h1>
         <button type="button" class="ms-close" onclick={closeMenu} aria-label="Fermer">
@@ -90,6 +87,12 @@
       </header>
 
       <MenuList onNavigate={closeMenu} />
+
+      <!-- Grabber : la poignée grise des feuilles iOS. Décorative. Elle marque
+           le bord LIBRE de la feuille — passé en bas avec l'ancrage haut, comme
+           le Centre de notifications d'iOS. Collée par `sticky` : sur une liste
+           longue, en fin de contenu, elle serait invisible sans défiler. -->
+      <span class="ms-grabber" aria-hidden="true"></span>
     </div>
   </div>
 {/if}
@@ -100,7 +103,7 @@
     inset: 0;
     z-index: 100;
     display: flex;
-    align-items: flex-end;
+    align-items: flex-start;
     justify-content: center;
     /* Assombrissement de la feuille modale iOS (la page reste devinable). */
     background: oklch(0 0 0 / 0.4);
@@ -110,10 +113,13 @@
     max-height: 90vh;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    border-top-left-radius: 14px;
-    border-top-right-radius: 14px;
-    padding: 8px 16px calc(20px + env(safe-area-inset-bottom));
-    animation: ms-up 300ms cubic-bezier(0.32, 0.72, 0, 1);
+    /* Ancrée en HAUT depuis le 04/08/2026, comme les autres feuilles : posée
+       en bas, elle laissait ses premières entrées hors de portée sur iPhone.
+       Zone sûre du haut = encoche / Dynamic Island. */
+    border-bottom-left-radius: 14px;
+    border-bottom-right-radius: 14px;
+    padding: calc(8px + env(safe-area-inset-top)) 16px 20px;
+    animation: ms-down 300ms cubic-bezier(0.32, 0.72, 0, 1);
   }
   .ms-panel:focus {
     outline: none;
@@ -126,16 +132,19 @@
     .ms-panel {
       max-width: 30rem;
       border-radius: 14px;
-      padding-bottom: 20px;
+      /* Centrée : aucune arête ne touche un bord, la zone sûre ne sert plus. */
+      padding-top: 8px;
       animation: ms-fade 180ms ease;
     }
   }
 
   .ms-grabber {
     display: block;
+    position: sticky;
+    bottom: 0;
     width: 36px;
     height: 5px;
-    margin: 0 auto 4px;
+    margin: 8px auto 0;
     border-radius: 3px;
     background: var(--ios-label3);
     opacity: 0.55;
@@ -160,9 +169,9 @@
     cursor: pointer;
   }
 
-  @keyframes ms-up {
+  @keyframes ms-down {
     from {
-      transform: translateY(100%);
+      transform: translateY(-100%);
     }
     to {
       transform: translateY(0);

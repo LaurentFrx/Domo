@@ -346,6 +346,11 @@
       ></div>
     {/if}
   </div>
+  <!-- Voile de lisibilité : la couleur étant désormais rendue pleine, le texte
+       ne peut plus compter sur un fond de carte neutre. Le voile ne couvre que
+       la colonne de gauche (texte) et s'efface avant le tiers droit, qui reste
+       en couleur pure. -->
+  <div class="tile-scrim" aria-hidden="true"></div>
   <!-- LE RUBAN : la lecture précise du niveau. Un lavage translucide sur fond
        sombre donne un brun sale, jamais « de la lumière » ; ce trait-là, lui,
        est vif et bloomé — c'est lui qui dit « allumé ». -->
@@ -494,19 +499,21 @@
     position: absolute;
     inset: 0;
     opacity: 0;
-    /* DISSOLUTION, pas bloc : un rectangle net à la coupe se lit « barre de
-       progression » (et brun sale sur fond sombre). La lumière s'éteint en
-       s'éloignant de sa source ; la lecture exacte du niveau, c'est le ruban. */
+    /* La couleur tient FRANCHE sur l'essentiel de la zone allumée, puis se
+       dissout sur la fin : un rectangle net à la coupe se lirait « barre de
+       progression », mais une dissolution trop précoce délaverait justement
+       les teintes qu'on veut montrer. La lecture exacte du niveau, c'est le
+       ruban. */
     -webkit-mask-image: linear-gradient(
       90deg,
       #000 0,
-      rgb(0 0 0 / 0.5) calc(var(--lvl) * 0.55),
+      #000 calc(var(--lvl) * 0.72),
       transparent var(--lvl)
     );
     mask-image: linear-gradient(
       90deg,
       #000 0,
-      rgb(0 0 0 / 0.5) calc(var(--lvl) * 0.55),
+      #000 calc(var(--lvl) * 0.72),
       transparent var(--lvl)
     );
     transition:
@@ -516,14 +523,12 @@
     pointer-events: none;
   }
   .tile.lit .tile-paint {
-    /* Discret : il pose l'ambiance, c'est le ruban qui porte la lecture. */
-    opacity: calc(0.16 + var(--lvlf) * 0.16);
-  }
-  /* Sombre : plafond volontairement bas (0.26). Au-delà, un lavage clair à
-     100 % passe sous la barre de contraste du texte — lisibilité d'abord, et
-     de toute façon c'est le ruban qui porte le signal. */
-  :global([data-theme='dark']) .tile.lit .tile-paint {
-    opacity: calc(0.12 + var(--lvlf) * 0.14);
+    /* PLEINE couleur : allumée, la tuile rend ce que le ruban éclaire — un
+       lavage translucide sur la carte délavait les teintes (un Ocean virait
+       au gris-bleu, un blanc 4000K au beige). La lisibilité du texte n'est
+       plus obtenue en affadissant la lumière mais par le voile local
+       (`.tile-scrim`), qui ne couvre que la colonne de texte. */
+    opacity: 1;
   }
   /* Couche qui porte les COULEURS et le MOUVEMENT. Séparée du cadre pour que
      les animations d'opacité (pulsation, scintillement) se multiplient au
@@ -536,6 +541,28 @@
     background-size: var(--paint-size, 100% 100%);
     background-repeat: repeat-x;
   }
+  /* Voile sous le texte. Indispensable dès lors que le fond rend la vraie
+     couleur : elle peut être très sombre (Ocean, Lava) comme très claire
+     (blanc 4000K, Pastel) — aucune couleur de texte ne tient sur les deux.
+     Bleu-nuit et non noir (charte), et dégressif vers la droite pour laisser
+     la lumière intacte là où rien n'est écrit. */
+  .tile-scrim {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      oklch(0.16 0.02 262 / 0.66) 0%,
+      oklch(0.16 0.02 262 / 0.44) 42%,
+      transparent 74%
+    );
+    opacity: 0;
+    transition: opacity var(--duration-normal) var(--ease-default);
+    pointer-events: none;
+  }
+  .tile.lit .tile-scrim {
+    opacity: 1;
+  }
+
   /* Point lumineux des effets de balayage — clippé par la tuile, et révélé
      jusqu'au niveau comme le reste (il hérite du masque du cadre). */
   .tile-spot {
@@ -779,6 +806,26 @@
   }
   .tile-pct.off {
     opacity: 0.4;
+  }
+  /* Allumée, la tuile est une surface COLORÉE : le texte passe en clair sur le
+     voile, dans les deux thèmes — `--color-fg` suit le thème, pas la couleur
+     du ruban, et virerait à l'illisible sur un fond sombre en thème clair. */
+  .tile.lit .tile-title,
+  .tile.lit .tile-pct {
+    color: oklch(0.99 0.004 286);
+    text-shadow: 0 1px 3px oklch(0.15 0.02 262 / 0.45);
+  }
+  .tile.lit .tile-state,
+  .tile.lit .tile-pct-unit {
+    color: oklch(0.94 0.008 262);
+    text-shadow: 0 1px 2px oklch(0.15 0.02 262 / 0.4);
+  }
+  /* Le bouton Réglages tombe, lui, dans la zone restée en couleur pure : sans
+     fond propre il se dissoudrait dedans. */
+  .tile.lit .tile-more {
+    border-color: oklch(1 0 0 / 0.4);
+    background: oklch(0.16 0.02 262 / 0.42);
+    color: oklch(0.98 0.004 286);
   }
   .tile-pct-unit {
     font-size: 15px;

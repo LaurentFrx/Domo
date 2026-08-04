@@ -1,10 +1,19 @@
 <script lang="ts">
   /**
-   * BottomSheet — feuille modale ancrée en bas (iPhone) / centrée (iPad paysage).
-   * iOS-safe : verrou de défilement du body (position:fixed + restauration scrollY),
-   * zone sûre (safe-area-inset-bottom), -webkit-backdrop-filter, fermeture Escape /
-   * tap-outside, focus du panneau, animations gated prefers-reduced-motion, repli
-   * opaque sous prefers-reduced-transparency. Porte le verre Yeldra inline.
+   * Feuille modale ancrée en HAUT (iPhone) / centrée (iPad paysage).
+   *
+   * Ancrée en bas jusqu'au 04/08/2026 : sur iPhone, une feuille longue posée en
+   * bas d'écran laissait ses premiers réglages hors de portée du pouce, et le
+   * bas du panneau se retrouvait sous la barre d'onglets. Elle descend donc
+   * désormais du haut — le titre et la croix de fermeture arrivent là où le
+   * regard est déjà. Le nom du composant est resté `BottomSheet` : il est
+   * importé par six écrans, le renommer est un chantier à part.
+   *
+   * iOS-safe : verrou de défilement du body (position:fixed + restauration
+   * scrollY), zone sûre HAUTE (encoche / Dynamic Island),
+   * -webkit-backdrop-filter, fermeture Escape / tap-outside, focus du panneau,
+   * animations gated prefers-reduced-motion, repli opaque sous
+   * prefers-reduced-transparency. Porte le verre Yeldra inline.
    */
   import type { Snippet } from 'svelte';
 
@@ -91,7 +100,7 @@
     inset: 0;
     z-index: 100;
     display: flex;
-    align-items: flex-end;
+    align-items: flex-start;
     justify-content: center;
     background: oklch(0.2 0.02 286 / 0.5);
     -webkit-backdrop-filter: blur(2px);
@@ -103,10 +112,12 @@
     overflow-y: auto;
     border-width: 1px;
     border-style: solid;
-    border-top-left-radius: var(--radius-2xl);
-    border-top-right-radius: var(--radius-2xl);
-    padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom));
-    animation: bs-up 240ms var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
+    border-bottom-left-radius: var(--radius-2xl);
+    border-bottom-right-radius: var(--radius-2xl);
+    /* Zone sûre du HAUT : sans elle, le titre passerait sous l'encoche / la
+       Dynamic Island en PWA plein écran. */
+    padding: calc(1rem + env(safe-area-inset-top)) 1rem 1rem;
+    animation: bs-down 240ms var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
   }
   .bs-panel:focus {
     outline: none;
@@ -119,7 +130,9 @@
     .bs-panel {
       max-width: 30rem;
       border-radius: var(--radius-2xl);
-      padding-bottom: 1rem;
+      /* Centrée : plus aucune arête ne touche un bord d'écran, la zone sûre
+         n'a plus lieu d'être. */
+      padding-top: 1rem;
       animation: bs-fade 200ms ease;
     }
   }
@@ -156,9 +169,9 @@
     gap: 0.5rem;
     margin-top: 1rem;
   }
-  @keyframes bs-up {
+  @keyframes bs-down {
     from {
-      transform: translateY(100%);
+      transform: translateY(-100%);
     }
     to {
       transform: translateY(0);
