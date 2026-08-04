@@ -4,7 +4,10 @@ Dashboard domotique / énergie. **SvelteKit + Tailwind v4**, couleurs **OKLCH**.
 
 ## ⚠️ Build & déploiement
 
-- Le dossier est **à la fois dev ET WorkingDirectory du service** → **ne jamais `pnpm build` sans enchaîner `sudo systemctl restart domo`** (sinon 500 `ERR_MODULE_NOT_FOUND`).
+- **On développe dans `/home/laurent/domo-dev`** (worktree git, branche `dev`, `.env` symlinké). `/home/laurent/domo` est la **PRODUCTION** : `WorkingDirectory` du service et cible de `deploy.yml` — on n'y écrit pas de code.
+- Pourquoi : toute modif non commitée dans `/home/laurent/domo` **bloque le déploiement suivant** (`git checkout -B main origin/main` refuse d'écraser), et un `pnpm build` de test y met le travail en cours **en service** sans qu'on le décide. Les deux se sont produits le 04/08/2026.
+- Dans le dossier de prod, le build est _in place_ → **ne jamais `pnpm build` sans enchaîner `sudo systemctl restart domo`** (sinon 500 `ERR_MODULE_NOT_FOUND`). En pratique : pousser sur `main` et laisser l'auto-deploy faire.
+- `data/` n'est **pas** partagé entre les deux dossiers : il porte l'état vivant (cumulus, boucles SB3/APS, abonnements push, `planning.json`) en chemins **relatifs au WorkingDirectory**.
 - `pnpm check` (svelte-check) est en **lecture seule**, sûr.
 
 ## UI / Design system
