@@ -21,7 +21,7 @@
    */
   import { wled, previewColor, type RGB } from '$stores/wled.svelte';
   import { wledMusic } from '$stores/wledMusic.svelte';
-  import { familyOf, gradientStops, stateLabel } from '$lib/wled/preview-model';
+  import { familyOf, paintStops, stateLabel, stopsToCss } from '$lib/wled/preview-model';
 
   interface Props {
     /** Animer les effets dynamiques (sinon image fixe). */
@@ -100,7 +100,20 @@
       const fxName = wled.effects[seg.fx] ?? 'Solid';
       const palName = wled.palettes[seg.pal] ?? 'Default';
       const whiteOnly = seg.col[0] === 0 && seg.col[1] === 0 && seg.col[2] === 0 && seg.white > 0;
-      const stops = on ? gradientStops(fxName, palName) : null;
+      // Couleurs RÉELLES du firmware — mêmes règles que la tuile (source
+      // unique dans `preview-model`), sinon les deux aperçus du même ruban
+      // finissent par ne plus raconter la même chose.
+      const stops = on
+        ? paintStops({
+            fxName,
+            palName,
+            palIndex: seg.pal,
+            palettes: wled.paletteColors,
+            c1: eff,
+            c2: seg.col2,
+            c3: seg.col3
+          })
+        : null;
       const family = familyOf(fxName, stops);
 
       let paint = 'transparent';
@@ -133,7 +146,9 @@
         shadow = `0 0 ${blur1}px rgb(${c} / ${a1}), 0 0 ${blur2}px rgb(${c} / ${a2})`;
 
         if (family === 'scroll' && stops) {
-          paint = `linear-gradient(90deg, ${[...stops, stops[0]].join(', ')})`;
+          // Premier arrêt rejoué en fin de course : le dégradé boucle sans
+          // couture visible quand il défile sur deux largeurs.
+          paint = `linear-gradient(90deg, ${stopsToCss([...stops, { ...stops[0], pos: 1 }])})`;
           size = '200% 100%';
           if (animated) {
             fillAnim = 'anim-scroll';

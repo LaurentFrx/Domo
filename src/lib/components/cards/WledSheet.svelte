@@ -102,7 +102,7 @@
   }
 </script>
 
-<BottomSheet {open} title="LED Terrasse" {onClose}>
+<BottomSheet {open} title="Terrasse" {onClose}>
   {#if wled.segments.length === 0}
     <p class="py-4 text-center text-[13px]" style="color: var(--color-muted-fg);">
       {wled.connected ? 'Aucun segment configuré.' : 'Connexion au module LED…'}

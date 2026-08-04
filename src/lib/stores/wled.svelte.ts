@@ -31,6 +31,8 @@
  * Future ligne « SàM Été » (2ᵉ sortie du Dig-Uno) : ajouter une entrée LINES.
  */
 
+import type { PaletteMap } from '$lib/wled/preview-model';
+
 export type RGB = [number, number, number];
 
 /** Teinte sRGB approximative d'un blanc 4000K (neutre légèrement chaud). */
@@ -46,6 +48,14 @@ export interface WledSegment {
   col: RGB;
   /** Canal blanc dédié 4000K (0-255). */
   white: number;
+  /**
+   * Couleurs 2 et 3 du segment. WLED en porte TROIS : la 1re est celle qu'on
+   * règle dans la feuille, les deux autres n'existent que pour les palettes
+   * dynamiques (« Colors 1&2 », « Color Gradient »…) qui s'y réfèrent par
+   * `c2`/`c3`. Sans elles, ces palettes se peignaient en aplat.
+   */
+  col2: RGB;
+  col3: RGB;
   /** Index d'effet (dans `effects`). */
   fx: number;
   /** Vitesse de l'effet (0-255). */
@@ -236,6 +246,13 @@ class WledStore {
   segments = $state<WledSegment[]>([]);
   effects = $state<string[]>([]);
   palettes = $state<string[]>([]);
+  /**
+   * Couleurs RÉELLES des palettes (index WLED → dégradé), lues une fois sur le
+   * module. Vide tant qu'il n'a pas répondu : l'aperçu retombe alors sur sa
+   * table écrite à la main — on ne bloque jamais l'affichage là-dessus.
+   */
+  paletteColors = $state<PaletteMap>({});
+  #paletteFetch: Promise<void> | null = null;
 
   #timer: ReturnType<typeof setInterval> | null = null;
   #vis: (() => void) | null = null;
@@ -294,17 +311,27 @@ class WledStore {
       const len = typeof seg.len === 'number' ? seg.len : Math.max(0, stop - start);
       if (len <= 0) continue; // segment inactif
 
-      // Couleur primaire : [r,g,b] ou [r,g,b,w] (RGBW).
+      // Couleurs du segment : WLED en renvoie trois, chacune [r,g,b] ou
+      // [r,g,b,w] (RGBW). La 1re porte la teinte réglable + le canal blanc ;
+      // les 2e et 3e ne servent qu'aux palettes qui s'y réfèrent (c2/c3).
+      const readCol = (i: number): RGB | null => {
+        if (!Array.isArray(seg.col) || !Array.isArray(seg.col[i])) return null;
+        const c = seg.col[i] as unknown[];
+        return [clamp(Number(c[0]) || 0), clamp(Number(c[1]) || 0), clamp(Number(c[2]) || 0)];
+      };
+
       let col: RGB = [255, 255, 255];
       let white = 0;
       if (Array.isArray(seg.col) && Array.isArray(seg.col[0])) {
         const c = seg.col[0] as unknown[];
-        col = [clamp(Number(c[0]) || 0), clamp(Number(c[1]) || 0), clamp(Number(c[2]) || 0)];
+        col = readCol(0) ?? col;
         if (c.length >= 4) {
           white = clamp(Number(c[3]) || 0);
           sawRgbw = true;
         }
       }
+      const col2: RGB = readCol(1) ?? [0, 0, 0];
+      const col3: RGB = readCol(2) ?? [0, 0, 0];
 
       const id = typeof seg.id === 'number' ? seg.id : next.length;
       const fields = {
@@ -313,6 +340,8 @@ class WledStore {
         bri: typeof seg.bri === 'number' ? clamp(seg.bri) : 255,
         col,
         white,
+        col2,
+        col3,
         fx: typeof seg.fx === 'number' ? seg.fx : 0,
         sx: typeof seg.sx === 'number' ? clamp(seg.sx) : 128,
         ix: typeof seg.ix === 'number' ? clamp(seg.ix) : 128,
@@ -370,10 +399,37 @@ class WledStore {
       this.lastError = null;
       this.lastUpdate = new Date();
       this.#metaLoaded = this.effects.length > 0;
+      this.#loadPaletteColors();
     } catch (e) {
       this.connected = false;
       this.lastError = e instanceof Error ? e.message : 'erreur';
     }
+  }
+
+  /**
+   * Charge les couleurs de palettes — une fois, en tâche de fond.
+   *
+   * Jamais attendu par l'appelant : l'aperçu doit s'afficher tout de suite,
+   * avec ses couleurs de repli, et se corriger quand celles du module
+   * arrivent. Un échec laisse la porte ouverte à un nouvel essai (le module
+   * de la terrasse est à -73 dBm et peut très bien manquer le premier
+   * rendez-vous) ; un succès ferme définitivement — ces couleurs ne changent
+   * qu'à un flashage de firmware.
+   */
+  #loadPaletteColors(): void {
+    if (this.#paletteFetch) return;
+    this.#paletteFetch = (async () => {
+      try {
+        const res = await fetch('/api/wled/palettes', { signal: AbortSignal.timeout(TIMEOUT_MS) });
+        if (!res.ok) return;
+        const d = await res.json();
+        if (d?.palettes && typeof d.palettes === 'object') this.paletteColors = d.palettes;
+      } catch {
+        /* silencieux : la table de repli prend le relais */
+      }
+    })().finally(() => {
+      if (!Object.keys(this.paletteColors).length) this.#paletteFetch = null;
+    });
   }
 
   /** Rafraîchit l'état courant (polling léger /json/si). Gelé pendant un drag

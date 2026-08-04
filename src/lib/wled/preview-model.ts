@@ -124,8 +124,14 @@ const FLICKER_FX = new Set([
   'Random Colors'
 ]);
 
-/** Dégradés représentatifs des palettes WLED courantes (fallback = couleur effective). */
-const PALETTE_GRADIENTS: Record<string, string[]> = {
+/**
+ * Dégradés écrits à la main — désormais REPLI seulement.
+ *
+ * La source de vérité est `/json/palx` (les 72 palettes du firmware, couleurs
+ * exactes) : cette table ne sert plus que si le module n'a pas encore répondu,
+ * ou pour les rares palettes qu'il ne publie pas.
+ */
+export const PALETTE_GRADIENTS: Record<string, string[]> = {
   Party: ['#ff00b0', '#ff0040', '#ffb000', '#ffe000', '#00d0ff', '#7000ff'],
   Rainbow: RAINBOW,
   'Rainbow Bands': RAINBOW,
@@ -190,7 +196,7 @@ export function gradientStops(fxName: string, palName: string): string[] | null 
 }
 
 /** Famille de mouvement de l'effet (pilote l'animation de l'aperçu). */
-export function familyOf(fxName: string, stops: string[] | null): Family {
+export function familyOf(fxName: string, stops: readonly unknown[] | null): Family {
   if (fxName === 'Solid') return 'solid';
   if (stops) return 'scroll';
   if (SWEEP_FX.has(fxName)) return 'sweep';
@@ -228,6 +234,154 @@ export function stateLabel(opts: {
   }
   if (whiteOnly && fxName === 'Solid') return 'Blanc 4000K';
   return FX_FR[fxName] ?? fxName;
+}
+
+/* ═══ Couleurs RÉELLES des palettes (source : /json/palx du module) ═══════ */
+
+/** Un arrêt de dégradé : position 0–255 puis RVB (format WLED). */
+export type PaletteStop = [number, number, number, number];
+/** `c1`/`c2`/`c3` = couleurs du segment, `r` = aléatoire (WLED). */
+export type PaletteRef = 'c1' | 'c2' | 'c3' | 'r';
+export type PaletteEntry = PaletteStop | PaletteRef;
+/** Palettes indexées par leur index WLED (= `seg.pal`). */
+export type PaletteMap = Record<number, PaletteEntry[]>;
+
+/** Arrêt prêt à peindre : couleur + position relative (0–1). */
+export interface Stop {
+  rgb: RGB;
+  pos: number;
+}
+
+function isBlack([r, g, b]: RGB): boolean {
+  return r === 0 && g === 0 && b === 0;
+}
+
+/**
+ * Traduit une palette du firmware en arrêts peignables.
+ *
+ * Les palettes « dynamiques » (`c1`/`c2`/`c3`) n'ont pas de couleur propre :
+ * elles reprennent celles du segment. On leur passe la couleur EFFECTIVE de la
+ * ligne (teinte + canal blanc), jamais la teinte brute — le ruban terrasse est
+ * le plus souvent en blanc 4000K pur, c'est-à-dire `col = [0,0,0]` avec tout le
+ * signal sur le canal W : peindre la teinte brute donnerait un ruban NOIR.
+ *
+ * `r` (aléatoire) change en permanence sur le module ; un aperçu qui clignote à
+ * chaque rendu serait pire qu'inexact, on le représente par l'arc-en-ciel.
+ *
+ * @returns `null` quand la palette ne donne rien de peignable — l'appelant
+ *   retombe alors sur l'aplat teinté, comme avant.
+ */
+export function resolvePalette(
+  def: PaletteEntry[] | undefined,
+  colors: { c1: RGB; c2: RGB; c3: RGB }
+): Stop[] | null {
+  if (!def?.length) return null;
+
+  const fixed = def.filter((e): e is PaletteStop => Array.isArray(e));
+  // Le firmware ne mélange pas les deux natures : soit des arrêts positionnés,
+  // soit des références. On traite le cas majoritaire et on ignore le reste.
+  if (fixed.length) {
+    const stops = fixed
+      .map<Stop>(([pos, r, g, b]) => ({ rgb: [r, g, b], pos: Math.min(1, Math.max(0, pos / 255)) }))
+      .sort((a, b) => a.pos - b.pos);
+    return usable(stops);
+  }
+
+  const refs = def.filter((e): e is PaletteRef => typeof e === 'string');
+  if (!refs.length) return null;
+  // Palette entièrement aléatoire : l'arc-en-ciel est la représentation stable
+  // la plus honnête de « toutes les couleurs y passent ».
+  if (refs.every((r) => r === 'r')) return hexesToStops(RAINBOW);
+
+  const pick = (ref: PaletteRef): RGB =>
+    ref === 'c2' ? colors.c2 : ref === 'c3' ? colors.c3 : colors.c1;
+  const last = Math.max(1, refs.length - 1);
+  const stops = refs.map<Stop>((ref, i) => ({
+    rgb: ref === 'r' ? colors.c1 : pick(ref),
+    pos: i / last
+  }));
+  return usable(stops);
+}
+
+/**
+ * Écarte ce qu'on ne saurait pas peindre.
+ *
+ *  - MOINS DE DEUX arrêts : `linear-gradient` en exige deux. « Color 1 » n'en
+ *    donne qu'un — le peindre produirait un dégradé invalide, donc un fond
+ *    transparent. Un seul arrêt veut de toute façon dire « aplat de la couleur
+ *    de la ligne », ce que l'appelant sait déjà faire, en mieux (teinte
+ *    remontée à pleine luminance).
+ *  - TOUT NOIR : les couleurs 2 et 3 restent souvent à zéro sur un ruban réglé
+ *    en blanc ; une palette qui n'y référerait que du noir éteindrait l'aperçu
+ *    d'un ruban pourtant allumé.
+ */
+function usable(stops: Stop[]): Stop[] | null {
+  if (stops.length < 2) return null;
+  return stops.every((s) => isBlack(s.rgb)) ? null : stops;
+}
+
+/**
+ * CE QU'IL FAUT PEINDRE pour une ligne : les vraies couleurs, ou `null` pour
+ * un aplat de la couleur de la ligne.
+ *
+ * L'arbitrage compte autant que les couleurs, parce qu'une palette n'est pas
+ * toujours appliquée :
+ *   - `Solid` SORT LA COULEUR 1 et ignore la palette — peindre le dégradé de
+ *     la palette montrerait un ruban qui n'existe pas ;
+ *   - la palette « Default » (index 0) veut dire « les couleurs propres de
+ *     l'effet », qu'on ne peut pas deviner : on garde l'aplat, sauf pour les
+ *     effets dont on sait qu'ils balaient le spectre.
+ * Hors de ces deux cas, les couleurs du firmware font foi ; la table écrite à
+ * la main ne sert plus que si le module ne les a pas (encore) données.
+ */
+export function paintStops(opts: {
+  fxName: string;
+  palName: string;
+  palIndex: number;
+  palettes: PaletteMap;
+  c1: RGB;
+  c2: RGB;
+  c3: RGB;
+}): Stop[] | null {
+  const { fxName, palName, palIndex, palettes } = opts;
+  if (fxName === 'Solid') return null;
+
+  const bare = palName.replace(/^\* /, '');
+  if (palIndex === 0 || bare === 'Default') {
+    return RAINBOW_FX.has(fxName) ? hexesToStops(RAINBOW) : null;
+  }
+
+  const real = resolvePalette(palettes[palIndex], opts);
+  if (real) return real;
+  const legacy = gradientStops(fxName, palName);
+  return legacy ? hexesToStops(legacy) : null;
+}
+
+/** Convertit la table de repli (hex) en arrêts régulièrement espacés. */
+export function hexesToStops(hexes: string[]): Stop[] {
+  const last = Math.max(1, hexes.length - 1);
+  return hexes.map((h, i) => ({ rgb: hexToRgb(h), pos: i / last }));
+}
+
+/** Arrêts prêts pour un `linear-gradient` CSS. */
+export function stopsToCss(stops: Stop[]): string {
+  return stops
+    .map((s) => `rgb(${s.rgb[0]} ${s.rgb[1]} ${s.rgb[2]}) ${(s.pos * 100).toFixed(1)}%`)
+    .join(', ');
+}
+
+/** Couleur moyenne d'une série d'arrêts — sert aux lueurs (une lueur = UNE couleur). */
+export function averageOfStops(stops: Stop[]): RGB {
+  if (!stops.length) return [0, 0, 0];
+  const sum = stops.reduce<[number, number, number]>(
+    (acc, s) => [acc[0] + s.rgb[0], acc[1] + s.rgb[1], acc[2] + s.rgb[2]],
+    [0, 0, 0]
+  );
+  return [
+    Math.round(sum[0] / stops.length),
+    Math.round(sum[1] / stops.length),
+    Math.round(sum[2] / stops.length)
+  ];
 }
 
 /** `#rrggbb` → RGB (repli noir si la chaîne n'est pas un hex à 6 chiffres). */

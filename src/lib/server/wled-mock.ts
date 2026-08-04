@@ -10,6 +10,7 @@
  *   GET  /json/info   → info
  *   GET  /json/eff    → string[]  (noms d'effets)
  *   GET  /json/pal    → string[]  (noms de palettes)
+ *   GET  /json/palx   → couleurs réelles des palettes (via `wledPalx()`)
  *   POST /json/state  → applique un patch d'état partiel, renvoie le nouvel état
  *
  * Le jour du branchement : on pose `WLED_URL=http://<ip-du-Dig-Uno>` dans .env
@@ -24,6 +25,9 @@
  * entre les requêtes mais repart aux valeurs par défaut à chaque redémarrage —
  * comportement attendu pour un mock.
  */
+
+import { hexToRgb, PALETTE_GRADIENTS } from '$lib/wled/preview-model';
+import type { PaletteMap, PaletteStop } from '$lib/wled/preview-model';
 
 /* ─── Catalogue d'effets WLED (ordre = index `fx`) ─────────────────────────
    Liste représentative et fidèle des effets WLED. Sur le vrai module, la liste
@@ -515,6 +519,51 @@ export function wledGet(sub: string): unknown {
       return { state, info: buildInfo(), effects: WLED_EFFECTS, palettes: WLED_PALETTES };
   }
 }
+
+/**
+ * Couleurs de palettes du mode démo, au format de `/json/palx`.
+ *
+ * Les 6 premières palettes de WLED n'ont pas de couleurs propres : elles
+ * empruntent celles du segment (`c1`/`c2`/`c3`) ou tirent au sort (`r`). Le
+ * mock reproduit ce comportement, sinon la démo peindrait un dégradé figé là
+ * où le vrai module suit la couleur choisie.
+ */
+export function wledPalx(): PaletteMap {
+  const out: PaletteMap = {};
+  WLED_PALETTES.forEach((name, idx) => {
+    if (name === 'Random Cycle') {
+      out[idx] = ['r', 'r', 'r', 'r'];
+      return;
+    }
+    if (name === 'Color 1') {
+      out[idx] = ['c1'];
+      return;
+    }
+    if (name === 'Colors 1&2') {
+      out[idx] = ['c1', 'c1', 'c2', 'c2'];
+      return;
+    }
+    if (name === 'Color Gradient') {
+      out[idx] = ['c3', 'c2', 'c1'];
+      return;
+    }
+    if (name === 'Colors Only') {
+      out[idx] = ['c1', 'c1', 'c1', 'c2', 'c2', 'c2', 'c3', 'c3', 'c3'];
+      return;
+    }
+    // « Default » n'est pas dans la table des dégradés : c'est l'arc-en-ciel.
+    const hexes = name === 'Default' ? DEMO_RAINBOW : PALETTE_GRADIENTS[name];
+    if (!hexes?.length) return;
+    const last = Math.max(1, hexes.length - 1);
+    out[idx] = hexes.map((hex, i) => {
+      const [r, g, b] = hexToRgb(hex);
+      return [Math.round((i / last) * 255), r, g, b] as PaletteStop;
+    });
+  });
+  return out;
+}
+
+const DEMO_RAINBOW = ['#ff0040', '#ff8000', '#ffff00', '#00ff40', '#00ffff', '#0040ff', '#8000ff'];
 
 /** Applique un POST /json/state et renvoie le nouvel état (comme WLED). */
 export function wledPostState(patch: unknown): unknown {

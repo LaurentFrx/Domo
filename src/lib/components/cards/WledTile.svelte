@@ -21,10 +21,17 @@
    * sonore serveur (var CSS `--mvol` en rAF, hors réactivité Svelte). Gated
    * `animationsEnabled` + `prefers-reduced-motion`, en pause en arrière-plan.
    */
-  import { wled, previewColor } from '$stores/wled.svelte';
+  import { wled, previewColor, type RGB } from '$stores/wled.svelte';
   import { wledMusic } from '$stores/wledMusic.svelte';
   import { preferences } from '$stores/preferences.svelte';
-  import { averageRgb, gradientStops, stateLabel, vividTint } from '$lib/wled/preview-model';
+  import {
+    averageOfStops,
+    familyOf,
+    paintStops,
+    stateLabel,
+    stopsToCss,
+    vividTint
+  } from '$lib/wled/preview-model';
   import { haptic } from '$utils/haptic';
 
   interface Props {
@@ -57,42 +64,115 @@
       return {
         lit: false,
         paint: 'transparent',
+        paintSize: '100% 100%',
         glow: '0 0 0',
+        anim: '',
+        animDur: 0,
+        sweep: false,
+        spotDur: 0,
+        spotPaint: 'transparent',
         label: wled.connected ? 'Aucun segment configuré' : 'Connexion au module LED…'
       };
     }
     const lit = wled.on && seg.on;
     const fxName = wled.effects[seg.fx] ?? 'Solid';
     const palName = wled.palettes[seg.pal] ?? 'Default';
-    // Effet/palette multicolore → on peint ses vraies couleurs ; sinon la
-    // TEINTE du segment, remontée à pleine luminance (`vividTint`) : ici le
-    // niveau est porté par la largeur et la lueur, pas par la couleur.
-    const stops = lit ? gradientStops(fxName, palName) : null;
+    // Les couleurs que le ruban sort VRAIMENT : celles que le firmware publie
+    // pour cette palette, les couleurs de la ligne quand la palette s'y réfère
+    // (`c1`/`c2`/`c3`), ou rien du tout quand l'effet ignore la palette. La
+    // couleur 1 est passée EFFECTIVE (teinte + canal blanc) : le ruban est le
+    // plus souvent en blanc 4000K pur, dont la teinte brute est noire.
+    const stops = lit
+      ? paintStops({
+          fxName,
+          palName,
+          palIndex: seg.pal,
+          palettes: wled.paletteColors,
+          c1: previewColor(seg.col, seg.white),
+          c2: seg.col2,
+          c3: seg.col3
+        })
+      : null;
+    // Sinon la TEINTE du segment, remontée à pleine luminance (`vividTint`) :
+    // le niveau est porté par la largeur et la lueur, pas par la couleur.
     const tint = vividTint(previewColor(seg.col, seg.white));
-    const glow = stops ? vividTint(averageRgb(stops)) : tint;
+    const glow = stops ? vividTint(averageOfStops(stops)) : tint;
     const whiteOnly = seg.col[0] === 0 && seg.col[1] === 0 && seg.col[2] === 0 && seg.white > 0;
+
+    // ─── Le MOUVEMENT de l'effet ────────────────────────────────────────
+    // Même vocabulaire que la barre de la feuille (`familyOf`) : une tuile qui
+    // peindrait un « Feu » ou un « Balayage » en image fixe montrerait des
+    // couleurs justes sur un ruban qui, lui, bouge. Vitesse dérivée de `sx`,
+    // comme le module.
+    const family = lit ? familyOf(fxName, stops) : 'solid';
+    const speed = seg.sx / 255;
+    let anim = '';
+    let animDur = 0;
+    let sweep = false;
+    let spotDur = 0;
+    if (family === 'scroll' && stops) {
+      anim = 'anim-scroll';
+      animDur = +(14 - speed * 11).toFixed(1); // ~3–14 s
+    } else if (family === 'pulse') {
+      anim = 'anim-pulse';
+      animDur = +(4.5 - speed * 3.3).toFixed(1);
+    } else if (family === 'flicker') {
+      anim = 'anim-flicker';
+      animDur = +(1.6 - speed * 1.2).toFixed(2);
+    } else if (family === 'sweep') {
+      sweep = true;
+      spotDur = +(5 - speed * 3.8).toFixed(1);
+    }
+    // Le dégradé qui défile doit BOUCLER : on rejoue le premier arrêt à la fin
+    // et on peint sur deux largeurs, sinon la couture saute à chaque tour.
+    const loop = anim === 'anim-scroll' && stops;
+    const spotTint: RGB = [
+      Math.min(255, glow[0] + 110),
+      Math.min(255, glow[1] + 110),
+      Math.min(255, glow[2] + 110)
+    ];
 
     // Une ligne éteinte pendant que l'autre éclaire est invisible sur une
     // tuile-résumé : le dire, sinon l'utilisateur croit tout allumé.
     const offLines = wled.on ? wled.segments.filter((s) => !s.on).length : 0;
-    const base = stateLabel({ on: lit, fxName, whiteOnly, music });
-    const label =
-      offLines > 0
-        ? `${base} · ${offLines} ligne${offLines > 1 ? 's' : ''} éteinte${offLines > 1 ? 's' : ''}`
-        : base;
+    const lines = offLines
+      ? `${offLines} ligne${offLines > 1 ? 's' : ''} éteinte${offLines > 1 ? 's' : ''}`
+      : '';
+    // Ruban coupé : l'interrupteur ET le « 0 % » le disent déjà — un « Éteint »
+    // écrit en toutes lettres serait la troisième fois. On ne garde ici que ce
+    // qu'aucune autre partie de la tuile ne porte : l'effet en cours, et le
+    // nombre de lignes restées éteintes alors que le reste éclaire.
+    const label = !wled.on
+      ? ''
+      : lit
+        ? [stateLabel({ on: true, fxName, whiteOnly, music }), lines].filter(Boolean).join(' · ')
+        : lines;
 
     return {
       lit,
       paint: stops
-        ? `linear-gradient(90deg, ${stops.join(', ')})`
+        ? `linear-gradient(90deg, ${stopsToCss(loop ? [...stops, { ...stops[0], pos: 1 }] : stops)})`
         : `linear-gradient(90deg, rgb(${tint.join(' ')}), rgb(${tint.join(' ')}))`,
+      paintSize: loop ? '200% 100%' : '100% 100%',
       glow: glow.join(' '),
+      anim,
+      animDur,
+      sweep,
+      spotDur,
+      spotPaint: `linear-gradient(90deg, transparent, rgb(${spotTint.join(' ')}) 50%, transparent)`,
       label
     };
   });
 
   // Badge d'état SEULEMENT si anormal — « connecté » est l'état attendu.
   const abnormal = $derived(!wled.connected ? 'Hors ligne' : wled.isMock ? 'Démo' : null);
+
+  // Le mouvement est une PRÉFÉRENCE : sans elle, la tuile garde les vraies
+  // couleurs mais en image fixe. La mise en pause en arrière-plan et le respect
+  // de `prefers-reduced-motion` sont traités en CSS (voir plus bas), pour ne pas
+  // reconstruire le modèle à chaque changement de visibilité.
+  const animsOn = $derived(preferences.animationsEnabled);
+  const anim = $derived(animsOn ? model.anim : '');
 
   // ─── Luminosité : niveau affiché (optimiste pendant le glissé) ─────────
   const briPct = $derived(Math.round((wled.bri / 255) * 100));
@@ -244,19 +324,33 @@
   class="tile"
   class:lit={model.lit}
   class:dragging
+  class:paused={hidden}
   style="background: var(--color-card); border-color: var(--color-border); --lvl: {fillPct}%; --lvlf: {fillPct /
-    100}; --paint: {model.paint}; --glow: {model.glow};"
+    100}; --paint: {model.paint}; --paint-size: {model.paintSize}; --glow: {model.glow};"
 >
   <!-- Lueur ambiante : c'est la lumière qui déborde de la tuile. -->
   <div class="tile-glow" aria-hidden="true"></div>
   <!-- Lavage : peinture pleine largeur RÉVÉLÉE jusqu'au niveau (masque) — le
-       dégradé reste ancré à la tuile au lieu d'être comprimé par la largeur. -->
-  <div class="tile-paint" aria-hidden="true"></div>
+       dégradé reste ancré à la tuile au lieu d'être comprimé par la largeur.
+       Le masque et l'opacité restent sur le cadre, le MOUVEMENT est porté par
+       la couche interne : une animation d'opacité sur le cadre écraserait le
+       dosage qui garde le texte lisible. -->
+  <div class="tile-paint" aria-hidden="true">
+    <div class="tile-paint-fill {anim}" style="animation-duration: {model.animDur}s;"></div>
+    {#if model.sweep}
+      <!-- Effets de balayage : le point qui traverse. Clippé par la tuile. -->
+      <div
+        class="tile-spot"
+        class:running={animsOn}
+        style="background: {model.spotPaint}; animation-duration: {model.spotDur}s;"
+      ></div>
+    {/if}
+  </div>
   <!-- LE RUBAN : la lecture précise du niveau. Un lavage translucide sur fond
        sombre donne un brun sale, jamais « de la lumière » ; ce trait-là, lui,
        est vif et bloomé — c'est lui qui dit « allumé ». -->
   <div class="tile-bar" aria-hidden="true">
-    <div class="tile-bar-fill"></div>
+    <div class="tile-bar-fill {anim}" style="animation-duration: {model.animDur}s;"></div>
     <div class="tile-bar-tip"></div>
   </div>
 
@@ -302,7 +396,7 @@
 
     <div class="tile-text">
       <span class="tile-title">
-        LED Terrasse
+        Terrasse
         {#if abnormal}
           <span
             class="tile-badge"
@@ -312,7 +406,9 @@
           </span>
         {/if}
       </span>
-      <span class="tile-state">{model.label}</span>
+      {#if model.label}
+        <span class="tile-state">{model.label}</span>
+      {/if}
       <span class="tile-pct tabular-nums" class:off={!wled.on}>
         {shownPct}<span class="tile-pct-unit"> %</span>
       </span>
@@ -397,7 +493,6 @@
   .tile-paint {
     position: absolute;
     inset: 0;
-    background: var(--paint);
     opacity: 0;
     /* DISSOLUTION, pas bloc : un rectangle net à la coupe se lit « barre de
        progression » (et brun sale sur fond sombre). La lumière s'éteint en
@@ -430,6 +525,29 @@
   :global([data-theme='dark']) .tile.lit .tile-paint {
     opacity: calc(0.12 + var(--lvlf) * 0.14);
   }
+  /* Couche qui porte les COULEURS et le MOUVEMENT. Séparée du cadre pour que
+     les animations d'opacité (pulsation, scintillement) se multiplient au
+     dosage ci-dessus au lieu de l'écraser — sinon un « Feu » à 100 % ferait
+     clignoter le fond jusque sous le texte. */
+  .tile-paint-fill {
+    position: absolute;
+    inset: 0;
+    background: var(--paint);
+    background-size: var(--paint-size, 100% 100%);
+    background-repeat: repeat-x;
+  }
+  /* Point lumineux des effets de balayage — clippé par la tuile, et révélé
+     jusqu'au niveau comme le reste (il hérite du masque du cadre). */
+  .tile-spot {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 32%;
+    transform: translateX(-120%);
+    filter: blur(2px);
+    will-change: transform;
+  }
 
   /* ─── Le ruban ────────────────────────────────────────────────────────── */
   .tile-bar {
@@ -447,6 +565,10 @@
     inset: 0;
     border-radius: inherit;
     background: var(--paint);
+    /* Même peinture que le fond : le ruban défile donc avec lui, sinon les
+       deux raconteraient deux effets différents. */
+    background-size: var(--paint-size, 100% 100%);
+    background-repeat: repeat-x;
     /* Révélé jusqu'au niveau (% = largeur du ruban), dégradé non comprimé. */
     -webkit-mask-image: linear-gradient(
       90deg,
@@ -485,6 +607,79 @@
   }
   .tile.lit .tile-bar-tip {
     opacity: 1;
+  }
+
+  /* ─── Mouvement des effets ───────────────────────────────────────────────
+     Mêmes familles que la barre de la feuille : un dégradé qui défile, une
+     respiration, un scintillement, un point qui balaie. Les noms de classes
+     sont posés depuis le script (`anim`), la durée vient de la vitesse `sx`
+     du segment. */
+  .anim-scroll {
+    animation-name: tile-scroll;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+  }
+  .anim-pulse {
+    animation-name: tile-pulse;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+  }
+  .anim-flicker {
+    animation-name: tile-flicker;
+    animation-timing-function: steps(2, end);
+    animation-iteration-count: infinite;
+  }
+  .tile-spot.running {
+    animation-name: tile-sweep;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+  }
+  @keyframes tile-scroll {
+    to {
+      background-position: -200% 0;
+    }
+  }
+  @keyframes tile-pulse {
+    from {
+      opacity: 0.55;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes tile-flicker {
+    0% {
+      opacity: 0.6;
+    }
+    25% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.72;
+    }
+    75% {
+      opacity: 0.95;
+    }
+    100% {
+      opacity: 0.65;
+    }
+  }
+  @keyframes tile-sweep {
+    from {
+      transform: translateX(-120%);
+    }
+    to {
+      transform: translateX(320%);
+    }
+  }
+
+  /* Onglet en arrière-plan : on ARRÊTE de peindre (règle Domo — rien ne tourne
+     dans le vide, surtout sur batterie). */
+  .tile.paused .tile-paint-fill,
+  .tile.paused .tile-bar-fill,
+  .tile.paused .tile-spot {
+    animation-play-state: paused;
   }
 
   /* Pendant le glissé, tout suit le doigt SANS interpolation (sinon le niveau
@@ -677,6 +872,15 @@
     .toggle-pill-knob,
     .toggle-pill-knob::after {
       transition: none;
+    }
+    /* Les couleurs restent JUSTES, seul le mouvement disparaît. */
+    .tile-paint-fill,
+    .tile-bar-fill,
+    .tile-spot {
+      animation: none !important;
+    }
+    .tile-spot {
+      display: none;
     }
   }
 </style>
