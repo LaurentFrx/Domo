@@ -16,24 +16,24 @@ Décision de Laurent. Si l'aspirateur est allumé **à la main** (pour balayer,
 aspirer les copeaux par terre), le daemon n'y touche pas — il ne coupe jamais un
 appareil qu'un humain a mis en marche.
 
-| Situation | Ce que fait le daemon |
-|---|---|
-| Outil démarre, aspirateur éteint | l'allume, et en prend la **propriété** |
-| Outil démarre, aspirateur **déjà allumé à la main** | ne fait rien, et n'en prend PAS la propriété → ne l'éteindra pas à la fin |
-| Outil s'arrête, aspirateur à nous | l'éteint après `OFF_DELAY_S` |
-| Outil s'arrête, aspirateur allumé à la main | **le laisse tourner** |
-| L'utilisateur éteint l'aspirateur en plein cycle | lâche la propriété, et **ne le rallume pas** — l'asservissement reprend au cycle d'outil suivant |
-| Le daemon redémarre en plein cycle | relit la propriété sur disque et rattrape l'extinction |
+| Situation                                           | Ce que fait le daemon                                                                            |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Outil démarre, aspirateur éteint                    | l'allume, et en prend la **propriété**                                                           |
+| Outil démarre, aspirateur **déjà allumé à la main** | ne fait rien, et n'en prend PAS la propriété → ne l'éteindra pas à la fin                        |
+| Outil s'arrête, aspirateur à nous                   | l'éteint après `OFF_DELAY_S`                                                                     |
+| Outil s'arrête, aspirateur allumé à la main         | **le laisse tourner**                                                                            |
+| L'utilisateur éteint l'aspirateur en plein cycle    | lâche la propriété, et **ne le rallume pas** — l'asservissement reprend au cycle d'outil suivant |
+| Le daemon redémarre en plein cycle                  | relit la propriété sur disque et rattrape l'extinction                                           |
 
 Se battre avec la personne qui appuie sur le bouton est toujours le mauvais camp.
 
 ## Mesures réelles (essai du 2026-07-31 — ne pas régler au jugé)
 
-| Grandeur | Mesure |
-|---|---|
-| Outil à l'arrêt | **0,0 W** (aucune veille) |
-| Outil en marche | **103 à 195 W** (pic de 195 W au démarrage) |
-| Aspirateur en marche | **1 244 W** |
+| Grandeur                      | Mesure                                                         |
+| ----------------------------- | -------------------------------------------------------------- |
+| Outil à l'arrêt               | **0,0 W** (aucune veille)                                      |
+| Outil en marche               | **103 à 195 W** (pic de 195 W au démarrage)                    |
+| Aspirateur en marche          | **1 244 W**                                                    |
 | Cadence de report de la prise | **~2 s** tant que la valeur bouge ; 15 s quand elle est stable |
 
 Les seuils `ON_W=20` / `OFF_W=10` sont donc à un ordre de grandeur du bruit
@@ -46,7 +46,7 @@ viennent de cette capture.
 - **Arrêt** : la prise peut mettre jusqu'à **~4 s** à annoncer le passage à 0 W
   (mesuré : 4,1 s sur l'essai). Extinction réelle = ce délai + `OFF_DELAY_S`,
   soit **5 à 9 s** après l'arrêt de l'outil. Le « 5 s » demandé est le délai
-  *ajouté*, pas le total — la prise ne sait pas faire mieux.
+  _ajouté_, pas le total — la prise ne sait pas faire mieux.
 
 ## Installation (RPi4)
 
@@ -62,15 +62,15 @@ Journal : `docker logs -f atelier-bridge`.
 
 ## Configuration (.env)
 
-| Variable | Défaut | Rôle |
-|---|---|---|
-| `MATTER_WS_URL` | `ws://127.0.0.1:5580/ws` | python-matter-server (réseau `host`) |
-| `TOOL_NODE_ID` | `28` | prise « Outils atelier » |
-| `VACUUM_NODE_ID` | `29` | prise « Aspirateur » |
-| `ON_W` / `OFF_W` | `20` / `10` | hystérésis de détection (W) |
-| `OFF_DELAY_S` | `5` | traînage après l'arrêt de l'outil |
-| `OBSERVE_ONLY` | `0` | `1` = journalise sans commander le relais |
-| `STATE_PATH` | `/data/atelier_state.json` | propriété persistée |
+| Variable         | Défaut                     | Rôle                                      |
+| ---------------- | -------------------------- | ----------------------------------------- |
+| `MATTER_WS_URL`  | `ws://127.0.0.1:5580/ws`   | python-matter-server (réseau `host`)      |
+| `TOOL_NODE_ID`   | `28`                       | prise « Outils atelier »                  |
+| `VACUUM_NODE_ID` | `29`                       | prise « Aspirateur »                      |
+| `ON_W` / `OFF_W` | `20` / `10`                | hystérésis de détection (W)               |
+| `OFF_DELAY_S`    | `5`                        | traînage après l'arrêt de l'outil         |
+| `OBSERVE_ONLY`   | `0`                        | `1` = journalise sans commander le relais |
+| `STATE_PATH`     | `/data/atelier_state.json` | propriété persistée                       |
 
 ⚠️ **Le volume `/data` n'est pas décoratif** : sans lui, un redémarrage du
 conteneur en plein cycle perd la propriété de l'aspirateur, et plus personne
