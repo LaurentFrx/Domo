@@ -302,7 +302,7 @@
 
     <div class="tile-text">
       <span class="tile-title">
-        Éclairage terrasse
+        LED Terrasse
         {#if abnormal}
           <span
             class="tile-badge"
