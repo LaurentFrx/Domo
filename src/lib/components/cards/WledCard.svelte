@@ -7,17 +7,19 @@
    *     (couleur réelle du ruban, remplie jusqu'à la luminosité) ; glissé
    *     horizontal = luminosité, tap = feuille, plus l'interrupteur.
    *   - `WledSheet` — tout le reste (ambiances, musique, couleur, effet,
-   *     lignes), avec la place de respirer, une décision à la fois.
+   *     lignes). Elle n'est PAS rendue ici : /pieces vit dans le rail du
+   *     Pager (`will-change: transform` + `overflow: hidden`), qui piège tout
+   *     `position: fixed` — une modale montée ici s'ouvre hors écran. La
+   *     feuille est donc montée dans +layout.svelte et ouverte via l'état
+   *     partagé `wled-sheet-state` (pattern MenuSheet / TempHistorySheet).
    *
    * Le flux temps réel du mode Musique (SSE /api/wled/music/live, refcounté et
    * suspendu en arrière-plan dans le store) est ouvert ICI : la tuile en a
    * besoin pour sa légende et sa lueur qui respire, même feuille fermée.
    */
   import WledTile from './WledTile.svelte';
-  import WledSheet from './WledSheet.svelte';
+  import { openWledSheet } from './wled-sheet-state.svelte';
   import { wledMusic } from '$stores/wledMusic.svelte';
-
-  let sheetOpen = $state(false);
 
   $effect(() => {
     wledMusic.openLive();
@@ -25,5 +27,4 @@
   });
 </script>
 
-<WledTile onopen={() => (sheetOpen = true)} />
-<WledSheet open={sheetOpen} onClose={() => (sheetOpen = false)} />
+<WledTile onopen={openWledSheet} />

@@ -110,7 +110,10 @@
   }
   .ms-panel {
     width: 100%;
+    /* dvh : même raison que BottomSheet — ancrée en haut, le vh de Safari
+       (barre d'URL incluse) ferait déborder le bas sous l'écran visible. */
     max-height: 90vh;
+    max-height: 90dvh;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     /* Ancrée en HAUT depuis le 04/08/2026, comme les autres feuilles : posée

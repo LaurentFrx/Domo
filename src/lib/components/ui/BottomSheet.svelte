@@ -108,7 +108,11 @@
   }
   .bs-panel {
     width: 100%;
+    /* dvh : ancrée en HAUT, une hauteur en vh (qui inclut la barre d'URL
+       dynamique de Safari) ferait déborder le bas de la feuille sous l'écran
+       visible. Le vh reste en repli pour les moteurs sans dvh. */
     max-height: 88vh;
+    max-height: 88dvh;
     overflow-y: auto;
     border-width: 1px;
     border-style: solid;

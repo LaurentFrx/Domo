@@ -12,6 +12,8 @@
   import PullToRefresh from '$components/layout/PullToRefresh.svelte';
   import HealthBanner from '$components/layout/HealthBanner.svelte';
   import TempHistorySheet from '$components/temperature/TempHistorySheet.svelte';
+  import WledSheet from '$components/cards/WledSheet.svelte';
+  import { wledSheet, closeWledSheet } from '$components/cards/wled-sheet-state.svelte';
   import MiniPlayer from '$components/music/MiniPlayer.svelte';
   import { player } from '$stores/plex.svelte';
   import { wledMusic } from '$stores/wledMusic.svelte';
@@ -295,6 +297,12 @@
 
   <!-- Pop-up global « historique de température 4 h » (piloté par openTempHistory) -->
   <TempHistorySheet />
+
+  <!-- Feuille de réglages terrasse GLOBALE : la tuile vit dans /pieces, donc
+       DANS le rail du Pager (`will-change: transform` + `overflow: hidden`),
+       qui piège tout `position: fixed` — montée là-bas, la feuille s'ouvrait
+       hors écran. Ici, elle s'ancre au vrai viewport. -->
+  <WledSheet open={wledSheet.open} onClose={closeWledSheet} />
 </div>
 
 <style>
