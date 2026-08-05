@@ -29,6 +29,7 @@
   import { health } from '$stores/health.svelte';
   import { clock } from '$stores/clock.svelte';
   import { haptic } from '$utils/haptic';
+  import { PORTAL_TARGET_ID } from '$utils/portal';
 
   let { children } = $props();
 
@@ -303,6 +304,13 @@
        qui piège tout `position: fixed` — montée là-bas, la feuille s'ouvrait
        hors écran. Ici, elle s'ancre au vrai viewport. -->
   <WledSheet open={wledSheet.open} onClose={closeWledSheet} />
+
+  <!-- Ancre de l'action `portal` ($utils/portal) : les pages du Pager y
+       re-parentent leurs modales position:fixed — laissées dans la page, le
+       rail (`will-change: transform`) en ferait le référentiel et les
+       ancrerait hors écran. Doit rester DANS ce <div> racine (délégation
+       d'événements Svelte 5 + enfoncement/haptique iOS ci-dessus). -->
+  <div id={PORTAL_TARGET_ID}></div>
 </div>
 
 <style>

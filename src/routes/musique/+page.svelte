@@ -25,6 +25,7 @@
     type SmartRules
   } from '$stores/plex.svelte';
   import AlbumCover from '$components/music/AlbumCover.svelte';
+  import { portal } from '$utils/portal';
 
   let releases: (() => void)[] = [];
   onMount(() => {
@@ -1361,9 +1362,13 @@
   {/if}
 </div>
 
-<!-- ─── Confirmation de suppression (règle : jamais de suppression sèche) ── -->
+<!-- ─── Confirmation de suppression (règle : jamais de suppression sèche) ──
+     Les 5 modales ci-dessous portent `use:portal` : /musique est rendue dans
+     le rail du Pager (`will-change: transform`), qui piégerait leur
+     `position: fixed` — elles s'ancreraient au rail (page longue), pas au
+     viewport. Le portail les re-parente dans le layout (cf. $utils/portal). -->
 {#if confirmDelete}
-  <div class="modal" role="dialog" aria-modal="true" aria-label={confirmDelete.title}>
+  <div use:portal class="modal" role="dialog" aria-modal="true" aria-label={confirmDelete.title}>
     <div
       class="modal-card rounded-[var(--radius-3xl,28px)] border p-5 text-center"
       style="background: var(--color-card); border-color: var(--color-border);"
@@ -1384,7 +1389,7 @@
 
 <!-- ─── Constructeur de mix personnalisé / playlist intelligente ─────────── -->
 {#if builderOpen}
-  <div class="modal" role="dialog" aria-modal="true" aria-label="Mix personnalisé">
+  <div use:portal class="modal" role="dialog" aria-modal="true" aria-label="Mix personnalisé">
     <div
       class="modal-card form-card rounded-[var(--radius-3xl,28px)] border p-5"
       style="background: var(--color-card); border-color: var(--color-border);"
@@ -1474,7 +1479,7 @@
 <!-- ─── « Ajouter à une playlist » ────────────────────────────────────────── -->
 {#if pickerFor}
   {@const classiques = plex.playlists.filter((p) => !p.smart)}
-  <div class="modal" role="dialog" aria-modal="true" aria-label="Ajouter à une playlist">
+  <div use:portal class="modal" role="dialog" aria-modal="true" aria-label="Ajouter à une playlist">
     <div
       class="modal-card form-card rounded-[var(--radius-3xl,28px)] border p-5"
       style="background: var(--color-card); border-color: var(--color-border);"
@@ -1521,7 +1526,7 @@
 
 <!-- ─── Renommage de playlist ─────────────────────────────────────────────── -->
 {#if renameOpen}
-  <div class="modal" role="dialog" aria-modal="true" aria-label="Renommer la playlist">
+  <div use:portal class="modal" role="dialog" aria-modal="true" aria-label="Renommer la playlist">
     <div
       class="modal-card form-card rounded-[var(--radius-3xl,28px)] border p-5"
       style="background: var(--color-card); border-color: var(--color-border);"
@@ -1547,7 +1552,7 @@
 
 <!-- ─── Suppression de playlist (les fichiers ne sont PAS touchés) ────────── -->
 {#if confirmDeletePl}
-  <div class="modal" role="dialog" aria-modal="true" aria-label="Supprimer la playlist">
+  <div use:portal class="modal" role="dialog" aria-modal="true" aria-label="Supprimer la playlist">
     <div
       class="modal-card rounded-[var(--radius-3xl,28px)] border p-5 text-center"
       style="background: var(--color-card); border-color: var(--color-border);"
