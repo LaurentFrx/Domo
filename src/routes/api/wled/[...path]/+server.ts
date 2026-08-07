@@ -37,7 +37,9 @@ function subPath(path: string | undefined): string {
 // Sous-chemins GET autorisés (lecture seule). Défense en profondeur : on ne
 // relaie PAS un chemin arbitraire vers le module LAN (config/win/reboot…),
 // même derrière l'auth — seule la lecture de l'état est exposée.
-const ALLOWED_GET = new Set(['', 'state', 'info', 'si', 'eff', 'pal']);
+// `fxdata` : métadonnées des effets — la grille en tire le flag audio-réactif
+// (`v`/`f`), sans lequel 37 des 220 effets paraissent morts hors musique.
+const ALLOWED_GET = new Set(['', 'state', 'info', 'si', 'eff', 'pal', 'fxdata']);
 
 const MOCK_HEADERS = { 'x-wled-source': 'mock', 'cache-control': 'no-store' };
 const LIVE_HEADERS = { 'x-wled-source': 'live', 'cache-control': 'no-store' };

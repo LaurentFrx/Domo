@@ -398,10 +398,22 @@
               wled.setSegEffect(s.id, e.i);
             }}
           >
-            {e.name}
+            {e.name}{#if wled.audioFx.has(e.i)}<span class="fx-audio" aria-label="suit la musique"
+                >&nbsp;♫</span
+              >{/if}
           </button>
         {/each}
       </div>
+    {/if}
+
+    <!-- 37 des 220 effets du firmware NE VIVENT QUE du flux musique : posés
+         sans lecture en cours, ils rendent un ruban noir ou figé qu'on prend
+         pour une panne. Le dire au moment où ça arrive, en mots simples. -->
+    {#if effLoaded && wled.audioFx.has(s.fx) && !wledMusic.playing}
+      <p class="fx-audio-note">
+        ♫ Cet effet suit la musique — lancez une lecture (ou choisissez le mode Musique de l'onglet
+        dédié) pour le voir vivre. Sans musique, le ruban reste sombre.
+      </p>
     {/if}
   </div>
 {/snippet}
@@ -681,6 +693,25 @@
   }
   .chip:disabled {
     cursor: not-allowed;
+  }
+
+  /* Marqueur des effets audio-réactifs : discret dans la grille, la note
+     au-dessous porte l'explication quand on en pose un sans musique. */
+  .fx-audio {
+    color: var(--color-primary);
+    font-size: 11px;
+  }
+  .chip.active .fx-audio {
+    color: inherit;
+  }
+  .fx-audio-note {
+    padding: 8px 10px;
+    border-radius: var(--radius-md);
+    background: var(--color-card-hover);
+    border: 1px solid var(--color-border);
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--color-muted-fg);
   }
 
   .fx-search {

@@ -514,6 +514,10 @@ export function wledGet(sub: string): unknown {
       return WLED_EFFECTS;
     case 'pal':
       return WLED_PALETTES;
+    case 'fxdata':
+      // Métadonnées d'effets (spec WLED) : la démo n'embarque pas d'effets
+      // audio-réactifs, des metas vides suffisent — l'UI n'y lira aucun flag.
+      return WLED_EFFECTS.map(() => '');
     case '':
     default:
       return { state, info: buildInfo(), effects: WLED_EFFECTS, palettes: WLED_PALETTES };

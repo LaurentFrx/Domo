@@ -255,6 +255,17 @@ class WledStore {
   #paletteFetch: Promise<void> | null = null;
   /** Backoff après un échec : pas de nouvel essai avant cet horodatage. */
   #paletteRetryAt = 0;
+  /**
+   * Index des effets AUDIO-RÉACTIFS du firmware (flag `v`/`f` de /json/fxdata).
+   * Sans musique en cours, ces effets rendent un ruban noir ou figé : la grille
+   * doit le dire, sinon 37 des 220 effets paraissent simplement « cassés ».
+   * Jamais muté — réassigné en bloc (la réassignation porte la réactivité).
+   */
+  audioFx = $state<ReadonlySet<number>>(new Set());
+  #fxFetch: Promise<void> | null = null;
+  #fxRetryAt = 0;
+  /** Distingue « chargé, zéro effet audio » (mock) d'un échec à retenter. */
+  #fxLoaded = false;
 
   #timer: ReturnType<typeof setInterval> | null = null;
   #vis: (() => void) | null = null;
@@ -402,6 +413,7 @@ class WledStore {
       this.lastUpdate = new Date();
       this.#metaLoaded = this.effects.length > 0;
       this.#loadPaletteColors();
+      this.#loadFxFlags();
     } catch (e) {
       this.connected = false;
       this.lastError = e instanceof Error ? e.message : 'erreur';
@@ -440,6 +452,42 @@ class WledStore {
     });
   }
 
+  /**
+   * Charge les métadonnées d'effets (une fois, en tâche de fond) et en tire
+   * les index audio-réactifs. Même contrat que #loadPaletteColors : jamais
+   * attendu, replis silencieux, backoff sur échec, figé après succès.
+   *
+   * Format fxdata (spec WLED) : `params;colors;palettes;flags;defaults` — le
+   * 4ᵉ champ porte `v` (réagit au volume) / `f` (réagit au spectre).
+   */
+  #loadFxFlags(): void {
+    if (this.#fxFetch || Date.now() < this.#fxRetryAt) return;
+    this.#fxFetch = (async () => {
+      try {
+        const res = await fetch('/api/wled/json/fxdata', {
+          signal: AbortSignal.timeout(TIMEOUT_MS)
+        });
+        if (!res.ok) return;
+        const d = (await res.json()) as unknown;
+        if (!Array.isArray(d)) return;
+        const audio = new Set<number>();
+        d.forEach((meta, i) => {
+          const flags = typeof meta === 'string' ? (meta.split(';')[3] ?? '') : '';
+          if (flags.includes('v') || flags.includes('f')) audio.add(i);
+        });
+        this.audioFx = audio;
+        this.#fxLoaded = true;
+      } catch {
+        /* silencieux : la grille reste sans badges, rien de cassé */
+      }
+    })().finally(() => {
+      if (!this.#fxLoaded) {
+        this.#fxFetch = null;
+        this.#fxRetryAt = Date.now() + 60_000;
+      }
+    });
+  }
+
   /** Rafraîchit l'état courant (polling léger /json/si). Gelé pendant un drag
    *  ou tant que des commandes sont en file (un GET intercalé renverrait un
    *  état antérieur au dernier ordre et ferait « sauter » l'UI en arrière). */
@@ -462,11 +510,12 @@ class WledStore {
       this.connected = true;
       this.lastError = null;
       this.lastUpdate = new Date();
-      // Les couleurs de palettes ont pu manquer leur premier rendez-vous
-      // (module muet au chargement) : tant qu'elles manquent, on retente au
-      // fil du polling — sinon l'aperçu resterait sur la table de repli toute
-      // la session. Le backoff interne évite de marteler un module muet.
+      // Les couleurs de palettes et les flags d'effets ont pu manquer leur
+      // premier rendez-vous (module muet au chargement) : tant qu'ils
+      // manquent, on retente au fil du polling — sinon l'aperçu resterait sur
+      // la table de repli toute la session. Backoff interne dans les deux cas.
       if (!Object.keys(this.paletteColors).length) this.#loadPaletteColors();
+      if (!this.#fxLoaded) this.#loadFxFlags();
     } catch (e) {
       this.connected = false;
       this.lastError = e instanceof Error ? e.message : 'erreur';

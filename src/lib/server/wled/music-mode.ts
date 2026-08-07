@@ -176,7 +176,7 @@ export function applyRender(playing: boolean, opts: RenderOpts = {}): Promise<vo
 
     const { data } = await moduleGet('');
     const d = data as {
-      state?: { on?: boolean; seg?: { id?: number; stop?: number; n?: string }[] };
+      state?: { on?: boolean; bri?: number; seg?: { id?: number; stop?: number; n?: string }[] };
       effects?: string[];
       palettes?: string[];
     };
@@ -205,8 +205,16 @@ export function applyRender(playing: boolean, opts: RenderOpts = {}): Promise<vo
     // `on` par segment : JAMAIS envoyé sur un rendu automatique (une ligne
     // éteinte volontairement — bras du store repliés — doit le RESTER) ; seul
     // le geste utilisateur (powerOn) allume ruban ET lignes.
+    // Plancher de luminosité SUR LE GESTE seulement : « voir la musique » à
+    // 16 % de luminosité résiduelle est invisible en extérieur — le geste
+    // exprime l'intention, on lui donne au moins ~40 %. Un rendu automatique,
+    // lui, ne touche jamais bri (ne pas surprendre la nuit).
+    const MIN_POWER_ON_BRI = 100;
+    const curBri = typeof d.state?.bri === 'number' ? d.state.bri : 255;
     await modulePostState({
-      ...(opts.powerOn ? { on: true } : {}),
+      ...(opts.powerOn
+        ? { on: true, ...(curBri < MIN_POWER_ON_BRI ? { bri: MIN_POWER_ON_BRI } : {}) }
+        : {}),
       seg: segs.map((s) => ({
         id: s.id ?? 0,
         ...(opts.powerOn ? { on: true } : {}),
