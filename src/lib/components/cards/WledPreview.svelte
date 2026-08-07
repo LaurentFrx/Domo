@@ -21,7 +21,7 @@
    */
   import { wled, previewColor, type RGB } from '$stores/wled.svelte';
   import { wledMusic } from '$stores/wledMusic.svelte';
-  import { familyOf, paintStops, stateLabel, stopsToCss } from '$lib/wled/preview-model';
+  import { familyOf, paintStops, stateLabel, stopsToCss, wrapStops } from '$lib/wled/preview-model';
 
   interface Props {
     /** Animer les effets dynamiques (sinon image fixe). */
@@ -43,6 +43,20 @@
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
   });
+
+  // Réduction de mouvement système, réactive : le MODÈLE en dépend — sans
+  // mouvement, pas de version bouclée du dégradé en 200 % (une image statique
+  // n'en montrerait que la moitié). Le CSS reduced-motion coupe bien les
+  // animations, mais lui ne peut pas changer la forme du dégradé.
+  let reducedMotion = $state(false);
+  $effect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    reducedMotion = mq.matches;
+    const on = (e: MediaQueryListEvent) => (reducedMotion = e.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  });
+  const motion = $derived(animated && !reducedMotion);
 
   // ─── Suivi musique : la barre bouge comme le ruban ───
   // Source UNIQUE : le niveau sonore 12,5 Hz du SSE /api/wled/music/live
@@ -146,20 +160,25 @@
         shadow = `0 0 ${blur1}px rgb(${c} / ${a1}), 0 0 ${blur2}px rgb(${c} / ${a2})`;
 
         if (family === 'scroll' && stops) {
-          // Premier arrêt rejoué en fin de course : le dégradé boucle sans
-          // couture visible quand il défile sur deux largeurs.
-          paint = `linear-gradient(90deg, ${stopsToCss([...stops, { ...stops[0], pos: 1 }])})`;
-          size = '200% 100%';
-          if (animated) {
+          if (motion) {
+            // Dégradé bouclé (wrapStops : premier arrêt rejoué à la fin, avec
+            // une vraie rampe de fermeture) peint sur deux largeurs : il
+            // défile sans couture.
+            paint = `linear-gradient(90deg, ${stopsToCss(wrapStops(stops))})`;
+            size = '200% 100%';
             fillAnim = 'anim-scroll';
             fillDur = +(14 - (seg.sx / 255) * 11).toFixed(1); // ~3–14 s
+          } else {
+            // Image fixe : le dégradé COMPLET sur une largeur — la version
+            // bouclée en 200 % n'en montrerait que la moitié.
+            paint = `linear-gradient(90deg, ${stopsToCss(stops)})`;
           }
         } else {
           paint = `linear-gradient(90deg, ${rgbCss(eff)}, ${rgbCss(eff)})`;
-          if (animated && family === 'pulse') {
+          if (motion && family === 'pulse') {
             fillAnim = 'anim-pulse';
             fillDur = +(4.5 - (seg.sx / 255) * 3.3).toFixed(1);
-          } else if (animated && family === 'flicker') {
+          } else if (motion && family === 'flicker') {
             fillAnim = 'anim-flicker';
             fillDur = +(1.6 - (seg.sx / 255) * 1.2).toFixed(2);
           } else if (family === 'sweep') {
@@ -170,7 +189,7 @@
               Math.min(255, eff[2] + 110)
             ];
             spotPaint = `linear-gradient(90deg, transparent, ${rgbCss(sp)} 50%, transparent)`;
-            if (animated) spotDur = +(5 - (seg.sx / 255) * 3.8).toFixed(1);
+            if (motion) spotDur = +(5 - (seg.sx / 255) * 3.8).toFixed(1);
           }
         }
       }

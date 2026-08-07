@@ -363,6 +363,24 @@ export function hexesToStops(hexes: string[]): Stop[] {
   return hexes.map((h, i) => ({ rgb: hexToRgb(h), pos: i / last }));
 }
 
+/**
+ * Prépare un dégradé à DÉFILER en boucle : rejoue le premier arrêt à la fin,
+ * en COMPRIMANT d'abord les positions pour lui faire une vraie place.
+ *
+ * Les arrêts finissent toujours à pos 1 (hexesToStops comme les palettes du
+ * firmware) : ajouter naïvement le rebouclage à pos 1 crée un arrêt COÏNCIDENT
+ * avec le dernier — rampe de fermeture de largeur nulle, donc un saut dur
+ * dernière→première couleur à chaque jonction d'image (`repeat-x` sur 200 %).
+ * Compression ×(N−1)/N : sur des arrêts uniformes, on retrouve exactement la
+ * répartition uniforme à N+1 couleurs — la boucle est sans couture.
+ */
+export function wrapStops(stops: Stop[]): Stop[] {
+  const n = stops.length;
+  if (n < 2) return stops;
+  const scale = (n - 1) / n;
+  return [...stops.map((s) => ({ ...s, pos: s.pos * scale })), { rgb: stops[0].rgb, pos: 1 }];
+}
+
 /** Arrêts prêts pour un `linear-gradient` CSS. */
 export function stopsToCss(stops: Stop[]): string {
   return stops
@@ -415,20 +433,3 @@ export function vividTint(rgb: RGB): RGB {
 
 /** Teinte de repli quand il n'y a aucune couleur à normaliser (ruban à zéro). */
 const WARM_FALLBACK: RGB = [255, 223, 191];
-
-/** Couleur moyenne d'un dégradé — sert aux lueurs (une lueur = UNE couleur). */
-export function averageRgb(stops: string[]): RGB {
-  if (!stops.length) return [0, 0, 0];
-  const sum = stops.reduce<[number, number, number]>(
-    (acc, s) => {
-      const [r, g, b] = hexToRgb(s);
-      return [acc[0] + r, acc[1] + g, acc[2] + b];
-    },
-    [0, 0, 0]
-  );
-  return [
-    Math.round(sum[0] / stops.length),
-    Math.round(sum[1] / stops.length),
-    Math.round(sum[2] / stops.length)
-  ];
-}

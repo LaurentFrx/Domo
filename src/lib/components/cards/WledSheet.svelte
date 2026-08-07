@@ -21,6 +21,7 @@
   import { wled, WLED_AMBIANCES, type WledSegment } from '$stores/wled.svelte';
   import { wledMusic, WLED_MUSIC_STYLES } from '$stores/wledMusic.svelte';
   import { preferences } from '$stores/preferences.svelte';
+  import { acquire } from '$stores/refcount';
   import { haptic } from '$utils/haptic';
 
   interface Props {
@@ -28,6 +29,23 @@
     onClose: () => void;
   }
   let { open, onClose }: Props = $props();
+
+  // La feuille vit au LAYOUT (elle échappe au rail du Pager — cf.
+  // wled-sheet-state) : elle ne peut plus compter sur /pieces pour le polling
+  // wled ni sur WledCard pour le SSE musique — tous deux meurent si /pieces
+  // sort de la fenêtre du Pager (retour arrière sous la modale) alors que la
+  // feuille, globale, reste ouverte sur un état figé sans le savoir. Tant
+  // qu'elle est ouverte, elle tient donc ses PROPRES références ; le refcount
+  // fait qu'aucun doublon n'existe quand /pieces est montée en même temps.
+  $effect(() => {
+    if (!open) return;
+    const release = acquire(wled);
+    wledMusic.openLive();
+    return () => {
+      release();
+      wledMusic.closeLive();
+    };
+  });
 
   type Tab = 'ambiances' | 'musique' | 'couleur' | 'effet' | 'lignes';
   let tab = $state<Tab>('ambiances');

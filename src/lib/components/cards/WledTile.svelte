@@ -30,7 +30,8 @@
     paintStops,
     stateLabel,
     stopsToCss,
-    vividTint
+    vividTint,
+    wrapStops
   } from '$lib/wled/preview-model';
   import { haptic } from '$utils/haptic';
 
@@ -57,6 +58,21 @@
     trackKey: wledMusic.trackKey,
     playing: wledMusic.playing
   });
+
+  // Réduction de mouvement SYSTÈME, en état réactif : le MODÈLE en dépend —
+  // sans mouvement il ne doit pas fabriquer la version bouclée du dégradé
+  // (peinte en 200 % de large, une image statique n'en montrerait que la
+  // moitié : un Sunset sans ses jaunes). Un matchMedia lu une fois manquerait
+  // le changement du réglage en cours de vie.
+  let reducedMotion = $state(false);
+  $effect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    reducedMotion = mq.matches;
+    const on = (e: MediaQueryListEvent) => (reducedMotion = e.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  });
+  const motionOn = $derived(preferences.animationsEnabled && !reducedMotion);
 
   const model = $derived.by(() => {
     const seg = dominant;
@@ -103,8 +119,10 @@
     // Même vocabulaire que la barre de la feuille (`familyOf`) : une tuile qui
     // peindrait un « Feu » ou un « Balayage » en image fixe montrerait des
     // couleurs justes sur un ruban qui, lui, bouge. Vitesse dérivée de `sx`,
-    // comme le module.
-    const family = lit ? familyOf(fxName, stops) : 'solid';
+    // comme le module. Sans mouvement (préférence Animations OFF, réduction
+    // système), tout reste en famille « solid » : couleurs justes, image fixe,
+    // dégradé COMPLET — ni classe d'animation, ni version bouclée.
+    const family = lit && motionOn ? familyOf(fxName, stops) : 'solid';
     const speed = seg.sx / 255;
     let anim = '';
     let animDur = 0;
@@ -123,8 +141,9 @@
       sweep = true;
       spotDur = +(5 - speed * 3.8).toFixed(1);
     }
-    // Le dégradé qui défile doit BOUCLER : on rejoue le premier arrêt à la fin
-    // et on peint sur deux largeurs, sinon la couture saute à chaque tour.
+    // Le dégradé qui défile doit BOUCLER : wrapStops rejoue le premier arrêt à
+    // la fin (en comprimant le reste pour lui faire une vraie place) et on
+    // peint sur deux largeurs, sinon la couture saute à chaque tour.
     const loop = anim === 'anim-scroll' && stops;
     const spotTint: RGB = [
       Math.min(255, glow[0] + 110),
@@ -151,7 +170,7 @@
     return {
       lit,
       paint: stops
-        ? `linear-gradient(90deg, ${stopsToCss(loop ? [...stops, { ...stops[0], pos: 1 }] : stops)})`
+        ? `linear-gradient(90deg, ${stopsToCss(loop ? wrapStops(stops) : stops)})`
         : `linear-gradient(90deg, rgb(${tint.join(' ')}), rgb(${tint.join(' ')}))`,
       paintSize: loop ? '200% 100%' : '100% 100%',
       glow: glow.join(' '),
@@ -167,18 +186,19 @@
   // Badge d'état SEULEMENT si anormal — « connecté » est l'état attendu.
   const abnormal = $derived(!wled.connected ? 'Hors ligne' : wled.isMock ? 'Démo' : null);
 
-  // Le mouvement est une PRÉFÉRENCE : sans elle, la tuile garde les vraies
-  // couleurs mais en image fixe. La mise en pause en arrière-plan et le respect
-  // de `prefers-reduced-motion` sont traités en CSS (voir plus bas), pour ne pas
-  // reconstruire le modèle à chaque changement de visibilité.
-  const animsOn = $derived(preferences.animationsEnabled);
-  const anim = $derived(animsOn ? model.anim : '');
+  // Le mouvement est arbitré DANS le modèle (motionOn) : classes d'animation
+  // ET forme du dégradé vont ensemble. Seule la pause en arrière-plan reste en
+  // CSS (.paused), pour ne pas reconstruire le modèle à chaque visibilité.
 
   // ─── Luminosité : niveau affiché (optimiste pendant le glissé) ─────────
   const briPct = $derived(Math.round((wled.bri / 255) * 100));
   let dragging = $state(false);
   let dragPct = $state(0);
-  const shownPct = $derived(dragging ? dragPct : briPct);
+  /* Éteinte, la tuile affiche « 0 % » — pas la dernière luminosité mémorisée
+     par le module : le mot « Éteint » a été retiré au motif que l'interrupteur
+     et le 0 % portent l'état, ce chiffre doit donc être VRAI. `briPct` reste
+     la valeur de reprise interne (glissé, flèches clavier). */
+  const shownPct = $derived(dragging ? dragPct : model.lit ? briPct : 0);
   /** Largeur du remplissage : 0 quand c'est éteint (la tuile s'éteint vraiment). */
   const fillPct = $derived(model.lit ? shownPct : 0);
 
@@ -336,12 +356,12 @@
        la couche interne : une animation d'opacité sur le cadre écraserait le
        dosage qui garde le texte lisible. -->
   <div class="tile-paint" aria-hidden="true">
-    <div class="tile-paint-fill {anim}" style="animation-duration: {model.animDur}s;"></div>
+    <div class="tile-paint-fill {model.anim}" style="animation-duration: {model.animDur}s;"></div>
     {#if model.sweep}
-      <!-- Effets de balayage : le point qui traverse. Clippé par la tuile. -->
+      <!-- Effets de balayage : le point qui traverse. Clippé par la tuile.
+           N'existe que si le mouvement est permis (arbitré dans le modèle). -->
       <div
         class="tile-spot"
-        class:running={animsOn}
         style="background: {model.spotPaint}; animation-duration: {model.spotDur}s;"
       ></div>
     {/if}
@@ -355,7 +375,7 @@
        sombre donne un brun sale, jamais « de la lumière » ; ce trait-là, lui,
        est vif et bloomé — c'est lui qui dit « allumé ». -->
   <div class="tile-bar" aria-hidden="true">
-    <div class="tile-bar-fill {anim}" style="animation-duration: {model.animDur}s;"></div>
+    <div class="tile-bar-fill {model.anim}" style="animation-duration: {model.animDur}s;"></div>
     <div class="tile-bar-tip"></div>
   </div>
 
@@ -460,6 +480,18 @@
 </div>
 
 <style>
+  /* --lvl ENREGISTRÉE pour être interpolable : un masque, un dégradé ou un
+     `left` qui en dépendent ne s'animent pas d'eux-mêmes (mask-image et
+     background s'animent en mode DISCRET — les lister dans une transition est
+     sans effet). En transitionnant la VARIABLE, tout ce qui la lit — masques
+     de niveau, lueur, tête du ruban — glisse d'un même mouvement. iOS ≥ 16.4,
+     en deçà le niveau saute (dégradation acceptable). */
+  @property --lvl {
+    syntax: '<percentage>';
+    inherits: true;
+    initial-value: 0%;
+  }
+
   .tile {
     position: relative;
     overflow: hidden;
@@ -469,6 +501,11 @@
     border-radius: var(--radius-2xl);
     /* Repos neutre quand la musique ne pilote pas la lueur. */
     --mvol: 0.5;
+    transition: --lvl var(--duration-normal) var(--ease-default);
+  }
+  /* Pendant le glissé, le niveau suit le doigt SANS interpolation. */
+  .tile.dragging {
+    transition: none;
   }
 
   /* ─── Couches lumineuses ─────────────────────────────────────────────── */
@@ -482,9 +519,9 @@
       transparent 70%
     );
     opacity: 0;
-    transition:
-      opacity var(--duration-normal) var(--ease-default),
-      background var(--duration-normal) var(--ease-default);
+    /* Le déplacement de la lueur suit --lvl (transitionnée sur .tile) ;
+       `background` s'anime en discret, le lister ici serait sans effet. */
+    transition: opacity var(--duration-normal) var(--ease-default);
     pointer-events: none;
   }
   .tile.lit .tile-glow {
@@ -516,10 +553,9 @@
       #000 calc(var(--lvl) * 0.72),
       transparent var(--lvl)
     );
-    transition:
-      opacity var(--duration-normal) var(--ease-default),
-      -webkit-mask-image var(--duration-normal) var(--ease-default),
-      mask-image var(--duration-normal) var(--ease-default);
+    /* Le masque suit --lvl (transitionnée sur .tile) ; mask-image s'anime en
+       discret, le lister ici serait sans effet. */
+    transition: opacity var(--duration-normal) var(--ease-default);
     pointer-events: none;
   }
   .tile.lit .tile-paint {
@@ -545,15 +581,18 @@
      couleur : elle peut être très sombre (Ocean, Lava) comme très claire
      (blanc 4000K, Pastel) — aucune couleur de texte ne tient sur les deux.
      Bleu-nuit et non noir (charte), et dégressif vers la droite pour laisser
-     la lumière intacte là où rien n'est écrit. */
+     la lumière intacte là où rien n'est écrit. Le voile TIENT (≥ 0.5) jusqu'à
+     64 % : la colonne de texte va jusqu'à ~80 % de la tuile (légendes longues
+     « Musique · en attente de lecture ») — un fondu amorcé à 42 % laissait la
+     fin des légendes passer sous la barre de contraste sur peinture claire. */
   .tile-scrim {
     position: absolute;
     inset: 0;
     background: linear-gradient(
       90deg,
       oklch(0.16 0.02 262 / 0.66) 0%,
-      oklch(0.16 0.02 262 / 0.44) 42%,
-      transparent 74%
+      oklch(0.16 0.02 262 / 0.5) 64%,
+      transparent 90%
     );
     opacity: 0;
     transition: opacity var(--duration-normal) var(--ease-default);
@@ -605,10 +644,8 @@
     );
     mask-image: linear-gradient(90deg, #000 0, #000 calc(var(--lvl) - 3px), transparent var(--lvl));
     opacity: 0;
-    transition:
-      opacity var(--duration-normal) var(--ease-default),
-      -webkit-mask-image var(--duration-normal) var(--ease-default),
-      mask-image var(--duration-normal) var(--ease-default);
+    /* Même logique que .tile-paint : c'est --lvl qui porte le glissement. */
+    transition: opacity var(--duration-normal) var(--ease-default);
   }
   .tile.lit .tile-bar-fill {
     opacity: 1;
@@ -628,9 +665,10 @@
       0 0 10px 2px rgb(var(--glow) / 0.75),
       0 0 26px 6px rgb(var(--glow) / 0.4);
     opacity: 0;
-    transition:
-      opacity var(--duration-normal) var(--ease-default),
-      left var(--duration-normal) var(--ease-default);
+    /* PAS de transition sur `left` : left = var(--lvl), déjà lissée sur .tile
+       — une seconde interpolation par-dessus ferait traîner la tête derrière
+       le remplissage. */
+    transition: opacity var(--duration-normal) var(--ease-default);
   }
   .tile.lit .tile-bar-tip {
     opacity: 1;
@@ -657,7 +695,7 @@
     animation-timing-function: steps(2, end);
     animation-iteration-count: infinite;
   }
-  .tile-spot.running {
+  .tile-spot {
     animation-name: tile-sweep;
     animation-timing-function: ease-in-out;
     animation-iteration-count: infinite;
@@ -826,6 +864,17 @@
     border-color: oklch(1 0 0 / 0.4);
     background: oklch(0.16 0.02 262 / 0.42);
     color: oklch(0.98 0.004 286);
+  }
+  /* Le badge « Hors ligne »/« Démo » garde sa couleur SÉMANTIQUE (alerte /
+     mandarine) — il ne peut donc pas passer en clair comme le reste du texte.
+     Pastille à fond sombre local (même recette que .tile-more) : le seul
+     témoin de panne de la tuile doit rester lisible sur peinture claire —
+     c'est précisément allumée en ambre que la déconnexion se voit le moins. */
+  .tile.lit .tile-badge {
+    padding: 2px 7px;
+    border-radius: 9999px;
+    background: oklch(0.16 0.02 262 / 0.55);
+    text-shadow: none;
   }
   .tile-pct-unit {
     font-size: 15px;

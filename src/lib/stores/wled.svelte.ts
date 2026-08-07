@@ -253,6 +253,8 @@ class WledStore {
    */
   paletteColors = $state<PaletteMap>({});
   #paletteFetch: Promise<void> | null = null;
+  /** Backoff après un échec : pas de nouvel essai avant cet horodatage. */
+  #paletteRetryAt = 0;
 
   #timer: ReturnType<typeof setInterval> | null = null;
   #vis: (() => void) | null = null;
@@ -417,7 +419,7 @@ class WledStore {
    * qu'à un flashage de firmware.
    */
   #loadPaletteColors(): void {
-    if (this.#paletteFetch) return;
+    if (this.#paletteFetch || Date.now() < this.#paletteRetryAt) return;
     this.#paletteFetch = (async () => {
       try {
         const res = await fetch('/api/wled/palettes', { signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -428,7 +430,13 @@ class WledStore {
         /* silencieux : la table de repli prend le relais */
       }
     })().finally(() => {
-      if (!Object.keys(this.paletteColors).length) this.#paletteFetch = null;
+      if (!Object.keys(this.paletteColors).length) {
+        // Porte rouverte, mais pas tout de suite : l'endpoint agrège jusqu'à
+        // 9 requêtes vers un module à -73 dBm — marteler toutes les 5 s
+        // (cadence de refresh) serait pire que d'attendre.
+        this.#paletteFetch = null;
+        this.#paletteRetryAt = Date.now() + 60_000;
+      }
     });
   }
 
@@ -454,6 +462,11 @@ class WledStore {
       this.connected = true;
       this.lastError = null;
       this.lastUpdate = new Date();
+      // Les couleurs de palettes ont pu manquer leur premier rendez-vous
+      // (module muet au chargement) : tant qu'elles manquent, on retente au
+      // fil du polling — sinon l'aperçu resterait sur la table de repli toute
+      // la session. Le backoff interne évite de marteler un module muet.
+      if (!Object.keys(this.paletteColors).length) this.#loadPaletteColors();
     } catch (e) {
       this.connected = false;
       this.lastError = e instanceof Error ? e.message : 'erreur';

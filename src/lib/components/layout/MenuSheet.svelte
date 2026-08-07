@@ -86,12 +86,18 @@
         </button>
       </header>
 
-      <MenuList onNavigate={closeMenu} />
+      <!-- LE scroller : le panneau, lui, ne défile pas — sinon le contenu
+           défilé resterait visible dans le padding de zone sûre (un overflow
+           clippe au padding box) et passerait sous la Dynamic Island ; et
+           l'en-tête partirait avec le défilement, croix comprise. -->
+      <div class="ms-scroll">
+        <MenuList onNavigate={closeMenu} />
+      </div>
 
       <!-- Grabber : la poignée grise des feuilles iOS. Décorative. Elle marque
            le bord LIBRE de la feuille — passé en bas avec l'ancrage haut, comme
-           le Centre de notifications d'iOS. Collée par `sticky` : sur une liste
-           longue, en fin de contenu, elle serait invisible sans défiler. -->
+           le Centre de notifications d'iOS. Posée APRÈS le scroller : toujours
+           visible, quelle que soit la longueur de la liste. -->
       <span class="ms-grabber" aria-hidden="true"></span>
     </div>
   </div>
@@ -105,24 +111,40 @@
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    /* Assombrissement de la feuille modale iOS (la page reste devinable). */
-    background: oklch(0 0 0 / 0.4);
+    /* Assombrissement de la feuille modale iOS (la page reste devinable).
+       Teinté charte — jamais noir pur — et aligné sur le scrim de BottomSheet :
+       deux feuilles du même écran doivent assombrir pareil. */
+    background: oklch(0.2 0.02 286 / 0.4);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
   }
   .ms-panel {
+    display: flex;
+    flex-direction: column;
     width: 100%;
     /* dvh : même raison que BottomSheet — ancrée en haut, le vh de Safari
        (barre d'URL incluse) ferait déborder le bas sous l'écran visible. */
     max-height: 90vh;
     max-height: 90dvh;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    /* Le panneau NE défile PAS : c'est .ms-scroll qui défile (cf. markup). */
+    overflow: hidden;
     /* Ancrée en HAUT depuis le 04/08/2026, comme les autres feuilles : posée
        en bas, elle laissait ses premières entrées hors de portée sur iPhone.
-       Zone sûre du haut = encoche / Dynamic Island. */
+       Zones sûres : haut (encoche / Dynamic Island) + côtés (paysage iPhone,
+       rien ne verrouille l'orientation). */
     border-bottom-left-radius: 14px;
     border-bottom-right-radius: 14px;
-    padding: calc(8px + env(safe-area-inset-top)) 16px 20px;
+    padding: calc(8px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 20px
+      max(16px, env(safe-area-inset-left));
     animation: ms-down 300ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .ms-scroll {
+    /* min-height: 0 : sans lui, un flex item refuse de rétrécir sous sa
+       hauteur de contenu — la liste ne défilerait jamais. */
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
   .ms-panel:focus {
     outline: none;
@@ -143,8 +165,7 @@
 
   .ms-grabber {
     display: block;
-    position: sticky;
-    bottom: 0;
+    flex-shrink: 0;
     width: 36px;
     height: 5px;
     margin: 8px auto 0;
@@ -154,12 +175,14 @@
   }
   .ms-header {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
   }
   /* Bouton de fermeture rond gris — celui des feuilles iOS modernes. */
   .ms-close {
+    position: relative;
     flex: 0 0 auto;
     width: 30px;
     height: 30px;
@@ -170,6 +193,12 @@
     background: var(--ios-field);
     color: var(--ios-label2);
     cursor: pointer;
+  }
+  /* Zone tappable 44×44 (HIG) sans grossir le rendu 30 px. */
+  .ms-close::after {
+    content: '';
+    position: absolute;
+    inset: -7px;
   }
 
   @keyframes ms-down {
@@ -191,6 +220,13 @@
   @media (prefers-reduced-motion: reduce) {
     .ms-panel {
       animation: none;
+    }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .ms-overlay {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      background: oklch(0.2 0.02 286 / 0.72);
     }
   }
 </style>
