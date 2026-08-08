@@ -54,11 +54,24 @@ export default defineConfig({
         // Greffe le handler Web Push (push + notificationclick) sur le SW généré,
         // SANS modifier la stratégie de cache. Le fichier est servi en statique.
         importScripts: ['/push-sw.js'],
-        // navigateFallback ('/') ne doit JAMAIS court-circuiter ces routes une
-        // fois la PWA installée (SW actif) : /auth pose le cookie de session
-        // (sinon /denied perpétuel), /api/* sont des endpoints serveur (dont
-        // /api/forecast), /denied est la page publique de refus.
-        navigateFallbackDenylist: [/^\/auth/, /^\/api\//, /^\/denied/],
+        /**
+         * PAS de navigateFallback (08/08/2026 — correctif d'un SW figé).
+         *
+         * Le défaut du plugin est `'/'`, qui produit
+         * `createHandlerBoundToURL('/')` AU PREMIER NIVEAU du service worker.
+         * Or cette app est en SSR (adapter-node) : `'/'` n'est JAMAIS dans le
+         * precache — la fonction lève alors `non-precached-url` pendant
+         * l'évaluation du script, et le service worker ÉCHOUE à s'installer.
+         *
+         * Conséquence vécue : le SW enregistré au moment d'activer les
+         * notifications restait actif à vie, servait son precache d'origine, et
+         * aucune version suivante ne pouvait le remplacer — l'app restait figée
+         * sur un vieux bundle, déploiement après déploiement.
+         *
+         * Un repli de navigation n'a de toute façon pas de sens ici : les pages
+         * sont rendues côté serveur et derrière authentification.
+         */
+        navigateFallback: undefined,
         // TODO: cache orchestrateur
         runtimeCaching: []
       },

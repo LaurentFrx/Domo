@@ -30,6 +30,7 @@
   import { clock } from '$stores/clock.svelte';
   import { haptic } from '$utils/haptic';
   import { PORTAL_TARGET_ID } from '$utils/portal';
+  import { setupServiceWorker } from '$lib/sw-client';
 
   let { children } = $props();
 
@@ -61,6 +62,11 @@
   let pagerReady = $state(false);
   onMount(() => {
     pagerReady = true;
+    // Le service worker n'était enregistré que par push-client (activation des
+    // notifications) et n'était JAMAIS revérifié : l'app restait servie depuis
+    // le precache de ce jour-là. Ici, il est enregistré au démarrage et
+    // revérifié au retour au premier plan.
+    setupServiceWorker();
   });
 
   // ─── Suivi musique → éclairage terrasse ────────────────────────────────
