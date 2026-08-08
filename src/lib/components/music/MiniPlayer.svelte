@@ -51,7 +51,14 @@
       >
       <span class="meta">
         <span class="t">{player.current.title}</span>
-        <span class="a">{player.current.artist}</span>
+        <!-- L'erreur prend la place de l'artiste : sans ça, un morceau qui ne
+             démarre pas ne dit RIEN ici, et il fallait ouvrir le lecteur pour
+             comprendre pourquoi. -->
+        {#if player.lastError}
+          <span class="err">{player.lastError}</span>
+        {:else}
+          <span class="a">{player.current.artist}</span>
+        {/if}
       </span>
     </button>
     <button
@@ -147,6 +154,14 @@
   .a {
     color: var(--color-muted-fg);
     font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .err {
+    color: var(--color-alert);
+    font-size: 12px;
+    font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

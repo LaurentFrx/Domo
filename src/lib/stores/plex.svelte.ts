@@ -572,14 +572,17 @@ class PlayerState {
       this.playing = true;
       this.syncMediaSessionState();
     });
+    // Du son SORT vraiment : efface un diagnostic d'échec précédent (le
+    // navigateur peut réussir une reprise après une erreur transitoire).
+    a.addEventListener('playing', () => (this.lastError = null));
     a.addEventListener('pause', () => {
       this.playing = false;
       this.syncMediaSessionState();
     });
     a.addEventListener('ended', () => this.autoNext());
     a.addEventListener('error', () => {
-      this.lastError = 'Lecture impossible (format ou réseau)';
       this.playing = false;
+      void this.diagnosePlaybackError(a);
     });
     this.detectOutputPicker(a);
     this.audio = a;
@@ -787,6 +790,55 @@ class PlayerState {
     a.src = streamUrl(t.part);
     if (autoplay) void a.play().catch(() => undefined);
     this.syncMediaSessionMetadata(t);
+  }
+
+  /**
+   * Pourquoi la lecture a-t-elle échoué ?
+   *
+   * L'élément `<audio>` ne dit presque rien (`MediaError.code`), et le message
+   * « format ou réseau » d'avant n'aidait personne : les causes réelles sont
+   * très différentes et n'appellent pas la même action. On REJOUE donc la
+   * requête sur le flux pour trancher — 2 octets suffisent.
+   *
+   * Le cas piégeux : session expirée. Le proxy répond alors par une
+   * REDIRECTION vers /denied, et l'élément audio reçoit une page HTML au lieu
+   * d'un fichier — il échoue exactement comme si le morceau n'existait pas.
+   */
+  private async diagnosePlaybackError(a: HTMLAudioElement): Promise<void> {
+    const code = a.error?.code ?? 0;
+    const byCode: Record<number, string> = {
+      1: 'Lecture interrompue.',
+      2: 'Réseau coupé pendant la lecture.',
+      3: 'Fichier illisible (données abîmées).',
+      4: 'Ce morceau n’a pas pu être lu.'
+    };
+    this.lastError = byCode[code] ?? 'Lecture impossible.';
+
+    const src = a.currentSrc || a.src;
+    if (!src) return;
+    try {
+      const res = await fetch(src, {
+        headers: { range: 'bytes=0-1' },
+        redirect: 'manual', // ne PAS suivre : c'est la redirection qu'on cherche
+        cache: 'no-store'
+      });
+      // `opaqueredirect` (status 0) : redirection non suivie = garde d'auth.
+      if (res.type === 'opaqueredirect' || res.status === 302 || res.status === 303) {
+        this.lastError = 'Session expirée — rechargez l’application pour vous reconnecter.';
+      } else if (res.status === 404) {
+        this.lastError = 'Fichier introuvable sur le serveur Plex (déplacé ou supprimé).';
+      } else if (res.status === 502 || res.status === 504) {
+        this.lastError = 'Serveur Plex injoignable.';
+      } else if (res.ok || res.status === 206) {
+        // Le serveur sert bien le fichier : c'est le navigateur qui n'en veut pas.
+        const type = res.headers.get('content-type') || 'type inconnu';
+        this.lastError = `Format non lu par cet appareil (${type}).`;
+      } else {
+        this.lastError = `Lecture refusée par le serveur (HTTP ${res.status}).`;
+      }
+    } catch {
+      this.lastError = 'Serveur injoignable (réseau).';
+    }
   }
 
   // ─── MediaSession (écran verrouillé / centre de contrôle iOS) ─────────────
