@@ -1,5 +1,6 @@
 import { redirect, type Handle, type HandleServerError } from '@sveltejs/kit';
-import { isAuthenticated } from '$lib/server/auth';
+import { SESSION_COOKIE_NAME, verifySessionCookie } from '$lib/server/auth';
+import { findUserById } from '$lib/server/users-store';
 import { setIncidentReporter } from '$lib/server/atomic-store';
 import { raiseIncident, resolveIncident } from '$lib/server/monitor/incidents';
 // Import d'amorçage : arme les timers de fond du mode Musique (réconciliation
@@ -117,8 +118,28 @@ export const handle: Handle = async ({ event, resolve }) => {
     return resolve(event);
   }
 
-  if (!isAuthenticated(event.cookies)) {
+  // Contrôle de session + résolution d'identité. Le refus reste EXACTEMENT le
+  // même qu'avant (303 vers /denied) ; ce qui s'ajoute, c'est `locals.user`.
+  const session = verifySessionCookie(event.cookies.get(SESSION_COOKIE_NAME));
+  if (!session) {
     throw redirect(303, '/denied');
+  }
+
+  if (session.legacy) {
+    // Cookie anonyme posé avant la phase identité : on ne sait pas qui c'est,
+    // on lui laisse donc l'accès qu'il avait déjà, ni plus ni moins. Aucune
+    // restriction nouvelle — personne ne doit être dérangé par un changement
+    // interne. Sa prochaine visite de /auth le fera passer au format identifié.
+    event.locals.user = { id: 'legacy', email: null, role: 'famille' };
+  } else {
+    // Cookie identifié : le magasin fait AUTORITÉ à chaque requête. Un compte
+    // révoqué ou effacé est coupé immédiatement, sans attendre l'expiration du
+    // cookie (qui court sur un an) — c'est tout l'intérêt du format identifié.
+    const user = await findUserById(session.userId as string);
+    if (!user || user.status !== 'active') {
+      throw redirect(303, '/denied');
+    }
+    event.locals.user = { id: user.id, email: user.email, role: user.role };
   }
 
   // « Réglages » n'existe plus comme page : son contenu vit derrière le menu ☰

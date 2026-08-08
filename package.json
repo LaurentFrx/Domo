@@ -21,7 +21,9 @@
     "test:atomic": "node --experimental-strip-types --test scripts/atomic-store.test.ts",
     "test:sb3loop": "node --experimental-strip-types --test scripts/sb3loop.test.ts",
     "test:desir": "node --experimental-strip-types --test scripts/desirability.test.ts",
-    "test:apsloop": "node --experimental-strip-types --test scripts/apsloop.test.ts"
+    "test:apsloop": "node --experimental-strip-types --test scripts/apsloop.test.ts",
+    "test:auth": "node --experimental-strip-types --import ./scripts/register-env.mjs --test scripts/auth-session.test.ts",
+    "test:users": "node --experimental-strip-types --test scripts/users-store.test.ts"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.0",
