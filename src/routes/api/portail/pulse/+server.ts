@@ -17,6 +17,7 @@ import crypto from 'node:crypto';
 import type { RequestHandler } from './$types';
 import { pulsePortail } from '$lib/server/mqtt';
 import { isAuthenticated } from '$lib/server/auth';
+import { createRateLimiter } from '$lib/server/rate-limit';
 
 function sha256(s: string): Buffer {
   return crypto.createHash('sha256').update(s).digest();
@@ -34,24 +35,19 @@ function extractBearer(header: string | null): string | null {
 }
 
 // ─── Rate-limit en mémoire (anti brute-force du token) ────────────────────
-// Fenêtre glissante par IP. Cet endpoint est le SEUL joignable sans cookie :
-// il mérite sa propre limite. 6/min couvre largement un usage raccourci iPhone.
-const RL_WINDOW_MS = 60_000;
-const RL_MAX_PER_WINDOW = 6;
-const rlHits = new Map<string, number[]>();
+// Fenêtre glissante. Cet endpoint est le SEUL joignable sans cookie : il mérite
+// sa propre limite. 6/min couvre largement un usage raccourci iPhone.
+//
+// La mécanique vit désormais dans `$lib/server/rate-limit` (partagée avec la
+// connexion par PIN) ; seuil, fenêtre et clé sont INCHANGÉS ici, et le seau est
+// propre à cette route. Note connue : la clé reste `getClientAddress()`, qui
+// derrière Caddy vaut toujours 127.0.0.1 — cette limite est donc globale, pas
+// par appelant. C'était déjà le cas ; la corriger changerait le comportement de
+// cet endpoint, ce qui n'est pas l'objet de ce lot.
+const limiteur = createRateLimiter({ windowMs: 60_000, max: 6 });
 
 function rateLimited(ip: string): boolean {
-  const now = Date.now();
-  const recent = (rlHits.get(ip) ?? []).filter((t) => now - t < RL_WINDOW_MS);
-  recent.push(now);
-  rlHits.set(ip, recent);
-  // GC grossier : purge les IP inactives pour borner la mémoire.
-  if (rlHits.size > 500) {
-    for (const [k, v] of rlHits) {
-      if (v.every((t) => now - t >= RL_WINDOW_MS)) rlHits.delete(k);
-    }
-  }
-  return recent.length > RL_MAX_PER_WINDOW;
+  return limiteur.hit(ip).limited;
 }
 
 export const POST: RequestHandler = async ({ request, getClientAddress, cookies }) => {

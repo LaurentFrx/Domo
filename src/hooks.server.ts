@@ -34,7 +34,13 @@ proc.once('sveltekit:shutdown', (reason) => {
 
 const PUBLIC_PATHS = ['/auth', '/denied'];
 
+// Routes publiques à match EXACT (pas de préfixe) : la connexion par PIN doit
+// être joignable sans session, mais rien d'autre sous /api/auth ne doit l'être
+// — une future /api/auth/… se retrouverait ouverte par simple préfixe.
+const PUBLIC_EXACT = ['/api/auth/pin-login'];
+
 function isPublic(pathname: string): boolean {
+  if (PUBLIC_EXACT.includes(pathname)) return true;
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
 }
 
@@ -114,8 +120,31 @@ export const handle: Handle = async ({ event, resolve }) => {
     return withApiCacheControl(pathname, await resolve(event));
   }
 
+  // Anti-CSRF explicite (défense en profondeur, en plus du checkOrigin SvelteKit) :
+  // une commande d'actuateur ou une écriture déclenchée par un AUTRE site, dans le
+  // navigateur d'un utilisateur authentifié, est bloquée. Fetch Metadata :
+  // same-origin / none (= app elle-même ou client non-navigateur) = OK ; cross-site
+  // ou same-site = refus. Les endpoints token (portail/tick/monitor) sont déjà
+  // sortis plus haut (curl serveur, sans Sec-Fetch-Site).
+  //
+  // ⚠️ ORDRE : ce contrôle est AVANT le laissez-passer assets/public. Il était
+  // après, ce qui rendait toute route publique implicitement exemptée de CSRF —
+  // sans conséquence tant que les routes publiques étaient en lecture seule
+  // (/auth, /denied), mais POST /api/auth/pin-login aurait été ouvert à un
+  // formulaire hébergé sur un site tiers. « Public » veut dire « sans session »,
+  // pas « sans protection ». Les GET publics ne sont pas concernés (non mutants).
+  if (pathname.startsWith('/api/') && isMutating(event.request.method)) {
+    const site = event.request.headers.get('sec-fetch-site');
+    if (site && site !== 'same-origin' && site !== 'none') {
+      return new Response(JSON.stringify({ error: 'cross_site_blocked' }), {
+        status: 403,
+        headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }
+      });
+    }
+  }
+
   if (isAsset(pathname) || isPublic(pathname)) {
-    return resolve(event);
+    return withApiCacheControl(pathname, await resolve(event));
   }
 
   // Contrôle de session + résolution d'identité. Le refus reste EXACTEMENT le
@@ -155,21 +184,8 @@ export const handle: Handle = async ({ event, resolve }) => {
     throw redirect(307, '/menu');
   }
 
-  // Anti-CSRF explicite (défense en profondeur, en plus du checkOrigin SvelteKit) :
-  // une commande d'actuateur ou une écriture déclenchée par un AUTRE site, dans le
-  // navigateur d'un utilisateur authentifié, est bloquée. Fetch Metadata :
-  // same-origin / none (= app elle-même ou client non-navigateur) = OK ; cross-site
-  // ou same-site = refus. Les endpoints token (portail/tick/monitor) sont déjà
-  // sortis plus haut (curl serveur, sans Sec-Fetch-Site).
-  if (pathname.startsWith('/api/') && isMutating(event.request.method)) {
-    const site = event.request.headers.get('sec-fetch-site');
-    if (site && site !== 'same-origin' && site !== 'none') {
-      return new Response(JSON.stringify({ error: 'cross_site_blocked' }), {
-        status: 403,
-        headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }
-      });
-    }
-  }
+  // (Le contrôle anti-CSRF a été remonté avant le laissez-passer assets/public —
+  // voir plus haut. Un seul point de vérification, pour toutes les routes.)
 
   return withApiCacheControl(pathname, await resolve(event));
 };

@@ -1,5 +1,39 @@
 <script lang="ts">
   import ConcentricRings from '$components/effects/ConcentricRings.svelte';
+
+  let email = $state('');
+  let pin = $state('');
+  let busy = $state(false);
+  let erreur = $state<string | null>(null);
+
+  const pret = $derived(email.trim().length > 0 && /^\d{4}$/.test(pin));
+
+  async function connecter(e: SubmitEvent) {
+    e.preventDefault();
+    if (!pret || busy) return;
+    busy = true;
+    erreur = null;
+    try {
+      const r = await fetch('/api/auth/pin-login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), pin })
+      });
+      const d = (await r.json().catch(() => ({}))) as { redirect?: string; message?: string };
+      if (r.ok && d.redirect) {
+        // Rechargement franc plutôt que goto() : le cookie vient d'être posé, on
+        // veut que TOUT reparte du serveur avec la nouvelle session.
+        window.location.href = d.redirect;
+        return;
+      }
+      erreur = d.message ?? 'Connexion impossible.';
+      pin = '';
+    } catch {
+      erreur = 'Pas de réseau — réessaie dans un instant.';
+    } finally {
+      busy = false;
+    }
+  }
 </script>
 
 <svelte:head>
@@ -51,5 +85,105 @@
         Demander l'accès
       </a>
     </div>
+
+    <!-- Voie de secours : email + code à 4 chiffres, pour qui n'a plus son lien
+         magique sous la main. Le lien mailto ci-dessus reste la porte d'entrée
+         de quelqu'un qui n'a pas encore de compte. -->
+    <form
+      class="pin-card w-full rounded-2xl p-5 text-left"
+      style="background: var(--color-card);"
+      onsubmit={connecter}
+    >
+      <h2 class="mb-1 text-[15px] font-semibold" style="color: var(--color-fg);">
+        J'ai déjà un code
+      </h2>
+      <p class="mb-4 text-[13px]" style="color: var(--color-muted-fg);">
+        Ton adresse e-mail et ton code à 4 chiffres.
+      </p>
+
+      <label class="pin-label" for="pin-email">E-mail</label>
+      <input
+        id="pin-email"
+        class="pin-input"
+        type="email"
+        bind:value={email}
+        autocomplete="username"
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck="false"
+        placeholder="prenom@exemple.fr"
+        disabled={busy}
+      />
+
+      <label class="pin-label mt-3" for="pin-code">Code</label>
+      <input
+        id="pin-code"
+        class="pin-input pin-code"
+        type="password"
+        inputmode="numeric"
+        maxlength="4"
+        bind:value={pin}
+        autocomplete="current-password"
+        placeholder="••••"
+        disabled={busy}
+      />
+
+      {#if erreur}
+        <p class="mt-3 text-[13px]" style="color: var(--color-alert);" role="alert">
+          {erreur}
+        </p>
+      {/if}
+
+      <button type="submit" class="pin-submit mt-4" disabled={!pret || busy}>
+        {busy ? 'Vérification…' : 'Entrer'}
+      </button>
+    </form>
   </div>
 </div>
+
+<style>
+  .pin-label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--color-muted-fg);
+  }
+  .pin-input {
+    width: 100%;
+    padding: 11px 13px;
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-size: 16px; /* 16px minimum : en dessous, iOS zoome à la mise au point */
+    outline: none;
+  }
+  .pin-input:focus {
+    border-color: var(--color-primary);
+  }
+  .pin-input:disabled {
+    opacity: 0.6;
+  }
+  .pin-code {
+    letter-spacing: 0.4em;
+  }
+  .pin-submit {
+    width: 100%;
+    padding: 12px;
+    border-radius: 999px;
+    background: var(--color-primary);
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    transition: transform 0.12s ease;
+  }
+  .pin-submit:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .pin-submit:disabled {
+    opacity: 0.45;
+  }
+</style>

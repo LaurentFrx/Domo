@@ -25,6 +25,7 @@ import { promises as fs } from 'node:fs';
 // Extension explicite : ce module est chargé tel quel par `node --test`
 // (cf. scripts/users-store.test.ts), qui n'a pas le résolveur de Vite.
 import { readJsonSafe, writeJsonAtomic, withFileLock } from './atomic-store.ts';
+import { dummyVerify, hashPin, verifyPin } from './pin.ts';
 
 const USERS_FILE = path.resolve(process.cwd(), 'data', 'users.json');
 
@@ -195,6 +196,101 @@ export async function createUser(input: NewUser): Promise<User> {
     users.push(user);
     await commit(users);
     return user;
+  });
+}
+
+// ─── PIN de secours ────────────────────────────────────────────────────
+
+/** Essais consécutifs autorisés avant verrouillage. */
+export const PIN_MAX_ATTEMPTS = 3;
+/** Durée du verrouillage, en millisecondes. */
+export const PIN_LOCK_MS = 15 * 60 * 1000;
+
+/** Pose (ou remplace) le PIN d'un utilisateur et remet les compteurs à zéro —
+ *  un code neuf ne doit pas hériter du verrou de l'ancien. */
+export async function setUserPin(userId: string, pin: string): Promise<void> {
+  const { hash, salt } = hashPin(pin);
+  return withFileLock(USERS_FILE, async () => {
+    const users = [...(await readUsers())];
+    const i = users.findIndex((u) => u.id === userId);
+    if (i === -1) throw new Error('users: utilisateur introuvable');
+    users[i] = {
+      ...users[i],
+      pinHash: hash,
+      pinSalt: salt,
+      pinAttempts: 0,
+      pinLockedUntil: null
+    };
+    await commit(users);
+  });
+}
+
+export type PinLoginResult =
+  | { ok: true; userId: string }
+  | { ok: false; reason: 'locked'; retryAfterMs: number }
+  | { ok: false; reason: 'not_found' | 'no_pin' | 'wrong_pin' };
+
+/**
+ * Tentative de connexion par email + PIN.
+ *
+ * TOUT le cycle lecture → décision → écriture est pris dans `withFileLock` :
+ * sans ça, trois essais simultanés liraient le même `pinAttempts` et
+ * l'incrémenteraient chacun à 1 — le verrou ne se déclencherait jamais, ce qui
+ * viderait la protection de sa substance.
+ *
+ * Le motif retourné est DÉTAILLÉ pour les tests et les logs ; c'est à la route
+ * de l'aplatir en un message unique côté client (cf. /api/auth/pin-login).
+ */
+export async function attemptPinLogin(email: string, pin: string): Promise<PinLoginResult> {
+  return withFileLock(USERS_FILE, async () => {
+    const users = [...(await readUsers())];
+    const needle = email.trim().toLowerCase();
+    const i = users.findIndex((u) => u.email.toLowerCase() === needle);
+
+    // Compte inconnu ou désactivé. `dummyVerify` égalise le temps de réponse
+    // avec celui d'un compte réel — cf. pin.ts.
+    if (i === -1 || users[i].status !== 'active') {
+      dummyVerify();
+      return { ok: false, reason: 'not_found' };
+    }
+
+    const u = users[i];
+    if (!u.pinHash || !u.pinSalt) {
+      dummyVerify();
+      return { ok: false, reason: 'no_pin' };
+    }
+
+    const now = Date.now();
+    if (u.pinLockedUntil !== null && u.pinLockedUntil > now) {
+      // On ne vérifie PAS le code pendant le verrouillage : un essai ne doit ni
+      // consommer d'essai, ni repousser l'échéance.
+      return { ok: false, reason: 'locked', retryAfterMs: u.pinLockedUntil - now };
+    }
+
+    // Verrou expiré → la fenêtre repart à neuf. Sans cette remise à zéro,
+    // `pinAttempts` resterait à 3 et le premier faux essai suivant reverrouillerait
+    // aussitôt : « déverrouillé » ne voudrait plus rien dire.
+    const attemptsBefore = u.pinLockedUntil !== null ? 0 : u.pinAttempts;
+
+    if (verifyPin(pin, u.pinSalt, u.pinHash)) {
+      users[i] = {
+        ...u,
+        pinAttempts: 0,
+        pinLockedUntil: null,
+        lastLoginAt: new Date().toISOString()
+      };
+      await commit(users);
+      return { ok: true, userId: u.id };
+    }
+
+    const attempts = attemptsBefore + 1;
+    users[i] = {
+      ...u,
+      pinAttempts: attempts,
+      pinLockedUntil: attempts >= PIN_MAX_ATTEMPTS ? now + PIN_LOCK_MS : null
+    };
+    await commit(users);
+    return { ok: false, reason: 'wrong_pin' };
   });
 }
 
