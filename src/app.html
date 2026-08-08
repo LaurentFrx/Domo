@@ -10,6 +10,13 @@
     <meta name="apple-mobile-web-app-title" content="Domo" />
     <meta name="description" content="Domo — PWA domotique familiale" />
 
+    <!-- Manifeste : généré par @vite-pwa/sveltekit, mais RIEN ne le liait — le
+         plugin ne touche pas à ce fichier, il faut le déclarer à la main. Sans
+         lui, le navigateur ignore `scope`, `start_url` et l'identité de l'app :
+         iOS ne sait alors pas quelle application rouvrir depuis les contrôles
+         média de l'écran verrouillé. Servi hors authentification. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />

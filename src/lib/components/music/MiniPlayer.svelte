@@ -1,10 +1,24 @@
 <script lang="ts">
   /**
-   * Mini-player GLOBAL (monté dans +layout) : n'apparaît que si une file de
-   * lecture existe. Flotte au-dessus de la TabBar sur iPhone, en bas de la zone
-   * de contenu (à droite de la sidebar) sur iPad/desktop. Tap sur le corps →
-   * feuille Now Playing plein écran. La musique vit dans le store `player`
-   * (élément audio module-level), donc survit aux navigations et au pager.
+   * Mini-player GLOBAL (monté dans +layout) : n'apparaît QUE si CET appareil a
+   * une file de lecture (`player.current`) — jamais parce qu'une autre
+   * tablette de la maison joue quelque chose. Il survit à la pause : c'est de
+   * là qu'on relance, comme dans tous les lecteurs. « Arrêter » (feuille Now
+   * Playing) vide la file et le fait disparaître.
+   *
+   * Flotte au-dessus de la TabBar sur iPhone, en bas de la zone de contenu (à
+   * droite de la sidebar) sur iPad/desktop. Tap sur le corps → feuille Now
+   * Playing plein écran. La musique vit dans le store `player` (élément audio
+   * module-level), donc survit aux navigations et au pager.
+   *
+   * OPAQUE, contrairement aux cartes : il flotte AU-DESSUS du contenu, pas
+   * posé dessus — un fond translucide laissait lire le texte de la page à
+   * travers le titre du morceau. Le fond composé
+   * (`linear-gradient(card, card), bg`) échappe volontairement au sélecteur
+   * `[style*='background: var(--color-card)']` d'app.css qui pose le verre ;
+   * l'ombre du verre est donc reposée explicitement dans le style ci-dessous.
+   * La hauteur qu'il occupe est déclarée par `--mini-h` (cf. +layout) pour que
+   * le bas des pages reste atteignable.
    */
   import { player } from '$stores/plex.svelte';
   import AlbumCover from './AlbumCover.svelte';
@@ -18,7 +32,7 @@
 {#if player.current}
   <div
     class="mini border"
-    style="background: var(--color-card); border-color: var(--color-border);"
+    style="background: linear-gradient(var(--color-card), var(--color-card)), var(--color-bg); border-color: var(--color-border);"
     role="region"
     aria-label="Lecture en cours"
   >
@@ -78,6 +92,9 @@
     gap: 4px;
     padding: 8px 10px 10px 8px;
     border-radius: 18px;
+    /* Reposée à la main : le fond opaque sort du sélecteur centralisé d'app.css
+       qui, lui, apporte l'ombre du verre. */
+    box-shadow: var(--shadow-md);
     /* Couche compositeur dédiée : même remède anti-tressautement que la TabBar. */
     transform: translateZ(0);
   }

@@ -266,11 +266,16 @@
 
   <Sidebar />
 
+  <!-- `--mini-h` : la place que le mini-player prend au bas de l'écran, 0 quand
+       il n'y a pas de lecture. Sans elle, il masquait la fin de CHAQUE page
+       (dernière carte, dernier bouton) — il flotte en `position: fixed`, donc
+       rien ne lui réserve d'espace. Le mini fait 62 px + son écart au bord. -->
   <main
     id="main"
     tabindex="-1"
     class="safe-top min-h-screen sm:pl-[72px] lg:pl-[280px]"
-    style="padding-bottom: calc(60px + env(safe-area-inset-bottom));"
+    class:has-mini={!!player.current}
+    style="padding-bottom: calc(60px + env(safe-area-inset-bottom) + var(--mini-h, 0px));"
   >
     <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
       <HealthBanner />
@@ -314,10 +319,20 @@
 </div>
 
 <style>
-  /* Compense le padding-bottom sur les écrans sm+ (tab bar masquée) */
+  /* Place réservée au mini-player quand une lecture est en cours : 62 px de
+     hauteur + 10 px d'écart au-dessus de la TabBar. */
+  main.has-mini {
+    --mini-h: 72px;
+  }
+  /* Compense le padding-bottom sur les écrans sm+ (tab bar masquée) — mais le
+     mini-player, lui, y est TOUJOURS (collé à 16 px du bas) : il garde donc sa
+     place réservée, 62 px + 16 px d'écart. */
   @media (min-width: 640px) {
     main {
       padding-bottom: 0 !important;
+    }
+    main.has-mini {
+      padding-bottom: 94px !important;
     }
   }
 </style>
