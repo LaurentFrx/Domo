@@ -18,8 +18,9 @@
   import BottomSheet from '$components/ui/BottomSheet.svelte';
   import WledColorPicker from './WledColorPicker.svelte';
   import WledPreview from './WledPreview.svelte';
+  import MusicLightPanel from '$components/music/MusicLightPanel.svelte';
   import { wled, WLED_AMBIANCES, type WledSegment } from '$stores/wled.svelte';
-  import { wledMusic, WLED_MUSIC_STYLES } from '$stores/wledMusic.svelte';
+  import { wledMusic } from '$stores/wledMusic.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { acquire } from '$stores/refcount';
   import { haptic } from '$utils/haptic';
@@ -220,56 +221,9 @@
         {/each}
       </div>
     {:else if tab === 'musique'}
-      <div class="flex flex-col gap-3">
-        <div class="master-row">
-          <span class="flex-1 text-[13px] font-semibold" style="color: var(--color-fg);">
-            Suivre la musique
-          </span>
-          <label class="toggle-pill" aria-label="Suivre la musique">
-            <input
-              type="checkbox"
-              checked={wledMusic.enabled}
-              onchange={(e) => {
-                haptic('medium');
-                wledMusic.setEnabled((e.currentTarget as HTMLInputElement).checked);
-              }}
-            />
-            <span class="toggle-pill-knob"></span>
-          </label>
-        </div>
-
-        {#if wledMusic.enabled}
-          <!-- Un effet ♪ ne suit QUE le volume — c'est sa conception WLED : le
-               dire évite de chercher des fréquences là où il n'y en aura jamais. -->
-          <div role="radiogroup" aria-label="Style musical" class="flex flex-col gap-1.5">
-            {#each [{ kind: 'freq', title: 'Réagit aux fréquences' }, { kind: 'vol', title: 'Réagit au volume' }] as grp (grp.kind)}
-              <span class="group-title">{grp.title}</span>
-              <div class="chip-grid">
-                {#each WLED_MUSIC_STYLES.filter((s) => s.kind === grp.kind || (grp.kind === 'freq' && s.kind === 'ambiance')) as st (st.key)}
-                  <button
-                    type="button"
-                    class="chip"
-                    class:active={wledMusic.style === st.key}
-                    role="radio"
-                    aria-checked={wledMusic.style === st.key}
-                    title={st.hint}
-                    onclick={() => {
-                      haptic('light');
-                      wledMusic.setStyle(st.key);
-                    }}
-                  >
-                    {st.label}
-                  </button>
-                {/each}
-              </div>
-            {/each}
-          </div>
-        {:else}
-          <p class="text-[12.5px]" style="color: var(--color-muted-fg);">
-            Le ruban suivra le morceau en cours de lecture, pour tous les appareils.
-          </p>
-        {/if}
-      </div>
+      <!-- Panneau PARTAGÉ avec le lecteur de la page Musique : un seul endroit
+           décrit ce réglage, sinon les deux divergent au premier style ajouté. -->
+      <MusicLightPanel />
     {:else if target}
       {#if !isTogether}
         <span class="applies-to">
@@ -633,21 +587,8 @@
     text-overflow: ellipsis;
   }
 
-  /* ─── Chips (styles musicaux, effets) ─── */
-  .group-title {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--color-muted-fg);
-    padding-top: 2px;
-  }
-  .chip-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-    gap: 6px;
-    padding: 2px;
-  }
+  /* ─── Chips (effets) ─── Les styles musicaux ont migré dans
+     MusicLightPanel, qui porte les siens. */
   .chip-wrap {
     display: flex;
     flex-wrap: wrap;

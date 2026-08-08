@@ -29,6 +29,7 @@ const DRIFT_S = 1.5;
 interface LiveEvent {
   enabled?: boolean;
   style?: string;
+  lines?: Record<string, string | null>;
   key?: string | null;
   playing?: boolean;
   analyzing?: boolean;
@@ -40,6 +41,13 @@ class WledMusicStore {
   // ─── État SERVEUR (reflété par le SSE) ───
   enabled = $state(false);
   style = $state('ambiance');
+  /**
+   * Réglage PAR LIGNE : id de segment → style, ou `null` = cette ligne ne suit
+   * pas la musique. Une ligne absente suit `style`. La terrasse porte deux
+   * rubans de nature différente (la table, les bras du store) : faire danser
+   * l'un pendant que l'autre reste en blanc chaud est l'usage courant.
+   */
+  lines = $state<Record<string, string | null>>({});
   /** Analyse spectrale en cours côté serveur ? (libellé de la chip) */
   analyzing = $state(false);
   /** La musique suivie par le serveur joue-t-elle ? (légende, animation) */
@@ -98,6 +106,7 @@ class WledMusicStore {
       }
       if (typeof e.enabled === 'boolean') this.enabled = e.enabled;
       if (typeof e.style === 'string') this.style = e.style;
+      if (e.lines && typeof e.lines === 'object') this.lines = e.lines;
       if (e.key !== undefined) this.trackKey = e.key;
       if (typeof e.playing === 'boolean') this.playing = e.playing;
       if (typeof e.analyzing === 'boolean') this.analyzing = e.analyzing;
@@ -114,7 +123,12 @@ class WledMusicStore {
 
   // ─── Pilotage (POST /mode — optimiste, le SSE confirme) ───
 
-  #postMode(patch: { enabled?: boolean; style?: string; quiet?: boolean }): void {
+  #postMode(patch: {
+    enabled?: boolean;
+    style?: string;
+    lines?: Record<string, string | null>;
+    quiet?: boolean;
+  }): void {
     void fetch('/api/wled/music/mode', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -132,12 +146,50 @@ class WledMusicStore {
   #resync(): void {
     void fetch('/api/wled/music/mode')
       .then((r) => (r.ok ? r.json() : null))
-      .then((st: { enabled?: boolean; style?: string } | null) => {
-        if (!st) return;
-        if (typeof st.enabled === 'boolean') this.enabled = st.enabled;
-        if (typeof st.style === 'string') this.style = st.style;
-      })
+      .then(
+        (
+          st: { enabled?: boolean; style?: string; lines?: Record<string, string | null> } | null
+        ) => {
+          if (!st) return;
+          if (typeof st.enabled === 'boolean') this.enabled = st.enabled;
+          if (typeof st.style === 'string') this.style = st.style;
+          if (st.lines && typeof st.lines === 'object') this.lines = st.lines;
+        }
+      )
       .catch(() => undefined);
+  }
+
+  /** Style effectif d'une ligne : son réglage propre, sinon le style global.
+   *  `null` = elle ne suit pas la musique. Miroir exact de `lineStyle()`
+   *  côté serveur — c'est lui qui fait foi, ceci ne sert qu'à l'affichage. */
+  lineStyle(segId: number): string | null {
+    const own = this.lines[String(segId)];
+    return own === undefined ? this.style : own;
+  }
+
+  /**
+   * Règle UNE ligne : un style, ou `null` pour qu'elle ne suive plus la
+   * musique. Les autres lignes gardent leur réglage — celles qui n'en ont
+   * pas sont figées explicitement au style global au passage, sans quoi
+   * régler une ligne changerait implicitement le sens des autres.
+   */
+  setLineStyle(segId: number, key: string | null, allIds: number[] = []): void {
+    if (key !== null && !WLED_MUSIC_STYLES.some((s) => s.key === key)) return;
+    const next: Record<string, string | null> = {};
+    for (const id of allIds) next[String(id)] = this.lineStyle(id);
+    for (const [k, v] of Object.entries(this.lines)) if (!(k in next)) next[k] = v;
+    next[String(segId)] = key;
+    this.lines = next; // optimiste
+    this.#lastBeatAt = 0;
+    this.#postMode({ lines: next });
+  }
+
+  /** Toutes les lignes reviennent au style global (efface les réglages). */
+  clearLines(): void {
+    if (!Object.keys(this.lines).length) return;
+    this.lines = {};
+    this.#lastBeatAt = 0;
+    this.#postMode({ lines: {} });
   }
 
   setEnabled(on: boolean): void {

@@ -15,8 +15,14 @@
    */
   import { plex, player, fmtDuration, plexImg } from '$stores/plex.svelte';
   import { preferences } from '$stores/preferences.svelte';
+  import { wled } from '$stores/wled.svelte';
+  import { wledMusic } from '$stores/wledMusic.svelte';
+  import { WLED_MUSIC_STYLES } from '$lib/wled/music-styles';
+  import { acquire } from '$stores/refcount';
   import { haptic } from '$utils/haptic';
   import AlbumCover from './AlbumCover.svelte';
+  import BottomSheet from '$components/ui/BottomSheet.svelte';
+  import MusicLightPanel from './MusicLightPanel.svelte';
 
   let scrub = $state<number | null>(null);
   const shown = $derived(scrub ?? player.currentTime);
@@ -29,6 +35,44 @@
   const upNext = $derived(player.queue.slice(player.index + 1, player.index + 21));
   const backdropUrl = $derived(plexImg(player.current?.thumb, 800));
   const eqOn = $derived(player.playing && preferences.animationsEnabled);
+
+  // ── Lumière qui accompagne la musique ────────────────────────────────────
+  // Le réglage vit ICI parce que c'est ici qu'on écoute : régler la lumière
+  // d'une soirée ne devrait pas obliger à quitter le lecteur pour la page
+  // Pièces. Le panneau lui-même est partagé avec la feuille terrasse.
+  let lightOpen = $state(false);
+  // Le store WLED n'est acquis que par /pieces : sans référence propre, le
+  // lecteur afficherait un résumé figé (et le panneau, des lignes vides).
+  $effect(() => {
+    if (!lightOpen) return;
+    const release = acquire(wled);
+    return release;
+  });
+
+  /** Résumé d'une ligne pour le bouton (« Store : Cascade »). */
+  function styleLabel(key: string | null): string {
+    if (key === null) return 'aucun';
+    return WLED_MUSIC_STYLES.find((s) => s.key === key)?.label ?? key;
+  }
+  /**
+   * Ce que dit le bouton, en un coup d'œil : « Lumière : éteinte » quand le
+   * mode est coupé, le style quand une seule ligne suit, sinon « 1 ligne sur
+   * 2 » — le détail se lit dans la feuille, pas sur un bouton.
+   */
+  const lightSummary = $derived.by(() => {
+    if (!wledMusic.enabled) return 'Lumière : ne suit pas';
+    const segs = wled.segments;
+    if (segs.length < 2) return `Lumière : ${styleLabel(wledMusic.style)}`;
+    const following = segs.filter((s) => wledMusic.lineStyle(s.id) !== null);
+    if (!following.length) return 'Lumière : aucune ligne';
+    if (following.length === segs.length) {
+      const keys = new Set(following.map((s) => wledMusic.lineStyle(s.id)));
+      return keys.size === 1
+        ? `Lumière : ${styleLabel(following[0] ? wledMusic.lineStyle(following[0].id) : null)}`
+        : 'Lumière : par ligne';
+    }
+    return `Lumière : ${following.length} ligne${following.length > 1 ? 's' : ''} sur ${segs.length}`;
+  });
 
   // ── Pop-up « infos du morceau » + suppression par APPUI LONG ─────────────
   // La suppression ne doit pas pouvoir partir par erreur : elle vit au fond du
@@ -308,6 +352,36 @@
         </button>
       {/if}
 
+      <!-- Effets lumineux du morceau : même rangée que la sortie audio — ce
+           sont les deux réglages « où sort la musique » d'une écoute. -->
+      <button
+        class="output"
+        class:on={wledMusic.enabled}
+        onclick={() => {
+          haptic('light');
+          lightOpen = true;
+        }}
+        aria-haspopup="dialog"
+        aria-label="Régler les effets lumineux de la terrasse"
+      >
+        <svg
+          width="17"
+          height="17"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M9 18h6" />
+          <path d="M10 22h4" />
+          <path d="M12 2a7 7 0 0 1 4 12.8c-.6.5-1 1.2-1 2v1H9v-1c0-.8-.4-1.5-1-2A7 7 0 0 1 12 2z" />
+        </svg>
+        {lightSummary}
+      </button>
+
       {#if player.lastError}
         <p class="error">{player.lastError}</p>
       {/if}
@@ -475,6 +549,13 @@
     {/if}
   </div>
 {/if}
+
+<!-- Feuille des effets lumineux. HORS du `{#if player.current}` : elle porte
+     le verre Yeldra et son propre overlay (z-100), au-dessus du lecteur
+     (z-80) ; l'imbriquer dans la feuille sombre du lecteur la teindrait. -->
+<BottomSheet open={lightOpen} title="Lumière de la terrasse" onClose={() => (lightOpen = false)}>
+  <MusicLightPanel compact />
+</BottomSheet>
 
 <style>
   .sheet {

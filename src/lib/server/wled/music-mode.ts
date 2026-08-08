@@ -34,13 +34,29 @@ const STATE_PATH = path.join('data', 'wled-music-mode.json');
 
 export interface MusicModeState {
   enabled: boolean;
+  /** Style des lignes qui n'ont pas de réglage propre (cf. `lines`). */
   style: string;
+  /**
+   * Réglage PAR LIGNE : id de segment → clé de style, ou `null` = cette ligne
+   * NE SUIT PAS la musique (elle garde ce que l'utilisateur y a posé).
+   * Une ligne absente de l'objet suit `style` — c'est le défaut, et le
+   * comportement d'avant l'introduction du réglage par ligne.
+   *
+   * Pourquoi par ligne : la terrasse porte deux rubans de nature différente
+   * (« SàM d'Été » éclaire la table, « Store » borde les bras du store banne).
+   * Faire danser le store pendant que la table reste en blanc chaud est l'usage
+   * courant — l'ancien état global l'interdisait.
+   */
+  lines: Record<string, string | null>;
 }
 
 /** Événement poussé aux abonnés SSE (champs présents = champs qui changent). */
 export interface LiveEvent {
   enabled?: boolean;
   style?: string;
+  /** Réglage par ligne — diffusé ENTIER (un diff partiel serait ambigu : une
+   *  clé absente veut déjà dire « suit le style global »). */
+  lines?: Record<string, string | null>;
   key?: string | null;
   playing?: boolean;
   analyzing?: boolean;
@@ -48,25 +64,45 @@ export interface LiveEvent {
   peak?: number;
 }
 
+/** Ne garde que les entrées interprétables (style connu, ou null). */
+function sanitizeLines(raw: unknown): Record<string, string | null> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, string | null> = {};
+  for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^\d+$/.test(id)) continue;
+    if (v === null) out[id] = null;
+    else if (typeof v === 'string' && WLED_MUSIC_STYLES.some((s) => s.key === v)) out[id] = v;
+  }
+  return out;
+}
+
 function loadState(): MusicModeState {
   try {
     const raw = JSON.parse(readFileSync(STATE_PATH, 'utf8')) as Partial<MusicModeState>;
     return {
       enabled: raw.enabled === true,
-      style: WLED_MUSIC_STYLES.some((s) => s.key === raw.style) ? (raw.style as string) : 'ambiance'
+      style: WLED_MUSIC_STYLES.some((s) => s.key === raw.style)
+        ? (raw.style as string)
+        : 'ambiance',
+      lines: sanitizeLines(raw.lines)
     };
   } catch {
-    return { enabled: false, style: 'ambiance' };
+    return { enabled: false, style: 'ambiance', lines: {} };
   }
 }
 
 const state: MusicModeState = loadState();
 /** Dernier `on` connu du ruban (proxy + rendus). Défaut optimiste. */
 let moduleOn = true;
-/** Repli statique DIFFÉRÉ : la sortie du mode a trouvé le ruban éteint — le
- *  repli sera rejoué au prochain rallumage (sinon l'effet audio-réactif reste
- *  gravé dans le module : rallumage = ruban allumé mais noir/figé). */
-let pendingFallback = false;
+/**
+ * Repli statique DIFFÉRÉ : la sortie du mode a trouvé le ruban éteint — le
+ * repli sera rejoué au prochain rallumage (sinon l'effet audio-réactif reste
+ * gravé dans le module : rallumage = ruban allumé mais noir/figé).
+ *
+ * `'all'` = sortie complète du mode ; un tableau = seulement CES lignes (une
+ * ligne qu'on vient de retirer de la musique pendant que les autres dansent).
+ */
+let pendingFallback: 'all' | number[] | null = null;
 
 function persist(): void {
   writeFile(STATE_PATH, JSON.stringify(state), () => undefined); // best-effort
@@ -95,15 +131,44 @@ export function broadcastLive(e: LiveEvent): void {
 // ─── État ────────────────────────────────────────────────────────
 
 export function musicModeState(): MusicModeState {
-  return { ...state };
+  return { ...state, lines: { ...state.lines } };
 }
 
 export function isMusicEnabled(): boolean {
   return state.enabled;
 }
 
+/** Style effectif d'une ligne : son réglage propre, sinon le style global.
+ *  `null` = la ligne ne suit pas la musique. */
+export function lineStyle(segId: number): string | null {
+  const own = state.lines[String(segId)];
+  return own === undefined ? state.style : own;
+}
+
+/**
+ * Segments vus au dernier rendu. `state.lines` ne liste que les lignes RÉGLÉES
+ * explicitement : sans la liste réelle, impossible de savoir s'il reste une
+ * ligne « par défaut » (donc soumise au style global). Mémorisé ici plutôt que
+ * redemandé au module — `isReactiveStyle()` est appelé à chaque trame (25 Hz).
+ */
+let lastSegIds: number[] = [];
+
+/**
+ * Faut-il streamer de l'audio ? OUI dès qu'UNE ligne suit un style réactif.
+ *
+ * Sur l'état global d'avant, la question se réglait en un mot. Avec le réglage
+ * par ligne, un ruban dont les lignes participantes sont toutes en « Ambiance »
+ * (ou dont aucune ne participe) n'a aucun besoin du flux UDP : le streamer se
+ * tait au lieu d'arroser le module pour rien.
+ */
 export function isReactiveStyle(): boolean {
-  return musicStyleDef(state.style).fx !== null;
+  // Avant le premier rendu, on ne connaît aucun segment : se fier au global.
+  const ids = lastSegIds.length ? lastSegIds : null;
+  if (!ids) return musicStyleDef(state.style).fx !== null;
+  return ids.some((id) => {
+    const k = lineStyle(id);
+    return k !== null && musicStyleDef(k).fx !== null;
+  });
 }
 
 /** Le ruban est-il allumé, au dernier signal connu ? (suspend le stream UDP) */
@@ -125,18 +190,24 @@ export function noteModuleOn(on: boolean, opts: { postsState?: boolean } = {}): 
   const was = moduleOn;
   moduleOn = on;
   if (!was && on && state.enabled) {
-    pendingFallback = false; // le rendu musique remplace tout repli en attente
+    // Le rendu musique va repeindre les lignes qui suivent ; celles qu'on
+    // avait retirées du mode, elles, attendent toujours leur repli — il ne
+    // faut donc PAS l'oublier ici (il ne concerne pas les mêmes lignes).
+    const orphans = Array.isArray(pendingFallback) ? pendingFallback : null;
+    pendingFallback = null;
     console.log('[wled/mode] ruban rallumé — rendu différé rejoué');
     void applyRender(playingProvider());
+    if (orphans?.length) void applyStaticFallback(orphans);
   } else if (!was && on && pendingFallback) {
     if (opts.postsState) {
       // Le rallumage vient d'une commande qui POSE déjà son état (scène,
       // couleur…) : le repli est superflu et ferait la course avec elle.
-      pendingFallback = false;
+      pendingFallback = null;
       console.log('[wled/mode] repli différé désarmé (état posé par la commande)');
     } else {
+      const only = Array.isArray(pendingFallback) ? pendingFallback : undefined;
       console.log('[wled/mode] ruban rallumé — repli statique différé rejoué');
-      void applyStaticFallback();
+      void applyStaticFallback(only);
     }
   }
 }
@@ -193,18 +264,46 @@ export function applyRender(playing: boolean, opts: RenderOpts = {}): Promise<vo
       return; // règle d'or : un rendu AUTOMATIQUE ne rallume jamais
     }
 
-    const def = musicStyleDef(state.style);
-    const reactive = def.fx !== null && !opts.forceAmbiance;
-    // Lecture → effet réactif du style ; pause (ou style Ambiance) → fondu
-    // doux multicolore lent. JAMAIS de Solid : le mode reste vivant et coloré.
+    lastSegIds = segs.map((s) => s.id ?? 0);
     const paused = !playing;
-    const fxIdx = resolveByName(effects, reactive && !paused ? (def.fx ?? MUSIC_FX) : MUSIC_FX);
-    const palIdx = Math.max(0, resolveByName(palettes, def.pal));
     const colPayload = MODE_SLOTS.map((x) => [x[0], x[1], x[2], 0]);
 
-    // `on` par segment : JAMAIS envoyé sur un rendu automatique (une ligne
-    // éteinte volontairement — bras du store repliés — doit le RESTER) ; seul
-    // le geste utilisateur (powerOn) allume ruban ET lignes.
+    // Le rendu se calcule LIGNE PAR LIGNE : chacune a son style (ou aucun).
+    // Une ligne qui ne suit pas la musique n'est pas dans le payload du tout —
+    // le module n'y touche donc pas, et elle garde ce que l'utilisateur y a
+    // posé (blanc chaud de la table, par exemple) pendant que l'autre danse.
+    const payload: Record<string, unknown>[] = [];
+    const rendered: string[] = [];
+    for (const s of segs) {
+      const id = s.id ?? 0;
+      const key = lineStyle(id);
+      if (key === null) continue; // ligne hors musique : intouchée
+      const def = musicStyleDef(key);
+      const reactive = def.fx !== null && !opts.forceAmbiance;
+      // Lecture → effet réactif du style ; pause (ou style Ambiance) → fondu
+      // doux multicolore lent. JAMAIS de Solid : le mode reste vivant et coloré.
+      const fxIdx = resolveByName(effects, reactive && !paused ? (def.fx ?? MUSIC_FX) : MUSIC_FX);
+      const palIdx = Math.max(0, resolveByName(palettes, def.pal));
+      payload.push({
+        id,
+        // `on` par segment : JAMAIS envoyé sur un rendu automatique (une ligne
+        // éteinte volontairement — bras du store repliés — doit le RESTER) ;
+        // seul le geste utilisateur (powerOn) allume ruban ET lignes.
+        ...(opts.powerOn ? { on: true } : {}),
+        col: colPayload,
+        ...(fxIdx >= 0 ? { fx: fxIdx } : {}),
+        pal: palIdx,
+        sx: paused ? 30 : (def.sx ?? 50),
+        ix: paused ? 128 : (def.ix ?? 150)
+      });
+      rendered.push(`${s.n ?? id}=${fxIdx >= 0 ? effects[fxIdx] : '(inchangé)'}`);
+    }
+
+    if (!payload.length) {
+      console.log('[wled/mode] rendu sans objet : aucune ligne ne suit la musique');
+      return;
+    }
+
     // Plancher de luminosité SUR LE GESTE seulement : « voir la musique » à
     // 16 % de luminosité résiduelle est invisible en extérieur — le geste
     // exprime l'intention, on lui donne au moins ~40 %. Un rendu automatique,
@@ -215,20 +314,11 @@ export function applyRender(playing: boolean, opts: RenderOpts = {}): Promise<vo
       ...(opts.powerOn
         ? { on: true, ...(curBri < MIN_POWER_ON_BRI ? { bri: MIN_POWER_ON_BRI } : {}) }
         : {}),
-      seg: segs.map((s) => ({
-        id: s.id ?? 0,
-        ...(opts.powerOn ? { on: true } : {}),
-        col: colPayload,
-        ...(fxIdx >= 0 ? { fx: fxIdx } : {}),
-        pal: palIdx,
-        sx: paused ? 30 : (def.sx ?? 50),
-        ix: paused ? 128 : (def.ix ?? 150)
-      }))
+      seg: payload
     });
     if (opts.powerOn) moduleOn = true;
     console.log(
-      `[wled/mode] rendu appliqué : fx=${fxIdx >= 0 ? effects[fxIdx] : '(inchangé)'} ` +
-        `pal=${palIdx >= 0 ? (palettes[palIdx] ?? palIdx) : palIdx} paused=${paused} ` +
+      `[wled/mode] rendu appliqué : ${rendered.join(' · ')} paused=${paused} ` +
         `on=${moduleOn} powerOn=${opts.powerOn === true}`
     );
   };
@@ -242,8 +332,11 @@ export function applyRender(playing: boolean, opts: RenderOpts = {}): Promise<vo
  * État statique PROPRE à la désactivation du mode (ou péremption) : fx Solid,
  * couleur dominante, fond non noir, réglages neutres. Le ruban ne doit JAMAIS
  * rester sur un effet audio-réactif sans stream (= allumé mais noir).
+ *
+ * @param onlyIds ne replier QUE ces lignes (celles qu'on vient de retirer de
+ *   la musique). Sans argument : toutes — sortie complète du mode.
  */
-export function applyStaticFallback(): Promise<void> {
+export function applyStaticFallback(onlyIds?: number[]): Promise<void> {
   const run = async () => {
     const { data } = await moduleGet('');
     const d = data as {
@@ -254,11 +347,17 @@ export function applyStaticFallback(): Promise<void> {
       // Ruban éteint : on ne rallume pas, mais l'effet audio-réactif reste
       // gravé dans le module → repli DIFFÉRÉ, rejoué par noteModuleOn au
       // prochain rallumage (app WLED native comprise, via le poll du proxy).
-      pendingFallback = true;
+      // Un repli global en attente absorbe un repli ciblé (il le contient).
+      if (pendingFallback !== 'all') {
+        pendingFallback = onlyIds
+          ? [...new Set([...(Array.isArray(pendingFallback) ? pendingFallback : []), ...onlyIds])]
+          : 'all';
+      }
       console.log('[wled/mode] repli statique différé : ruban éteint');
       return;
     }
-    const segs = (d.state?.seg ?? []).filter((s) => (s.stop ?? 0) > 0);
+    let segs = (d.state?.seg ?? []).filter((s) => (s.stop ?? 0) > 0);
+    if (onlyIds) segs = segs.filter((s) => onlyIds.includes(s.id ?? 0));
     if (!segs.length) return;
     const solid = (d.effects ?? []).indexOf('Solid');
     // Sortie du mode : on rend un état STATIQUE chaleureux (blanc chaud, fond
@@ -280,8 +379,12 @@ export function applyStaticFallback(): Promise<void> {
         ix: 128
       }))
     });
-    pendingFallback = false;
-    console.log('[wled/mode] repli statique appliqué (Solid blanc chaud)');
+    if (!onlyIds) pendingFallback = null;
+    console.log(
+      `[wled/mode] repli statique appliqué (Solid blanc chaud)${
+        onlyIds ? ` — lignes ${segs.map((s) => s.n ?? s.id).join(', ')}` : ''
+      }`
+    );
   };
   renderChain = renderChain.then(run).catch((e) => {
     console.error('[wled/mode] repli statique échoué:', (e as Error).message);
@@ -323,6 +426,13 @@ if (!G.__wledModeTimers) {
 export interface ModePatch {
   enabled?: boolean;
   style?: string;
+  /** Réglage par ligne — REMPLACE l'objet entier (cf. MusicModeState.lines). */
+  lines?: Record<string, string | null>;
+}
+
+/** Lignes qui suivent la musique, parmi celles vues au dernier rendu. */
+function participants(): number[] {
+  return lastSegIds.filter((id) => lineStyle(id) !== null);
 }
 
 /**
@@ -339,6 +449,10 @@ export async function setMode(
   opts: { userGesture?: boolean; quiet?: boolean } = {}
 ): Promise<MusicModeState> {
   const ev: LiveEvent = {};
+  // Qui suivait la musique AVANT ce patch ? Une ligne qu'on en retire garde
+  // sinon l'effet audio-réactif gravé dans le module — allumée mais noire.
+  const before = state.enabled ? participants() : [];
+
   if (typeof patch.enabled === 'boolean' && patch.enabled !== state.enabled) {
     state.enabled = patch.enabled;
     ev.enabled = state.enabled;
@@ -349,12 +463,23 @@ export async function setMode(
       ev.style = state.style;
     }
   }
+  if (patch.lines) {
+    const next = sanitizeLines(patch.lines);
+    if (JSON.stringify(next) !== JSON.stringify(state.lines)) {
+      state.lines = next;
+      ev.lines = { ...next };
+    }
+  }
   if (Object.keys(ev).length) {
     persist();
     broadcastLive(ev);
-    if (state.enabled && (ev.enabled || ev.style)) {
-      pendingFallback = false; // le rendu musique remplace tout repli en attente
+    // Lignes qui SORTENT du mode alors qu'il reste actif : leur rendre un état
+    // statique propre, sans toucher à celles qui continuent de danser.
+    const orphans = state.enabled ? before.filter((id) => lineStyle(id) === null) : [];
+    if (state.enabled && (ev.enabled || ev.style || ev.lines)) {
+      pendingFallback = null; // le rendu musique remplace tout repli en attente
       void applyRender(playingNow, { powerOn: opts.userGesture === true });
+      if (orphans.length) void applyStaticFallback(orphans);
     } else if (ev.enabled === false && !opts.quiet) {
       // Désactivation : ne JAMAIS laisser le ruban échoué sur un effet
       // audio-réactif sans stream (allumé mais noir) — état statique propre.

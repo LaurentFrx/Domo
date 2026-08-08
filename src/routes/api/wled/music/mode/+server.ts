@@ -22,11 +22,26 @@ export const POST: RequestHandler = async ({ request }) => {
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body) throw error(400, 'JSON attendu');
 
-  const patch: { enabled?: boolean; style?: string } = {};
+  const patch: { enabled?: boolean; style?: string; lines?: Record<string, string | null> } = {};
   if (typeof body.enabled === 'boolean') patch.enabled = body.enabled;
   if (typeof body.style === 'string') {
     if (!WLED_MUSIC_STYLES.some((s) => s.key === body.style)) throw error(400, 'style inconnu');
     patch.style = body.style;
+  }
+  // `lines` : réglage PAR LIGNE (id de segment → style, ou null = ne suit pas).
+  // Remplace l'objet entier — un patch partiel serait ambigu, une clé absente
+  // signifiant déjà « cette ligne suit le style global ».
+  if (body.lines !== undefined) {
+    const raw = body.lines;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw error(400, 'lines invalide');
+    const lines: Record<string, string | null> = {};
+    for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (!/^\d+$/.test(id)) throw error(400, `ligne « ${id} » invalide`);
+      if (v === null) lines[id] = null;
+      else if (typeof v === 'string' && WLED_MUSIC_STYLES.some((s) => s.key === v)) lines[id] = v;
+      else throw error(400, `style inconnu pour la ligne ${id}`);
+    }
+    patch.lines = lines;
   }
   if (!Object.keys(patch).length) throw error(400, 'aucun champ valide');
 
