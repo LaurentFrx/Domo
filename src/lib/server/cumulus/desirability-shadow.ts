@@ -52,7 +52,11 @@ export function shadowDesirability(
     eFullWh: ctx.eFullWh,
     gridPowerW: inputs.gridPowerW,
     em50Available: inputs.em50Available,
-    maxAcChargeW: inputs.maxAcAvailable ? inputs.maxAcChargeW : null,
+    // Max AC retirée du parc le 09/08/2026 : plus aucune mesure de sa charge.
+    // Les deux voies du modèle qui en dépendaient (chargeSurplus, chargeExhausted)
+    // se neutralisent proprement sur `null` — l'audit les avait déjà déclarées
+    // inertes et le modèle reste en SHADOW (il ne commande rien).
+    maxAcChargeW: null,
     socFrac,
     socFloorFrac,
     heaterW: config.pilot.heatPowerW,

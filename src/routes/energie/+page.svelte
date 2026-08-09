@@ -40,7 +40,7 @@
     releases = [
       acquire(zigbee),
       acquire(matter), // prises Matter mesurées (Bureau multimédia, Home cinéma) — conso
-      // ankerLocal (Modbus Max AC + Gen 2) est APP-WIDE (layout) : l'accueil
+      // ankerLocal (Modbus Gen 2) est APP-WIDE (layout) : l'accueil
       // fusionne son SoC/flux — ne pas le refcounter ici.
       // sb3loop / apsloop ne sont plus acquis ici : les boucles d'allocation SB3 et
       // de bridage APS ont rejoint le menu (/menu/energie), qui les refcounte.

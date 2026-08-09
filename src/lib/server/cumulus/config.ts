@@ -55,17 +55,22 @@ export function defaultPilotConfig(): PilotConfig {
     apsMinW: 300, // soleil RÉEL exigé (production APS minimale)
     minUsefulHeatMin: 45, // jamais d'allumage à moins de 45 min de la fin de fenêtre
     invisibleSurplusMinW: 2000, // déclencheur de secours : surplus invisible estimé minimal
-    // Voie saturation/réserve (Max AC zéro-export) : ballon 2900 W − budget de
-    // drain batterie ~900 W = 2000 W de surplus mesuré ; SoC 65 % → une chauffe
-    // au drain max (~1,1 kWh ≈ 15 pts) laisse ≥ 50 % = la réserve nocturne (3,6 kWh).
-    surplusOnW: 2000,
-    maxAcSocOnPct: 65,
 
-    // Grâce et coupures
+    // ── Grâce et coupures ──
     graceStartupSec: 240, // latence SolarBank tolérée au démarrage (4 min)
-    cutBuyW: 150, // achat réseau déclenchant la coupure
+    // ⚠️ SEUILS RELEVÉS TEMPORAIREMENT — bridage Consuel, décidé par Laurent le 09/08/2026.
+    // Les SB3 sont limitées à 800 W chacune : le maximum délivrable est 2 500 W
+    // (APS 900 + SB3 1 600) contre 2 900 W au ballon. Toute chauffe de jour achète
+    // donc 600 à 1 000 W en régime établi — un déficit STRUCTUREL, pas un transitoire.
+    // Aux valeurs d'origine (150 / 500), le pilote allumait puis coupait en 30 s et
+    // brûlait son quota chaque jour. Laurent, chiffres en main (0,04 €/kWh solaire
+    // avec achat contre 0,1812 € en HC), a tranché : « On accepte l'achat ».
+    // Ce qu'on protège encore : l'ajout d'un GROS appareil (plaque 2,4 kW, four 2 kW)
+    // pendant la chauffe → l'achat saute à 3 kW+ et la coupure tombe.
+    // 🔁 À REMETTRE À 150 / 500 DÈS LA LEVÉE DU BRIDAGE (validation Consuel).
+    cutBuyW: 1200, // achat réseau déclenchant la coupure (origine : 150)
     cutBuySustainSec: 30, // soutenu 30 s (VALEUR CORRIGÉE PAR LAURENT — pas 90)
-    cutBuyHardW: 500, // achat franc → coupure immédiate (four/plaques : la cuisine d'abord)
+    cutBuyHardW: 2000, // achat franc → coupure immédiate (origine : 500)
     batteryDropCutPts: 20, // SoC −20 points depuis le début de chauffe → coupure (valeur Laurent)
     batteryFloorCutPct: 40, // plancher absolu de SoC en chauffe (valeur Laurent)
 
@@ -193,11 +198,11 @@ export function normalizePilotConfig(raw: unknown): PilotConfig {
     apsMinW: asNum(o.apsMinW, d.apsMinW, 50, 900),
     minUsefulHeatMin: asNum(o.minUsefulHeatMin, d.minUsefulHeatMin, 10, 240),
     invisibleSurplusMinW: asNum(o.invisibleSurplusMinW, d.invisibleSurplusMinW, 300, 5000),
-    surplusOnW: asNum(o.surplusOnW, d.surplusOnW, 500, 5000),
-    maxAcSocOnPct: asNum(o.maxAcSocOnPct, d.maxAcSocOnPct, 30, 100),
 
     graceStartupSec: asNum(o.graceStartupSec, d.graceStartupSec, 60, 900),
-    cutBuyW: asNum(o.cutBuyW, d.cutBuyW, 50, 1000),
+    // Plafond porté de 1000 à 2500 W : sous bridage Consuel, le seuil de coupure
+    // doit pouvoir dépasser le déficit structurel de la chauffe (cf. défauts).
+    cutBuyW: asNum(o.cutBuyW, d.cutBuyW, 50, 2500),
     cutBuySustainSec: asNum(o.cutBuySustainSec, d.cutBuySustainSec, 0, 600),
     cutBuyHardW: asNum(o.cutBuyHardW, d.cutBuyHardW, 200, 3000),
     batteryDropCutPts: asNum(o.batteryDropCutPts, d.batteryDropCutPts, 2, 60),

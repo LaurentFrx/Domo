@@ -2,11 +2,9 @@
  * Collecte des entrées de la boucle SB3 — server-side, chaque source isolée
  * (échec → ok:false, jamais de throw) et bornée en temps. Mêmes chemins que
  * les intégrations existantes : EM-50 direct (pattern cumulus/inputs), APS via
- * bridge, Max AC via le module Modbus partagé (partage de vol + micro-cache),
  * cloud via anker-bridge (champs sb3_* ajoutés pour cette boucle).
  */
 import { env } from '$env/dynamic/private';
-import { readAnkerSolarbank } from '$lib/server/anker-modbus';
 import { sunPosition } from '../cumulus/sun.ts';
 import type { Sb3LoopConfig, Sb3LoopInputs } from './types';
 
@@ -99,26 +97,11 @@ async function readCloud(now: number): Promise<Sb3LoopInputs['cloud']> {
 
 export async function collectSb3Inputs(cfg: Sb3LoopConfig): Promise<Sb3LoopInputs> {
   const now = Date.now();
-  const [em50, aps, maxacRaw, cloud] = await Promise.all([
-    readEm50(),
-    readAps(),
-    readAnkerSolarbank(),
-    readCloud(now)
-  ]);
+  const [em50, aps, cloud] = await Promise.all([readEm50(), readAps(), readCloud(now)]);
   return {
     now,
     em50,
     aps,
-    maxac: maxacRaw.available
-      ? {
-          ok: true,
-          socPct: maxacRaw.soc_pct,
-          // ac_power_w (10208) est une SORTIE seule : 0 pendant la charge. Le flux
-          // NET signé vient du registre batterie (cf. docs/regulation-energie.md §5).
-          acNetW: maxacRaw.ac_net_w,
-          ratedEnergyWh: maxacRaw.rated_energy_wh ?? 0
-        }
-      : { ok: false, socPct: 0, acNetW: 0, ratedEnergyWh: 0 },
     cloud,
     sunElevDeg: sunPosition(now, cfg.latDeg, cfg.lonDeg).elevationDeg
   };

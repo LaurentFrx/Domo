@@ -10,7 +10,6 @@ import { env } from '$env/dynamic/private';
 import { isHC, nextTariffSwitch, parisDate, regimeAt } from '../tariffs';
 import type { CumulusConfig, CumulusInputs, TempSource, ApplianceInput } from './types';
 import { readRelay } from './relay';
-import { readAnkerSolarbank } from '$lib/server/anker-modbus';
 import { averageTemp } from './energy-model';
 import { ensureTempSensor, getCumulusTemp, ensureTempTopic, getTempTopic } from './temp-sensor';
 import { ensureApplianceSensors, getAppliancePower, TRACKED_APPLIANCES } from './appliance-sensor';
@@ -265,13 +264,6 @@ interface AnkerRead {
   batteryEnergyWh: number;
   batteryCapacityWh: number;
   socPct: number[];
-  /** Variantes SANS la Max AC (A17E2) : depuis la reconfig des systèmes Anker
-   *  (22/07), le cloud liste AUSSI la Max AC dans batteries[] — quand la
-   *  lecture Modbus locale est up, elle PRIME et l'entrée cloud est
-   *  dédupliquée via ces champs (sinon la Max AC compterait double). */
-  socPctNoMaxAc: number[];
-  batteryEnergyWhNoMaxAc: number;
-  batteryCapacityWhNoMaxAc: number;
   sbInputW: (number | null)[]; // PV entrant par station (input_power_w) — calibration estimateur
   /** Charge DC des SB3 (W ≥ 0) — surplus solaire RÉORIENTABLE vers le ballon.
    *  Dérivée (les champs cloud charging_power_w sont cassés), cf. sb3ChargeFrom(). */
@@ -331,9 +323,6 @@ async function readAnker(): Promise<AnkerRead> {
     batteryEnergyWh: 0,
     batteryCapacityWh: 0,
     socPct: [],
-    socPctNoMaxAc: [],
-    batteryEnergyWhNoMaxAc: 0,
-    batteryCapacityWhNoMaxAc: 0,
     sbInputW: [],
     sb3ChargeW: 0
   };
@@ -357,8 +346,9 @@ async function readAnker(): Promise<AnkerRead> {
       }[];
     };
     const bats = Array.isArray(d.batteries) ? d.batteries : [];
-    // A17E2 = Solarbank Max AC : exclue des variantes NoMaxAc (sa vérité
-    // vient du Modbus local quand il est up — cf. collectInputs).
+    // A17E2 = Solarbank Max AC, retirée de l'installation le 09/08/2026. Le cloud
+    // ne la liste plus, mais le filtre reste : il coûte zéro et protège la charge
+    // DC des SB3 d'une réapparition (la Max AC est couplée AC, elle n'a pas de PV).
     const noMax = bats.filter((b) => b?.model !== 'A17E2');
     return {
       available: d.connected !== false,
@@ -370,11 +360,6 @@ async function readAnker(): Promise<AnkerRead> {
       batteryEnergyWh: Math.round(bats.reduce((s, b) => s + num(b?.battery_energy_wh), 0)),
       batteryCapacityWh: Math.round(bats.reduce((s, b) => s + num(b?.battery_capacity_wh), 0)),
       socPct: bats.map((b) => Math.round(num(b?.soc))),
-      socPctNoMaxAc: noMax.map((b) => Math.round(num(b?.soc))),
-      batteryEnergyWhNoMaxAc: Math.round(noMax.reduce((s, b) => s + num(b?.battery_energy_wh), 0)),
-      batteryCapacityWhNoMaxAc: Math.round(
-        noMax.reduce((s, b) => s + num(b?.battery_capacity_wh), 0)
-      ),
       sbInputW: bats.map((b) =>
         typeof b?.input_power_w === 'number' && Number.isFinite(b.input_power_w)
           ? Math.round(b.input_power_w)
@@ -420,17 +405,13 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
   if (em.outdoorSources.thermoExtTopic) ensureTempTopic(em.outdoorSources.thermoExtTopic);
   const now = new Date();
 
-  const [relay, em50, forecast, anker, daikinOut, aps, sbLocal] = await Promise.all([
+  const [relay, em50, forecast, anker, daikinOut, aps] = await Promise.all([
     readRelay(),
     readEm50(),
     readForecastNextDaylight(now),
     readAnker(),
     em.outdoorSources.daikin ? readDaikinOutdoor() : Promise.resolve(null),
-    readApsystems(now.getTime()),
-    // Max AC en Modbus LOCAL : le bridge cloud ne la liste PAS dans batteries[]
-    // → sans elle, socAvg (réserve HC, battFullPct) jugeait un parc « 100 % »
-    // avec la batterie principale (7,2 kWh) à moitié vide. Ne rejette jamais.
-    readAnkerSolarbank()
+    readApsystems(now.getTime())
   ]);
 
   const t = getCumulusTemp();
@@ -508,26 +489,14 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     ankerGridPowerW: anker.gridPowerW,
     sbOutputPowerW: anker.sbOutputPowerW,
     batteryDischargeW: anker.batteryDischargeW,
-    // Parc RÉEL : packs cloud + Max AC. Depuis la reconfig des systèmes
-    // (22/07), le cloud liste AUSSI la Max AC → quand le Modbus local est up,
-    // il PRIME pour elle (fraîcheur) et l'entrée cloud est DÉDUPLIQUÉE
-    // (variantes NoMaxAc) ; local down = cloud complet tel quel. Le pilote
-    // moyenne batterySocPct (socAvg) : conditions battFullPct / réserve HC
-    // fidèles à la vraie réserve. Les flux W restent l'agrégat cloud.
-    batterySocPct: sbLocal.available ? [...anker.socPctNoMaxAc, sbLocal.soc_pct] : anker.socPct,
-    batteryEnergyWh: sbLocal.available
-      ? anker.batteryEnergyWhNoMaxAc + sbLocal.energy_wh
-      : anker.batteryEnergyWh,
-    batteryCapacityWh: sbLocal.available
-      ? anker.batteryCapacityWhNoMaxAc + sbLocal.rated_energy_wh
-      : anker.batteryCapacityWh,
+    // Parc = les 2 SB3 du cloud, point. La Max AC a été retirée de l'installation
+    // le 09/08/2026 : plus de fusion Modbus, plus de déduplication à faire — le
+    // cloud ne la liste plus non plus. Le pilote moyenne batterySocPct (socAvg)
+    // pour ses conditions battFullPct / réserve HC ; les flux W restent l'agrégat.
+    batterySocPct: anker.socPct,
+    batteryEnergyWh: anker.batteryEnergyWh,
+    batteryCapacityWh: anker.batteryCapacityWh,
     batteryChargeW: anker.batteryChargeW,
-    // ── Max AC locale (Modbus ~2,5 s) : le signal « saturation/réserve » du pilote ──
-    // battery_power_w est SIGNÉ (+ décharge vers la maison / − charge) → la charge
-    // réorientable vers le ballon = max(0, −battery_power_w).
-    maxAcAvailable: sbLocal.available,
-    maxAcSocPct: sbLocal.available ? sbLocal.soc_pct : null,
-    maxAcChargeW: sbLocal.available ? Math.max(0, -sbLocal.battery_power_w) : null,
     sbInputW: anker.sbInputW,
     sb3ChargeW: anker.sb3ChargeW,
     pvApsW: aps.powerW,

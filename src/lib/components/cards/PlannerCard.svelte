@@ -521,9 +521,14 @@
     >
       <p style="color: var(--color-fg);" class="font-semibold">La règle du pilote</p>
       <p>
-        ⚡ Le chauffe-eau ne doit <strong>jamais</strong> être la cause d'un achat de courant à EDF. Il
-        s'allume quand le soleil produit plus que ce que la maison consomme — surplus mesuré dans la charge
-        de la batterie et au compteur — et s'éteint dès que la maison a besoin de sa puissance.
+        ⚡ Le chauffe-eau s'allume quand les batteries sont pleines et que le surplus de soleil part
+        au réseau — sinon il est perdu. Il s'éteint dès que la maison a besoin de sa puissance.
+      </p>
+      <p>
+        🔧 <strong>En ce moment</strong> : les batteries sont bridées en attendant le contrôle de l'installation.
+        Elles ne peuvent plus fournir les 2 900 W du chauffe-eau à elles seules, donc une chauffe au soleil
+        achète environ 700 W à EDF. Ça reste bien moins cher que de chauffer la nuit, et ça redeviendra
+        gratuit une fois le bridage levé.
       </p>
       <p>
         ☀️ L'allumage exige sept conditions réunies pendant deux minutes (bouton « pilote » pour les

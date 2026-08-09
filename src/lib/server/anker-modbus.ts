@@ -4,7 +4,12 @@
  * tunnel-1502-anker-modbus.sh + crontab @reboot sur le RPi4, modèle
  * tunnel-8102-em50.sh) :
  *   127.0.0.1:1502 → Anker Smart Meter Gen 2  192.168.1.48:502
- *   127.0.0.1:1503 → Anker Solarbank Max AC   192.168.1.49:502
+ *
+ * Le tunnel 1503 desservait la Solarbank Max AC, retirée de l'installation le
+ * 09/08/2026 — plus rien ne la lit. ⚠️ Elle répondait ENCORE en Modbus après son
+ * débranchement (batterie interne + Wi-Fi actif) : continuer à la lire aurait
+ * versé 7,1 kWh de batterie INERTE dans le SoC du parc sans qu'aucun fail-safe
+ * ne s'en aperçoive — c'est pourquoi le lecteur a été supprimé, pas désactivé.
  * Modbus TCP = TCP brut : le -R ssh le transporte tel quel, comme le RPC HTTP
  * du EM-50. Deux -R dans un seul process ssh (ExitOnForwardFailure=yes).
  *
@@ -37,11 +42,6 @@ const meterTarget = (): ModbusTarget => ({
   host: env.ANKER_MODBUS_METER_HOST ?? '127.0.0.1',
   port: Number(env.ANKER_MODBUS_METER_PORT ?? 1502),
   unitId: Number(env.ANKER_MODBUS_METER_UNIT ?? 1)
-});
-const solarbankTarget = (): ModbusTarget => ({
-  host: env.ANKER_MODBUS_SB_HOST ?? '127.0.0.1',
-  port: Number(env.ANKER_MODBUS_SB_PORT ?? 1503),
-  unitId: Number(env.ANKER_MODBUS_SB_UNIT ?? 1)
 });
 /** −1 si la convention du CT réseau devait s'inverser (cf. EM50_GRID_SIGN). */
 const meterSign = (): 1 | -1 => (Number(env.ANKER_MODBUS_METER_SIGN ?? 1) < 0 ? -1 : 1);
@@ -160,115 +160,6 @@ async function fetchMeter(): Promise<AnkerMeterStatus> {
   };
 }
 
-// ─── Solarbank Max AC (192.168.1.49) ──────────────────────────────────────
-export type SolarbankBatteryStatus = 'standby' | 'charging' | 'discharging' | 'sleep' | 'unknown';
-
-/** value_mapping de battery_status (10001) dans le YAML officiel. */
-const BATTERY_STATUS: Record<number, SolarbankBatteryStatus> = {
-  0: 'standby',
-  1: 'charging',
-  2: 'discharging',
-  3: 'sleep'
-};
-
-/** options d'operating_mode (10064) dans le YAML officiel. */
-const OPERATING_MODE: Record<number, string> = {
-  0: 'self_consumption',
-  1: 'tou_mode',
-  3: 'third_party_control',
-  4: 'custom_mode',
-  5: 'socket_overlay_mode',
-  6: 'smart_mode',
-  7: 'dynamic_pricing'
-};
-
-export interface AnkerSolarbankStatus {
-  available: boolean;
-  /** État de charge batterie (%). */
-  soc_pct: number;
-  /** Puissance batterie signée (W) : + décharge vers la maison / − charge. */
-  battery_power_w: number;
-  /** Sortie AC vers la maison (W) — registre 10208 `ac_grid_output_power`.
-   *  ⚠ NON SIGNÉ : vérifié sur l'appareil, il vaut 0 pendant que la batterie
-   *  charge à 2 050 W, et il n'est jamais négatif sur 18 148 échantillons
-   *  historisés. Ne JAMAIS l'utiliser comme flux net (cf. docs/regulation-energie.md §5). */
-  ac_power_w: number;
-  /** Flux AC NET signé (W) : + vers la maison / − absorbé par la Max AC.
-   *  Reconstruit du flux BATTERIE (10008/10009), lui vraiment signé, corrigé du
-   *  rendement de conversion. La Max AC n'a pas de PV propre (couplée AC) :
-   *  côté AC on a donc η·P_batt en décharge et P_batt/η en charge. */
-  ac_net_w: number;
-  /** PV total (W) = PV du PCS + PV tiers (comme le capteur officiel). */
-  pv_power_w: number;
-  /** Conso maison vue par la Solarbank (W). */
-  load_power_w: number;
-  battery_status: SolarbankBatteryStatus;
-  /** Mode actif (clé technique du YAML officiel, ex. self_consumption). */
-  mode: string;
-  mode_raw: number;
-  /** Capacité nominale du device (Wh) — rated_energy 10250. La Max AC est ABSENTE
-   *  de la liste batteries[] du bridge cloud : cette capacité sert à la réintégrer
-   *  dans le SoC/stock du parc (accueil + orchestrateur cumulus). */
-  rated_energy_wh: number;
-  /** Énergie stockée estimée (Wh) = soc × rated / 100. */
-  energy_wh: number;
-}
-
-const SB_OFFLINE: AnkerSolarbankStatus = {
-  available: false,
-  soc_pct: 0,
-  battery_power_w: 0,
-  ac_power_w: 0,
-  ac_net_w: 0,
-  pv_power_w: 0,
-  load_power_w: 0,
-  battery_status: 'unknown',
-  mode: 'unknown',
-  mode_raw: -1,
-  rated_energy_wh: 0,
-  energy_wh: 0
-};
-
-/**
- * Quatre transactions sur une socket :
- *   FC 04 @10001 ×15 → status(0) pv(1-2) pv_tiers(3-4) batterie(7-8)
- *                      maison(9-10) soc(13)
- *   FC 04 @10208 ×2  → ac_grid_output_power
- *   FC 04 @10250 ×2  → rated_energy (UINT32, gain 10 → kWh×10)
- *   FC 03 @10064 ×1  → operating_mode (plage holding)
- */
-/** Rendement de conversion DC↔AC de la Max AC (onduleur + pertes), ~5 %. */
-const CONV_ETA = 0.95;
-
-async function fetchSolarbank(): Promise<AnkerSolarbankStatus> {
-  const [main, ac, rated, mode] = await readMany(solarbankTarget(), [
-    { fc: 4, address: 10001, count: 15 },
-    { fc: 4, address: 10208, count: 2 },
-    { fc: 4, address: 10250, count: 2 },
-    { fc: 3, address: 10064, count: 1 }
-  ]);
-  const socPct = main[13];
-  // Flux batterie SIGNÉ (10008/10009) : + décharge / − charge. Vérifié en direct
-  // le 28/07 (−2 050 W en charge) — c'est la SEULE source signée de l'appareil.
-  const battW = i32(main[7], main[8]);
-  // rated_energy : UINT32 gain 10 (dixièmes de kWh) → Wh. Vérifié en réel : 7,2 kWh.
-  const ratedWh = ((((rated[0] & 0xffff) << 16) | (rated[1] & 0xffff)) >>> 0) * 100;
-  return {
-    available: true,
-    soc_pct: socPct,
-    battery_power_w: battW,
-    ac_power_w: i32(ac[0], ac[1]),
-    ac_net_w: Math.round(battW >= 0 ? battW * CONV_ETA : battW / CONV_ETA),
-    pv_power_w: i32(main[1], main[2]) + i32(main[3], main[4]),
-    load_power_w: i32(main[9], main[10]),
-    battery_status: BATTERY_STATUS[main[0]] ?? 'unknown',
-    mode: OPERATING_MODE[mode[0]] ?? `unknown(${mode[0]})`,
-    mode_raw: mode[0],
-    rated_energy_wh: ratedWh,
-    energy_wh: Math.round((socPct * ratedWh) / 100)
-  };
-}
-
 // ─── Partage de vol + micro-cache (absorbe iPhone + iPad simultanés) ──────
 const CACHE_MS = 1_500;
 
@@ -290,5 +181,3 @@ function shared<T>(fetcher: () => Promise<T>, offline: T): () => Promise<T> {
 
 /** Lecture Smart Meter Gen 2 — ne rejette jamais (offline ⇒ available:false). */
 export const readAnkerMeter = shared(fetchMeter, METER_OFFLINE);
-/** Lecture Solarbank Max AC — ne rejette jamais (offline ⇒ available:false). */
-export const readAnkerSolarbank = shared(fetchSolarbank, SB_OFFLINE);

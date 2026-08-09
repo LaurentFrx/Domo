@@ -30,23 +30,6 @@ export interface Sb3LoopConfig {
    *  retranche des corrections DÉJÀ visibles et la boucle annule ses propres
    *  écritures en continu (achat ×4, écritures ×6 en régime saturé). */
   enVolS: number;
-  /** Puissance AC max de la Max AC (W) — borne le rééquilibrage de partage :
-   *  on ne déplace pas vers elle plus qu'elle ne peut fournir ou absorber.
-   *  MESURÉ sur history.db (18 259 points) : p99,9 = 3 530 W, max 3 540 W —
-   *  cohérent avec les 3 600 W annoncés par le constructeur. La valeur de 2 000 W
-   *  posée initialement était FAUSSE (dépassée 2 % du temps) et gelait le
-   *  rééquilibrage dès que la Max AC débitait fort : marge calculée à 0. */
-  maxAcPowerW: number;
-  /** Fraction de l'écart de partage corrigée par cycle. Le rééquilibrage ENTRE
-   *  batteries est un objectif de confort, pas une réponse à la maison : il ne
-   *  doit pas bousculer l'équilibre du compteur que la règle 1 protège. La
-   *  règle 3 (« aucune réaction différée ») porte sur la CONSOMMATION du foyer,
-   *  qui est traitée à gain plein par le chemin « erreur compteur ».
-   *  ⚠ La PRÉCISION du partage vaut `deadbandW / shareGain` : en deçà, le pas
-   *  calculé tombe dans la bande morte et la convergence s'arrête. Avec 100 W et
-   *  0,5, le partage est tenu à ±200 W — négligeable devant les 2 400 W de
-   *  consigne, pour 2 à 3 écritures par rééquilibrage. */
-  shareGain: number;
   /** Durée du blocage des BAISSES de consigne après un pré-armement cumulus
    *  (feedforward) : la consigne montée AVANT la fermeture du relais crée un
    *  excédent transitoire que la boucle prendrait pour une injection à
@@ -54,12 +37,6 @@ export interface Sb3LoopConfig {
    *  MONTÉES restent libres (règle 1 intouchée). Vérifié par le banc apparié
    *  du 31/07 (docs/etudes/verif_prearm_fenetre.py). */
   ffHoldS: number;
-  /** RÈGLE 0 — rééquilibrage de CHARGE. Écart de remplissage relatif au-delà
-   *  duquel on détourne le PV des SB3 vers la Max AC. Bande d'hystérésis : en
-   *  deçà on ne touche à rien (le détour coûte une conversion de plus). */
-  rebalanceBandFrac: number;
-  /** Fraction du PV détournable corrigée par cycle (même rôle que shareGain). */
-  rebalanceGain: number;
   /** Réserve intouchable de chaque batterie (%) : l'énergie « utilisable » qui
    *  sert au prorata s'entend RÉSERVE DÉDUITE. Règle Laurent 28/07. */
   reservePct: number;
@@ -109,9 +86,6 @@ export interface Sb3LoopInputs {
   em50: { ok: boolean; gridW: number };
   /** APS EZ1 : production (≈ 0 la nuit — 0 réel, pas une panne). */
   aps: { ok: boolean; powerW: number };
-  /** Max AC en Modbus local : SoC + flux AC net (+ décharge / − charge) +
-   *  capacité nominale (pour le prorata d'énergie utilisable). */
-  maxac: { ok: boolean; socPct: number; acNetW: number; ratedEnergyWh: number };
   /** Cloud Anker (bridge) : le système SB3 seul. */
   cloud: {
     ok: boolean;
@@ -225,15 +199,13 @@ export function defaultSb3LoopConfig(): Sb3LoopConfig {
     reservePct: 10,
     enVolS: 20,
     ffHoldS: 30,
-    maxAcPowerW: 3600,
-    shareGain: 0.5,
-    rebalanceBandFrac: 0.1,
-    rebalanceGain: 0.5,
     failLowStepW: 300,
     deadbandW: 100, // < marginW — sinon la cible « charge − marge » est piégée dans la bande
     failLowDwellS: 300,
     settleS: 180,
-    maxPresetW: 2400,
+    // Consigne système maximale. 2 × 800 W depuis le bridage Consuel du 09/08/2026
+    // (c'était 2 × 1 200). 🔁 REMETTRE À 2400 à la levée du bridage.
+    maxPresetW: 1600,
     cloudStaleS: 180,
     localMuteS: 120,
     confirmFailMax: 2,

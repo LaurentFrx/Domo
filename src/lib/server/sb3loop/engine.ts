@@ -110,7 +110,9 @@ async function writePreset(
 ): Promise<WriteResult> {
   const token = env.SB3_BRIDGE_WRITE_TOKEN;
   if (!token) return { ok: false, confirmedW: null };
-  presetW = Math.round(Math.min(2400, Math.max(0, presetW)));
+  // Plafond ALIGNÉ sur la config (bridage Consuel : 2 × 800 W). C'était 2400 en
+  // dur — un second plafond, silencieux, qu'il aurait fallu penser à changer.
+  presetW = Math.round(Math.min(defaultSb3LoopConfig().maxPresetW, Math.max(0, presetW)));
   try {
     const r = await fetch(`${bridgeUrl()}/api/sb3/output`, {
       method: 'POST',
@@ -199,15 +201,19 @@ export interface FeedforwardOutcome {
  *
  *  - stepW > 0 (pré-armement) : monter la part SB3 AVANT de fermer le relais
  *    supprime le transitoire d'achat EDF à la source (−71 % mesuré au banc sur
- *    les allumages qui achetaient) — la Max AC n'a plus à monter seule en
- *    butée pendant que les SB3 attendent le cloud.
- *  - stepW < 0 (désarmement) : rendre la part SB3 à l'ouverture évite le
- *    recyclage SB3 → Max AC de la descente progressive (64 → 9 Wh au banc)
- *    et l'injection qui l'accompagne quand la Max AC n'absorbe pas.
+ *    les allumages qui achetaient).
+ *  - stepW < 0 (désarmement) : rendre la part à l'ouverture évite l'injection
+ *    de la descente progressive (64 → 9 Wh au banc).
+ *
+ * ⚠️ INERTE depuis le 09/08/2026, comme le reste de la boucle : en mode
+ * autoconsommation la consigne n'est plus lue, et la garde « mode ≠ manuel »
+ * rend la main. Les SB3 encaissent désormais l'échelon EN RÉACTION (quelques
+ * secondes) au lieu de l'anticiper — à surveiller au premier cycle de chauffe :
+ * si le pic de démarrage reste sous cutBuyW, il n'y a rien à faire.
  *
  * Best-effort par construction : boucle inactive, mesures muettes, cloud
  * périmé ou mode Anker ≠ manuel ⇒ aucune écriture, l'appelant continue comme
- * aujourd'hui. La part suit la RÈGLE 2 (prorata d'énergie utilisable) ; les
+ * aujourd'hui. La part revient en entier aux SB3 (parc à deux packs) ; les
  * protections zéro-import du pilote cumulus restent le filet.
  */
 export async function feedforwardCumulusStep(stepW: number): Promise<FeedforwardOutcome> {

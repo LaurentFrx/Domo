@@ -1,19 +1,23 @@
 /**
- * /api/anker-local/status — lecture LOCALE (Modbus TCP, lecture seule) des
- * devices Anker Solix, sans le cloud Solix ni sa latence ~60 s :
- *   - Solarbank Max AC (192.168.1.49:502) : SOC, flux batterie/AC, mode ;
- *   - Smart Meter Gen 2 (192.168.1.48:502) : puissance réseau signée.
+ * /api/anker-local/status — lecture LOCALE (Modbus TCP, lecture seule) du
+ * Smart Meter Gen 2 (192.168.1.48:502) : puissance réseau signée, sans le cloud
+ * Solix ni sa latence ~60 s.
+ *
+ * La Solarbank Max AC (192.168.1.49:502, tunnel 1503) a été retirée de
+ * l'installation le 09/08/2026 — elle n'est plus lue. ⚠️ Elle répondait encore
+ * en Modbus après son débranchement (batterie interne + Wi-Fi actif) : la
+ * garder aurait injecté 7,1 kWh de batterie INERTE dans le SoC du parc, sans
+ * qu'aucun fail-safe ne s'en aperçoive.
  *
  * MÊME modèle que /api/em50/status : les devices ne sont JAMAIS exposés au
  * navigateur ni à Internet ; le client tape cette route (derrière le guard
  * d'auth de hooks.server.ts) et SvelteKit relaie server-to-server via la
- * loopback du VPS — sorties du tunnel SSH inverse 1502/1503 (cf. sur le RPi4
+ * loopback du VPS — sortie du tunnel SSH inverse 1502 (cf. sur le RPi4
  * tunnel-1502-anker-modbus.sh + crontab @reboot, modèle tunnel-8102-em50.sh).
  * Le protocole Modbus (registres sourcés de l'intégration HA officielle
  * anker-charging/ha-anker-solix-official) vit dans $lib/server/anker-modbus.
  *
- * Un device injoignable ⇒ son bloc `available:false` dans un 200 (jamais de
- * 504 global : la Solarbank ne doit pas masquer le meter, et inversement).
+ * Device injoignable ⇒ `available:false` dans un 200 (jamais de 504).
  *
  * CONTRÔLE CROISÉ : le Gen 2 ne remplace PAS le EM-50 (source de vérité
  * réseau). On lit le EM-50 en best-effort à chaque poll, on expose l'écart
@@ -22,7 +26,7 @@
  */
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
-import { readAnkerMeter, readAnkerSolarbank } from '$lib/server/anker-modbus';
+import { readAnkerMeter } from '$lib/server/anker-modbus';
 import type { RequestHandler } from './$types';
 
 /** Écart Gen 2 ↔ EM-50 au-delà duquel on journalise (W). */
@@ -55,11 +59,7 @@ async function em50GridW(): Promise<number | null> {
 }
 
 export const GET: RequestHandler = async () => {
-  const [solarbank, meter, em50W] = await Promise.all([
-    readAnkerSolarbank(),
-    readAnkerMeter(),
-    em50GridW()
-  ]);
+  const [meter, em50W] = await Promise.all([readAnkerMeter(), em50GridW()]);
 
   const deviation = meter.available && em50W !== null ? Math.abs(meter.grid_power_w - em50W) : null;
   if (deviation !== null && deviation > DEVIATION_WARN_W) {
@@ -74,7 +74,6 @@ export const GET: RequestHandler = async () => {
   }
 
   return json({
-    solarbank,
     meter,
     /** Réseau signé vu par le EM-50 (contrôle croisé), null si indisponible. */
     em50_grid_w: em50W,
