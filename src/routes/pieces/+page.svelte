@@ -150,7 +150,11 @@
   // deux lumières d'un même lieu se commandent au même endroit. Il est donc
   // RETIRÉ de la grille générique plus bas, sinon il s'y afficherait en double.
   // Reconnu par son NOM (nom + pièce), pas par son nodeId : celui-ci est
-  // attribué à la commission et n'est pas connu d'avance.
+  // attribué à la commission et n'est pas connu d'avance. Le nom vient de
+  // SWITCH_NAMES si le device y figure, sinon de son NodeLabel Matter — donc
+  // le nommer « Spot » à la commission suffit, sans toucher au code. La pièce,
+  // elle, n'existe que dans SWITCH_NAMES : le premier test (nom ET pièce) ne
+  // passe qu'une fois l'entrée ajoutée, le second suffit d'ici là.
   const terraceSpot = $derived(
     matter.commandableSwitches.find(
       (s) => /spot/i.test(`${s.name} ${s.room}`) && /terrasse/i.test(`${s.name} ${s.room}`)
