@@ -188,8 +188,20 @@ function parseSwitch(node: Record<string, unknown>): Switch | null {
   // Attribut OnOff : endpoint 1, cluster 6, attribute 0 = OnOff state (bool).
   const isOn = Boolean(attrs['1/6/0'] ?? false);
 
+  // NodeLabel du device (BasicInformation, cluster 40 attr 5) = le nom donné
+  // dans l'app de commission. Même repli que les volets (cf. parseShutter) :
+  // sans lui, tout appareil absent de SWITCH_NAMES s'affichait « Interrupteur
+  // <id> » et RENOMMER le device côté Matter n'avait aucun effet ici — un piège
+  // à contresens, puisque c'est le geste naturel. SWITCH_NAMES reste
+  // prioritaire : elle porte les renommages voulus côté Domo (et la pièce, que
+  // Matter ne donne pas).
+  let label = '';
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.includes('/40/5') && v) label = String(v);
+  }
+
   const meta = SWITCH_NAMES[nodeId] || {
-    name: `Interrupteur ${nodeId}`,
+    name: label || `Interrupteur ${nodeId}`,
     room: 'Autre'
   };
 
