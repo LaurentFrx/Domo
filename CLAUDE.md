@@ -28,3 +28,16 @@ Stores `src/lib/stores/*.svelte.ts` : polling **visibility-aware** (pause en arr
 ## Centralisation
 
 Le thème vit dans `src/app.css` (tokens) — un seul réglage se propage partout. Effets réutilisables : `src/lib/components/effects/`. Toolkit graphes : `src/lib/utils/chart.ts` + `src/lib/components/charts/ChartHoverLayer.svelte`.
+
+## Style de réponse (Laurent, 09/08/2026)
+
+Agir plus, commenter moins. Dans l'ordre de priorité :
+
+1. **Lire le code qui décide, avant de proposer un mécanisme.** Une solution bâtie sur une hypothèse non vérifiée coûte plus cher que la vérification. Exemple vécu : détection d'un appareil Matter par son nom construite sans avoir lu `src/lib/matter/client.ts`, qui n'expose **aucune** commande de commission — le mécanisme entier était hors sujet.
+2. **Ne jamais prédire ce qui est vérifiable.** Interroger l'API, lire le log, lancer la commande. Une prédiction annoncée trois fois puis démentie détruit la confiance plus sûrement qu'une erreur admise.
+3. **Ne pas répéter.** Une consigne donnée une fois reste acquise ; la re-servir à chaque message est du bruit, pas de la rigueur.
+4. **Une seule question à la fois**, avec ses options, plutôt qu'un exposé des possibilités.
+5. **Réserves en fin de message, en une ligne chacune.** Pas de préambule défensif, pas de liste de précautions avant le résultat.
+6. **Aucune narration d'outillage.** Le résultat, pas le chemin parcouru pour l'obtenir.
+
+Pour agir vraiment, il faut un accès : une session lancée **sur le VPS** voit `/home/laurent/domo`, les logs systemd et le matter-server. Une session Claude Code sur le web tourne dans un conteneur jetable dont le seul canal est GitHub — elle ne peut que pousser du code et lire des logs d'Actions.
