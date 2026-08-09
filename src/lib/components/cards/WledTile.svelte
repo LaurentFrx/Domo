@@ -1,12 +1,21 @@
 <script lang="ts">
   /**
-   * Tuile « lampe » de l'éclairage terrasse — surface par défaut sur /pieces.
+   * Carte « Terrasse » — surface par défaut sur /pieces. Deux lumières du même
+   * lieu, l'une sous l'autre :
+   *   - « LEDS » — le ruban WLED, bloc `.tile-light` : la tuile EST la lumière,
+   *     son fond se remplit de la couleur réelle du ruban sur la largeur = la
+   *     luminosité. Tout le réglage fin vit dans la feuille (WledSheet).
+   *   - « Spot » — rangée sobre, un simple on/off Matter injecté en props
+   *     (`spot` + `onSpotToggle`) pour que ce composant reste ignorant du
+   *     store Matter. Absente tant que le spot n'est pas appairé.
    *
    * Le panneau de contrôle empilé (barre héros + luminosité + scènes + styles
    * musicaux + accordéon de réglages) coûtait 5 à 7 rangées au milieu d'une
-   * page déjà dense. Ici la carte se résume à UN objet : la tuile EST la
-   * lumière — son fond se remplit de la couleur réelle du ruban, sur la
-   * largeur = la luminosité. Tout le reste vit dans la feuille (WledSheet).
+   * page déjà dense ; le ruban se résume désormais à UN objet.
+   *
+   * ⚠️ Les couches lumineuses et la surface de geste sont en `inset: 0` sur
+   * `.tile-light`, PAS sur la carte : sans ce bloc, le glissé de luminosité
+   * s'étendrait sous la rangée Spot et le lavage la déborderait.
    *
    * Gestes (façon Maison iOS, mais à l'HORIZONTALE — le ruban est horizontal) :
    *   - glissé HORIZONTAL sur la tuile → luminosité, en direct ;
@@ -34,12 +43,22 @@
     wrapStops
   } from '$lib/wled/preview-model';
   import { haptic } from '$utils/haptic';
+  import type { Switch } from '$stores/matter.svelte';
+  import { onDestroy } from 'svelte';
 
   interface Props {
     /** Ouvre la feuille de réglages (tap sur la tuile ou bouton dédié). */
     onopen: () => void;
+    /**
+     * Spot Matter de la terrasse, s'il est appairé. La carte regroupe les deux
+     * lumières du même lieu : le ruban (« LEDS ») et ce spot (« Spot »).
+     * `null` tant qu'il n'est pas commissionné → la carte se réduit au ruban.
+     */
+    spot?: Switch | null;
+    /** Bascule le spot. Injectée pour que cette tuile reste ignorante de Matter. */
+    onSpotToggle?: () => void;
   }
-  let { onopen }: Props = $props();
+  let { onopen, spot = null, onSpotToggle }: Props = $props();
 
   // ─── Modèle d'affichage ────────────────────────────────────────────────
   // Une tuile = UN résumé : on peint la ligne la plus longue effectivement
@@ -317,6 +336,48 @@
     model.lit && wledMusic.reactive && wledMusic.playing && preferences.animationsEnabled && !hidden
   );
 
+  // ─── Spot Matter : reflet optimiste ────────────────────────────────────
+  // `matter.toggleSwitch` n'anticipe rien — il attend le rapport du device.
+  // Sans ce reflet local l'interrupteur reviendrait en arrière sous le doigt
+  // pendant l'aller-retour. Même filet que SwitchTile : la valeur optimiste
+  // tombe dès que le serveur bouge, et au bout de 5 s quoi qu'il arrive (une
+  // commande perdue ne doit pas figer un état mensonger).
+  let optimisticSpot = $state<boolean | null>(null);
+  let spotTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastSpotServer: boolean | null = null;
+  const spotOn = $derived(optimisticSpot !== null ? optimisticSpot : (spot?.isOn ?? false));
+
+  $effect(() => {
+    const cur = spot?.isOn ?? null;
+    if (cur === null || lastSpotServer === null) {
+      lastSpotServer = cur;
+      return;
+    }
+    if (cur === lastSpotServer) return;
+    lastSpotServer = cur;
+    if (spotTimer) {
+      clearTimeout(spotTimer);
+      spotTimer = null;
+    }
+    optimisticSpot = null;
+  });
+
+  function toggleSpot(): void {
+    if (!spot?.available) return;
+    optimisticSpot = !spotOn;
+    haptic('light');
+    if (spotTimer) clearTimeout(spotTimer);
+    spotTimer = setTimeout(() => {
+      optimisticSpot = null;
+      spotTimer = null;
+    }, 5000);
+    onSpotToggle?.();
+  }
+
+  onDestroy(() => {
+    if (spotTimer) clearTimeout(spotTimer);
+  });
+
   let tileEl = $state<HTMLDivElement | null>(null);
   $effect(() => {
     if (!pulsing || !tileEl) return;
@@ -348,135 +409,175 @@
   style="background: var(--color-card); border-color: var(--color-border); --lvl: {fillPct}%; --lvlf: {fillPct /
     100}; --paint: {model.paint}; --paint-size: {model.paintSize}; --glow: {model.glow};"
 >
-  <!-- Lueur ambiante : c'est la lumière qui déborde de la tuile. -->
-  <div class="tile-glow" aria-hidden="true"></div>
-  <!-- Lavage : peinture pleine largeur RÉVÉLÉE jusqu'au niveau (masque) — le
+  <!-- ═══ LEDS — le ruban. Toutes les couches lumineuses et la surface de
+       geste sont bornées à CE bloc : sans lui, le glissé de luminosité
+       s'étendrait sous la rangée Spot et le lavage la déborderait. ═══ -->
+  <div class="tile-light">
+    <!-- Lueur ambiante : c'est la lumière qui déborde de la tuile. -->
+    <div class="tile-glow" aria-hidden="true"></div>
+    <!-- Lavage : peinture pleine largeur RÉVÉLÉE jusqu'au niveau (masque) — le
        dégradé reste ancré à la tuile au lieu d'être comprimé par la largeur.
        Le masque et l'opacité restent sur le cadre, le MOUVEMENT est porté par
        la couche interne : une animation d'opacité sur le cadre écraserait le
        dosage qui garde le texte lisible. -->
-  <div class="tile-paint" aria-hidden="true">
-    <div class="tile-paint-fill {model.anim}" style="animation-duration: {model.animDur}s;"></div>
-    {#if model.sweep}
-      <!-- Effets de balayage : le point qui traverse. Clippé par la tuile.
+    <div class="tile-paint" aria-hidden="true">
+      <div class="tile-paint-fill {model.anim}" style="animation-duration: {model.animDur}s;"></div>
+      {#if model.sweep}
+        <!-- Effets de balayage : le point qui traverse. Clippé par la tuile.
            N'existe que si le mouvement est permis (arbitré dans le modèle). -->
-      <div
-        class="tile-spot"
-        style="background: {model.spotPaint}; animation-duration: {model.spotDur}s;"
-      ></div>
-    {/if}
-  </div>
-  <!-- Voile de lisibilité : la couleur étant désormais rendue pleine, le texte
+        <div
+          class="tile-spot"
+          style="background: {model.spotPaint}; animation-duration: {model.spotDur}s;"
+        ></div>
+      {/if}
+    </div>
+    <!-- Voile de lisibilité : la couleur étant désormais rendue pleine, le texte
        ne peut plus compter sur un fond de carte neutre. Le voile ne couvre que
        la colonne de gauche (texte) et s'efface avant le tiers droit, qui reste
        en couleur pure. -->
-  <div class="tile-scrim" aria-hidden="true"></div>
-  <!-- LE RUBAN : la lecture précise du niveau. Un lavage translucide sur fond
+    <div class="tile-scrim" aria-hidden="true"></div>
+    <!-- LE RUBAN : la lecture précise du niveau. Un lavage translucide sur fond
        sombre donne un brun sale, jamais « de la lumière » ; ce trait-là, lui,
        est vif et bloomé — c'est lui qui dit « allumé ». -->
-  <div class="tile-bar" aria-hidden="true">
-    <div class="tile-bar-fill {model.anim}" style="animation-duration: {model.animDur}s;"></div>
-    <div class="tile-bar-tip"></div>
-  </div>
-
-  <!-- Surface de geste : glissé = luminosité, tap = feuille. `data-no-haptic`
-       car les retours sont déclenchés explicitement (accroche / tap). -->
-  <div
-    bind:this={surfEl}
-    class="tile-surface"
-    role="slider"
-    tabindex="0"
-    aria-label="Luminosité de l'éclairage terrasse"
-    aria-valuemin={0}
-    aria-valuemax={100}
-    aria-valuenow={shownPct}
-    aria-valuetext="{shownPct} %"
-    aria-disabled={!wled.on}
-    data-no-haptic
-    data-swipe-ignore
-    onpointerdown={onPointerDown}
-    onpointermove={onPointerMove}
-    onpointerup={onPointerUp}
-    onpointercancel={onPointerCancel}
-    onkeydown={onKeydown}
-  ></div>
-
-  <div class="tile-body">
-    <span class="tile-icon" aria-hidden="true">
-      <svg
-        width="22"
-        height="22"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.75"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      >
-        <path d="M9 18h6" />
-        <path d="M10 22h4" />
-        <path d="M12 2a7 7 0 0 1 4 12.8c-.6.5-1 1.2-1 2v1H9v-1c0-.8-.4-1.5-1-2A7 7 0 0 1 12 2z" />
-      </svg>
-    </span>
-
-    <div class="tile-text">
-      <span class="tile-title">
-        Terrasse
-        {#if abnormal}
-          <span
-            class="tile-badge"
-            style="color: {wled.connected ? 'var(--color-mandarine)' : 'var(--color-alert)'};"
-          >
-            {abnormal}
-          </span>
-        {/if}
-      </span>
-      {#if model.label}
-        <span class="tile-state">{model.label}</span>
-      {/if}
-      <span class="tile-pct tabular-nums" class:off={!wled.on}>
-        {shownPct}<span class="tile-pct-unit"> %</span>
-      </span>
+    <div class="tile-bar" aria-hidden="true">
+      <div class="tile-bar-fill {model.anim}" style="animation-duration: {model.animDur}s;"></div>
+      <div class="tile-bar-tip"></div>
     </div>
 
-    <div class="tile-actions">
-      <label class="toggle-pill" aria-label="Allumer / éteindre l'éclairage terrasse">
-        <input
-          type="checkbox"
-          checked={wled.on}
-          onchange={(e) => {
-            haptic('light');
-            // L'interrupteur coupe la LUMIÈRE, pas le mode Musique : le serveur
-            // suspend le stream tant que le ruban est éteint.
-            wled.setOn((e.currentTarget as HTMLInputElement).checked);
-          }}
-        />
-        <span class="toggle-pill-knob"></span>
-      </label>
+    <!-- Surface de geste : glissé = luminosité, tap = feuille. `data-no-haptic`
+       car les retours sont déclenchés explicitement (accroche / tap). -->
+    <div
+      bind:this={surfEl}
+      class="tile-surface"
+      role="slider"
+      tabindex="0"
+      aria-label="Luminosité de l'éclairage terrasse"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={shownPct}
+      aria-valuetext="{shownPct} %"
+      aria-disabled={!wled.on}
+      data-no-haptic
+      data-swipe-ignore
+      onpointerdown={onPointerDown}
+      onpointermove={onPointerMove}
+      onpointerup={onPointerUp}
+      onpointercancel={onPointerCancel}
+      onkeydown={onKeydown}
+    ></div>
 
-      <button
-        type="button"
-        class="tile-more"
-        aria-label="Réglages de l'éclairage terrasse"
-        onclick={onopen}
-      >
+    <div class="tile-body">
+      <span class="tile-icon" aria-hidden="true">
         <svg
-          width="18"
-          height="18"
+          width="22"
+          height="22"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          stroke-width="2"
+          stroke-width="1.75"
           stroke-linecap="round"
-          aria-hidden="true"
+          stroke-linejoin="round"
         >
-          <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
-          <circle cx="16" cy="7" r="2" />
-          <circle cx="10" cy="17" r="2" />
+          <path d="M9 18h6" />
+          <path d="M10 22h4" />
+          <path d="M12 2a7 7 0 0 1 4 12.8c-.6.5-1 1.2-1 2v1H9v-1c0-.8-.4-1.5-1-2A7 7 0 0 1 12 2z" />
         </svg>
-      </button>
+      </span>
+
+      <div class="tile-text">
+        <!-- La carte regroupe les deux lumières de la terrasse : le lieu passe
+           en surtitre, les noms des appareils (« LEDS », « Spot ») deviennent
+           les titres — sinon les deux rangées n'ont plus d'identité propre. -->
+        <span class="tile-eyebrow">Terrasse</span>
+        <span class="tile-title">
+          LEDS
+          {#if abnormal}
+            <span
+              class="tile-badge"
+              style="color: {wled.connected ? 'var(--color-mandarine)' : 'var(--color-alert)'};"
+            >
+              {abnormal}
+            </span>
+          {/if}
+        </span>
+        {#if model.label}
+          <span class="tile-state">{model.label}</span>
+        {/if}
+        <span class="tile-pct tabular-nums" class:off={!wled.on}>
+          {shownPct}<span class="tile-pct-unit"> %</span>
+        </span>
+      </div>
+
+      <div class="tile-actions">
+        <label class="toggle-pill" aria-label="Allumer / éteindre l'éclairage terrasse">
+          <input
+            type="checkbox"
+            checked={wled.on}
+            onchange={(e) => {
+              haptic('light');
+              // L'interrupteur coupe la LUMIÈRE, pas le mode Musique : le serveur
+              // suspend le stream tant que le ruban est éteint.
+              wled.setOn((e.currentTarget as HTMLInputElement).checked);
+            }}
+          />
+          <span class="toggle-pill-knob"></span>
+        </label>
+
+        <button
+          type="button"
+          class="tile-more"
+          aria-label="Réglages de l'éclairage terrasse"
+          onclick={onopen}
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+            <circle cx="16" cy="7" r="2" />
+            <circle cx="10" cy="17" r="2" />
+          </svg>
+        </button>
+      </div>
     </div>
   </div>
+
+  {#if spot}
+    <!-- ═══ Spot — même lieu, autre lumière. Rangée sobre et parallèle à
+         l'en-tête du ruban ([icône] [nom] … [interrupteur]) : c'est un simple
+         on/off Matter, il n'a ni niveau ni réglages à porter. ═══ -->
+    <div class="spot-row">
+      <span class="spot-icon" class:on={spotOn && spot.available} aria-hidden="true">
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M7 4h10l-1.6 5.5H8.6z" />
+          <path d="M12 12.5v3M8.2 12.8l-1.4 2.4M15.8 12.8l1.4 2.4" />
+        </svg>
+      </span>
+      <span class="spot-name">Spot</span>
+      {#if !spot.available}
+        <span class="spot-badge" style="color: var(--color-alert);">Hors ligne</span>
+      {/if}
+      <label class="toggle-pill" aria-label="Allumer / éteindre le spot de la terrasse">
+        <input type="checkbox" checked={spotOn} disabled={!spot.available} onchange={toggleSpot} />
+        <span class="toggle-pill-knob"></span>
+      </label>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -495,13 +596,19 @@
   .tile {
     position: relative;
     overflow: hidden;
-    min-height: 128px;
     border-width: 1px;
     border-style: solid;
     border-radius: var(--radius-2xl);
     /* Repos neutre quand la musique ne pilote pas la lueur. */
     --mvol: 0.5;
     transition: --lvl var(--duration-normal) var(--ease-default);
+  }
+  /* Bloc LEDS : le référent de position de TOUTES les couches lumineuses
+     (elles sont en `inset: 0`) et de la surface de geste. La rangée Spot vit
+     hors de lui, donc hors du lavage et hors du glissé de luminosité. */
+  .tile-light {
+    position: relative;
+    min-height: 128px;
   }
   /* Pendant le glissé, le niveau suit le doigt SANS interpolation. */
   .tile.dragging {
@@ -814,6 +921,15 @@
     flex-direction: column;
     gap: 2px;
   }
+  /* Surtitre du lieu — signature Yeldra (uppercase, tracking discret). */
+  .tile-eyebrow {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted-fg);
+    line-height: 1.2;
+  }
   .tile-title {
     display: flex;
     align-items: center;
@@ -853,6 +969,7 @@
     color: oklch(0.99 0.004 286);
     text-shadow: 0 1px 3px oklch(0.15 0.02 262 / 0.45);
   }
+  .tile.lit .tile-eyebrow,
   .tile.lit .tile-state,
   .tile.lit .tile-pct-unit {
     color: oklch(0.94 0.008 262);
@@ -892,6 +1009,50 @@
     align-self: stretch;
     pointer-events: auto;
   }
+  /* ─── Rangée Spot ────────────────────────────────────────────────────── */
+  /* Hors du bloc lumineux : fond de carte nu, séparé par un filet. La lumière
+     du ruban ne doit pas déteindre dessus — ce sont deux appareils. */
+  .spot-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--color-border);
+  }
+  .spot-icon {
+    display: flex;
+    height: 36px;
+    width: 36px;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-lg);
+    background: var(--color-consumption-muted);
+    color: var(--color-consumption);
+    transition:
+      background-color var(--duration-normal) var(--ease-default),
+      color var(--duration-normal) var(--ease-default);
+  }
+  .spot-icon.on {
+    background: var(--color-primary);
+    color: var(--color-primary-fg);
+  }
+  .spot-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .spot-badge {
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
   .tile-more {
     display: inline-flex;
     height: 36px;
@@ -965,6 +1126,7 @@
     .tile-bar-fill,
     .tile-bar-tip,
     .tile-icon,
+    .spot-icon,
     .toggle-pill-knob,
     .toggle-pill-knob::after {
       transition: none;

@@ -145,8 +145,23 @@
   const chargeurSwitch = $derived(
     matter.commandableSwitches.find((s) => /chargeur|charger/i.test(s.name)) ?? null
   );
+  // ─── Spot de la terrasse ───────────────────────────────────────────────
+  // Il rejoint le ruban WLED dans la carte « Terrasse » (LEDS + Spot) : les
+  // deux lumières d'un même lieu se commandent au même endroit. Il est donc
+  // RETIRÉ de la grille générique plus bas, sinon il s'y afficherait en double.
+  // Reconnu par son NOM (nom + pièce), pas par son nodeId : celui-ci est
+  // attribué à la commission et n'est pas connu d'avance.
+  const terraceSpot = $derived(
+    matter.commandableSwitches.find(
+      (s) => /spot/i.test(`${s.name} ${s.room}`) && /terrasse/i.test(`${s.name} ${s.room}`)
+    ) ??
+      matter.commandableSwitches.find((s) => /spot/i.test(s.name)) ??
+      null
+  );
   const restSwitches = $derived(
-    matter.commandableSwitches.filter((s) => s !== bureauSwitch && s !== chargeurSwitch)
+    matter.commandableSwitches.filter(
+      (s) => s !== bureauSwitch && s !== chargeurSwitch && s !== terraceSpot
+    )
   );
   const atelierDevice = $derived(
     flatZigbeeOthers.find(
@@ -352,9 +367,11 @@
     {/if}
   {/if}
 
-  <!-- ═══ Éclairage terrasse (WLED — QuinLed Dig-Uno) — indépendant de Matter,
-       donc HORS du bloc conditionnel ci-dessus (toujours visible). ═══ -->
-  <WledCard />
+  <!-- ═══ Terrasse — LEDS (WLED, QuinLed Dig-Uno) + Spot (Matter). Le ruban est
+       indépendant de Matter, la carte reste donc HORS du bloc conditionnel
+       ci-dessus (toujours visible) ; la rangée Spot, elle, n'apparaît que si le
+       spot est appairé. ═══ -->
+  <WledCard spot={terraceSpot} />
 
   <!-- ═══ Imprimante — descendue sous l'éclairage terrasse : on la consulte
        (niveaux d'encre), on ne la commande pas au quotidien. Elle sort du bloc
