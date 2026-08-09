@@ -5,6 +5,14 @@
 > sur surplus réel). Aucune valeur supposée : tout est confirmé par Laurent.
 >
 > État : étape 1 verrouillée · étapes 2–6 en cours.
+>
+> ⚠️ **MISE À JOUR 2026-08-09 — le parc a changé.** La Solarbank **Max AC**
+> (7,1 kWh, 3 540 W), ajoutée après la rédaction de cette fiche et jamais
+> intégrée ici, a été **retirée de l'installation**. Le **Smart Meter Gen 2** est
+> passé sur le système des 2 SB3, qui sont désormais en **autoconsommation** (elles
+> régulent le compteur elles-mêmes) et **bridées à 800 W chacune jusqu'à la
+> validation Consuel**. Les puissances des §2 et §6 ci-dessous intègrent ce
+> bridage ; 🔁 remettre 1 200 W par SB3 quand il sera levé.
 
 ## 1. Production solaire ✅ (verrouillée 2026-06-30)
 
@@ -13,9 +21,9 @@
 | Onduleur          | Panneaux   | Orientation | Crête    | Écrêtage AC (sortie) |
 | ----------------- | ---------- | ----------- | -------- | -------------------- |
 | **APsystems EZ1** | 2 × 585 Wc | **Sud**     | 1 170 Wc | **900 W**            |
-| **SolarBank #1**  | 2 × 585 Wc | **Sud**     | 1 170 Wc | **1 200 W**          |
-| **SolarBank #2**  | 2 × 500 Wc | **Ouest**   | 1 000 Wc | **1 200 W**          |
-| **Total**         | 6 panneaux | Sud + Ouest | 3 340 Wc | **3 300 W** (somme)  |
+| **SolarBank #1**  | 2 × 585 Wc | **Sud**     | 1 170 Wc | **800 W** (bridage)  |
+| **SolarBank #2**  | 2 × 500 Wc | **Ouest**   | 1 000 Wc | **800 W** (bridage)  |
+| **Total**         | 6 panneaux | Sud + Ouest | 3 340 Wc | **2 500 W** (somme)  |
 
 - **Sud** = 4 × 585 = 2 340 Wc (EZ1 + SB#1, côte à côte) → produit surtout en milieu de journée.
 - **Ouest** = 2 × 500 = 1 000 Wc (SB#2) → produit surtout en fin d'après-midi / soir.
@@ -30,20 +38,20 @@
 
 2 SolarBank, **2,68 kWh chacune → 5,36 kWh** au total.
 
-| Par SolarBank | Valeur                                   |
-| ------------- | ---------------------------------------- |
-| Capacité      | 2,68 kWh                                 |
-| Charge max    | 1 800 W                                  |
-| Décharge max  | **1 200 W**                              |
-| SoC mini      | **10 %** (pas de plafond → charge 100 %) |
+| Par SolarBank | Valeur                                        |
+| ------------- | --------------------------------------------- |
+| Capacité      | 2,68 kWh                                      |
+| Charge max    | 1 800 W                                       |
+| Décharge max  | **800 W** (bridage Consuel ; 1 200 W nominal) |
+| SoC mini      | **10 %** (pas de plafond → charge 100 %)      |
 
 - **Énergie utile** (100 %→10 %) : 2,41 kWh / SolarBank → **4,82 kWh utile au total**.
-- **Décharge max totale : 2 400 W** (1 200 × 2) — confirme la conf Domo `batteryMaxDischargeW = 2400`.
+- **Décharge max totale : 1 600 W** (800 × 2) sous bridage — 2 400 W une fois levé. Conf Domo : `sb3loop.maxPresetW = 1600`.
 - **Stratégie Anker** : surplus → **maison d'abord, puis charge batterie** ; la nuit, **les batteries alimentent la maison jusqu'à 10 %**.
 
 **Implications clés (déterminantes pour le pilotage) :**
 
-- ⚠️ **Sortie AC max de TOUT le système ≈ 3 300 W** (EZ1 900 + SB1 1 200 + SB2 1 200), **batterie comprise** — plafond physique. Le cumulus tire 3 000 W : dès que la maison consomme ≥ ~300 W en parallèle, **on dépasse 3 300 W → import réseau inévitable** pendant la chauffe. Chauffer le cumulus n'est donc **jamais 100 % gratuit** s'il y a de la conso maison simultanée.
+- ⚠️ **Sortie AC max de TOUT le système = 2 500 W** (EZ1 900 + SB1 800 + SB2 800), **batterie comprise** — plafond physique sous bridage Consuel. Le cumulus tire 2 900 W : **l'import réseau est désormais STRUCTUREL pendant toute chauffe de jour** (600 à 1 000 W selon le soleil et la maison), et non plus seulement quand la maison consomme. C'est ce qui a conduit Laurent à assouplir temporairement la règle « zéro import cumulus » le 09/08 (seuils de coupure relevés à 1 200 / 2 000 W) : la chauffe solaire avec achat revient à ≈ 0,04 €/kWh contre 0,1812 € en heures creuses.
 - ⚠️ **La batterie est la réserve du soir/nuit de la maison.** Mettre un kWh de batterie dans le cumulus = un kWh que la maison **rachètera au réseau plus tard** (elle se vide à 2,4 kW → 4,82 kWh épuisés en ~2 h). → le planificateur doit traiter la batterie comme **précieuse, pas gratuite**.
 - Conséquence : le seul créneau vraiment **gratuit** pour le cumulus = **surplus PV réel instantané** (PV − conso maison), batterie déjà pleine. C'est précisément ce que le 2b doit mesurer.
 
@@ -116,4 +124,4 @@
 2. **Batterie précieuse** : ne pas la vider pour le cumulus (réserve du soir).
 3. **Délester** : pas de chauffe si la maison consomme (surplus réel ≤ 0) ou si on frôle 6 kVA.
 4. **Garantir 2 douches le matin** : recharger la veille (solaire de préférence, HC sinon), jamais en HP.
-5. **Plafond physique 3 300 W** de sortie système : la chauffe (3 kW) déborde dès qu'il y a de la conso maison.
+5. **Plafond physique 2 500 W** de sortie système sous bridage Consuel : la chauffe (2,9 kW) déborde **toujours** — achat structurel assumé jusqu'à la levée du bridage.
