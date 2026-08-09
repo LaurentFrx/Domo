@@ -31,6 +31,20 @@ jobs:
             set -euo pipefail
             cd /home/laurent/domo
             git fetch --prune origin
+            # Filet de sûreté. Le dossier de prod est aussi un dépôt git : la moindre
+            # modif non commitée y fait échouer `git checkout -B` et bloque TOUS les
+            # déploiements suivants (arrivé le 04/08/2026, runs #268 et #269 — le
+            # service reste alors en vie sur une vieille version, sans rien signaler).
+            # On la met de côté au lieu de mourir. `stash push -u` ne touche pas les
+            # fichiers ignorés : .env et data/ (état vivant) sont saufs.
+            if [ -n "$(git status --porcelain)" ]; then
+              echo "[deploy] ⚠ modifications locales dans /home/laurent/domo — mises de côté :"
+              git status --short
+              git stash push -u -m "auto-deploy $(git rev-parse --short origin/main)"
+              # `pop` peut conflicter si le travail local recouvrait l'amont ; l'entrée
+              # de stash est alors conservée, donc rien n'est jamais perdu.
+              echo "[deploy] rien n'est perdu — inspecter : cd /home/laurent/domo && git stash list && git stash show -p stash@{0}"
+            fi
             git checkout -B main origin/main
             pnpm install --frozen-lockfile
             pnpm build
