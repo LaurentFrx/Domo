@@ -14,7 +14,7 @@ import Database from 'better-sqlite3';
 import { env } from '$env/dynamic/private';
 import { isMqttConnected } from '$lib/server/mqtt';
 import { raiseIncident, resolveIncident, type RaiseInput, type Severity } from './incidents';
-import { readAnkerMeter } from '$lib/server/anker-modbus';
+import { readAnkerMeter, readAnkerSolarbank } from '$lib/server/anker-modbus';
 
 // Seuils (secondes). Le recorder tique ~30 s ; le cloud Solix se rafraîchit ~60 s.
 const RECORDER_STALE_S = 240; // > 8 cycles manqués = recorder réellement figé
@@ -151,12 +151,22 @@ export async function runProbes(): Promise<ProbeSummary> {
     });
   }
 
-  // ── Smart Meter Gen 2 en Modbus LOCAL (tunnel 1502) ──
-  //    Sonde du seul contrôle croisé du EM-50. Import direct du module (pas
-  //    d'HTTP) ; readAnkerMeter ne rejette jamais (offline ⇒ available:false).
-  //    La sonde `anker-local-sb:down` a été retirée le 09/08/2026 avec la Max AC.
+  // ── Anker Solix en Modbus LOCAL (Max AC + Gen 2, tunnels 1502/1503) ──
+  //    Le SoC/flux batterie de l'accueil et le socAvg du pilote cumulus
+  //    fusionnent la Max AC locale (ABSENTE de batteries[] du cloud) : local
+  //    down = retour silencieux au cloud seul (parc incomplet) → on veut le
+  //    VOIR. Import direct du module (pas d'HTTP) ; readAnker* ne rejettent
+  //    jamais (offline ⇒ available:false).
   {
-    const meterLocal = await readAnkerMeter();
+    const [sbLocal, meterLocal] = await Promise.all([readAnkerSolarbank(), readAnkerMeter()]);
+    assess(!sbLocal.available, {
+      key: 'anker-local-sb:down',
+      severity: 'warning',
+      source: 'anker',
+      kind: 'unreachable',
+      message:
+        'Batterie Solarbank Max AC injoignable en local — SoC/flux du parc incomplets (cloud seul)'
+    });
     assess(!meterLocal.available, {
       key: 'anker-local-meter:down',
       severity: 'warning',

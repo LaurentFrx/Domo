@@ -93,19 +93,34 @@
     if (!batteryOnline) out.push('Batteries sans réponse');
     return out;
   });
-  // ─── Batterie : les 2 SB3 du cloud ───────────────────────────────────────
-  // La fusion avec la Max AC lue en Modbus a été retirée le 09/08/2026 avec la
-  // batterie elle-même. ⚠️ Elle répondait ENCORE en Modbus après son
-  // débranchement (batterie interne + Wi-Fi) : la garder aurait affiché une
-  // troisième barre à 89 % et pondéré le SoC du parc avec 7,1 kWh inertes.
-  const batteryOnline = $derived(anker.connected);
-  /** Garde : si le cloud relistait un jour une Max AC (A17E2), on l'ignore. */
+  // ─── Batterie : fusion cloud + LOCAL (Modbus Max AC) ─────────────────────
+  // Depuis la reconfiguration des systèmes Anker (22/07), le bridge cloud
+  // liste les TROIS batteries dans batteries[] — Max AC (A17E2) comprise.
+  // Quand la lecture Modbus locale est up, elle PRIME pour la Max AC
+  // (fraîcheur 2,5 s ici vs ~60 s cloud) : on DÉDUPLIQUE donc l'entrée cloud
+  // A17E2 pour ne pas compter la Max AC deux fois (SoC pondéré, flux, stock).
+  //   SoC parc = pondéré par CAPACITÉ (SB3 cloud + Max AC locale) ;
+  //   flux = per-unit SB3 cloud + Max AC locale temps réel.
+  // Repli intégral sur le cloud (désormais complet) si le local est
+  // injoignable, et sur le local seul si le cloud est down.
+  const localBatteryUp = $derived(ankerLocal.sbAvailable && ankerLocal.ratedEnergyWh > 0);
+  const batteryOnline = $derived(anker.connected || localBatteryUp);
+  /** Batteries cloud SANS la Max AC (A17E2) — sa vérité vient du Modbus local. */
   const cloudSb3 = $derived(anker.batteries.filter((b) => b.model !== 'A17E2'));
   const batterySoc = $derived.by(() => {
-    if (!anker.connected) return 0;
-    const den = cloudSb3.reduce((s, b) => s + b.capacityWh, 0);
-    if (den <= 0) return anker.averageSoc ?? 0;
-    return cloudSb3.reduce((s, b) => s + b.soc * b.capacityWh, 0) / den;
+    if (anker.connected && localBatteryUp) {
+      const num =
+        cloudSb3.reduce((s, b) => s + b.soc * b.capacityWh, 0) +
+        ankerLocal.socPct * ankerLocal.ratedEnergyWh;
+      const den = cloudSb3.reduce((s, b) => s + b.capacityWh, 0) + ankerLocal.ratedEnergyWh;
+      return den > 0 ? num / den : ankerLocal.socPct;
+    }
+    if (localBatteryUp) return ankerLocal.socPct;
+    // Aucune source batterie : 0, et non plus une valeur fictive. L'affichage est
+    // déjà gardé par `batteryOnline`, mais la valeur inventée circulait quand même
+    // (tweenée puis passée au Sankey) — bombe amorcée pour le premier qui
+    // l'afficherait sans garde.
+    return anker.connected ? (anker.averageSoc ?? 0) : 0;
   });
   // ── Flux des SB3 RECONSTRUITS par bilan physique (les champs cloud sont CASSÉS) ──
   // `charging_power_w` / `discharging_power_w` par unité valent ≈ TOUJOURS 0 côté cloud.
@@ -200,7 +215,7 @@
   const HOUSE_FLOOR_W = 120;
 
   /**
-   * Flux batterie (W) — SB3 reconstruits, puis FERMETURE du bilan.
+   * Flux batterie (W) — SB3 reconstruits, Max AC mesurée, puis FERMETURE du bilan.
    * La conso Maison n'est mesurée nulle part (l'EM-50 ne voit que réseau + cumulus) :
    * elle est forcément déduite. Elle n'est donc juste que si TOUS les autres flux le
    * sont — or la sortie AC des SB3 est la seule grandeur ni mesurée ni fiable côté
@@ -212,7 +227,10 @@
    * Tout écart résiduel est réattribué à la charge SB3 (l'inconnue), jamais à la Maison.
    */
   const battFlow = $derived.by((): { charge: number; discharge: number; perPack: number[] } => {
-    if (!anker.connected) {
+    if (!localBatteryUp) {
+      // Repli DÉGRADÉ (Modbus Max AC injoignable) : agrégats cloud, eux aussi peu fiables.
+      if (anker.connected)
+        return { charge: anker.batteryChargeW, discharge: anker.batteryDischargeW, perPack: [] };
       // Plus AUCUNE source batterie : ne rien peindre. C'étaient deux constantes
       // arbitraires (400 W de charge ou 600 W de décharge) — le Sankey affichait
       // donc « Batterie · charge 400 W » pendant que la carte Batterie juste
@@ -245,18 +263,20 @@
       const roomWh = Math.max(0, b.capacityWh * (1 - Math.min(1, Math.max(0, b.soc) / 100)));
       return Math.min(n, roomWh / SB3_FILL_HORIZON_H);
     });
+    const maxAcCharge = Math.max(0, -ankerLocal.batteryPowerW);
+    const maxAcDischarge = Math.max(0, ankerLocal.batteryPowerW);
     let sb3Charge = perPack.reduce((s, n) => s + Math.max(0, n), 0);
-    const discharge = perPack.reduce((s, n) => s + Math.max(0, -n), 0);
+    const discharge = perPack.reduce((s, n) => s + Math.max(0, -n), 0) + maxAcDischarge;
     // (c) contrainte 2 — fermeture : si la Maison déduite passe sous la veille, c'est
     // que la charge SB3 est surestimée (le pack sortait en AC) → on la réduit d'autant.
-    const home = pvSudW + pvOuestW + gridPowerW - (sb3Charge - discharge) - cumulusW;
+    const home = pvSudW + pvOuestW + gridPowerW - (sb3Charge + maxAcCharge - discharge) - cumulusW;
     if (home < HOUSE_FLOOR_W && sb3Charge > 0) {
       const cut = Math.min(sb3Charge, HOUSE_FLOOR_W - home);
       const k = (sb3Charge - cut) / sb3Charge;
       for (let i = 0; i < perPack.length; i++) if (perPack[i] > 0) perPack[i] *= k;
       sb3Charge -= cut;
     }
-    return { charge: sb3Charge, discharge, perPack };
+    return { charge: sb3Charge + maxAcCharge, discharge, perPack };
   });
 
   // Charge (→ usage) et décharge (→ apport) SÉPARÉES. Le Sankey peut ainsi
@@ -264,8 +284,9 @@
   const batteryChargeW = $derived(battFlow.charge);
   const batteryDischargeW = $derived(battFlow.discharge);
 
-  // Détail PAR PACK : les 2 Solarbank 3. Sert à ÉCLATER le nœud Batterie du Sankey
-  // ET à la carte Charge. SoC = donnée fiable ; charge/décharge = best-effort.
+  // Détail PAR PACK : les 2 Solarbank 3 (cloud, hors A17E2) + la Max AC (Modbus local
+  // prioritaire, sinon repli cloud). Sert à ÉCLATER le nœud Batterie du Sankey ET à la
+  // carte Charge. SoC = donnée fiable ; charge/décharge = best-effort (indicateur).
   interface BatteryDetail {
     label: string;
     soc: number;
@@ -292,6 +313,23 @@
         dischargeW: Math.max(0, -(battFlow.perPack[i] ?? 0))
       })
     );
+    if (localBatteryUp) {
+      out.push({
+        label: 'Max AC',
+        soc: ankerLocal.socPct,
+        chargeW: Math.max(0, -ankerLocal.batteryPowerW),
+        dischargeW: Math.max(0, ankerLocal.batteryPowerW)
+      });
+    } else {
+      const max = anker.batteries.find((b) => b.model === 'A17E2');
+      if (max)
+        out.push({
+          label: 'Max AC',
+          soc: max.soc,
+          chargeW: Math.max(0, max.chargingPowerW),
+          dischargeW: Math.max(0, max.dischargingPowerW)
+        });
+    }
     return out;
   });
 
@@ -349,7 +387,7 @@
     if (homePageActive) {
       em50.setBoost(2500);
       apsystems.setBoost(5000);
-      ankerLocal.setBoost(2500); // Gen 2 en Modbus LAN : boost sans risque
+      ankerLocal.setBoost(2500); // Max AC + Gen 2 en Modbus LAN : boost sans risque
     } else {
       em50.clearBoost();
       apsystems.clearBoost();
@@ -420,9 +458,17 @@
       ? 0
       : Math.max(0, capacityWh * (Math.min(100, Math.max(0, socPct)) - RESERVE_PCT)) / 100;
 
-  const usableKwh = $derived(
-    cloudSb3.reduce((sum, b) => sum + usableWhOf(b.soc, b.capacityWh), 0) / 1000
-  );
+  // Local up : SB3 cloud (sans l'entrée Max AC, dédupliquée) + Max AC locale.
+  // Local down : les batteries du cloud, qui incluent désormais la Max AC.
+  const usableKwh = $derived.by(() => {
+    const packs = localBatteryUp
+      ? [
+          ...cloudSb3.map((b) => ({ soc: b.soc, cap: b.capacityWh })),
+          { soc: ankerLocal.socPct, cap: ankerLocal.ratedEnergyWh }
+        ]
+      : anker.batteries.map((b) => ({ soc: b.soc, cap: b.capacityWh }));
+    return packs.reduce((sum, p) => sum + usableWhOf(p.soc, p.cap), 0) / 1000;
+  });
 
   // ─── Bilan énergie du JOUR — répartition de toute l'énergie brassée ──────
   // 3 parts d'un même total (= 100 %) : solaire autoconsommé + surplus renvoyé
@@ -484,7 +530,7 @@
     <!-- Carte Batterie définie en snippet → rendue à 2 endroits : au-dessus du
          Sankey sur mobile, dans la colonne stats droite dès lg. -->
     {#snippet batteryCard()}
-      <!-- ═══ Batterie — SOC parc + une barre par pack (SB3 Sud / SB3 Ouest) ═══ -->
+      <!-- ═══ Batterie — SOC parc + 3 barres par pack (SB3-1 / SB3-2 / Max AC) ═══ -->
       <div
         class="bat-card flex flex-col gap-3 rounded-[var(--radius-xl)] border px-4 py-3"
         class:is-charging={batteryOnline && batChargeA > 1}
@@ -556,7 +602,7 @@
             {/if}
           </div>
         </div>
-        <!-- Les 2 batteries EN BARRES DE PROGRESSION : SB3 Sud / SB3 Ouest -->
+        <!-- Les 3 batteries EN BARRES DE PROGRESSION : SB3-1 / SB3-2 / Max AC -->
         {#if batteryOnline && batteryDetail.length}
           <!-- Pas de filet de séparation : l'espacement suffit à détacher les barres
                du résumé, et un trait de plus dans une carte de verre l'alourdit. -->

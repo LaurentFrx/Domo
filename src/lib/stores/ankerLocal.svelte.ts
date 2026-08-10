@@ -1,20 +1,38 @@
 /**
- * Store Anker Solix LOCAL (Modbus TCP via /api/anker-local/status) — Smart
- * Meter Gen 2 seul (réseau signé, contrôle croisé du EM-50). Lecture 100 %
- * locale : ni le cloud Solix, ni sa latence ~60 s, ni ses SoC fantômes.
- *
- * Le bloc Solarbank Max AC a disparu le 09/08/2026 avec la batterie elle-même.
+ * Store Anker Solix LOCAL (Modbus TCP via /api/anker-local/status) — Solarbank
+ * Max AC (SOC, flux, mode) + Smart Meter Gen 2 (réseau signé, contrôle croisé
+ * du EM-50). Lecture 100 % locale : ni le cloud Solix, ni sa latence ~60 s,
+ * ni ses SoC fantômes — c'est le pendant temps réel du store `anker` (cloud).
  *
  * Calqué STRICTEMENT sur le store em50 : poll 10 s visibility-aware (pause en
  * arrière-plan + refetch au retour au premier plan), conserve le dernier
- * snapshot en cas d'erreur réseau (la route répond 200 quoi qu'il arrive,
- * `available` fait foi).
+ * snapshot en cas d'erreur réseau, disponibilité par device dans le payload
+ * (un device down ne masque pas l'autre — la route répond 200 quoi qu'il
+ * arrive, `available` fait foi par bloc).
  *
- * Convention de signe (alignée EM-50) :
- *   meterGridPowerW : + soutirage EDF / − injection PV.
+ * Conventions de signe (alignées EM-50) :
+ *   meterGridPowerW : + soutirage EDF / − injection PV ;
+ *   batteryPowerW / acPowerW : + décharge vers la maison / − charge.
  */
 
 // ─── Contrat de /api/anker-local/status ─────────────────────────────────
+interface SolarbankBlock {
+  available: boolean;
+  soc_pct: number;
+  battery_power_w: number;
+  ac_power_w: number;
+  pv_power_w: number;
+  load_power_w: number;
+  battery_status: 'standby' | 'charging' | 'discharging' | 'sleep' | 'unknown';
+  mode: string;
+  mode_raw: number;
+  /** Capacité nominale (Wh) — la Max AC est ABSENTE de batteries[] côté cloud :
+   *  cette capacité sert à la réintégrer dans le SoC/stock du parc (accueil). */
+  rated_energy_wh: number;
+  /** Énergie stockée estimée (Wh) = soc × rated / 100. */
+  energy_wh: number;
+}
+
 interface MeterBlock {
   available: boolean;
   grid_power_w: number;
@@ -22,6 +40,7 @@ interface MeterBlock {
 }
 
 interface AnkerLocalStatus {
+  solarbank: SolarbankBlock;
   meter: MeterBlock;
   em50_grid_w: number | null;
   grid_deviation_w: number | null;
@@ -35,10 +54,34 @@ const REFRESH_MS = 10_000;
 const TIMEOUT_MS = 9_000;
 
 const EMPTY: AnkerLocalStatus = {
+  solarbank: {
+    available: false,
+    soc_pct: 0,
+    battery_power_w: 0,
+    ac_power_w: 0,
+    pv_power_w: 0,
+    load_power_w: 0,
+    battery_status: 'unknown',
+    mode: 'unknown',
+    mode_raw: -1,
+    rated_energy_wh: 0,
+    energy_wh: 0
+  },
   meter: { available: false, grid_power_w: 0, voltage_v: 0 },
   em50_grid_w: null,
   grid_deviation_w: null,
   ts: 0
+};
+
+/** Libellés FR des modes de la Solarbank (clés du YAML officiel Anker). */
+const MODE_LABELS: Record<string, string> = {
+  self_consumption: 'Autoconsommation',
+  tou_mode: 'Heures creuses',
+  third_party_control: 'Pilotage externe',
+  custom_mode: 'Personnalisé',
+  socket_overlay_mode: 'Prise pilotée',
+  smart_mode: 'Intelligent',
+  dynamic_pricing: 'Tarif dynamique'
 };
 
 class AnkerLocalState {
@@ -62,6 +105,52 @@ class AnkerLocalState {
   /** La route répond (dernier poll réussi). */
   get connected(): boolean {
     return this.#ok;
+  }
+
+  // Solarbank Max AC
+  /** Solarbank joignable en Modbus local. */
+  get sbAvailable(): boolean {
+    return this.#ok && this.#snap.solarbank.available;
+  }
+  /** État de charge batterie (%). */
+  get socPct(): number {
+    return this.#snap.solarbank.soc_pct;
+  }
+  /** Puissance batterie signée (W) : + décharge vers la maison / − charge. */
+  get batteryPowerW(): number {
+    return this.#snap.solarbank.battery_power_w;
+  }
+  /** Sortie AC signée (W), même convention que batteryPowerW. */
+  get acPowerW(): number {
+    return this.#snap.solarbank.ac_power_w;
+  }
+  /** PV total vu par la Solarbank (W). */
+  get pvPowerW(): number {
+    return this.#snap.solarbank.pv_power_w;
+  }
+  /** Conso maison vue par la Solarbank (W). */
+  get loadPowerW(): number {
+    return this.#snap.solarbank.load_power_w;
+  }
+  /** État batterie brut (standby / charging / discharging / sleep / unknown). */
+  get batteryStatus(): SolarbankBlock['battery_status'] {
+    return this.#snap.solarbank.battery_status;
+  }
+  /** Mode actif (clé technique, ex. self_consumption). */
+  get mode(): string {
+    return this.#snap.solarbank.mode;
+  }
+  /** Mode actif en français (pour l'UI). */
+  get modeLabel(): string {
+    return MODE_LABELS[this.#snap.solarbank.mode] ?? this.#snap.solarbank.mode;
+  }
+  /** Capacité nominale de la Max AC (Wh) — 0 tant que rien n'a été lu. */
+  get ratedEnergyWh(): number {
+    return this.#snap.solarbank.rated_energy_wh;
+  }
+  /** Énergie stockée estimée dans la Max AC (Wh). */
+  get energyWh(): number {
+    return this.#snap.solarbank.energy_wh;
   }
 
   // Smart Meter Gen 2 (contrôle croisé du EM-50 — PAS la source de vérité)
@@ -161,6 +250,7 @@ class AnkerLocalState {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as AnkerLocalStatus;
       this.#snap = {
+        solarbank: { ...EMPTY.solarbank, ...data.solarbank },
         meter: { ...EMPTY.meter, ...data.meter },
         em50_grid_w: data.em50_grid_w ?? null,
         grid_deviation_w: data.grid_deviation_w ?? null,

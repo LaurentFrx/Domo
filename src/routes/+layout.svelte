@@ -207,9 +207,10 @@
     return () => em50.disconnect();
   });
 
-  // ─── Anker Solix LOCAL (Modbus : Smart Meter Gen 2) ──
-  // App-wide : le contrôle croisé réseau du Gen 2 contre le EM-50, consommé
-  // par la tuile /energie. Poll 10 s, visibility-aware, idempotent.
+  // ─── Anker Solix LOCAL (Modbus : Solarbank Max AC + Smart Meter Gen 2) ──
+  // App-wide : le SoC/flux batterie de l'ACCUEIL fusionne la Max AC locale
+  // (absente de batteries[] du cloud) avec les Solarbank 3 cloud — la tuile
+  // /energie le consomme aussi. Poll 10 s, visibility-aware, idempotent.
   $effect(() => {
     ankerLocal.connect();
     return () => ankerLocal.disconnect();

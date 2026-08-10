@@ -6,24 +6,27 @@
 >
 > État : étape 1 verrouillée · étapes 2–6 en cours.
 >
-> ⚠️ **MISE À JOUR 2026-08-09 — le parc a changé.** La Solarbank **Max AC**
-> (7,1 kWh, 3 540 W), ajoutée après la rédaction de cette fiche et jamais
-> intégrée ici, a été **retirée de l'installation**. Le **Smart Meter Gen 2** est
-> passé sur le système des 2 SB3, qui sont désormais en **autoconsommation** (elles
-> régulent le compteur elles-mêmes) et **bridées à 800 W chacune jusqu'à la
-> validation Consuel**. Les puissances des §2 et §6 ci-dessous intègrent ce
-> bridage ; 🔁 remettre 1 200 W par SB3 quand il sera levé.
+> ⚠️ **MISE À JOUR 2026-08-10 — la fiche datait d'avant la Solarbank Max AC.**
+> Le parc comporte une **Max AC (A17E2, 7,1 kWh)** couplée **AC** : aucun panneau
+> ne lui est raccordé, elle se recharge par sa prise Schuko depuis le bus AC de la
+> maison. Elle porte le **Smart Meter Gen 2** et régule le compteur à zéro-export en
+> quelques secondes ; les 2 SB3 sont en **plan personnalisé, pilotées par Domo**.
+>
+> **Bridage Consuel en cours** : SB3 **800 W chacune** (au lieu de 1 200) et Max AC
+> **800 W** (au lieu de 3 540), en attendant la validation NF C 15-100. Les §2 et §6
+> ci-dessous en tiennent compte. 🔁 À la levée : SB3 1 200, Max AC 3 540.
 
 ## 1. Production solaire ✅ (verrouillée 2026-06-30)
 
 **6 panneaux, 3 340 Wc crête, sur 3 onduleurs**, deux orientations :
 
-| Onduleur          | Panneaux   | Orientation | Crête    | Écrêtage AC (sortie) |
-| ----------------- | ---------- | ----------- | -------- | -------------------- |
-| **APsystems EZ1** | 2 × 585 Wc | **Sud**     | 1 170 Wc | **900 W**            |
-| **SolarBank #1**  | 2 × 585 Wc | **Sud**     | 1 170 Wc | **800 W** (bridage)  |
-| **SolarBank #2**  | 2 × 500 Wc | **Ouest**   | 1 000 Wc | **800 W** (bridage)  |
-| **Total**         | 6 panneaux | Sud + Ouest | 3 340 Wc | **2 500 W** (somme)  |
+| Onduleur             | Panneaux   | Orientation    | Crête    | Écrêtage AC (sortie) |
+| -------------------- | ---------- | -------------- | -------- | -------------------- |
+| **APsystems EZ1**    | 2 × 585 Wc | **Sud**        | 1 170 Wc | **900 W**            |
+| **SolarBank #1**     | 2 × 585 Wc | **Sud**        | 1 170 Wc | **800 W** (bridage)  |
+| **SolarBank #2**     | 2 × 500 Wc | **Ouest**      | 1 000 Wc | **800 W** (bridage)  |
+| **Solarbank Max AC** | _aucun_    | — (couplée AC) | —        | **800 W** (bridage)  |
+| **Total**            | 6 panneaux | Sud + Ouest    | 3 340 Wc | **3 300 W** (somme)  |
 
 - **Sud** = 4 × 585 = 2 340 Wc (EZ1 + SB#1, côte à côte) → produit surtout en milieu de journée.
 - **Ouest** = 2 × 500 = 1 000 Wc (SB#2) → produit surtout en fin d'après-midi / soir.
@@ -36,22 +39,27 @@
 
 ## 2. Stockage — batteries SolarBank ✅ (verrouillée 2026-06-30)
 
-2 SolarBank, **2,68 kWh chacune → 5,36 kWh** au total.
+2 SolarBank 3 Pro (**2,688 kWh chacune**) + 1 Solarbank **Max AC 7,1 kWh** → **12,5 kWh** au total.
 
 | Par SolarBank | Valeur                                        |
 | ------------- | --------------------------------------------- |
 | Capacité      | 2,68 kWh                                      |
 | Charge max    | 1 800 W                                       |
-| Décharge max  | **800 W** (bridage Consuel ; 1 200 W nominal) |
+| Décharge max  | **800 W** par SB3 (bridage ; 1 200 W nominal) |
 | SoC mini      | **10 %** (pas de plafond → charge 100 %)      |
 
-- **Énergie utile** (100 %→10 %) : 2,41 kWh / SolarBank → **4,82 kWh utile au total**.
-- **Décharge max totale : 1 600 W** (800 × 2) sous bridage — 2 400 W une fois levé. Conf Domo : `sb3loop.maxPresetW = 1600`.
+- **Énergie utile** (100 %→10 %) : 2,41 kWh / SB3 + 6,4 kWh Max AC → **11,2 kWh utile au total**.
+- **Décharge max totale : 2 400 W** sous bridage (800 × 3) — 5 940 W une fois levé.
+  Conf Domo : `sb3loop.maxPresetW = 1600` (consigne système des 2 SB3) et
+  `sb3loop.maxAcPowerW = 800` (borne du rééquilibrage vers la Max AC).
+- **La Max AC n'a AUCUN panneau** : tout ce qu'elle stocke vient du bus AC, donc du
+  surplus que les SB3 et l'APS y déversent. C'est ce qui lui permet de tenir le
+  compteur à zéro-export — mais avec une double conversion (~15-20 % de pertes).
 - **Stratégie Anker** : surplus → **maison d'abord, puis charge batterie** ; la nuit, **les batteries alimentent la maison jusqu'à 10 %**.
 
 **Implications clés (déterminantes pour le pilotage) :**
 
-- ⚠️ **Sortie AC max de TOUT le système = 2 500 W** (EZ1 900 + SB1 800 + SB2 800), **batterie comprise** — plafond physique sous bridage Consuel. Le cumulus tire 2 900 W : **l'import réseau est désormais STRUCTUREL pendant toute chauffe de jour** (600 à 1 000 W selon le soleil et la maison), et non plus seulement quand la maison consomme. C'est ce qui a conduit Laurent à assouplir temporairement la règle « zéro import cumulus » le 09/08 (seuils de coupure relevés à 1 200 / 2 000 W) : la chauffe solaire avec achat revient à ≈ 0,04 €/kWh contre 0,1812 € en heures creuses.
+- ⚠️ **Sortie AC max de TOUT le système = 3 300 W** sous bridage (EZ1 900 + SB1 800 + SB2 800 + Max AC 800), **batterie comprise**. Le cumulus tire 2 900 W : avec 200-400 W de maison en parallèle on est **à la limite**, et l'achat résiduel va de 0 à ~400 W selon le soleil. D'où les seuils de coupure relevés à 400 / 1 000 W le temps du bridage (au lieu de 150 / 500). Une fois le Consuel obtenu, le système remonte à 6 840 W et la chauffe redevient gratuite.
 - ⚠️ **La batterie est la réserve du soir/nuit de la maison.** Mettre un kWh de batterie dans le cumulus = un kWh que la maison **rachètera au réseau plus tard** (elle se vide à 2,4 kW → 4,82 kWh épuisés en ~2 h). → le planificateur doit traiter la batterie comme **précieuse, pas gratuite**.
 - Conséquence : le seul créneau vraiment **gratuit** pour le cumulus = **surplus PV réel instantané** (PV − conso maison), batterie déjà pleine. C'est précisément ce que le 2b doit mesurer.
 
@@ -124,4 +132,4 @@
 2. **Batterie précieuse** : ne pas la vider pour le cumulus (réserve du soir).
 3. **Délester** : pas de chauffe si la maison consomme (surplus réel ≤ 0) ou si on frôle 6 kVA.
 4. **Garantir 2 douches le matin** : recharger la veille (solaire de préférence, HC sinon), jamais en HP.
-5. **Plafond physique 2 500 W** de sortie système sous bridage Consuel : la chauffe (2,9 kW) déborde **toujours** — achat structurel assumé jusqu'à la levée du bridage.
+5. **Plafond physique 3 300 W** sous bridage Consuel : la chauffe (2,9 kW) déborde dès qu'il y a de la conso maison → achat résiduel 0-400 W assumé jusqu'à la levée du bridage.

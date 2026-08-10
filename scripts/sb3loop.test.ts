@@ -32,6 +32,7 @@ function inp(o: Partial<Sb3LoopInputs> = {}): Sb3LoopInputs {
     now: NOW,
     em50: { ok: true, gridW: 0 },
     aps: { ok: true, powerW: 0 },
+    maxac: { ok: true, socPct: 60, acNetW: 500, ratedEnergyWh: 7200 },
     cloud: {
       ok: true,
       freshS: 30,
@@ -59,6 +60,7 @@ test('RÈGLE 1 : un soutirage mesuré est couvert INTÉGRALEMENT, pas au prorata
   const d = decide(
     inp({
       em50: { ok: true, gridW: 1500 }, // 1,5 kW achetés à EDF, maintenant
+      maxac: { ok: true, socPct: 60, acNetW: 2000, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 0 }
     }),
     cfg,
@@ -78,6 +80,7 @@ test('RÈGLE 1 : batteries PLEINES en plein soleil → elles débitent, jamais d
       sunElevDeg: 55,
       aps: { ok: true, powerW: 650 },
       em50: { ok: true, gridW: 900 },
+      maxac: { ok: true, socPct: 73, acNetW: 1900, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3Packs: packs(100), sb3SocAvg: 100 }
     }),
     cfg,
@@ -89,6 +92,7 @@ test('RÈGLE 1 : batteries PLEINES en plein soleil → elles débitent, jamais d
 test('RÈGLE 1 : le plein soleil ne change RIEN à la loi (plus de mode jour)', () => {
   const commun = {
     em50: { ok: true, gridW: 0 },
+    maxac: { ok: true, socPct: 60, acNetW: 500, ratedEnergyWh: 7200 },
     cloud: { ...inp().cloud, sb3OutW: 800 }
   };
   const jour = decide(inp({ ...commun, sunElevDeg: 55 }), cfg, st({ lastCmdW: 0 }));
@@ -105,9 +109,73 @@ test('utilisable = capacité × (SoC − réserve), jamais négatif', () => {
   assert.equal(usableWh(60, 7200, 10), (7200 * 50) / 100);
 });
 
+test('RÈGLE 2 : la part suit le prorata d’énergie utilisable', () => {
+  // SB3 : 2 × 2688 × 0,9 = 4 838,4 Wh ; Max AC : 7 200 × 0,5 = 3 600 Wh
+  // Compteur à l'équilibre → on répartit les 2 000 W de batterie au prorata.
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: 0 },
+      // acNetW faible : on teste le RATIO, pas la borne de marge Max AC.
+      maxac: { ok: true, socPct: 60, acNetW: 200, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 800, sb3Packs: packs(100) }
+    }),
+    cfg,
+    st({ lastCmdW: 0 })
+  );
+  // La cible de partage est approchée par fractions (shareGain) pour ne pas
+  // bousculer l'équilibre du compteur : on vérifie la CONVERGENCE, pas un saut.
+  const attendu = 1000 * (4838.4 / (4838.4 + 3600));
+  let u = 0;
+  for (let i = 0; i < 40; i++) {
+    const r = decide(
+      inp({
+        em50: { ok: true, gridW: 0 },
+        maxac: { ok: true, socPct: 60, acNetW: 200, ratedEnergyWh: 7200 },
+        cloud: { ...inp().cloud, sb3OutW: 800, sb3Packs: packs(100) }
+      }),
+      cfg,
+      st({ lastCmdW: u })
+    );
+    u = r.writeW ?? u;
+  }
+  // précision attendue = deadbandW / shareGain
+  const tol = cfg.deadbandW / cfg.shareGain + 10;
+  assert.ok(Math.abs(u - attendu) <= tol, `converge vers ~${Math.round(attendu)} W, obtenu ${u}`);
+  assert.ok((d.writeW ?? 0) > 0 && (d.writeW ?? 0) < attendu, 'premier pas partiel');
+});
+
+test('RÈGLE 2 : Max AC à sa réserve → les SB3 prennent TOUT (part 100 %)', () => {
+  const d = decide(
+    inp({
+      maxac: { ok: true, socPct: 10, acNetW: 0, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 1000, sb3Packs: packs(80) }
+    }),
+    cfg,
+    st({ lastCmdW: 0 })
+  );
+  let u = 0;
+  for (let i = 0; i < 40; i++) {
+    const r = decide(
+      inp({
+        maxac: { ok: true, socPct: 10, acNetW: 0, ratedEnergyWh: 7200 },
+        cloud: { ...inp().cloud, sb3OutW: 1000, sb3Packs: packs(80) }
+      }),
+      cfg,
+      st({ lastCmdW: u })
+    );
+    u = r.writeW ?? u;
+  }
+  assert.ok(
+    Math.abs(u - 1000) <= cfg.deadbandW / cfg.shareGain + 10,
+    `la Max AC ne peut plus rien : converge vers 1000, obtenu ${u}`
+  );
+  assert.ok((d.writeW ?? 0) > 0, 'premier pas dans le bon sens');
+});
+
 test('RÈGLE 2 : SB3 à leur réserve → part 0, la Max AC assume', () => {
   const d = decide(
     inp({
+      maxac: { ok: true, socPct: 80, acNetW: 1000, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 0, sb3Packs: packs(10), sb3SocAvg: 10 }
     }),
     cfg,
@@ -116,9 +184,40 @@ test('RÈGLE 2 : SB3 à leur réserve → part 0, la Max AC assume', () => {
   assert.equal(d.writeW, 0);
 });
 
+test('RÈGLE 2 : deux packs DÉSÉQUILIBRÉS comptent chacun pour leur propre reste', () => {
+  const plein = decide(
+    inp({
+      maxac: { ok: true, socPct: 60, acNetW: 200, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 800, sb3Packs: packs(100) }
+    }),
+    cfg,
+    st({ lastCmdW: 0 })
+  );
+  const boiteux = decide(
+    inp({
+      maxac: { ok: true, socPct: 60, acNetW: 200, ratedEnergyWh: 7200 },
+      cloud: {
+        ...inp().cloud,
+        sb3OutW: 800,
+        sb3Packs: [
+          { socPct: 100, capacityWh: 2688 },
+          { socPct: 10, capacityWh: 2688 } // vide : ne contribue pas
+        ]
+      }
+    }),
+    cfg,
+    st({ lastCmdW: 0 })
+  );
+  assert.ok(
+    (boiteux.writeW ?? 0) < (plein.writeW ?? 0),
+    'un pack vide doit réduire la part SB3, pas être noyé dans une moyenne'
+  );
+});
+
 test('parc entièrement à plat → consigne 0 (rien à répartir)', () => {
   const d = decide(
     inp({
+      maxac: { ok: true, socPct: 8, acNetW: 0, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 0, sb3Packs: packs(9), sb3SocAvg: 9 }
     }),
     cfg,
@@ -133,6 +232,7 @@ test('RÈGLE 3 : un échelon de charge est suivi EN UNE SEULE écriture', () => 
   const d = decide(
     inp({
       em50: { ok: true, gridW: 2500 }, // le cumulus vient de démarrer
+      maxac: { ok: true, socPct: 10, acNetW: 0, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 0, sb3Packs: packs(100) }
     }),
     cfg,
@@ -145,6 +245,7 @@ test('RÈGLE 3 : aucune temporisation — une écriture à l’instant précéde
   const d = decide(
     inp({
       em50: { ok: true, gridW: 2000 },
+      maxac: { ok: true, socPct: 10, acNetW: 0, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 0 }
     }),
     cfg,
@@ -159,6 +260,7 @@ test('RÈGLE 3 : la BAISSE est immédiate aussi (l’excédent finirait chez EDF
       // injection RÉELLE (au-delà de la bande morte) : c'est le chemin « erreur
       // compteur » qu'on teste, et lui n'est jamais borné — la règle 1 prime.
       em50: { ok: true, gridW: -800 },
+      maxac: { ok: true, socPct: 60, acNetW: -1500, ratedEnergyWh: 7200 }, // absorbe
       cloud: { ...inp().cloud, sb3OutW: 2400, sb3Packs: packs(100) }
     }),
     cfg,
@@ -171,6 +273,7 @@ test('bande morte : une variation < deadbandW n’écrit pas (résolution, pas d
   const d = decide(
     inp({
       em50: { ok: true, gridW: 0 },
+      maxac: { ok: true, socPct: 10, acNetW: 0, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 980 }
     }),
     cfg,
@@ -184,6 +287,16 @@ test('bande morte : une variation < deadbandW n’écrit pas (résolution, pas d
 
 test('EM-50 muet → failsafe, aucune écriture', () => {
   const d = decide(inp({ em50: { ok: false, gridW: 0 } }), cfg, st({ lastCmdW: 900 }));
+  assert.equal(d.mode, 'failsafe');
+  assert.equal(d.writeW, null);
+});
+
+test('Modbus Max AC muet → failsafe, aucune écriture', () => {
+  const d = decide(
+    inp({ maxac: { ok: false, socPct: 0, acNetW: 0, ratedEnergyWh: 0 } }),
+    cfg,
+    st()
+  );
   assert.equal(d.mode, 'failsafe');
   assert.equal(d.writeW, null);
 });
@@ -208,6 +321,7 @@ test('la cible ne dépasse jamais maxPresetW', () => {
   const d = decide(
     inp({
       em50: { ok: true, gridW: 5000 },
+      maxac: { ok: true, socPct: 10, acNetW: 0, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 0 }
     }),
     cfg,
@@ -222,6 +336,7 @@ test('settle : juste après une écriture, sb3Out est remplacé par la consigne 
   const d = decide(
     inp({
       em50: { ok: true, gridW: 0 },
+      maxac: { ok: true, socPct: 10, acNetW: 0, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 0 }
     }),
     cfg,
@@ -242,6 +357,7 @@ test('SMITH : une correction déjà commandée est retranchée de l’erreur mes
   const d = decide(
     inp({
       em50: { ok: true, gridW: 800 },
+      maxac: { ok: true, socPct: 60, acNetW: 500, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 200 }
     }),
     cfg,
@@ -256,6 +372,7 @@ test('SMITH : sans correction en vol, l’erreur mesurée est suivie en plein', 
   const d = decide(
     inp({
       em50: { ok: true, gridW: 800 },
+      maxac: { ok: true, socPct: 60, acNetW: 500, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 200 }
     }),
     cfg,
@@ -268,6 +385,7 @@ test('SMITH : une correction PÉRIMÉE ne bloque plus rien', () => {
   const d = decide(
     inp({
       em50: { ok: true, gridW: 800 },
+      maxac: { ok: true, socPct: 60, acNetW: 500, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 200 }
     }),
     cfg,
@@ -280,6 +398,7 @@ test('SMITH : toute écriture alimente la file des corrections en vol', () => {
   const d = decide(
     inp({
       em50: { ok: true, gridW: 900 },
+      maxac: { ok: true, socPct: 60, acNetW: 500, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 0 }
     }),
     cfg,
@@ -293,6 +412,7 @@ test('SMITH : les corrections en vol se CUMULENT', () => {
   const d = decide(
     inp({
       em50: { ok: true, gridW: 900 },
+      maxac: { ok: true, socPct: 60, acNetW: 500, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 200 }
     }),
     cfg,
@@ -314,6 +434,7 @@ test('le rééquilibrage ne dépasse jamais la marge de puissance de la Max AC',
   const d = decide(
     inp({
       em50: { ok: true, gridW: 0 },
+      maxac: { ok: true, socPct: 40, acNetW: 1870, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 2400, sb3Packs: packs(100) }
     }),
     cfg,
@@ -331,10 +452,25 @@ test('le rééquilibrage ne dépasse jamais la marge de puissance de la Max AC',
 // mobilisables au lieu de 5 940 — et 800 W achetés à EDF. Le prorata en
 // décharge CONSERVE le déséquilibre (invariant) : seule la recharge répare.
 
+test('RÈGLE 0 : Max AC en retard + PV gardé par les SB3 → on DÉTOURNE vers elle', () => {
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: 0 }, // règle 1 servie
+      maxac: { ok: true, socPct: 15, acNetW: 0, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 200, sb3PvW: 1400, sb3Packs: packs(80) }
+    }),
+    cfg,
+    st({ lastCmdW: 200 })
+  );
+  assert.ok((d.writeW ?? 0) > 200, `la consigne doit MONTER pour détourner (obtenu ${d.writeW})`);
+  assert.match(d.reason, /RÉÉQUILIBRAGE/);
+});
+
 test('RÈGLE 0 : parc déjà équilibré → aucun détour (le détour coûte une conversion)', () => {
   const d = decide(
     inp({
       em50: { ok: true, gridW: 0 },
+      maxac: { ok: true, socPct: 80, acNetW: 0, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 200, sb3PvW: 1400, sb3Packs: packs(80) }
     }),
     cfg,
@@ -347,6 +483,7 @@ test('RÈGLE 0 : pas de PV gardé → rien à détourner, on ne s’agite pas', 
   const d = decide(
     inp({
       em50: { ok: true, gridW: 0 },
+      maxac: { ok: true, socPct: 15, acNetW: 0, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 1400, sb3PvW: 1400, sb3Packs: packs(80) }
     }),
     cfg,
@@ -359,6 +496,7 @@ test('RÈGLE 1 PRIME sur la règle 0 : un soutirage passe avant le rééquilibra
   const d = decide(
     inp({
       em50: { ok: true, gridW: 900 }, // on achète : priorité absolue
+      maxac: { ok: true, socPct: 15, acNetW: 0, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 200, sb3PvW: 1400, sb3Packs: packs(80) }
     }),
     cfg,
@@ -371,6 +509,7 @@ test('RÈGLE 0 : le détour est PROGRESSIF, il ne saute pas sur la cible', () =>
   const d = decide(
     inp({
       em50: { ok: true, gridW: 0 },
+      maxac: { ok: true, socPct: 15, acNetW: 0, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 200, sb3PvW: 1400, sb3Packs: packs(80) }
     }),
     cfg,
@@ -379,10 +518,31 @@ test('RÈGLE 0 : le détour est PROGRESSIF, il ne saute pas sur la cible', () =>
   assert.ok((d.writeW ?? 0) < 200 + 1200, 'pas de saut sur la totalité du PV gardé');
 });
 
+test('RÈGLE 0 : INTERDIT de baisser la consigne pendant que la Max AC débite', () => {
+  // Cas réel du 31/07 : injection de 134 W (dépassement de la régulation Max AC),
+  // Max AC qui décharge 3 170 W à 14 % pendant que les SB3 gardent leur PV.
+  // Baisser reporterait encore plus sur elle : c'est la puissance du parc qu'on tue.
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: -134 },
+      maxac: { ok: true, socPct: 14, acNetW: 3170, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 241, sb3PvW: 2050, sb3Packs: packs(35) }
+    }),
+    cfg,
+    st({ lastCmdW: 241 })
+  );
+  assert.ok(
+    d.writeW === null || d.writeW >= 241,
+    `la consigne ne doit PAS baisser (obtenu ${d.writeW})`
+  );
+  assert.doesNotMatch(d.reason, /injection/);
+});
+
 test('RÈGLE 0 : la baisse reste PERMISE si la Max AC charge (elle, elle absorbe)', () => {
   const d = decide(
     inp({
       em50: { ok: true, gridW: -600 },
+      maxac: { ok: true, socPct: 60, acNetW: -800, ratedEnergyWh: 7200 }, // charge
       cloud: { ...inp().cloud, sb3OutW: 2000, sb3PvW: 500, sb3Packs: packs(90) }
     }),
     cfg,
@@ -391,15 +551,29 @@ test('RÈGLE 0 : la baisse reste PERMISE si la Max AC charge (elle, elle absorbe
   assert.ok((d.writeW ?? 2000) < 2000, 'sur-livraison réelle : on baisse');
 });
 
+test('RÈGLE 0 : baisse interdite → on RÉÉQUILIBRE au lieu d’attendre', () => {
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: -134 },
+      maxac: { ok: true, socPct: 14, acNetW: 3170, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 241, sb3PvW: 2050, sb3Packs: packs(35) }
+    }),
+    cfg,
+    st({ lastCmdW: 241 })
+  );
+  assert.match(d.reason, /RÉÉQUILIBRAGE/);
+  assert.ok((d.writeW ?? 0) > 241, 'la consigne doit MONTER pour soulager la Max AC');
+});
+
 // ─── FEEDFORWARD — pré-armement / désarmement de l'échelon cumulus ────────
 // L'échelon du cumulus est le seul échelon prévisible (c'est nous qui
 // l'allumons) : la part SB3 monte AVANT la fermeture du relais et se rend à
 // l'ouverture. Banc apparié du 31/07 : docs/etudes/verif_prearm_fenetre.py.
 
-test('FEEDFORWARD : les SB3 étant seules, l’échelon leur revient EN ENTIER', () => {
-  // Depuis le retrait de la Max AC (09/08) il n'y a plus de complément à laisser
-  // à personne : part = 100 %. L'échelon de 2 900 W dépasse alors le plafond de
-  // consigne (1 600 W sous bridage Consuel) — on pré-arme jusqu'au plafond.
+test('FEEDFORWARD : pré-armement au prorata de l’énergie utilisable', () => {
+  // SB3 2×2688 à 80 % → 3 763,2 Wh ; Max AC 7 200 à 60 % → 3 600 Wh
+  // part SB3 = 3763,2/7363,2 ≈ 51 % ; +2 900 W → +1 482 W sur la consigne, soit
+  // 1 782 W — AU-DESSUS du plafond 1 600 W (SB3 bridées 2 × 800 W) : on écrête.
   const t = feedforwardTarget(
     inp({ cloud: { ...inp().cloud, sb3Packs: packs(80), sb3PresetW: 300 } }),
     cfg,
@@ -409,31 +583,21 @@ test('FEEDFORWARD : les SB3 étant seules, l’échelon leur revient EN ENTIER',
   assert.ok(t.ok);
   if (t.ok) {
     assert.equal(t.baseW, 300);
-    assert.equal(t.targetW, cfg.maxPresetW);
-    assert.equal(t.sharePct, 100);
+    assert.equal(t.targetW, cfg.maxPresetW, 'écrêté au plafond de consigne');
+    assert.equal(t.sharePct, 51);
   }
-});
-
-test('FEEDFORWARD : un échelon qui tient sous le plafond passe en entier', () => {
-  const t = feedforwardTarget(
-    inp({ cloud: { ...inp().cloud, sb3Packs: packs(80), sb3PresetW: 300 } }),
-    cfg,
-    st({ lastCmdW: 300 }),
-    900
-  );
-  assert.ok(t.ok);
-  if (t.ok) assert.equal(t.targetW, 1200);
 });
 
 test('FEEDFORWARD : désarmement — la part SB3 mesurée est rendue', () => {
   const t = feedforwardTarget(
     inp({ cloud: { ...inp().cloud, sb3Packs: packs(80) } }),
     cfg,
-    st({ lastCmdW: 1800 }),
+    st({ lastCmdW: 1600 }),
     -2900
   );
   assert.ok(t.ok);
-  if (t.ok) assert.equal(t.targetW, 0); // part entière : la consigne est rendue en totalité
+  // 1 600 − 51 % × 2 900 = 118 W : la part SB3 de l'échelon est rendue.
+  if (t.ok) assert.ok(Math.abs(t.targetW - 118) <= 5, `cible ≈ 118 W (obtenu ${t.targetW})`);
 });
 
 test('FEEDFORWARD : la cible est écrêtée au plafond de consigne', () => {
@@ -474,7 +638,7 @@ test('FEEDFORWARD : un pas sous la bande morte ne s’écrit pas', () => {
     inp({ cloud: { ...inp().cloud, sb3Packs: packs(80) } }),
     cfg,
     st({ lastCmdW: 300 }),
-    80 // part entière : 80 W < bande morte 100 W
+    150 // ×51 % ≈ 77 W < bande morte 100 W
   );
   assert.ok(!t.ok);
 });
@@ -487,6 +651,7 @@ test('HOLD : pendant le pré-armement, l’injection transitoire n’est PAS cor
   const d = decide(
     inp({
       em50: { ok: true, gridW: -400 },
+      maxac: { ok: true, socPct: 60, acNetW: -50, ratedEnergyWh: 7200 }, // absorbe un peu
       cloud: { ...inp().cloud, sb3OutW: 800, sb3Packs: packs(80) }
     }),
     cfg,
@@ -499,6 +664,7 @@ test('HOLD : la RÈGLE 1 prime — un soutirage pendant le hold monte quand mêm
   const d = decide(
     inp({
       em50: { ok: true, gridW: 800 },
+      maxac: { ok: true, socPct: 60, acNetW: 2500, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 800, sb3Packs: packs(80) }
     }),
     cfg,
@@ -511,6 +677,7 @@ test('HOLD : expiré → la baisse redevient normale', () => {
   const d = decide(
     inp({
       em50: { ok: true, gridW: -600 },
+      maxac: { ok: true, socPct: 60, acNetW: -800, ratedEnergyWh: 7200 },
       cloud: { ...inp().cloud, sb3OutW: 2000, sb3PvW: 500, sb3Packs: packs(90) }
     }),
     cfg,

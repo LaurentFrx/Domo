@@ -102,9 +102,21 @@ export interface CumulusInputs {
    *  titre que la charge Max AC : sous zéro-export, la SolarBank bascule de « charge »
    *  vers « sortie AC » dès que la maison demande plus). Dérivée + bornée, cf. inputs.ts. */
   sb3ChargeW: number;
-  // (Les champs maxAc* ont été retirés le 09/08/2026 : la Max AC est sortie du parc
-  //  et sa voie d'allumage « saturation/réserve » avec elle.)
-  pvApsW: number; // prod du micro-onduleur APsystems EZ1 (pan Sud), W — l'ÉTALON (jamais bridé)
+  // ── Max AC en Modbus LOCAL (~2,5 s — classe « mesure locale », comme l'EM-50) ──
+  // Depuis que la Max AC régule le compteur à zéro-export (boucle ~3 s avec le
+  // Gen 2), le don franc a quasi disparu : le surplus vit dans SA charge. Ces
+  // champs portent la voie d'allumage « saturation/réserve » du pilote (22/07).
+  maxAcAvailable: boolean; // lecture Modbus locale de la Max AC disponible
+  maxAcSocPct: number | null; // SoC de la Max AC (%), null si local muet
+  maxAcChargeW: number | null; // puissance de CHARGE de la Max AC (W ≥ 0), null si local muet
+  pvApsW: number; // prod du micro-onduleur APsystems EZ1 (pan Sud), W
+  /** Plafond COURANT de l'APS (W), écrit par NOTRE boucle anti-injection ; null si
+   *  inconnu. ⚠️ L'APS a longtemps été décrit ici comme « l'étalon jamais bridé » —
+   *  c'est FAUX depuis que la boucle APS est en réel (27/07/2026). Quand elle
+   *  écrête à 30 W, `pvApsW` ne dit plus rien du soleil, et tout ce qui s'appuie
+   *  dessus (condition « soleil réel », estimateur de potentiel) se retrouve
+   *  aveuglé par notre propre régulation. Ce champ permet de faire la différence. */
+  apsCapW: number | null;
   apsAvailable: boolean; // le bridge APS répond (distinguer « injoignable » de « 0 W réel »)
   apsAgeSec: number | null; // fraîcheur de la donnée APS (s), null si inconnue
 
@@ -250,6 +262,9 @@ export interface PilotConfig {
   apsMinW: number; // soleil RÉEL exigé : production APS minimale (W)
   minUsefulHeatMin: number; // jamais d'allumage s'il reste moins de X min de fenêtre devant soi
   invisibleSurplusMinW: number; // déclencheur de secours : surplus invisible estimé minimal (W)
+  // ── Voie « saturation/réserve » (contexte Max AC zéro-export, 22/07/2026) ──
+  surplusOnW: number; // surplus RÉORIENTABLE mesuré (charge Max AC + don) exigé pour allumer (W)
+  maxAcSocOnPct: number; // réserve nocturne assurée : SoC Max AC local minimal pour céder le flux au ballon (%)
 
   // ── Grâce et coupures (chauffe en cours) ──
   graceStartupSec: number; // latence SolarBank tolérée au démarrage — 240 s

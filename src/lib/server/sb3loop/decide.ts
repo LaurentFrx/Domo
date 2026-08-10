@@ -1,37 +1,29 @@
 /**
  * Loi de commande de la boucle SB3 — fonction PURE (testable sans réseau).
  *
- * ⚠️ CETTE BOUCLE N'A PLUS D'OBJET DEPUIS LE 09/08/2026.
- * Elle avait été écrite parce que les SB3 n'avaient pas de compteur : consigne
- * fixe à 300 W, ~165 W de batterie injectés en permanence, ~9 kWh/mois perdus.
- * Le Smart Meter Gen 2 leur est désormais rattaché et elles sont en mode
- * AUTOCONSOMMATION : elles asservissent le compteur elles-mêmes, en secondes, en
- * local (mesuré à l'EM-50 le 09/08 : réseau entre −37 et −99 W, zéro soutirage).
- * En mode autoconsommation la consigne système n'est même plus LUE — vérifié :
- * preset 200 W affiché pendant que 793 W sortaient réellement.
- *
- * La garde « mode Anker ≠ manuel » ci-dessous rend donc la main à chaque tick, et
- * c'est très bien ainsi. La loi est conservée — correcte pour deux SB3 — au cas
- * où Laurent repasserait un jour en plan personnalisé, mais elle ne commande plus
- * rien tant que le mode reste 1.
- *
- * ⛔ RÈGLES ABSOLUES posées par Laurent (28/07/2026) :
+ * ⛔ RÈGLES ABSOLUES posées par Laurent (28/07/2026), dans cet ordre :
  *   1. NE JAMAIS SOUTIRER SUR LE RÉSEAU EDF. Tant qu'il reste de l'énergie
- *      utilisable dans le parc, elle sort.
- *   2. (Le prorata entre batteries est devenu sans objet : deux packs identiques,
- *      répartis par le firmware — 200 W système = 100 + 100, vérifié.)
+ *      utilisable dans le parc, elle sort. AUCUNE convention de « charge
+ *      prioritaire » ne bloque jamais la décharge d'une Solarbank.
+ *   2. Charge et décharge se répartissent AU PRORATA des kWh utilisables de
+ *      chaque batterie, réserve de 10 % déduite — pour qu'elles atteignent leur
+ *      plancher EN MÊME TEMPS, jamais l'une vidée pendant que l'autre est pleine.
  *   3. AUCUN PALIER, AUCUNE RÉACTION DIFFÉRÉE : « une consommation électrique du
  *      foyer est immédiate et jamais graduelle ». Plus de rampe (slew), plus de
  *      temporisation (dwell), plus de confirmation sur N évaluations.
  *
+ * Ce que ça a remplacé : une règle « jour » qui posait consigne 0 « parce que les
+ * SB3 chargent » — le 28/07 la maison achetait 2 079 W à EDF pendant que 5,4 kWh
+ * dormaient dans deux packs pleins et que la Max AC s'épuisait seule.
+ *
  * Hiérarchie d'évaluation :
- *  1. FAIL-SAFE local : EM-50 muet → AUCUNE écriture (sans les yeux, pas de mains).
+ *  1. FAIL-SAFE local : EM-50 ou Modbus Max AC muets → AUCUNE écriture (sans les
+ *     yeux, pas de mains).
  *  2. FAIL-LOW cloud : données cloud périmées → house_load inconnue ; on redescend
  *     par paliers (seul endroit où un palier subsiste : c'est une dégradation de
  *     sûreté, pas une réponse à la charge).
- *  3. Mode Anker ≠ manuel → nos écritures ne gouvernent rien, on attend. ← le
- *     chemin emprunté en permanence depuis le 09/08.
- *  4. Couverture intégrale du soutirage mesuré (pilotage sur l'erreur compteur).
+ *  3. Mode Anker ≠ manuel → nos écritures ne gouvernent rien, on attend.
+ *  4. ALLOCATION PROPORTIONNELLE + couverture intégrale du soutirage mesuré.
  *
  * Seul amortisseur conservé : une bande morte EN WATTS, qui n'introduit aucun
  * retard — elle évite de réécrire une valeur quasi identique (chaque écriture est
@@ -60,8 +52,9 @@ export type FeedforwardTarget =
  * supprime le transitoire à la source, sans prédiction (étude §8, banc §10).
  *
  * stepW SIGNÉ : + la charge va apparaître (pré-armement), − elle disparaît.
- * Mêmes yeux que decide() : sans mesures locales fraîches ni mode manuel Anker,
- * pas de mains.
+ * La part suit la RÈGLE 2 : prorata de l'énergie utilisable, la Max AC prend
+ * automatiquement le complément. Mêmes yeux que decide() : sans mesures
+ * locales fraîches ni mode manuel Anker, pas de mains.
  */
 export function feedforwardTarget(
   inputs: Sb3LoopInputs,
@@ -69,8 +62,8 @@ export function feedforwardTarget(
   state: Sb3LoopState,
   stepW: number
 ): FeedforwardTarget {
-  if (!inputs.em50.ok) {
-    return { ok: false, reason: 'EM-50 muet — pas de feedforward' };
+  if (!inputs.em50.ok || !inputs.maxac.ok) {
+    return { ok: false, reason: 'mesures locales muettes — pas de feedforward' };
   }
   const cloudFresh =
     inputs.cloud.ok && inputs.cloud.freshS !== null && inputs.cloud.freshS <= cfg.cloudStaleS;
@@ -86,10 +79,9 @@ export function feedforwardTarget(
   if (stepW > 0 && sb3UsableWh <= 0) {
     return { ok: false, reason: `SB3 à leur réserve (${cfg.reservePct} %) — rien à pré-armer` };
   }
-  // Les SB3 sont désormais SEULES dans le parc (Max AC retirée le 09/08/2026) :
-  // l'échelon leur revient en entier, il n'y a plus de complément à laisser à
-  // personne. La part vaut donc 1 tant qu'il leur reste de l'énergie utilisable.
-  const share = sb3UsableWh > 0 ? 1 : 0;
+  const maxAcUsableWh = usableWh(inputs.maxac.socPct, inputs.maxac.ratedEnergyWh, cfg.reservePct);
+  const parkUsableWh = sb3UsableWh + maxAcUsableWh;
+  const share = parkUsableWh > 0 ? sb3UsableWh / parkUsableWh : 0;
 
   const base = clamp(state.lastCmdW ?? inputs.cloud.sb3PresetW ?? 0, 0, cfg.maxPresetW);
   const targetW = Math.round(clamp(base + share * stepW, 0, cfg.maxPresetW));
@@ -123,8 +115,11 @@ export function decide(
   const currentW = rawCurrent === null ? null : clamp(rawCurrent, 0, cfg.maxPresetW);
 
   // ── 1. Fail-safe local : sans les yeux, pas de mains. ──
-  if (!inputs.em50.ok) {
-    return noWrite('failsafe', 'EM-50 muet — aucune écriture');
+  if (!inputs.em50.ok || !inputs.maxac.ok) {
+    return noWrite(
+      'failsafe',
+      !inputs.em50.ok ? 'EM-50 muet — aucune écriture' : 'Modbus Max AC muet — aucune écriture'
+    );
   }
 
   // ── 2. Fail-low : cloud périmé → décroître d'un palier par cycle. ──
@@ -164,19 +159,29 @@ export function decide(
 
   // house_load — INFORMATIF SEULEMENT (journal, carte). Elle ne pilote plus rien :
   // voir « pilotage sur l'erreur mesurée » plus bas.
-  // Réseau signé + APS + sortie SB3.
-  const houseLoadW = Math.max(0, Math.round(inputs.em50.gridW + inputs.aps.powerW + sb3Out));
+  // Réseau signé + APS + sortie SB3 + flux AC net Max AC SIGNÉ.
+  // Le SIGNE est vital (revue 23/07) : en régime de recyclage (consigne > charge
+  // réelle, la Max AC absorbe l'excédent à compteur nul), sa CHARGE −(C−H) annule
+  // l'excès compté dans sb3Out et l'estimation redonne H — sans le signe, elle
+  // dégénérait en « consigne + APS » et toute consigne trop haute s'auto-confirmait.
+  const houseLoadW = Math.max(
+    0,
+    Math.round(inputs.em50.gridW + inputs.aps.powerW + sb3Out + inputs.maxac.acNetW)
+  );
 
-  // ── RÈGLE 2 — SANS OBJET depuis le 09/08/2026 ────────────────────────────
-  // Le prorata existait pour que trois batteries de tailles différentes
-  // atteignent leur réserve ensemble, la troisième prenant le complément sans
-  // être commandée. Cette batterie est sortie du parc : il ne reste que deux SB3
-  // identiques, et le firmware répartit lui-même la consigne système entre elles
-  // (vérifié : 200 W système = 100 + 100). Il n'y a plus rien à répartir ici.
+  // ── RÈGLE 2 — part des SB3 au prorata de l'énergie UTILISABLE du parc. ──
+  // Les trois batteries doivent atteindre leur réserve en même temps : chacune
+  // fournit à hauteur de ce qu'elle peut encore donner. La Max AC n'est pas
+  // commandée (elle asservit le compteur à zéro toute seule) — on ne pilote que
+  // la part SB3, et elle prend automatiquement le reste.
   const sb3UsableWh = inputs.cloud.sb3Packs.reduce(
     (s, p) => s + usableWh(p.socPct, p.capacityWh, cfg.reservePct),
     0
   );
+  const maxAcUsableWh = usableWh(inputs.maxac.socPct, inputs.maxac.ratedEnergyWh, cfg.reservePct);
+  const parkUsableWh = sb3UsableWh + maxAcUsableWh;
+  const shareSb3 = parkUsableWh > 0 ? sb3UsableWh / parkUsableWh : 0;
+  const pctSb3 = Math.round(shareSb3 * 100);
 
   // Plus rien d'utilisable dans les SB3 : demander leur décharge est sans objet.
   if (sb3UsableWh <= 0) {
@@ -202,14 +207,23 @@ export function decide(
   // Avec, le retard sort de la boucle : correction PLEINE et immédiate, stable.
   const erreurW = Math.round(gridW - dejaCommandeW);
 
-  // ── (La garde « ne jamais baisser pendant que la Max AC débite » est tombée
-  //     avec elle, le 09/08/2026 : il n'y a plus de seconde batterie sur qui
-  //     reporter la charge, donc plus de cercle vicieux à empêcher.) ──
+  // ── GARDE RÈGLE 0 : ne JAMAIS baisser la consigne pendant que la Max AC débite ──
+  // Invariant physique : à charge maison donnée, baisser la sortie des SB3 reporte
+  // exactement autant sur la Max AC. Si elle DÉCHARGE déjà, la baisser l'épuise —
+  // et comme elle porte 3 540 W des 5 940 W du parc, c'est la puissance du parc
+  // qu'on détruit. Une Max AC qui débite prouve d'ailleurs que les SB3 ne sur-
+  // livrent PAS (sinon elle chargerait) : l'injection vient de SA propre
+  // régulation, pas de nous. Baisser serait donc doublement faux.
+  // Mesuré le 31/07 : injection de 30 à 227 W (dépassement de la régulation Max AC)
+  // → la boucle a descendu la consigne 381 → 242 → 15 W, la Max AC est passée de
+  // 3 110 à 3 170 W de décharge et de 15 % à 14 % pendant que les SB3 montaient
+  // à 35 %. Cercle vicieux exact.
+  const maxAcDebite = inputs.maxac.acNetW > cfg.deadbandW;
   // Pré-armement cumulus en cours : la consigne vient d'être montée EXPRÈS,
   // AVANT l'échelon de charge — l'excédent transitoire n'est pas une erreur à
   // corriger. Baisses suspendues quelques secondes ; montées toujours libres.
   const ffHold = (state.ffHoldUntilTs ?? 0) > inputs.now;
-  const baisseInterdite = erreurW < 0 && ffHold;
+  const baisseInterdite = erreurW < 0 && (maxAcDebite || ffHold);
 
   if (Math.abs(erreurW) > cfg.deadbandW && !baisseInterdite) {
     const cible = clamp(base + erreurW, 0, cfg.maxPresetW);
@@ -236,19 +250,79 @@ export function decide(
       base
     );
   }
-  // ── RÉÉQUILIBRAGE DU PARC — SUPPRIMÉ le 09/08/2026 ────────────────────────
-  // Tout ce bloc (règle 0) servait à remonter la Max AC : elle portait 3 540 W
-  // des 5 940 du parc et, tombée à sa réserve, elle coûtait 60 % de la puissance
-  // disponible. Le levier était de détourner vers le bus AC le PV que les SB3
-  // gardaient en DC, pour qu'elle l'absorbe. Elle a quitté l'installation : il
-  // reste deux packs identiques que le firmware équilibre lui-même, et il n'y a
-  // plus de batterie à qui rendre quoi que ce soit.
+  // ── RÈGLE 0 — RÉÉQUILIBRAGE DE CHARGE : rendre la puissance du parc au parc ──
+  // Les 5 900 W émissibles doivent rester disponibles EN PERMANENCE. La Max AC
+  // porte 3 540 W des 5 940 : la laisser sous sa réserve, c'est perdre 60 % de la
+  // puissance du parc — mesuré le 31/07, 1 854 Wh encore en stock mais seulement
+  // 2 400 W mobilisables, et 800 W achetés à EDF pour un cumulus de 2,9 kW.
   //
-  // Le compteur est à l'équilibre et il n'y a plus rien à arbitrer : on tient la
-  // consigne. C'est aussi le seul chemin qu'atteint encore cette fonction en
-  // pratique — depuis que les SB3 sont en autoconsommation, la garde `sceneMode
-  // !== 3` plus haut rend la main bien avant.
-  return noWrite('allocate', 'compteur à l’équilibre — consigne tenue', houseLoadW, base);
+  // Le prorata en DÉCHARGE ne peut pas réparer ça : avec dEᵢ/dt = −Eᵢ·P/ΣE on a
+  // d(Eᵢ/Eⱼ)/dt = 0 — le rapport entre batteries est un INVARIANT. Il conserve le
+  // déséquilibre au lieu de le corriger, et une batterie à sa réserve a une part
+  // nulle : elle en est exclue définitivement. SEULE LA RECHARGE rééquilibre.
+  //
+  // Le levier : les SB3 ont leur PV en DC. Ce qu'elles n'envoient pas en AC, elles
+  // le gardent pour elles. Monter la consigne DÉTOURNE ce PV vers le bus AC, où la
+  // Max AC peut l'absorber (vérifié en direct : elle charge à 150-290 W, réseau
+  // tenu à ±70 W). C'est le seul chemin qui la remonte.
+  const fracLibre = (soc: number): number =>
+    Math.max(0, Math.min(1, (soc - cfg.reservePct) / (100 - cfg.reservePct)));
+  const fracMaxAc = fracLibre(inputs.maxac.socPct);
+  // SoC moyen des SB3 pondéré par leur CAPACITÉ (deux packs identiques ici, mais
+  // la pondération reste juste si l'un est remplacé par un modèle différent).
+  const capSb3 = inputs.cloud.sb3Packs.reduce((a, p) => a + p.capacityWh, 0);
+  const socSb3 =
+    capSb3 > 0
+      ? inputs.cloud.sb3Packs.reduce((a, p) => a + p.socPct * p.capacityWh, 0) / capSb3
+      : null;
+  const fracSb3 = socSb3 === null ? fracMaxAc : fracLibre(socSb3);
+  // PV que les SB3 gardent en DC — c'est exactement ce qui est détournable.
+  const pvGardeW = Math.max(0, (inputs.cloud.sb3PvW ?? 0) - sb3Out);
+
+  if (
+    // Règle 1 servie (rien d'urgent), OU baisse interdite par la règle 0 : dans
+    // les deux cas le rééquilibrage est la bonne action, pas l'attente.
+    (Math.abs(gridW) <= cfg.deadbandW || baisseInterdite) &&
+    !settling &&
+    fracMaxAc < fracSb3 - cfg.rebalanceBandFrac && // la Max AC est la retardataire
+    pvGardeW > cfg.deadbandW // il y a réellement du PV à détourner
+  ) {
+    const cible = sb3Out + cfg.rebalanceGain * pvGardeW;
+    return applyTarget(
+      cible,
+      `RÉÉQUILIBRAGE — Max AC à ${Math.round(fracMaxAc * 100)} % de sa plage contre ` +
+        `${Math.round(fracSb3 * 100)} % pour les SB3 : ${Math.round(pvGardeW)} W de PV détournables ` +
+        `vers elle (consigne ${base} → ${Math.round(clamp(cible, 0, cfg.maxPresetW))} W)`
+    );
+  }
+
+  const battTotalW = Math.max(0, sb3Out + inputs.maxac.acNetW);
+  // BORNE PHYSIQUE DU RÉÉQUILIBRAGE (règle 1 avant règle 2). Déplacer la part
+  // des SB3 vers la Max AC n'est possible que si la Max AC peut effectivement
+  // reprendre le relais : baisser la consigne de Δ lui demande Δ de plus, la
+  // monter de Δ lui demande d'absorber Δ. Au-delà de sa réserve de puissance,
+  // le rééquilibrage crée un SOUTIRAGE — mesuré en direct le 28/07 : un saut
+  // de −1 291 W a produit 867 W d'achat EDF instantané, que la boucle a dû
+  // rattraper au tick suivant. Le partage est un confort ; acheter est interdit.
+  const marge = Math.max(0, cfg.maxAcPowerW - Math.abs(inputs.maxac.acNetW));
+  const cibleBrute = shareSb3 * battTotalW;
+  // Approche PROGRESSIVE de la cible de partage. Sauter dessus d'un coup fait
+  // basculer la charge d'une batterie à l'autre plus vite que la Max AC ne peut
+  // suivre : mesuré le 28/07, un saut de −1 291 W a créé 867 W d'achat EDF
+  // instantané. On corrige une fraction de l'écart par cycle, en restant dans la
+  // marge de puissance de la Max AC. Cela ne diffère AUCUNE réponse à la maison :
+  // le soutirage et l'injection sont traités à gain plein juste au-dessus.
+  const base0 = currentW ?? 0;
+  const progressif = base0 + cfg.shareGain * (cibleBrute - base0);
+  const borne = clamp(progressif, base0 - marge, base0 + marge);
+  return applyTarget(
+    borne,
+    `répartition — part SB3 ${pctSb3} % de ${battTotalW} W batterie ` +
+      (Math.abs(cibleBrute - borne) > 1
+        ? `[borné par la marge Max AC ${Math.round(marge)} W] `
+        : '') +
+      `(${Math.round(sb3UsableWh / 100) / 10}/${Math.round(parkUsableWh / 100) / 10} kWh utilisables)`
+  );
 
   /** Bande morte EN WATTS : une résolution, pas un délai. */
   function applyTarget(rawW: number, reason: string): Sb3Decision {
