@@ -59,7 +59,7 @@
 
 **Implications clés (déterminantes pour le pilotage) :**
 
-- ⚠️ **Sortie AC max de TOUT le système = 3 300 W** sous bridage (EZ1 900 + SB1 800 + SB2 800 + Max AC 800), **batterie comprise**. Le cumulus tire 2 900 W : avec 200-400 W de maison en parallèle on est **à la limite**, et l'achat résiduel va de 0 à ~400 W selon le soleil. D'où les seuils de coupure relevés à 400 / 1 000 W le temps du bridage (au lieu de 150 / 500). Une fois le Consuel obtenu, le système remonte à 6 840 W et la chauffe redevient gratuite.
+- ⚠️ **Sortie AC max de TOUT le système = 3 300 W** sous bridage (EZ1 900 + SB1 800 + SB2 800 + Max AC 800), **batterie comprise**. Le cumulus tire 2 900 W : avec 200-400 W de maison en parallèle on est **à la limite**, et l'achat résiduel va de 0 à ~400 W selon le soleil. D'où les seuils de coupure relevés à **1 100 / 1 800 W** le temps du bridage (au lieu de 150 / 500) : mesuré en chauffe réelle le 10/08, tout est à la butée (SB3 1 600 + Max AC 800 + APS ~500) et les 700 W de fond de la maison passent intégralement en achat. Le kWh dans le ballon revient alors à ~0,06 € contre 0,1812 € en heures creuses. Une fois le Consuel obtenu, le système remonte à 6 840 W et la chauffe redevient gratuite.
 - ⚠️ **La batterie est la réserve du soir/nuit de la maison.** Mettre un kWh de batterie dans le cumulus = un kWh que la maison **rachètera au réseau plus tard** (elle se vide à 2,4 kW → 4,82 kWh épuisés en ~2 h). → le planificateur doit traiter la batterie comme **précieuse, pas gratuite**.
 - Conséquence : le seul créneau vraiment **gratuit** pour le cumulus = **surplus PV réel instantané** (PV − conso maison), batterie déjà pleine. C'est précisément ce que le 2b doit mesurer.
 
@@ -132,4 +132,4 @@
 2. **Batterie précieuse** : ne pas la vider pour le cumulus (réserve du soir).
 3. **Délester** : pas de chauffe si la maison consomme (surplus réel ≤ 0) ou si on frôle 6 kVA.
 4. **Garantir 2 douches le matin** : recharger la veille (solaire de préférence, HC sinon), jamais en HP.
-5. **Plafond physique 3 300 W** sous bridage Consuel : la chauffe (2,9 kW) déborde dès qu'il y a de la conso maison → achat résiduel 0-400 W assumé jusqu'à la levée du bridage.
+5. **Plafond physique 3 300 W** sous bridage Consuel : la chauffe (2,9 kW) déborde dès qu'il y a de la conso maison → achat résiduel assumé jusqu'à la levée du bridage (~730 W mesuré avec 700 W de fond domestique).

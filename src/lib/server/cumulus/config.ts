@@ -63,17 +63,28 @@ export function defaultPilotConfig(): PilotConfig {
 
     // Grâce et coupures
     graceStartupSec: 240, // latence SolarBank tolérée au démarrage (4 min)
-    // ⚠️ SEUILS RELEVÉS TEMPORAIREMENT — bridage Consuel, décidé par Laurent le 09/08/2026,
-    // recalculés le 10/08 sur la config Max AC + SB3 toutes bridées à 800 W.
-    // Disponible : APS 900 + SB3 1 600 + Max AC 800 = 3 300 W, contre 2 900 W au
-    // ballon + 200-400 W de maison → l'achat résiduel est de 0 à 400 W selon le
-    // soleil. Aux valeurs d'origine (150 / 500) chaque chauffe solaire se coupait
-    // en 30 s. Ce qu'on protège encore : l'ajout d'un GROS appareil (plaque 2,4 kW,
-    // four 2 kW) → l'achat saute au-delà de 1 000 W et la coupure tombe.
-    // 🔁 REMETTRE 150 / 500 À LA LEVÉE DU BRIDAGE.
-    cutBuyW: 400, // achat réseau déclenchant la coupure (origine : 150)
+    // ⚠️ SEUILS RELEVÉS TEMPORAIREMENT — bridage Consuel. Arbitrage de Laurent,
+    // tranché EN CONDITIONS RÉELLES le 10/08 pendant une chauffe.
+    //
+    // Sous bridage, tout est à la butée pendant une chauffe : SB3 1 600 W, Max AC
+    // 800 W, APS ~500 W = 2 900 W disponibles pour un ballon qui en tire 2 900 —
+    // donc TOUTE consommation de la maison passe en achat. Mesuré ce jour-là :
+    // 700 W de fond domestique → 730 W achetés, en régime établi, sans qu'aucune
+    // régulation puisse y faire quoi que ce soit. À 400 W la chauffe se coupait
+    // au bout de 30 s ; le ballon repartait alors la nuit en heures creuses.
+    //
+    // Le calcul qui a tranché : le kWh mis dans le ballon revient à ~0,06 € en
+    // chauffant ainsi (2 200 W gratuits + 730 W en HP) contre 0,1812 € en heures
+    // creuses. Laurent : « c'est une aberration de le faire tourner la nuit
+    // quand il n'y a pas de production solaire ».
+    //
+    // Ce qu'on protège encore : l'ajout d'un GROS appareil (plaque 2,4 kW, four
+    // 2 kW) pendant la chauffe → l'achat dépasse 1 800 W et la coupure tombe net.
+    // 🔁 REMETTRE 150 / 500 À LA LEVÉE DU BRIDAGE — le parc repassera à 5 940 W
+    //    et la règle « zéro import cumulus » redeviendra tenable sans exception.
+    cutBuyW: 1100, // achat réseau déclenchant la coupure (origine : 150)
     cutBuySustainSec: 30, // soutenu 30 s (VALEUR CORRIGÉE PAR LAURENT — pas 90)
-    cutBuyHardW: 1000, // achat franc → coupure immédiate (origine : 500)
+    cutBuyHardW: 1800, // achat franc → coupure immédiate (origine : 500)
     batteryDropCutPts: 20, // SoC −20 points depuis le début de chauffe → coupure (valeur Laurent)
     batteryFloorCutPct: 40, // plancher absolu de SoC en chauffe (valeur Laurent)
 
