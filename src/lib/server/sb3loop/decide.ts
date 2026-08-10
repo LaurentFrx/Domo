@@ -304,7 +304,17 @@ export function decide(
   // le rééquilibrage crée un SOUTIRAGE — mesuré en direct le 28/07 : un saut
   // de −1 291 W a produit 867 W d'achat EDF instantané, que la boucle a dû
   // rattraper au tick suivant. Le partage est un confort ; acheter est interdit.
-  const marge = Math.max(0, cfg.maxAcPowerW - Math.abs(inputs.maxac.acNetW));
+  // ⚠️ La marge est ASYMÉTRIQUE, et ce n'est pas un détail. Le bridage Consuel du
+  // 10/08 ne porte que sur la SORTIE de la Max AC (800 W) — sa charge, elle, reste
+  // à pleine capacité. Une borne symétrique calée sur 800 W la gelait dès qu'elle
+  // absorbait fort : constaté en direct le 10/08, elle chargeait à 1 116 W, la
+  // marge tombait à 0 et le rééquilibrage était inerte en permanence.
+  //   baisser la consigne de Δ → on demande à la Max AC de FOURNIR Δ de plus ;
+  //   la monter de Δ       → on lui demande d'ABSORBER Δ de plus.
+  // Chaque sens a donc sa propre réserve, et on retranche ce qu'elle fait déjà.
+  const acNetW = inputs.maxac.acNetW; // + décharge vers la maison / − absorbé
+  const margeFournir = Math.max(0, cfg.maxAcPowerW - Math.max(0, acNetW));
+  const margeAbsorber = Math.max(0, cfg.maxAcChargePowerW - Math.max(0, -acNetW));
   const cibleBrute = shareSb3 * battTotalW;
   // Approche PROGRESSIVE de la cible de partage. Sauter dessus d'un coup fait
   // basculer la charge d'une batterie à l'autre plus vite que la Max AC ne peut
@@ -314,12 +324,13 @@ export function decide(
   // le soutirage et l'injection sont traités à gain plein juste au-dessus.
   const base0 = currentW ?? 0;
   const progressif = base0 + cfg.shareGain * (cibleBrute - base0);
-  const borne = clamp(progressif, base0 - marge, base0 + marge);
+  const borne = clamp(progressif, base0 - margeFournir, base0 + margeAbsorber);
   return applyTarget(
     borne,
     `répartition — part SB3 ${pctSb3} % de ${battTotalW} W batterie ` +
       (Math.abs(cibleBrute - borne) > 1
-        ? `[borné par la marge Max AC ${Math.round(marge)} W] `
+        ? `[borné par la Max AC : ${Math.round(margeFournir)} W à fournir / ` +
+          `${Math.round(margeAbsorber)} W à absorber] `
         : '') +
       `(${Math.round(sb3UsableWh / 100) / 10}/${Math.round(parkUsableWh / 100) / 10} kWh utilisables)`
   );

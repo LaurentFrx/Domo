@@ -429,22 +429,45 @@ test('SMITH : les corrections en vol se CUMULENT', () => {
 });
 
 test('le rééquilibrage ne dépasse jamais la marge de puissance de la Max AC', () => {
-  // Max AC déjà à 1 870 W sur 2 000 : elle ne peut reprendre que 130 W de plus.
-  // Le prorata voudrait baisser la consigne de bien plus — ce serait du soutirage.
+  // Max AC déjà à 600 W sur les 800 W que le bridage Consuel lui autorise en
+  // sortie : elle ne peut reprendre que 200 W de plus. Le prorata voudrait
+  // baisser la consigne de bien plus — ce serait du soutirage.
   const d = decide(
     inp({
       em50: { ok: true, gridW: 0 },
-      maxac: { ok: true, socPct: 40, acNetW: 1870, ratedEnergyWh: 7200 },
-      cloud: { ...inp().cloud, sb3OutW: 2400, sb3Packs: packs(100) }
+      maxac: { ok: true, socPct: 40, acNetW: 600, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 1600, sb3Packs: packs(100) }
     }),
     cfg,
-    st({ lastCmdW: 2400 })
+    st({ lastCmdW: 1600 })
   );
-  const marge = cfg.maxAcPowerW - 1870;
+  const marge = cfg.maxAcPowerW - 600;
   assert.ok(
-    d.writeW === null || d.writeW >= 2400 - marge - 1,
+    d.writeW === null || d.writeW >= 1600 - marge - 1,
     `baisse limitée à ${marge} W, obtenu ${d.writeW}`
   );
+});
+
+test('BORNE ASYMÉTRIQUE : une Max AC qui CHARGE fort ne gèle pas la marge', () => {
+  // Piège du 10/08 : borne symétrique calée sur les 800 W de bridage. La Max AC
+  // chargeait à 1 116 W → marge = 800 − 1116 → 0, et le rééquilibrage devenait
+  // inerte EN PERMANENCE. Or le bridage ne porte que sur sa SORTIE : côté
+  // absorption elle a encore de la réserve, et la boucle doit pouvoir MONTER.
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: 0 },
+      maxac: { ok: true, socPct: 91, acNetW: -1116, ratedEnergyWh: 7100 },
+      cloud: { ...inp().cloud, sb3OutW: 200, sb3Packs: packs(100) }
+    }),
+    cfg,
+    st({ lastCmdW: 200 })
+  );
+  // marge d'absorption = 2100 − 1116 = 984 W : largement de quoi bouger.
+  assert.ok(
+    d.writeW === null || d.writeW > 200,
+    `la montée doit rester possible (obtenu ${d.writeW})`
+  );
+  assert.notEqual(d.reason, undefined);
 });
 
 // ─── RÈGLE 0 — la PUISSANCE du parc doit rester disponible ───────────────

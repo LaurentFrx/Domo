@@ -39,6 +39,11 @@ export interface Sb3LoopConfig {
    *  crée du SOUTIRAGE (mesuré le 28/07 : un saut de −1 291 W → 867 W d'achat).
    *  🔁 REMETTRE 3600 à la levée du bridage. */
   maxAcPowerW: number;
+  /** Puissance de CHARGE max de la Max AC (W) — l'autre moitié de la borne de
+   *  rééquilibrage. Volontairement DISTINCTE de maxAcPowerW : le bridage Consuel
+   *  ne limite que la sortie, jamais l'absorption. 2 100 W ≈ les 2 050 W mesurés
+   *  en direct le 28/07 ; à affiner sur quelques jours d'observation. */
+  maxAcChargePowerW: number;
   /** Fraction de l'écart de partage corrigée par cycle. Le rééquilibrage ENTRE
    *  batteries est un objectif de confort, pas une réponse à la maison : il ne
    *  doit pas bousculer l'équilibre du compteur que la règle 1 protège. La
@@ -228,6 +233,7 @@ export function defaultSb3LoopConfig(): Sb3LoopConfig {
     enVolS: 20,
     ffHoldS: 30,
     maxAcPowerW: 800,
+    maxAcChargePowerW: 2100,
     shareGain: 0.5,
     rebalanceBandFrac: 0.1,
     rebalanceGain: 0.5,
