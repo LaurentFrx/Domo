@@ -69,6 +69,55 @@ test('id inconnu → null, et touchLastLogin ne jette pas', async () => {
   await store.touchLastLogin('inexistant');
 });
 
+// ─── Amortissement de lastLoginAt ──────────────────────────────────────
+// Un appelant répétitif sur /auth (crontab, prefetch, raccourci) ne doit pas
+// déclencher une écriture durable à chaque passage. Régression vécue en prod :
+// ~1440 écritures/jour pendant neuf jours.
+
+test('un second passage dans l’heure n’écrit PAS le fichier', async () => {
+  const admin = (await store.findActiveAdmin())!;
+  const avant = await fs.stat(USERS_FILE);
+  const dateAvant = admin.lastLoginAt;
+
+  for (let i = 0; i < 5; i++) await store.touchLastLogin(admin.id);
+
+  const apres = await fs.stat(USERS_FILE);
+  assert.equal(apres.mtimeMs, avant.mtimeMs, 'le fichier a été réécrit alors qu’il ne devait pas');
+  assert.equal((await store.findUserById(admin.id))?.lastLoginAt, dateAvant, 'la date a bougé');
+});
+
+test('au-delà de la granularité, l’horodatage repart', async () => {
+  const admin = (await store.findActiveAdmin())!;
+  const vieux = new Date(Date.now() - store.LAST_LOGIN_GRANULARITE_MS - 60_000).toISOString();
+  const raw = JSON.parse(await fs.readFile(USERS_FILE, 'utf-8'));
+  raw.users = raw.users.map((u: { id: string }) =>
+    u.id === admin.id ? { ...u, lastLoginAt: vieux } : u
+  );
+  await fs.writeFile(USERS_FILE, JSON.stringify(raw, null, 2));
+  const futur = new Date(Date.now() + 2000);
+  await fs.utimes(USERS_FILE, futur, futur);
+
+  await store.touchLastLogin(admin.id);
+  const relu = await store.findUserById(admin.id);
+  assert.notEqual(relu?.lastLoginAt, vieux, 'la date aurait dû être rafraîchie');
+  assert.ok(Date.parse(relu?.lastLoginAt as string) > Date.parse(vieux));
+});
+
+test('lastLoginAt illisible → on réécrit plutôt que de rester coincé', async () => {
+  const admin = (await store.findActiveAdmin())!;
+  const raw = JSON.parse(await fs.readFile(USERS_FILE, 'utf-8'));
+  raw.users = raw.users.map((u: { id: string }) =>
+    u.id === admin.id ? { ...u, lastLoginAt: 'pas-une-date' } : u
+  );
+  await fs.writeFile(USERS_FILE, JSON.stringify(raw, null, 2));
+  const futur = new Date(Date.now() + 4000);
+  await fs.utimes(USERS_FILE, futur, futur);
+
+  await store.touchLastLogin(admin.id);
+  const relu = await store.findUserById(admin.id);
+  assert.ok(!Number.isNaN(Date.parse(relu?.lastLoginAt as string)), 'date toujours illisible');
+});
+
 test('édition MANUELLE du fichier prise en compte (révocation sans UI)', async () => {
   const admin = (await store.findActiveAdmin())!;
   const raw = JSON.parse(await fs.readFile(USERS_FILE, 'utf-8'));

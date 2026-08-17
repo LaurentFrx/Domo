@@ -294,6 +294,23 @@ export async function attemptPinLogin(email: string, pin: string): Promise<PinLo
   });
 }
 
+/**
+ * Granularité de `lastLoginAt`. En deçà, on ne réécrit pas le fichier.
+ *
+ * POURQUOI CE GARDE-FOU : `/auth` est une simple requête GET, et l'horodater
+ * déclenche une écriture DURABLE complète (fsync du fichier, copie .bak, rename,
+ * fsync du répertoire). N'importe quel appelant répétitif transforme donc une
+ * page de connexion en marteau-pilon sur le disque. Ce n'est pas théorique : le
+ * script de mesure `domo-mesures/trace-sb3loop.sh`, lancé par une crontab à la
+ * minute, rouvrait une session à chaque passage — ~1440 cycles d'écriture par
+ * jour pendant les neuf jours qui ont suivi la phase identité, et un
+ * `lastLoginAt` qui horodatait un cron plutôt qu'une personne.
+ *
+ * Une heure de granularité suffit largement : cette date sert à savoir « quand
+ * cette personne est-elle venue pour la dernière fois », jamais à la seconde.
+ */
+export const LAST_LOGIN_GRANULARITE_MS = 60 * 60 * 1000;
+
 /** Horodate la connexion. Best-effort : un échec d'écriture ne doit pas
  *  refuser une session par ailleurs valide. */
 export async function touchLastLogin(id: string): Promise<void> {
@@ -302,6 +319,15 @@ export async function touchLastLogin(id: string): Promise<void> {
       const users = [...(await readUsers())];
       const i = users.findIndex((u) => u.id === id);
       if (i === -1) return;
+
+      // Déjà horodaté récemment → rien à écrire. Le contrôle est DANS le verrou :
+      // deux connexions simultanées ne doivent pas décider chacune d'écrire.
+      const precedent = users[i].lastLoginAt;
+      if (precedent) {
+        const age = Date.now() - Date.parse(precedent);
+        if (Number.isFinite(age) && age >= 0 && age < LAST_LOGIN_GRANULARITE_MS) return;
+      }
+
       users[i] = { ...users[i], lastLoginAt: new Date().toISOString() };
       await commit(users);
     });
