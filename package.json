@@ -27,7 +27,10 @@
     "test:pin": "node --experimental-strip-types --test scripts/pin.test.ts",
     "test:pin-login": "node --experimental-strip-types --test scripts/pin-login.test.ts",
     "test:pin-routes": "node --experimental-strip-types --import ./scripts/register-env.mjs --test scripts/pin-routes.test.ts",
-    "test:rate-limit": "node --experimental-strip-types --test scripts/rate-limit.test.ts"
+    "test:rate-limit": "node --experimental-strip-types --test scripts/rate-limit.test.ts",
+    "test:invite": "node --experimental-strip-types --test scripts/invite.test.ts",
+    "test:invite-routes": "node --experimental-strip-types --import ./scripts/register-env.mjs --test scripts/invite-routes.test.ts",
+    "test:users-admin": "node --experimental-strip-types --import ./scripts/register-env.mjs --test scripts/users-admin.test.ts"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.0",

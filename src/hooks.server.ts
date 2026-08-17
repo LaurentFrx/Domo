@@ -1,4 +1,4 @@
-import { redirect, type Handle, type HandleServerError } from '@sveltejs/kit';
+import { error, redirect, type Handle, type HandleServerError } from '@sveltejs/kit';
 import { SESSION_COOKIE_NAME, verifySessionCookie } from '$lib/server/auth';
 import { findUserById } from '$lib/server/users-store';
 import { setIncidentReporter } from '$lib/server/atomic-store';
@@ -46,6 +46,25 @@ function isPublic(pathname: string): boolean {
 
 function isMutating(method: string): boolean {
   return method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
+}
+
+/**
+ * Chemins réservés au rôle `admin`.
+ *
+ * RÈGLE DE CONCEPTION, à ne pas éroder : le rôle `famille` conserve EXACTEMENT
+ * l'accès qu'il avait avant l'existence des rôles. Rien de ce qu'Isabelle
+ * utilise au quotidien — climat, pièces, musique, énergie, cumulus — ne doit se
+ * mettre à répondre 403 parce qu'on a introduit une notion interne. Cette liste
+ * ne contient donc QUE de l'administration, et toutes ces routes sont nées
+ * après les rôles : personne ne perd quoi que ce soit.
+ *
+ * Ajouter ici un chemin déjà en service serait une régression pour elle, pas un
+ * durcissement.
+ */
+const ADMIN_ONLY = ['/api/users', '/menu/utilisateurs'];
+
+function isAdminOnly(pathname: string): boolean {
+  return ADMIN_ONLY.some((p) => pathname === p || pathname.startsWith(p + '/'));
 }
 
 function isAsset(pathname: string): boolean {
@@ -169,6 +188,23 @@ export const handle: Handle = async ({ event, resolve }) => {
       throw redirect(303, '/denied');
     }
     event.locals.user = { id: user.id, email: user.email, role: user.role };
+  }
+
+  // Garde de rôle. Une session legacy vaut `famille` : elle ne dit pas qui est
+  // derrière, elle n'administre donc rien. Les routes concernées vérifient AUSSI
+  // le rôle chez elles — deux barrières, pour qu'un remaniement de cette liste
+  // ne suffise pas à ouvrir une porte.
+  if (isAdminOnly(pathname) && event.locals.user.role !== 'admin') {
+    if (pathname.startsWith('/api/')) {
+      return new Response(
+        JSON.stringify({ error: 'interdit', message: 'Réservé à l’administrateur.' }),
+        {
+          status: 403,
+          headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }
+        }
+      );
+    }
+    throw error(403, 'Cette page est réservée à l’administrateur.');
   }
 
   // « Réglages » n'existe plus comme page : son contenu vit derrière le menu ☰

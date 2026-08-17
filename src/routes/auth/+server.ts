@@ -1,20 +1,46 @@
 import { redirect, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { checkMagicToken, setSessionCookie } from '$lib/server/auth';
-import { findActiveAdmin, touchLastLogin } from '$lib/server/users-store';
+import {
+  findActiveAdmin,
+  findUserByInviteToken,
+  markInviteUsed,
+  touchLastLogin
+} from '$lib/server/users-store';
 
+/**
+ * GET /auth?k=<jeton> — entrée dans l'app.
+ *
+ * DEUX natures de jeton, dans cet ordre :
+ *
+ *   1. INVITATION NOMINATIVE (phase 3) — un jeton par personne, borné dans le
+ *      temps, révocable. C'est la voie normale : c'est elle qui fait qu'une
+ *      session sait QUI est entré, donc que retirer quelqu'un le coupe vraiment.
+ *
+ *   2. AUTH_TOKEN global — conservé, mais rétrogradé en TRAPPE DE SECOURS de
+ *      l'administrateur. Il ne se partage plus : il vit dans `.env` sur le VPS
+ *      et reste la seule façon de rentrer si le magasin est vide, illisible, ou
+ *      si toutes les invitations ont expiré. Le supprimer ferait de Domo une
+ *      porte sans serrure de secours ; le partager annulerait la phase 3.
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
   const token = url.searchParams.get('k');
+  if (!token) throw error(403, 'Lien invalide');
 
-  if (!token || !checkMagicToken(token)) {
+  // ── 1. Invitation nominative ──────────────────────────────────────────
+  const invite = await findUserByInviteToken(token);
+  if (invite) {
+    setSessionCookie(cookies, invite.id);
+    await markInviteUsed(invite.id);
+    await touchLastLogin(invite.id);
+    throw redirect(303, '/');
+  }
+
+  // ── 2. Trappe de secours ──────────────────────────────────────────────
+  if (!checkMagicToken(token)) {
     throw error(403, 'Lien invalide');
   }
 
-  // Le lien magique est GLOBAL : il n'identifie personne par lui-même. On le
-  // rattache donc au propriétaire (unique administrateur actif), ce qui suffit
-  // à faire exister une identité dans la session. Les liens d'invitation
-  // nominatifs — un token par personne — viendront dans une phase séparée ;
-  // c'est eux qui rendront « supprimer un email » réellement effectif.
   const admin = await findActiveAdmin();
   if (!admin) {
     // Magasin vide, illisible ou sans administrateur actif : on n'enferme
@@ -25,9 +51,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
     throw redirect(303, '/');
   }
 
+  console.warn(`[auth] entrée par la trappe de secours AUTH_TOKEN (admin ${admin.email})`);
   setSessionCookie(cookies, admin.id);
   await touchLastLogin(admin.id);
 
-  // Redirect vers l'accueil
   throw redirect(303, '/');
 };

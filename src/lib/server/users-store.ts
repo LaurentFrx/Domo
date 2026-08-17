@@ -26,6 +26,13 @@ import { promises as fs } from 'node:fs';
 // (cf. scripts/users-store.test.ts), qui n'a pas le résolveur de Vite.
 import { readJsonSafe, writeJsonAtomic, withFileLock } from './atomic-store.ts';
 import { dummyVerify, hashPin, verifyPin } from './pin.ts';
+import {
+  INVITE_TTL_MS,
+  createInviteToken,
+  hashInviteToken,
+  inviteHashMatches,
+  looksLikeInviteToken
+} from './invite.ts';
 
 const USERS_FILE = path.resolve(process.cwd(), 'data', 'users.json');
 
@@ -44,6 +51,12 @@ export interface User {
   pinAttempts: number;
   /** Epoch ms de fin de verrouillage après trop d'essais, sinon `null`. */
   pinLockedUntil: number | null;
+  /** Invitation nominative en cours — SHA-256 du jeton, jamais le jeton. */
+  inviteHash: string | null;
+  /** Epoch ms de péremption du lien d'invitation, sinon `null`. */
+  inviteExpiresAt: number | null;
+  /** ISO 8601 de la PREMIÈRE entrée par ce lien — informatif, ne le consomme pas. */
+  inviteUsedAt: string | null;
   /** ISO 8601. */
   createdAt: string;
   /** ISO 8601, ou `null` si l'utilisateur ne s'est jamais connecté. */
@@ -87,6 +100,12 @@ function normalize(raw: unknown): UsersFile {
       pinSalt: typeof u.pinSalt === 'string' ? u.pinSalt : null,
       pinAttempts: typeof u.pinAttempts === 'number' ? u.pinAttempts : 0,
       pinLockedUntil: typeof u.pinLockedUntil === 'number' ? u.pinLockedUntil : null,
+      // Champs d'invitation absents des fichiers écrits avant la phase 3 : on
+      // les comble par `null` au lieu d'écarter l'entrée. Migration silencieuse,
+      // sans étape manuelle — un users.json de phase 1 se relit tel quel.
+      inviteHash: typeof u.inviteHash === 'string' ? u.inviteHash : null,
+      inviteExpiresAt: typeof u.inviteExpiresAt === 'number' ? u.inviteExpiresAt : null,
+      inviteUsedAt: typeof u.inviteUsedAt === 'string' ? u.inviteUsedAt : null,
       createdAt: typeof u.createdAt === 'string' ? u.createdAt : new Date().toISOString(),
       lastLoginAt: typeof u.lastLoginAt === 'string' ? u.lastLoginAt : null
     });
@@ -190,6 +209,9 @@ export async function createUser(input: NewUser): Promise<User> {
       pinSalt: null,
       pinAttempts: 0,
       pinLockedUntil: null,
+      inviteHash: null,
+      inviteExpiresAt: null,
+      inviteUsedAt: null,
       createdAt: new Date().toISOString(),
       lastLoginAt: null
     };
@@ -292,6 +314,158 @@ export async function attemptPinLogin(email: string, pin: string): Promise<PinLo
     await commit(users);
     return { ok: false, reason: 'wrong_pin' };
   });
+}
+
+// ─── Modification et suppression ───────────────────────────────────────
+
+export interface UserPatch {
+  role?: UserRole;
+  status?: UserStatus;
+}
+
+/** Levée si l'opération laisserait le foyer sans personne pour administrer. */
+export class DernierAdminError extends Error {
+  constructor() {
+    super('users: il doit rester au moins un administrateur actif');
+    this.name = 'DernierAdminError';
+  }
+}
+
+/**
+ * Garde-fou d'enfermement : après toute modification, au moins un compte doit
+ * rester `admin` ET `active`.
+ *
+ * Sans lui, se rétrograder soi-même en « famille » ou se révoquer par mégarde
+ * rendrait l'administration définitivement inatteignable depuis l'interface —
+ * il faudrait rouvrir `users.json` à la main sur le VPS. La trappe AUTH_TOKEN
+ * dépanne, mais elle s'appuie justement sur `findActiveAdmin()` : plus d'admin
+ * actif, et elle retombe sur un cookie anonyme sans pouvoir.
+ */
+function resteUnAdmin(users: User[]): boolean {
+  return users.some((u) => u.role === 'admin' && u.status === 'active');
+}
+
+export async function updateUser(id: string, patch: UserPatch): Promise<User> {
+  return withFileLock(USERS_FILE, async () => {
+    const users = [...(await readUsers())];
+    const i = users.findIndex((u) => u.id === id);
+    if (i === -1) throw new Error('users: utilisateur introuvable');
+
+    const modifie: User = {
+      ...users[i],
+      role: patch.role ?? users[i].role,
+      status: patch.status ?? users[i].status
+    };
+    // Révoquer quelqu'un coupe aussi son lien : le laisser vivant permettrait
+    // de rentrer à nouveau dès la réactivation, sans décision explicite.
+    if (modifie.status === 'revoked') {
+      modifie.inviteHash = null;
+      modifie.inviteExpiresAt = null;
+    }
+    users[i] = modifie;
+
+    if (!resteUnAdmin(users)) throw new DernierAdminError();
+    await commit(users);
+    return modifie;
+  });
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  return withFileLock(USERS_FILE, async () => {
+    const users = (await readUsers()).filter((u) => u.id !== id);
+    if (users.length === (await readUsers()).length) return; // déjà absent
+    if (!resteUnAdmin(users)) throw new DernierAdminError();
+    await commit(users);
+  });
+}
+
+// ─── Invitations nominatives ───────────────────────────────────────────
+
+export type InviteIssue = { token: string; expiresAt: number };
+
+/**
+ * Émet une invitation pour un utilisateur et renvoie le jeton EN CLAIR.
+ *
+ * C'est le seul instant où il existe en clair : seule son empreinte est
+ * persistée. Un appel remplace l'invitation précédente — régénérer un lien
+ * invalide donc l'ancien, ce qui est exactement ce qu'on veut quand un lien a
+ * fuité.
+ */
+export async function issueInvite(userId: string, ttlMs = INVITE_TTL_MS): Promise<InviteIssue> {
+  const token = createInviteToken();
+  const expiresAt = Date.now() + ttlMs;
+  await withFileLock(USERS_FILE, async () => {
+    const users = [...(await readUsers())];
+    const i = users.findIndex((u) => u.id === userId);
+    if (i === -1) throw new Error('users: utilisateur introuvable');
+    users[i] = {
+      ...users[i],
+      inviteHash: hashInviteToken(token),
+      inviteExpiresAt: expiresAt,
+      inviteUsedAt: null
+    };
+    await commit(users);
+  });
+  return { token, expiresAt };
+}
+
+/** Révoque l'invitation en cours — le lien cesse immédiatement de fonctionner. */
+export async function revokeInvite(userId: string): Promise<void> {
+  await withFileLock(USERS_FILE, async () => {
+    const users = [...(await readUsers())];
+    const i = users.findIndex((u) => u.id === userId);
+    if (i === -1) return;
+    users[i] = { ...users[i], inviteHash: null, inviteExpiresAt: null, inviteUsedAt: null };
+    await commit(users);
+  });
+}
+
+/**
+ * Retrouve l'utilisateur ACTIF dont l'invitation valide correspond au jeton.
+ *
+ * Balayage linéaire avec comparaison à temps constant : le foyer compte une
+ * poignée de comptes, et un index par empreinte n'apporterait rien qu'une
+ * occasion de désynchronisation.
+ */
+export async function findUserByInviteToken(token: string): Promise<User | null> {
+  if (!looksLikeInviteToken(token)) return null;
+  const empreinte = hashInviteToken(token);
+  const now = Date.now();
+  for (const u of await readUsers()) {
+    if (!u.inviteHash || u.status === 'revoked') continue;
+    if (!inviteHashMatches(empreinte, u.inviteHash)) continue;
+    if (u.inviteExpiresAt !== null && u.inviteExpiresAt <= now) return null; // périmée
+    return u;
+  }
+  return null;
+}
+
+/**
+ * Note la première entrée par le lien, et fait passer `invited` → `active`.
+ *
+ * L'invitation n'est PAS consommée (cf. le commentaire d'en-tête d'invite.ts :
+ * les aperçus SMS/WhatsApp préchargent l'URL). Best-effort : un échec d'écriture
+ * ne doit pas refuser une entrée par ailleurs légitime.
+ */
+export async function markInviteUsed(userId: string): Promise<void> {
+  try {
+    await withFileLock(USERS_FILE, async () => {
+      const users = [...(await readUsers())];
+      const i = users.findIndex((u) => u.id === userId);
+      if (i === -1) return;
+      const u = users[i];
+      const devientActif = u.status === 'invited';
+      if (u.inviteUsedAt && !devientActif) return; // déjà noté, rien à réécrire
+      users[i] = {
+        ...u,
+        inviteUsedAt: u.inviteUsedAt ?? new Date().toISOString(),
+        status: devientActif ? 'active' : u.status
+      };
+      await commit(users);
+    });
+  } catch (e) {
+    console.error(`[users-store] invitation non horodatée pour ${userId}: ${(e as Error).message}`);
+  }
 }
 
 /**
