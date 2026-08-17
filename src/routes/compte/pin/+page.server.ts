@@ -6,14 +6,23 @@
  * utilisateurs viendra plus tard.
  */
 import type { PageServerLoad } from './$types';
-import { readUsers } from '$lib/server/users-store';
+import { findActiveAdmin, readUsers } from '$lib/server/users-store';
 
 export const load: PageServerLoad = async ({ locals }) => {
   const user = locals.user;
 
   // Session legacy : on ne sait pas qui c'est, donc pas de PIN attribuable.
+  // On renvoie l'adresse de l'administrateur pour que le message dise à qui
+  // s'adresser, au lieu de renvoyer à un « lien magique » que personne ne sait
+  // où trouver — c'est exactement là-dessus que Laurent a buté le 17/08.
   if (!user || user.id === 'legacy') {
-    return { identifie: false as const, email: null, role: null, membres: [] };
+    return {
+      identifie: false as const,
+      email: null,
+      role: null,
+      membres: [],
+      adminEmail: (await findActiveAdmin())?.email ?? null
+    };
   }
 
   // La liste des membres n'est renvoyée QU'À un administrateur — et réduite à
@@ -26,5 +35,11 @@ export const load: PageServerLoad = async ({ locals }) => {
           .map((u) => ({ id: u.id, email: u.email }))
       : [];
 
-  return { identifie: true as const, email: user.email, role: user.role, membres };
+  return {
+    identifie: true as const,
+    email: user.email,
+    role: user.role,
+    membres,
+    adminEmail: null
+  };
 };

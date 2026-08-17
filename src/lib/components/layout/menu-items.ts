@@ -116,6 +116,15 @@ export const menuGroups: MenuGroup[] = [
         keywords: 'thème clair sombre animations affichage'
       },
       {
+        href: '/compte/pin',
+        label: 'Mon code',
+        description: 'Entrer sans le lien, avec 4 chiffres',
+        icon: 'M12 15a2 2 0 1 0 0-4 2 2 0 0 0 0 4 M12 15v2.5 M6 10V7a6 6 0 0 1 12 0v3 M5 10h14v11H5Z',
+        tint: 'var(--ios-teal)',
+        keywords: 'pin secours 4 chiffres connexion mot de passe accès oublié',
+        external: true
+      },
+      {
         href: '/menu/utilisateurs',
         label: 'Utilisateurs',
         icon: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M22 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',

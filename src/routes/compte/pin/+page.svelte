@@ -1,8 +1,11 @@
 <script lang="ts">
   /**
-   * « Mon code » — définir son PIN de secours, et pour un administrateur celui
-   * d'un autre membre. Page hors navigation (accès par URL), volontairement
-   * minimale : la vraie page d'administration viendra en phase 4.
+   * « Mon code » — définir son code de secours, et pour un administrateur celui
+   * d'un autre membre. Atteignable par Menu ▸ Mon code.
+   *
+   * Vocabulaire : pas de « PIN », pas de « lien magique », pas de « session ».
+   * La page a été réécrite le 17/08 parce que sa première version renvoyait à un
+   * « lien magique » que son propre auteur n'a pas su retrouver.
    */
   import type { PageData } from './$types';
 
@@ -64,26 +67,36 @@
   }
 </script>
 
-<svelte:head><title>Mon code — Domo</title></svelte:head>
+<!-- Pas de <title> ici : le layout racine est la source UNIQUE du titre d'onglet
+     (plusieurs pages sont montées à la fois sous le pager, deux titres se
+     télescoperaient). « Mon code » vient du registre du menu, via pageTitleFor. -->
 
 <div class="mx-auto flex w-full max-w-md flex-col gap-5 px-4 py-6">
   <h1 class="text-[22px] font-semibold tracking-tight" style="color: var(--color-fg);">Mon code</h1>
 
   {#if !data.identifie}
     <div class="card" style="background: var(--color-card);">
-      <p class="text-[14px]" style="color: var(--color-fg);">
-        Ta session ne dit pas encore qui tu es.
+      <p class="text-[14px] font-semibold" style="color: var(--color-fg);">
+        Domo ne sait pas encore qui tu es
       </p>
       <p class="mt-2 text-[13px]" style="color: var(--color-muted-fg);">
-        Rouvre l'app une fois avec ton lien magique, puis reviens sur cette page : le code de
-        secours pourra alors être rattaché à ton compte.
+        Cet appareil entre avec l'ancien lien d'accès, celui qui était le même pour toute la maison.
+        Un code à 4 chiffres appartient à une personne, il n'y a donc rien à quoi le rattacher.
+      </p>
+      <p class="mt-3 text-[13px]" style="color: var(--color-fg);">
+        <strong>Ce qu'il faut faire :</strong> demander ton lien personnel
+        {#if data.adminEmail}
+          à <span class="whitespace-nowrap">{data.adminEmail}</span>
+        {/if}
+        — dans Domo, c'est <em>Menu ▸ Utilisateurs</em>, puis <em>Inviter</em> sur ta ligne. Ouvre le
+        lien reçu une fois depuis cet appareil, puis reviens ici : le formulaire sera là.
       </p>
     </div>
   {:else}
     <form class="card" style="background: var(--color-card);" onsubmit={soumettreMien}>
       <h2 class="titre">Définir mon code</h2>
       <p class="sous">
-        Quatre chiffres, pour entrer sans le lien magique.
+        Quatre chiffres, pour entrer le jour où tu n'as plus ton lien d'accès sous la main.
         {#if data.email}<span class="whitespace-nowrap">Compte : {data.email}</span>{/if}
       </p>
       <input
