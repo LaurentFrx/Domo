@@ -1,39 +1,19 @@
 /**
- * Invitations nominatives — réservé à l'administrateur.
+ * Invitations nominatives.
  *
  *   POST   { userId, ttlDays? }  → émet un lien, renvoie le jeton UNE fois
  *   DELETE { userId }            → révoque le lien en cours
  *
- * Le contrôle de rôle est fait ICI en plus de la garde du hook : une route
- * d'administration ne doit pas dépendre d'une seule barrière, ni devenir
- * ouverte si quelqu'un remanie la liste des chemins gardés.
+ * Contrôle de rôle : uniquement dans la table de $lib/server/access, appliquée
+ * par le hook. Rien n'est revérifié ici.
  */
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { issueInvite, revokeInvite, findUserById } from '$lib/server/users-store';
 
-const REFUS_ADMIN = { error: 'interdit', message: 'Réservé à l’administrateur.' };
-
 /** Session identifiée ET administratrice, sinon la raison du refus. */
-function exigeAdmin(locals: App.Locals): Response | null {
-  const user = locals.user;
-  if (!user || user.id === 'legacy') {
-    return json(
-      {
-        error: 'session_non_identifiee',
-        message: 'Ouvre d’abord l’app avec ton lien, puis reviens.'
-      },
-      { status: 401 }
-    );
-  }
-  if (user.role !== 'admin') return json(REFUS_ADMIN, { status: 403 });
-  return null;
-}
 
-export const POST: RequestHandler = async ({ request, locals }) => {
-  const refus = exigeAdmin(locals);
-  if (refus) return refus;
-
+export const POST: RequestHandler = async ({ request }) => {
   const body = (await request.json().catch(() => null)) as {
     userId?: unknown;
     ttlDays?: unknown;
@@ -79,10 +59,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
   });
 };
 
-export const DELETE: RequestHandler = async ({ request, locals }) => {
-  const refus = exigeAdmin(locals);
-  if (refus) return refus;
-
+export const DELETE: RequestHandler = async ({ request }) => {
   const body = (await request.json().catch(() => null)) as { userId?: unknown } | null;
   if (typeof body?.userId !== 'string' || !body.userId) {
     return json({ error: 'format', message: 'userId requis.' }, { status: 400 });

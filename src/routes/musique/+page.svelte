@@ -10,6 +10,7 @@
    * suppression toujours derrière une confirmation explicite).
    */
   import { onDestroy, onMount, tick } from 'svelte';
+  import { peutToutRegler, RESERVE } from '$utils/droits.svelte';
   import { acquire } from '$stores/refcount';
   import {
     plex,
@@ -737,7 +738,12 @@
                 <span class="row-a">{a.artist}{a.tracks ? ` · ${a.tracks} titres` : ''}</span>
               </span>
             </button>
-            <button class="del" onclick={() => askDeleteAlbum(a)}>Supprimer</button>
+            <button
+              class="del"
+              onclick={() => askDeleteAlbum(a)}
+              disabled={!peutToutRegler()}
+              title={peutToutRegler() ? undefined : RESERVE}>Supprimer</button
+            >
           </div>
         {/each}
         {#if plex.albums.length < plex.albumsTotal}

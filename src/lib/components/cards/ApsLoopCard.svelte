@@ -1,6 +1,7 @@
 <script lang="ts">
   import { apsloop } from '$stores/apsloop.svelte';
   import { haptic } from '$utils/haptic';
+  import { peutToutRegler, RESERVE } from '$utils/droits.svelte';
 
   // Tuile « bridage onduleur » : la boucle qui abaisse le plafond de l'onduleur
   // APS quand le compteur voit une injection persistante, et le rend dès que le
@@ -67,7 +68,8 @@
     <button
       type="button"
       onclick={toggle}
-      disabled={apsloop.busy || !apsloop.connected}
+      disabled={apsloop.busy || !apsloop.connected || !peutToutRegler()}
+      title={peutToutRegler() ? undefined : RESERVE}
       class="rounded-full px-3 py-1.5 text-[12px] font-semibold transition-opacity disabled:opacity-40"
       style="background: {apsloop.enabled
         ? 'var(--color-battery-muted)'
@@ -127,7 +129,8 @@
     <button
       type="button"
       onclick={toggleObservation}
-      disabled={apsloop.busy}
+      disabled={apsloop.busy || !peutToutRegler()}
+      title={peutToutRegler() ? undefined : RESERVE}
       class="flex items-center justify-between gap-3 rounded-[var(--radius-xl)] border px-3 py-2 text-left transition-opacity disabled:opacity-40"
       style="border-color: var(--color-border);"
     >

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { sb3loop } from '$stores/sb3loop.svelte';
   import { haptic } from '$utils/haptic';
+  import { peutToutRegler, RESERVE } from '$utils/droits.svelte';
 
   // Tuile « boucle SB3 » : la boucle lente qui alloue l'énergie entre les
   // Solarbank 3 et la Max AC la nuit (consigne cloud, minutes, bandes mortes).
@@ -64,7 +65,8 @@
     <button
       type="button"
       onclick={toggle}
-      disabled={sb3loop.busy || !sb3loop.connected}
+      disabled={sb3loop.busy || !sb3loop.connected || !peutToutRegler()}
+      title={peutToutRegler() ? undefined : RESERVE}
       class="rounded-full px-3 py-1.5 text-[12px] font-semibold transition-opacity disabled:opacity-40"
       style="background: {sb3loop.enabled
         ? 'var(--color-battery-muted)'

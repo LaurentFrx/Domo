@@ -2,8 +2,9 @@
  * Tests de l'administration des comptes (/api/users).
  * Lance : node --experimental-strip-types --import ./scripts/register-env.mjs --test scripts/users-admin.test.ts
  *
- * Le cas qui compte le plus : ne JAMAIS pouvoir se retrouver sans administrateur
- * actif. Sans ce garde-fou, une fausse manœuvre rendrait l'administration
+ * Le contrôle de rôle est testé dans scripts/access.test.ts, pas ici : la route
+ * ne le refait plus. Le cas qui compte le plus ici : ne JAMAIS pouvoir se
+ * retrouver sans administrateur actif. Sans ce garde-fou, une fausse manœuvre rendrait l'administration
  * inatteignable depuis l'app, et il faudrait rouvrir users.json sur le VPS.
  */
 import { test } from 'node:test';
@@ -48,27 +49,6 @@ const lire = async (r: Response) => (await r.json()) as Record<string, unknown>;
 
 // ─── Accès ─────────────────────────────────────────────────────────────
 
-test('la liste est réservée à l’admin', async () => {
-  assert.equal((await api.GET({ locals: SESSION_ADMIN } as never)).status, 200);
-  assert.equal((await api.GET({ locals: SESSION_FAMILLE } as never)).status, 403);
-  assert.equal((await api.GET({ locals: SESSION_LEGACY } as never)).status, 401);
-  assert.equal((await api.GET({ locals: {} } as never)).status, 401);
-});
-
-test('toutes les écritures sont réservées à l’admin', async () => {
-  for (const [nom, fn] of [
-    ['POST', api.POST],
-    ['PATCH', api.PATCH],
-    ['DELETE', api.DELETE]
-  ] as const) {
-    assert.equal(
-      (await fn(evt({ userId: membre.id, email: 'x@y.fr' }, SESSION_FAMILLE) as never)).status,
-      403,
-      `${nom} laisse passer un membre famille`
-    );
-  }
-});
-
 test('la liste ne laisse fuir NI empreinte de code, NI empreinte de lien', async () => {
   await store.setUserPin(membre.id, '1234');
   await store.issueInvite(membre.id);
@@ -83,12 +63,12 @@ test('la liste ne laisse fuir NI empreinte de code, NI empreinte de lien', async
 
 // ─── Création ──────────────────────────────────────────────────────────
 
-test('POST crée un compte « invité », adresse invalide → 400, doublon → 409', async () => {
+test('POST crée un compte actif, adresse invalide → 400, doublon → 409', async () => {
   const r = await api.POST(evt({ email: 'neuf@exemple.fr' }, SESSION_ADMIN) as never);
   assert.equal(r.status, 200);
   const cree = (await lire(r)).user as { id: string; role: string };
   assert.equal(cree.role, 'famille', 'rôle par défaut');
-  assert.equal((await store.findUserById(cree.id))?.status, 'invited');
+  assert.equal((await store.findUserById(cree.id))?.status, 'active');
 
   assert.equal(
     (await api.POST(evt({ email: 'pas-une-adresse' }, SESSION_ADMIN) as never)).status,

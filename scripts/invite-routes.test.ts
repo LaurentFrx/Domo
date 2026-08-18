@@ -1,5 +1,8 @@
 /**
- * Tests des routes d'invitation et du nouveau /auth.
+ * Tests des routes d'invitation et de /auth.
+ *
+ * Le contrôle de rôle n'est PAS testé ici : il ne vit plus dans les routes mais
+ * dans la table de $lib/server/access — cf. scripts/access.test.ts.
  * Lance : node --experimental-strip-types --import ./scripts/register-env.mjs --test scripts/invite-routes.test.ts
  */
 import { test } from 'node:test';
@@ -21,11 +24,7 @@ const { GET: authGet } = await import('../src/routes/auth/+server.ts');
 
 const USERS_FILE = path.join(sandbox, 'data', 'users.json');
 const admin = await store.createUser({ email: 'chef@exemple.fr', role: 'admin', status: 'active' });
-const membre = await store.createUser({
-  email: 'ex@exemple.fr',
-  role: 'famille',
-  status: 'invited'
-});
+const membre = await store.createUser({ email: 'ex@exemple.fr', role: 'famille' });
 
 const SESSION_ADMIN = { user: { id: admin.id, email: admin.email, role: 'admin' } };
 const SESSION_FAMILLE = { user: { id: membre.id, email: membre.email, role: 'famille' } };
@@ -81,16 +80,6 @@ test('admin : émet un lien, renvoie le jeton UNE fois', async () => {
   assert.ok(!fichier.includes(token), 'le jeton en clair est stocké');
 });
 
-test('un membre « famille » ne peut pas inviter → 403', async () => {
-  const r = await inviter(evt({ userId: admin.id }, SESSION_FAMILLE) as never);
-  assert.equal(r.status, 403);
-});
-
-test('session legacy → 401 ; sans session → 401', async () => {
-  assert.equal((await inviter(evt({ userId: membre.id }, SESSION_LEGACY) as never)).status, 401);
-  assert.equal((await inviter(evt({ userId: membre.id }, {}) as never)).status, 401);
-});
-
 test('userId manquant → 400 ; inconnu → 404', async () => {
   assert.equal((await inviter(evt({}, SESSION_ADMIN) as never)).status, 400);
   assert.equal((await inviter(evt({ userId: 'fantome' }, SESSION_ADMIN) as never)).status, 404);
@@ -124,12 +113,11 @@ test('inviter un compte révoqué → 409 (le réactiver d’abord)', async () =
   assert.equal(r.status, 409);
 });
 
-test('DELETE révoque le lien ; réservé à l’admin', async () => {
+test('DELETE révoque le lien', async () => {
   const d = await lire(await inviter(evt({ userId: membre.id }, SESSION_ADMIN) as never));
   const token = (d.path as string).split('k=')[1];
   assert.ok(await store.findUserByInviteToken(token));
 
-  assert.equal((await revoquer(evt({ userId: membre.id }, SESSION_FAMILLE) as never)).status, 403);
   assert.equal((await revoquer(evt({ userId: membre.id }, SESSION_ADMIN) as never)).status, 200);
   assert.equal(await store.findUserByInviteToken(token), null);
 });
@@ -149,7 +137,6 @@ test('invitation : ouvre une session AU NOM de l’invité, pas de l’admin', a
     membre.id,
     'la session n’est pas celle de l’invité'
   );
-  // Et l'entrée a fait passer le compte de « invited » à « active ».
   assert.equal((await store.findUserById(membre.id))?.status, 'active');
 });
 

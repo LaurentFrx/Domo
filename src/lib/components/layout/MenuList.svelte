@@ -14,24 +14,13 @@
   import { menuGroups, filterGroups, type MenuItem } from './menu-items';
   import { preferences } from '$stores/preferences.svelte';
   import { health } from '$stores/health.svelte';
-  import { page } from '$app/state';
 
   let { onNavigate, searchable = true }: { onNavigate?: () => void; searchable?: boolean } =
     $props();
 
   let query = $state('');
 
-  // Les cellules `adminOnly` disparaissent pour tout le monde sauf l'admin — y
-  // compris pour une session legacy, qui ne dit pas qui est derrière. La route
-  // reste gardée côté serveur : ceci n'est qu'une question de ne pas proposer
-  // une porte fermée.
-  const estAdmin = $derived((page.data.user as { role?: string } | null)?.role === 'admin');
-  const visibles = $derived(
-    (query ? filterGroups(query) : menuGroups)
-      .map((g) => ({ ...g, items: g.items.filter((it) => !it.adminOnly || estAdmin) }))
-      .filter((g) => g.items.length > 0)
-  );
-  const groups = $derived(visibles);
+  const groups = $derived(query ? filterGroups(query) : menuGroups);
   const empty = $derived(groups.length === 0);
 
   const incidents = $derived(health.incidents.length);

@@ -1,13 +1,14 @@
 /**
- * Administration des comptes — réservé au rôle `admin`.
+ * Administration des comptes.
  *
  *   GET                                   → liste
- *   POST   { email, role }                → crée un compte « invité »
- *   PATCH  { userId, role?, status? }     → change rôle / statut
+ *   POST   { email, role }                → crée un compte
+ *   PATCH  { userId, role?, status? }     → change droits / accès
  *   DELETE { userId }                     → supprime
  *
- * Comme pour /api/users/invite, le rôle est revérifié ici en plus de la garde
- * du hook : deux barrières valent mieux qu'une sur de l'administration.
+ * Le contrôle de rôle N'EST PAS refait ici : il vit à un seul endroit, la table
+ * de $lib/server/access appliquée par le hook. Le redoubler, c'était la même
+ * règle écrite deux fois, donc deux occasions de diverger.
  *
  * Ce qui sort d'ici est DÉLIBÉRÉMENT réduit : ni empreinte de PIN, ni sel, ni
  * empreinte d'invitation. Le client n'a besoin que de savoir si un code et un
@@ -26,22 +27,8 @@ import {
 } from '$lib/server/users-store';
 
 const ROLES: readonly UserRole[] = ['admin', 'famille'];
-const STATUSES: readonly UserStatus[] = ['active', 'invited', 'revoked'];
+const STATUSES: readonly UserStatus[] = ['active', 'revoked'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function exigeAdmin(locals: App.Locals): Response | null {
-  const user = locals.user;
-  if (!user || user.id === 'legacy') {
-    return json(
-      { error: 'session_non_identifiee', message: 'Ouvre d’abord l’app avec ton lien.' },
-      { status: 401 }
-    );
-  }
-  if (user.role !== 'admin') {
-    return json({ error: 'interdit', message: 'Réservé à l’administrateur.' }, { status: 403 });
-  }
-  return null;
-}
 
 /** Vue publique d'un compte : des faits, jamais de secrets. */
 async function liste() {
@@ -65,16 +52,11 @@ async function liste() {
   }));
 }
 
-export const GET: RequestHandler = async ({ locals }) => {
-  const refus = exigeAdmin(locals);
-  if (refus) return refus;
+export const GET: RequestHandler = async () => {
   return json({ users: await liste() });
 };
 
-export const POST: RequestHandler = async ({ request, locals }) => {
-  const refus = exigeAdmin(locals);
-  if (refus) return refus;
-
+export const POST: RequestHandler = async ({ request }) => {
   const body = (await request.json().catch(() => null)) as {
     email?: unknown;
     role?: unknown;
@@ -87,19 +69,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
   const role = ROLES.includes(body?.role as UserRole) ? (body?.role as UserRole) : 'famille';
 
   try {
-    // « invited » et non « active » : le compte n'existe vraiment qu'une fois
-    // que la personne est entrée par son lien.
-    const cree = await createUser({ email, role, status: 'invited' });
+    const cree = await createUser({ email, role, status: 'active' });
     return json({ ok: true, user: { id: cree.id, email: cree.email, role: cree.role } });
   } catch {
     return json({ error: 'doublon', message: 'Cette adresse existe déjà.' }, { status: 409 });
   }
 };
 
-export const PATCH: RequestHandler = async ({ request, locals }) => {
-  const refus = exigeAdmin(locals);
-  if (refus) return refus;
-
+export const PATCH: RequestHandler = async ({ request }) => {
   const body = (await request.json().catch(() => null)) as {
     userId?: unknown;
     role?: unknown;
@@ -136,10 +113,7 @@ export const PATCH: RequestHandler = async ({ request, locals }) => {
   }
 };
 
-export const DELETE: RequestHandler = async ({ request, locals }) => {
-  const refus = exigeAdmin(locals);
-  if (refus) return refus;
-
+export const DELETE: RequestHandler = async ({ request }) => {
   const body = (await request.json().catch(() => null)) as { userId?: unknown } | null;
   if (typeof body?.userId !== 'string' || !body.userId) {
     return json({ error: 'format', message: 'userId requis.' }, { status: 400 });

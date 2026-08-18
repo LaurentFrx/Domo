@@ -16,11 +16,7 @@ const inv = await import('../src/lib/server/invite.ts');
 const USERS_FILE = path.join(sandbox, 'data', 'users.json');
 
 const admin = await store.createUser({ email: 'chef@exemple.fr', role: 'admin', status: 'active' });
-const membre = await store.createUser({
-  email: 'ex@exemple.fr',
-  role: 'famille',
-  status: 'invited'
-});
+const membre = await store.createUser({ email: 'ex@exemple.fr', role: 'famille' });
 
 const brut = async (id: string) =>
   JSON.parse(await fs.readFile(USERS_FILE, 'utf-8')).users.find((u: { id: string }) => u.id === id);
@@ -112,7 +108,7 @@ test('compte révoqué : son lien ne fonctionne plus', async () => {
   const { token } = await store.issueInvite(membre.id);
   await patch(membre.id, { status: 'revoked' });
   assert.equal(await store.findUserByInviteToken(token), null);
-  await patch(membre.id, { status: 'invited' });
+  await patch(membre.id, { status: 'active' });
   assert.equal((await store.findUserByInviteToken(token))?.id, membre.id, 'réactivé, ça remarche');
 });
 
@@ -125,14 +121,14 @@ test('revokeInvite coupe le lien immédiatement', async () => {
   assert.equal(u.inviteExpiresAt, null);
 });
 
-test('markInviteUsed fait passer invited → active et horodate une seule fois', async () => {
+test('markInviteUsed horodate UNE fois et ne consomme pas le lien', async () => {
   const { token } = await store.issueInvite(membre.id);
-  assert.equal((await brut(membre.id)).status, 'invited');
+  const avantStatut = (await brut(membre.id)).status;
 
   await store.markInviteUsed(membre.id);
   const apres = await brut(membre.id);
-  assert.equal(apres.status, 'active');
-  assert.ok(apres.inviteUsedAt);
+  assert.ok(apres.inviteUsedAt, 'la première entrée doit être horodatée');
+  assert.equal(apres.status, avantStatut, 'le statut ne doit plus bouger tout seul');
 
   // Le lien reste VALIDE (aperçus SMS/WhatsApp) et l'horodatage ne bouge plus.
   const mtimeAvant = (await fs.stat(USERS_FILE)).mtimeMs;

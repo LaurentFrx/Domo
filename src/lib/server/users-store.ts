@@ -37,7 +37,15 @@ import {
 const USERS_FILE = path.resolve(process.cwd(), 'data', 'users.json');
 
 export type UserRole = 'admin' | 'famille';
-export type UserStatus = 'active' | 'invited' | 'revoked';
+/**
+ * Deux états, pas trois. « Invité » (créé, jamais venu) doublonnait avec
+ * `lastLoginAt === null` : deux sources pour le même fait, et un piège réel —
+ * la porte d'entrée exige `active`, si bien qu'un compte resté `invited` parce
+ * que l'écriture de bascule avait échoué recevait son cookie puis se faisait
+ * renvoyer dehors à la requête suivante, en boucle et sans explication.
+ * « Jamais venu » est désormais un simple AFFICHAGE, déduit de lastLoginAt.
+ */
+export type UserStatus = 'active' | 'revoked';
 
 export interface User {
   /** UUID v4 — stable, porté par le cookie de session. Jamais réutilisé. */
@@ -70,7 +78,7 @@ interface UsersFile {
 }
 
 const ROLES: readonly UserRole[] = ['admin', 'famille'];
-const STATUSES: readonly UserStatus[] = ['active', 'invited', 'revoked'];
+const STATUSES: readonly UserStatus[] = ['active', 'revoked'];
 
 const emptyFile = (): UsersFile => ({ version: 1, users: [] });
 
@@ -90,12 +98,17 @@ function normalize(raw: unknown): UsersFile {
     if (typeof u?.id !== 'string' || !u.id) continue;
     if (typeof u.email !== 'string' || !u.email) continue;
     if (!ROLES.includes(u.role as UserRole)) continue;
-    if (!STATUSES.includes(u.status as UserStatus)) continue;
+    // Migration silencieuse : les fichiers écrits avant la simplification
+    // portent encore « invited ». On le relit comme « active » — c'est
+    // l'invitation elle-même, et non le statut, qui garde la porte.
+    const statut: UserStatus =
+      (u.status as string) === 'invited' ? 'active' : (u.status as UserStatus);
+    if (!STATUSES.includes(statut)) continue;
     users.push({
       id: u.id,
       email: u.email,
       role: u.role as UserRole,
-      status: u.status as UserStatus,
+      status: statut,
       pinHash: typeof u.pinHash === 'string' ? u.pinHash : null,
       pinSalt: typeof u.pinSalt === 'string' ? u.pinSalt : null,
       pinAttempts: typeof u.pinAttempts === 'number' ? u.pinAttempts : 0,
@@ -204,7 +217,7 @@ export async function createUser(input: NewUser): Promise<User> {
       id: crypto.randomUUID(),
       email,
       role: input.role,
-      status: input.status ?? 'invited',
+      status: input.status ?? 'active',
       pinHash: null,
       pinSalt: null,
       pinAttempts: 0,
@@ -441,7 +454,7 @@ export async function findUserByInviteToken(token: string): Promise<User | null>
 }
 
 /**
- * Note la première entrée par le lien, et fait passer `invited` → `active`.
+ * Note la première entrée par le lien.
  *
  * L'invitation n'est PAS consommée (cf. le commentaire d'en-tête d'invite.ts :
  * les aperçus SMS/WhatsApp préchargent l'URL). Best-effort : un échec d'écriture
@@ -454,12 +467,10 @@ export async function markInviteUsed(userId: string): Promise<void> {
       const i = users.findIndex((u) => u.id === userId);
       if (i === -1) return;
       const u = users[i];
-      const devientActif = u.status === 'invited';
-      if (u.inviteUsedAt && !devientActif) return; // déjà noté, rien à réécrire
+      if (u.inviteUsedAt) return; // déjà noté, rien à réécrire
       users[i] = {
         ...u,
-        inviteUsedAt: u.inviteUsedAt ?? new Date().toISOString(),
-        status: devientActif ? 'active' : u.status
+        inviteUsedAt: u.inviteUsedAt ?? new Date().toISOString()
       };
       await commit(users);
     });
