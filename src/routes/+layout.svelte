@@ -94,10 +94,20 @@
   // les modules et l'app « ne répond plus ». `version.pollInterval` (svelte.config)
   // détecte la nouvelle version (`updated.current`) ; on force alors une navigation
   // PLEINE page (location.href) qui recharge le code à jour. Filet durable.
+  //
+  // MAIS PAS PENDANT UNE ÉCOUTE. Un rechargement plein détruit le contexte JS,
+  // donc l'élément <audio> : la musique s'arrête net, et iOS interdit de la
+  // relancer sans geste de l'utilisateur — impossible de reprendre tout seul.
+  // Vécu le 18/08 : deux déploiements dans l'heure, et le premier passage dans
+  // le menu coupait la musique. On diffère : la mise à jour se fera à la
+  // navigation suivante une fois la lecture terminée. Si un module manquait
+  // vraiment d'ici là, le routeur SvelteKit bascule de lui-même en navigation
+  // pleine page — on ne perd donc pas le filet, on cesse juste de le tendre
+  // au mauvais moment.
   beforeNavigate(({ willUnload, to }) => {
-    if (updated.current && to?.url && !willUnload) {
-      location.href = to.url.href;
-    }
+    if (!updated.current || !to?.url || willUnload) return;
+    if (player.playing) return;
+    location.href = to.url.href;
   });
 
   // ─── Boutons « façon iOS » : pression visuelle + haptique de CONFIRMATION ──
