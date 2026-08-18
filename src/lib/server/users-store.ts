@@ -36,7 +36,14 @@ import {
 
 const USERS_FILE = path.resolve(process.cwd(), 'data', 'users.json');
 
-export type UserRole = 'admin' | 'famille';
+/**
+ * `demo` : accès de DÉMONSTRATION, en lecture seule. Ce n'est pas un rôle
+ * « famille » diminué — c'est un visiteur de passage, à qui l'on montre
+ * l'installation sans lui confier la maison.
+ */
+export type UserRole = 'admin' | 'famille' | 'demo';
+/** Ce qu'un compte de démonstration voit : la vraie maison, ou la simulée. */
+export type DemoDonnees = 'reelles' | 'fictives';
 /**
  * Deux états, pas trois. « Invité » (créé, jamais venu) doublonnait avec
  * `lastLoginAt === null` : deux sources pour le même fait, et un piège réel —
@@ -69,6 +76,8 @@ export interface User {
   createdAt: string;
   /** ISO 8601, ou `null` si l'utilisateur ne s'est jamais connecté. */
   lastLoginAt: string | null;
+  /** Uniquement pour le rôle `demo` : source des données montrées. */
+  demoDonnees: DemoDonnees | null;
 }
 
 /** Enveloppe versionnée : permet une migration de schéma sans deviner le format. */
@@ -77,7 +86,7 @@ interface UsersFile {
   users: User[];
 }
 
-const ROLES: readonly UserRole[] = ['admin', 'famille'];
+const ROLES: readonly UserRole[] = ['admin', 'famille', 'demo'];
 const STATUSES: readonly UserStatus[] = ['active', 'revoked'];
 
 const emptyFile = (): UsersFile => ({ version: 1, users: [] });
@@ -120,7 +129,9 @@ function normalize(raw: unknown): UsersFile {
       inviteExpiresAt: typeof u.inviteExpiresAt === 'number' ? u.inviteExpiresAt : null,
       inviteUsedAt: typeof u.inviteUsedAt === 'string' ? u.inviteUsedAt : null,
       createdAt: typeof u.createdAt === 'string' ? u.createdAt : new Date().toISOString(),
-      lastLoginAt: typeof u.lastLoginAt === 'string' ? u.lastLoginAt : null
+      lastLoginAt: typeof u.lastLoginAt === 'string' ? u.lastLoginAt : null,
+      demoDonnees:
+        u.demoDonnees === 'reelles' || u.demoDonnees === 'fictives' ? u.demoDonnees : null
     });
   }
   if (users.length !== list.length) {
@@ -199,6 +210,7 @@ export interface NewUser {
   email: string;
   role: UserRole;
   status?: UserStatus;
+  demoDonnees?: DemoDonnees | null;
 }
 
 /**
@@ -226,7 +238,8 @@ export async function createUser(input: NewUser): Promise<User> {
       inviteExpiresAt: null,
       inviteUsedAt: null,
       createdAt: new Date().toISOString(),
-      lastLoginAt: null
+      lastLoginAt: null,
+      demoDonnees: input.demoDonnees ?? null
     };
     users.push(user);
     await commit(users);

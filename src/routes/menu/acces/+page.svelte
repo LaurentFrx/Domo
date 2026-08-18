@@ -104,6 +104,16 @@
       ouvert = null;
     });
 
+  const creerDemo = (donnees: 'reelles' | 'fictives') =>
+    agir(`demo:${donnees}`, async () => {
+      const d = (await appel('POST', { donnees }, '/api/users/demo')) as {
+        path: string;
+        email: string;
+      };
+      lien = { email: d.email, url: `${location.origin}${d.path}` };
+      copie = false;
+    });
+
   const ajouter = () =>
     agir('add', async () => {
       await appel('POST', { email: nouvelEmail.trim(), role: 'famille' }, '/api/users');
@@ -127,13 +137,29 @@
   /** Une seule phrase d'état par personne — pas une accumulation de pastilles. */
   function etat(g: Gens): string {
     if (g.accesRetire) return 'Accès retiré';
+    if (g.demo)
+      return g.demo === 'fictives'
+        ? 'Démonstration — maison simulée'
+        : 'Démonstration — données réelles';
     if (!g.derniereVenue)
       return g.lien && !g.lien.perime ? 'Lien envoyé, pas encore venu' : 'Jamais venu';
     return `Vu le ${jour(g.derniereVenue)}`;
   }
 </script>
 
-{#if !data.identifie}
+{#if data.estDemo}
+  <section class="ios-section">
+    <div class="ios-group">
+      <div class="ios-cell bloc">
+        <span class="ios-cell-label">Accès de démonstration</span>
+        <p class="aide">
+          Tu visites Domo en lecture seule : tout est visible, rien n'est commandable. Il n'y a pas
+          de compte à gérer depuis cet accès.
+        </p>
+      </div>
+    </div>
+  </section>
+{:else if !data.identifie}
   <section class="ios-section">
     <div class="ios-group">
       <div class="ios-cell bloc">
@@ -314,6 +340,44 @@
   </section>
 
   {#if data.estAdmin}
+    <section class="ios-section">
+      <h2 class="ios-group-header">Montrer Domo à quelqu'un</h2>
+      <div class="ios-group">
+        <div class="ios-cell bloc">
+          <p class="aide">
+            Un accès en <strong>lecture seule</strong> : la personne voit tout, ne commande rien. Le lien
+            vaut 2 jours et se révoque d'un geste comme les autres.
+          </p>
+          <div class="rangee">
+            <button
+              type="button"
+              class="b"
+              disabled={busy !== null}
+              onclick={() => creerDemo('fictives')}
+            >
+              {busy === 'demo:fictives' ? '…' : 'Maison simulée'}
+            </button>
+            <button
+              type="button"
+              class="b gris"
+              disabled={busy !== null}
+              onclick={() => creerDemo('reelles')}
+            >
+              {busy === 'demo:reelles' ? '…' : 'Données réelles'}
+            </button>
+          </div>
+          <p class="aide">
+            <strong>Maison simulée</strong> : ton installation à l'identique — mêmes batteries, même
+            onduleur, même ballon, mêmes pièces — mais des valeurs inventées qui vivent au fil de la
+            journée. Rien de ce qui se passe chez toi n'est visible.
+            <br />
+            <strong>Données réelles</strong> : ta maison telle qu'elle est, à l'instant. La localisation
+            des téléphones reste masquée dans les deux cas.
+          </p>
+        </div>
+      </div>
+    </section>
+
     <section class="ios-section">
       <h2 class="ios-group-header">Ajouter quelqu'un</h2>
       <div class="ios-group">

@@ -31,7 +31,8 @@
     "test:invite": "node --experimental-strip-types --test scripts/invite.test.ts",
     "test:invite-routes": "node --experimental-strip-types --import ./scripts/register-env.mjs --test scripts/invite-routes.test.ts",
     "test:users-admin": "node --experimental-strip-types --import ./scripts/register-env.mjs --test scripts/users-admin.test.ts",
-    "test:access": "node --experimental-strip-types --test scripts/access.test.ts"
+    "test:access": "node --experimental-strip-types --test scripts/access.test.ts",
+    "test:demo": "node --experimental-strip-types --test scripts/demo.test.ts"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.0",

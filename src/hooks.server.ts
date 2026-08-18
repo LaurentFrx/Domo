@@ -1,7 +1,8 @@
 import { error, redirect, type Handle, type HandleServerError } from '@sveltejs/kit';
 import { SESSION_COOKIE_NAME, verifySessionCookie } from '$lib/server/auth';
 import { findUserById } from '$lib/server/users-store';
-import { reservePour } from '$lib/server/access';
+import { authParJeton, refusPour } from '$lib/server/access';
+import { projeter } from '$lib/server/demo/projections';
 import { setIncidentReporter } from '$lib/server/atomic-store';
 import { raiseIncident, resolveIncident } from '$lib/server/monitor/incidents';
 // Import d'amorçage : arme les timers de fond du mode Musique (réconciliation
@@ -83,41 +84,11 @@ function withApiCacheControl(pathname: string, response: Response): Response {
 export const handle: Handle = async ({ event, resolve }) => {
   const { pathname } = event.url;
 
-  // Endpoint portail : appelable par un raccourci iPhone sans cookie Domo.
-  // Sa propre auth par token (Authorization: Bearer) est appliquée dans la route.
-  // Match EXACT — ne PAS élargir aux autres routes /api.
-  if (pathname === '/api/portail/pulse') {
-    return withApiCacheControl(pathname, await resolve(event));
-  }
-
-  // Endpoint tick de l'orchestrateur cumulus : appelé par le timer systemd en
-  // localhost, sans cookie. Auth par token (Bearer) appliquée dans la route.
-  // Match EXACT — ne PAS élargir aux autres routes /api/cumulus.
-  if (pathname === '/api/cumulus/tick') {
-    return withApiCacheControl(pathname, await resolve(event));
-  }
-
-  // Endpoint tick du moniteur de fiabilité : timer systemd en localhost, sans
-  // cookie. Auth par token (Bearer) appliquée dans la route. Match EXACT.
-  if (pathname === '/api/monitor/tick') {
-    return withApiCacheControl(pathname, await resolve(event));
-  }
-
-  // Endpoint tick de la boucle SB3 : timer systemd en localhost, sans cookie.
-  // Auth par token (Bearer) appliquée dans la route. Match EXACT.
-  if (pathname === '/api/sb3loop/tick') {
-    return withApiCacheControl(pathname, await resolve(event));
-  }
-
-  // Endpoint tick de la boucle de bridage APS : timer systemd en localhost, sans
-  // cookie. Auth par token (Bearer) appliquée dans la route. Match EXACT.
-  if (pathname === '/api/apsloop/tick') {
-    return withApiCacheControl(pathname, await resolve(event));
-  }
-
-  // Endpoint tick de la collecte de température : timer systemd en localhost,
-  // sans cookie. Auth par token (Bearer) appliquée dans la route. Match EXACT.
-  if (pathname === '/api/temperature/tick') {
+  // Endpoints à jeton (raccourci portail, ticks des timers systemd) : ils
+  // s'authentifient eux-mêmes et sortent de la garde. La liste et la règle
+  // vivent dans $lib/server/access — six blocs identiques vivaient ici, et
+  // c'est dans l'un d'eux qu'une faille s'était logée.
+  if (authParJeton(pathname, event.request.headers.has('authorization'))) {
     return withApiCacheControl(pathname, await resolve(event));
   }
 
@@ -169,28 +140,47 @@ export const handle: Handle = async ({ event, resolve }) => {
     if (!user || user.status !== 'active') {
       throw redirect(303, '/denied');
     }
-    event.locals.user = { id: user.id, email: user.email, role: user.role };
+    event.locals.user = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      demoDonnees: user.demoDonnees
+    };
   }
 
-  // Garde de rôle — UNIQUE point de contrôle de l'app. La table des opérations
-  // réservées vit dans $lib/server/access ; les routes ne la redoublent pas.
-  // Une session legacy vaut `famille` : elle ne dit pas qui est derrière, elle
-  // n'administre donc rien.
-  const reserve = reservePour(event.request.method, pathname);
-  if (reserve && event.locals.user.role !== 'admin') {
-    // Tournure sans accord : les libellés sont de genres différents, « est
-    // réservé(e) » produisait « Le réglage … est réservée ».
-    // Seule la première lettre descend : un `toLowerCase()` entier écrasait les
-    // sigles (« boucle sb3 »).
-    const l = reserve.libelle;
-    const message = `Réservé à l'administrateur : ${l.charAt(0).toLowerCase()}${l.slice(1)}.`;
+  // Garde des droits — UNIQUE point de contrôle de l'app. Les deux règles
+  // (opérations réservées à l'administrateur, lecture seule de la démonstration)
+  // sont décidées par $lib/server/access ; les routes ne les redoublent pas.
+  // Une session legacy vaut `famille` : elle ne dit pas qui est derrière.
+  const refus = refusPour(event.locals.user.role, event.request.method, pathname);
+  if (refus) {
     if (pathname.startsWith('/api/')) {
-      return new Response(JSON.stringify({ error: 'reserve', message }), {
+      return new Response(JSON.stringify({ error: 'refuse', message: refus.message }), {
         status: 403,
         headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }
       });
     }
-    throw error(403, message);
+    throw error(403, refus.message);
+  }
+
+  // ── Maison simulée ────────────────────────────────────────────────────
+  // Pour une démonstration « données fictives », AUCUNE lecture d'API ne touche
+  // la vraie maison. Ce qui est projeté est servi ; ce qui ne l'est pas renvoie
+  // « indisponible » — jamais le réel. C'est cette règle de repli, et non
+  // l'exhaustivité de la table, qui garantit qu'aucune donnée ne fuit : oublier
+  // un endpoint le rend muet, pas bavard.
+  if (
+    event.locals.user.role === 'demo' &&
+    event.locals.user.demoDonnees === 'fictives' &&
+    pathname.startsWith('/api/') &&
+    event.request.method === 'GET'
+  ) {
+    const simule = projeter(pathname);
+    const corps = simule ?? { available: false, connected: false, demo: 'non simulé' };
+    return new Response(JSON.stringify(corps), {
+      status: 200,
+      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }
+    });
   }
 
   // « Réglages » n'existe plus comme page : son contenu vit derrière le menu ☰

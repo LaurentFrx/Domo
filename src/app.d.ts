@@ -1,6 +1,6 @@
 // See https://kit.svelte.dev/docs/types#app
 
-import type { UserRole } from '$lib/server/users-store';
+import type { DemoDonnees, UserRole } from '$lib/server/users-store';
 
 /** Identité résolue pour la requête en cours (cf. hooks.server.ts). */
 interface AppUser {
@@ -10,6 +10,8 @@ interface AppUser {
   /** `null` pour une session legacy : on ne sait pas qui c'est. */
   email: string | null;
   role: UserRole;
+  /** Renseigné pour le rôle `demo` : la maison montrée est réelle ou simulée. */
+  demoDonnees?: DemoDonnees | null;
 }
 
 declare global {
