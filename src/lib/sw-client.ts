@@ -16,15 +16,30 @@
  * prend la main dès qu'elle est installée. Les chunks JS déjà chargés par la
  * page, eux, appartiennent à l'ancienne — d'où le rechargement au changement
  * de contrôleur.
+ *
+ * ⚠️ CE RECHARGEMENT-CI EST HORS NAVIGATION. C'est un second chemin, distinct
+ * de celui de `beforeNavigate` dans le layout : il part du service worker, pas
+ * d'un clic. Avoir gardé l'un sans l'autre a coûté une après-midi de fausses
+ * pistes — la musique se coupait « en ouvrant une page » alors que c'était la
+ * sonde de mise à jour qui tombait à cet instant. Toute garde posée sur l'un
+ * doit l'être sur l'autre.
  */
 
 /** Délai minimal entre deux vérifications (le retour au premier plan est fréquent). */
 const CHECK_EVERY_MS = 30 * 60 * 1000;
 
+/** Rythme auquel on reteste si le rechargement différé peut enfin se faire. */
+const REESSAI_MS = 5000;
+
 let lastCheck = 0;
 let started = false;
 
-export function setupServiceWorker(): void {
+/**
+ * @param peutRecharger Rendu `false` quand un rechargement serait brutal —
+ *   typiquement pendant une écoute. Le rechargement est alors DIFFÉRÉ, pas
+ *   annulé : il se fera dès que la condition se lève.
+ */
+export function setupServiceWorker(peutRecharger: () => boolean = () => true): void {
   if (started || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
   started = true;
 
@@ -32,10 +47,24 @@ export function setupServiceWorker(): void {
   // contrôleur qui suit est normal et ne doit PAS provoquer de rechargement.
   const hadController = !!navigator.serviceWorker.controller;
   let reloading = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!hadController || reloading) return;
+  let attente: ReturnType<typeof setInterval> | null = null;
+
+  const recharger = () => {
+    if (reloading) return;
+    if (!peutRecharger()) {
+      // Différé : on retente régulièrement plutôt que d'abandonner, sinon
+      // l'app resterait sur l'ancien code jusqu'à la prochaine ouverture.
+      attente ??= setInterval(recharger, REESSAI_MS);
+      return;
+    }
     reloading = true;
+    if (attente) clearInterval(attente);
     location.reload();
+  };
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) return;
+    recharger();
   });
 
   void navigator.serviceWorker

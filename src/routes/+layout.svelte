@@ -66,7 +66,9 @@
     // notifications) et n'était JAMAIS revérifié : l'app restait servie depuis
     // le precache de ce jour-là. Ici, il est enregistré au démarrage et
     // revérifié au retour au premier plan.
-    setupServiceWorker();
+    // Même garde que pour beforeNavigate : on ne recharge pas sous les pieds
+    // de quelqu'un qui écoute. Le rechargement est différé, pas annulé.
+    setupServiceWorker(() => !player.current);
   });
 
   // ─── Suivi musique → éclairage terrasse ────────────────────────────────
