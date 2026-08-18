@@ -97,9 +97,9 @@
       );
     });
 
-  const supprimer = (g: Gens) =>
+  const supprimer = (g: Gens, nom = g.email) =>
     agir(`rm:${g.id}`, async () => {
-      if (!confirm(`Supprimer définitivement le compte de ${g.email} ?`)) return;
+      if (!confirm(`Supprimer définitivement « ${nom} » ?`)) return;
       await appel('DELETE', { userId: g.id }, '/api/users');
       ouvert = null;
     });
@@ -130,6 +130,24 @@
       copie = false;
     }
   }
+
+  /** Une démonstration se lit en français, pas par son adresse technique. */
+  const libelleDemo = (g: Gens) => (g.demo === 'fictives' ? 'Maison simulée' : 'Données réelles');
+
+  const heure = (iso: string) =>
+    new Date(iso).toLocaleString('fr-FR', {
+      day: 'numeric',
+      month: 'long',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+  const retirerToutesLesDemos = () =>
+    agir('demos:purge', async () => {
+      if (!confirm(`Retirer les ${data.demos.length} démonstrations en cours ?`)) return;
+      for (const d of data.demos) await appel('DELETE', { userId: d.id }, '/api/users');
+      return 'Démonstrations retirées.';
+    });
 
   const jour = (iso: string) =>
     new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
@@ -339,6 +357,45 @@
     {/if}
   </section>
 
+  {#if data.estAdmin && data.demos.length > 0}
+    <section class="ios-section">
+      <h2 class="ios-group-header">Démonstrations en cours</h2>
+      <div class="ios-group">
+        {#each data.demos as d (d.id)}
+          <div class="ios-cell bloc">
+            <div class="ligne-fixe">
+              <span class="ios-cell-text">
+                <span class="ios-cell-label">{libelleDemo(d)}</span>
+                <span class="ios-cell-sub">
+                  Créée le {heure(d.creeLe)}{#if d.lien?.expireLe}
+                    · {d.lien.perime
+                      ? 'lien expiré'
+                      : `valable jusqu'au ${jour(new Date(d.lien.expireLe).toISOString())}`}
+                  {/if}
+                </span>
+              </span>
+              <button
+                type="button"
+                class="b rouge"
+                disabled={busy !== null}
+                onclick={() => supprimer(d, libelleDemo(d))}>Retirer</button
+              >
+            </div>
+          </div>
+        {/each}
+      </div>
+      <p class="ios-group-footer">
+        Un accès de passage, en lecture seule. Il disparaît de lui-même à l'expiration du lien.
+        <button
+          type="button"
+          class="lien-texte"
+          disabled={busy !== null}
+          onclick={retirerToutesLesDemos}>Tout retirer maintenant</button
+        >
+      </p>
+    </section>
+  {/if}
+
   {#if data.estAdmin}
     <section class="ios-section">
       <h2 class="ios-group-header">Montrer Domo à quelqu'un</h2>
@@ -367,12 +424,10 @@
             </button>
           </div>
           <p class="aide">
-            <strong>Maison simulée</strong> : ton installation à l'identique — mêmes batteries, même
-            onduleur, même ballon, mêmes pièces — mais des valeurs inventées qui vivent au fil de la
-            journée. Rien de ce qui se passe chez toi n'est visible.
-            <br />
-            <strong>Données réelles</strong> : ta maison telle qu'elle est, à l'instant. La localisation
-            des téléphones reste masquée dans les deux cas.
+            <strong>Maison simulée</strong> : ton installation à l'identique, avec des valeurs
+            inventées. Rien de chez toi n'est visible.
+            <strong>Données réelles</strong> : ta maison telle qu'elle est. La localisation des téléphones
+            reste masquée dans les deux cas.
           </p>
         </div>
       </div>
@@ -468,6 +523,17 @@
   }
   .aide.rouge {
     color: var(--color-alert);
+  }
+  .ligne-fixe {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .lien-texte {
+    color: var(--color-primary);
+    font-weight: 600;
+    text-decoration: underline;
   }
   .rangee {
     display: flex;

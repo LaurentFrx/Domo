@@ -25,28 +25,33 @@ export const load: PageServerLoad = async ({ locals }) => {
   const tous = identifie ? await readUsers() : [];
   const visibles = estAdmin ? tous : tous.filter((u) => u.id === moi?.id);
 
+  const fiches = visibles.map((u) => ({
+    id: u.id,
+    email: u.email,
+    peutToutRegler: u.role === 'admin',
+    demo: u.role === 'demo' ? (u.demoDonnees ?? 'reelles') : null,
+    accesRetire: u.status === 'revoked',
+    aUnCode: u.pinHash !== null,
+    lien:
+      u.inviteHash === null
+        ? null
+        : {
+            expireLe: u.inviteExpiresAt,
+            perime: u.inviteExpiresAt !== null && u.inviteExpiresAt <= now
+          },
+    creeLe: u.createdAt,
+    derniereVenue: u.lastLoginAt
+  }));
+
   return {
     identifie,
     estAdmin,
     estDemo,
     moiId: moi?.id ?? null,
-    // Des faits, jamais de secrets : ni empreinte de code, ni empreinte de lien.
-    gens: visibles.map((u) => ({
-      id: u.id,
-      email: u.email,
-      peutToutRegler: u.role === 'admin',
-      demo: u.role === 'demo' ? (u.demoDonnees ?? 'reelles') : null,
-      accesRetire: u.status === 'revoked',
-      aUnCode: u.pinHash !== null,
-      lien:
-        u.inviteHash === null
-          ? null
-          : {
-              expireLe: u.inviteExpiresAt,
-              perime: u.inviteExpiresAt !== null && u.inviteExpiresAt <= now
-            },
-      // « Jamais venu » est déduit d'ici — ce n'est plus un état stocké.
-      derniereVenue: u.lastLoginAt
-    }))
+    // Les visiteurs de démonstration ne sont PAS de la famille : les mêler à la
+    // liste du foyer, c'est ce qui a transformé trois essais de boutons en
+    // trois lignes illisibles au milieu des vraies personnes.
+    gens: fiches.filter((f) => !f.demo),
+    demos: fiches.filter((f) => f.demo)
   };
 };
