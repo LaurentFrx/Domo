@@ -106,7 +106,10 @@
   // au mauvais moment.
   beforeNavigate(({ willUnload, to }) => {
     if (!updated.current || !to?.url || willUnload) return;
-    if (player.playing) return;
+    // `current` et pas `playing` : entre deux morceaux, ou sur une pause de
+    // quelques secondes, la file reste chargée et l'utilisateur est en train
+    // d'écouter. Recharger là est tout aussi brutal.
+    if (player.current) return;
     location.href = to.url.href;
   });
 
