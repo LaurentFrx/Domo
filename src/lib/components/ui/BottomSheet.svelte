@@ -122,7 +122,22 @@
   <!-- data-no-ptr : l'overlay est role="presentation", donc invisible au test
        [role="dialog"] du tirer-pour-rafraîchir. Même intention que
        data-swipe-ignore pour le Pager. -->
-  <div class="bs-overlay" role="presentation" data-swipe-ignore data-no-ptr onclick={onClose}>
+  <!-- Fermeture au clic EXTÉRIEUR : on teste la cible plutôt que d'étouffer
+           l'événement dans le panneau. Étouffer ici empêchait le clic
+           d'atteindre `document`, où le routeur de SvelteKit intercepte les
+           liens : tout lien de la feuille provoquait une navigation NATIVE,
+           l'app se rechargeait entièrement et la musique en cours était coupée.
+           Mesuré le 18/08 : capture vue, bulle jamais atteinte, beforeunload
+           déclenché. Ne pas réintroduire d'arrêt de propagation ici. -->
+  <div
+    class="bs-overlay"
+    role="presentation"
+    data-swipe-ignore
+    data-no-ptr
+    onclick={(e) => {
+      if (e.target === e.currentTarget) onClose();
+    }}
+  >
     <div
       class="bs-panel"
       bind:this={panelEl}
@@ -130,7 +145,6 @@
       role="dialog"
       aria-modal="true"
       aria-label={title}
-      onclick={(e) => e.stopPropagation()}
       style="background: linear-gradient(var(--color-card), var(--color-card)), var(--color-bg); border-color: var(--color-border);"
     >
       {#if title}

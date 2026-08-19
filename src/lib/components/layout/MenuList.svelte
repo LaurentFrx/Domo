@@ -4,8 +4,15 @@
    * arrondi coloré, valeur secondaire à droite, chevron, séparateurs décalés.
    *
    * PARTAGÉE par la feuille (☰) et la page /menu : sans ça les deux listes
-   * divergeraient à la première rubrique ajoutée. Le parent fournit `onNavigate`
-   * (la feuille s'en sert pour se fermer au tap) ; la page ne passe rien.
+   * divergeraient à la première rubrique ajoutée.
+   *
+   * ⚠️ NE PAS remettre de `onclick` qui ferme la feuille sur ces liens. Fermer
+   * la feuille pendant le clic retire l'ancre du DOM AVANT que le routeur de
+   * SvelteKit ait intercepté l'événement : le navigateur fait alors une
+   * navigation native, l'app se recharge entièrement et la musique en cours est
+   * coupée. Mesuré le 18/08 — depuis la page /menu le même lien navigue côté
+   * client, depuis la feuille il rechargeait. La feuille se ferme via
+   * `afterNavigate` dans MenuSheet, une fois la navigation faite.
    *
    * Les valeurs de droite sont celles qu'iOS affiche en gris (« Général > iPhone ») :
    * on n'y met que ce qui est GRATUIT — préférences déjà hydratées et santé déjà
@@ -15,8 +22,7 @@
   import { preferences } from '$stores/preferences.svelte';
   import { health } from '$stores/health.svelte';
 
-  let { onNavigate, searchable = true }: { onNavigate?: () => void; searchable?: boolean } =
-    $props();
+  let { searchable = true }: { searchable?: boolean } = $props();
 
   let query = $state('');
 
@@ -77,12 +83,7 @@
     {/if}
     <div class="ios-group">
       {#each group.items as item (item.href)}
-        <a
-          href={item.href}
-          class="ios-cell has-icon"
-          onclick={onNavigate}
-          data-sveltekit-preload-data
-        >
+        <a href={item.href} class="ios-cell has-icon" data-sveltekit-preload-data>
           <span class="ios-icon" style="background: {item.tint};">
             <svg
               width="17"

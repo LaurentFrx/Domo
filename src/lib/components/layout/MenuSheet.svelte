@@ -58,7 +58,22 @@
   <!-- data-swipe-ignore : neutralise le pager 2 doigts ; data-no-ptr : le
        tirer-pour-rafraîchir ignore la feuille (même intention que BottomSheet). -->
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="ms-overlay" role="presentation" data-swipe-ignore data-no-ptr onclick={closeMenu}>
+  <!-- Fermeture au clic EXTÉRIEUR : on teste la cible plutôt que d'étouffer
+           l'événement dans le panneau. Étouffer ici empêchait le clic
+           d'atteindre `document`, où le routeur de SvelteKit intercepte les
+           liens : tout lien de la feuille provoquait une navigation NATIVE,
+           l'app se rechargeait entièrement et la musique en cours était coupée.
+           Mesuré le 18/08 : capture vue, bulle jamais atteinte, beforeunload
+           déclenché. Ne pas réintroduire d'arrêt de propagation ici. -->
+  <div
+    class="ms-overlay"
+    role="presentation"
+    data-swipe-ignore
+    data-no-ptr
+    onclick={(e) => {
+      if (e.target === e.currentTarget) closeMenu();
+    }}
+  >
     <div
       class="ios ms-panel"
       bind:this={panelEl}
@@ -66,7 +81,6 @@
       role="dialog"
       aria-modal="true"
       aria-label="Menu"
-      onclick={(e) => e.stopPropagation()}
     >
       <header class="ms-header">
         <h1 class="ios-large-title">Menu</h1>
@@ -91,7 +105,7 @@
            clippe au padding box) et passerait sous la Dynamic Island ; et
            l'en-tête partirait avec le défilement, croix comprise. -->
       <div class="ms-scroll">
-        <MenuList onNavigate={closeMenu} />
+        <MenuList />
       </div>
 
       <!-- Grabber : la poignée grise des feuilles iOS. Décorative. Elle marque
