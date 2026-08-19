@@ -21,20 +21,148 @@
    * le bas des pages reste atteignable.
    */
   import { player } from '$stores/plex.svelte';
+  import { haptic } from '$utils/haptic';
   import AlbumCover from './AlbumCover.svelte';
   import NowPlaying from './NowPlaying.svelte';
 
   const progress = $derived(
     player.duration > 0 ? Math.min(1, player.currentTime / player.duration) : 0
   );
+
+  // ─── Glisser vers la GAUCHE pour congédier ────────────────────────────────
+  // Un morceau fini laisse la file chargée (c'est voulu : on relance de là).
+  // Restait qu'aucun geste ne permettait de s'en débarrasser sans ouvrir la
+  // feuille plein écran pour y trouver « Arrêter » — le mini semblait collé.
+  //
+  // Un doigt, horizontal, vers la gauche : le mini suit puis s'en va, et
+  // `player.clear()` vide la file (donc `--mini-h` rend sa place aux pages).
+  // Vers la droite, résistance seulement : rien ne s'y ferme.
+  //
+  // Sans conflit avec le Pager, qui exige DEUX doigts ; `data-swipe-ignore` le
+  // dit quand même explicitement. `touch-action: pan-y` rend le vertical au
+  // navigateur (scroll de la page depuis le mini) — il émet alors
+  // `pointercancel`, d'où le handler dédié.
+  const CLOSE_PX = 90; // course franche
+  const FLICK = 500; // px/s — chiquenaude brève mais nette
+  const OUT_MS = 260; // doit suivre la transition CSS de .closing
+
+  let el = $state<HTMLElement | null>(null);
+  let dx = $state(0);
+  let dragging = $state(false);
+  let closing = $state(false);
+  let startX = 0;
+  let startY = 0;
+  let lastX = 0;
+  let lastT = 0;
+  let vx = 0;
+  let pid: number | null = null;
+  let locked = false;
+  /** Un glissé a eu lieu → le `click` qui suit le relâché n'est pas un tap. */
+  let moved = false;
+
+  const opacity = $derived(dragging && dx < 0 ? Math.max(0.25, 1 + dx / 320) : 1);
+
+  function reset() {
+    if (pid !== null && el?.hasPointerCapture(pid)) el.releasePointerCapture(pid);
+    pid = null;
+    locked = false;
+    dragging = false;
+    dx = 0;
+  }
+
+  function onDown(e: PointerEvent) {
+    if (closing) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    pid = e.pointerId;
+    startX = lastX = e.clientX;
+    startY = e.clientY;
+    lastT = e.timeStamp;
+    vx = 0;
+    locked = false;
+    moved = false;
+  }
+
+  function onMove(e: PointerEvent) {
+    if (pid !== e.pointerId || closing) return;
+    const ddx = e.clientX - startX;
+    const ddy = e.clientY - startY;
+    if (!locked) {
+      if (Math.abs(ddx) < 10) return; // attendre l'intention
+      if (Math.abs(ddx) <= Math.abs(ddy)) {
+        pid = null; // geste vertical → laisser filer le scroll
+        return;
+      }
+      locked = true;
+      dragging = true;
+      el?.setPointerCapture(e.pointerId);
+    }
+    moved = true;
+    const dt = e.timeStamp - lastT;
+    if (dt > 0) vx = ((e.clientX - lastX) / dt) * 1000;
+    lastX = e.clientX;
+    lastT = e.timeStamp;
+    dx = ddx < 0 ? ddx : ddx * 0.22; // droite : rubber-band, aucune fermeture
+  }
+
+  function onUp(e: PointerEvent) {
+    if (pid !== e.pointerId) return;
+    const wasDragging = dragging;
+    reset();
+    if (!wasDragging) return;
+    const ddx = e.clientX - startX;
+    if (ddx <= -CLOSE_PX || (vx <= -FLICK && ddx < -24)) dismiss();
+  }
+
+  function onCancel(e: PointerEvent) {
+    if (pid !== e.pointerId) return;
+    reset(); // retour élastique à sa place
+  }
+
+  function dismiss() {
+    haptic('light');
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      player.clear();
+      return;
+    }
+    closing = true;
+    setTimeout(() => {
+      closing = false;
+      player.clear();
+    }, OUT_MS);
+  }
+
+  /**
+   * Un glissé se termine par un `click` que le navigateur émet quand même : sans
+   * ce filet, congédier le mini ouvrait la feuille plein écran au passage. On le
+   * coupe en CAPTURE (avant les boutons, et avant l'haptique déléguée du
+   * layout) — le mini ne contient aucun lien, la propagation stoppée ici ne peut
+   * donc pas court-circuiter le routeur.
+   */
+  function onClickCapture(e: MouseEvent) {
+    if (!moved) return;
+    moved = false;
+    e.preventDefault();
+    e.stopPropagation();
+  }
 </script>
 
 {#if player.current}
   <div
+    bind:this={el}
     class="mini border"
-    style="background: linear-gradient(var(--color-card), var(--color-card)), var(--color-bg); border-color: var(--color-border);"
+    class:dragging
+    class:closing
+    style="background: linear-gradient(var(--color-card), var(--color-card)), var(--color-bg); border-color: var(--color-border);{closing
+      ? ''
+      : ` transform: translate3d(${dx}px, 0, 0); opacity: ${opacity};`}"
     role="region"
-    aria-label="Lecture en cours"
+    aria-label="Lecture en cours — glisser vers la gauche pour fermer"
+    data-swipe-ignore
+    onpointerdown={onDown}
+    onpointermove={onMove}
+    onpointerup={onUp}
+    onpointercancel={onCancel}
+    onclickcapture={onClickCapture}
   >
     <button
       class="body"
@@ -103,7 +231,29 @@
        qui, lui, apporte l'ombre du verre. */
     box-shadow: var(--shadow-md);
     /* Couche compositeur dédiée : même remède anti-tressautement que la TabBar. */
-    transform: translateZ(0);
+    transform: translate3d(0, 0, 0);
+    /* Le vertical reste au navigateur (on scrolle la page depuis le mini) ;
+       l'horizontal nous revient pour le geste de congé. */
+    touch-action: pan-y;
+    transition:
+      transform 260ms cubic-bezier(0.2, 0.9, 0.25, 1),
+      opacity 200ms ease;
+  }
+  /* Pendant le glissé, le transform inline suit le doigt : aucune transition,
+     sinon il traîne d'un temps de retard. */
+  .mini.dragging {
+    transition: none;
+  }
+  /* Sortie : plus de transform inline → cette règle prend la main et anime
+     depuis la position atteinte par le doigt. */
+  .mini.closing {
+    transform: translate3d(calc(-100% - 24px), 0, 0);
+    opacity: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mini {
+      transition: none;
+    }
   }
   /* ≥ sm : la TabBar disparaît (sidebar rail 72px) → coller en bas, à droite du rail. */
   @media (min-width: 640px) {
