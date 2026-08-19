@@ -146,9 +146,10 @@
     matter.commandableSwitches.find((s) => /chargeur|charger/i.test(s.name)) ?? null
   );
   // ─── Spot de la terrasse ───────────────────────────────────────────────
-  // Il rejoint le ruban WLED dans la carte « Terrasse » (LEDS + Spot) : les
-  // deux lumières d'un même lieu se commandent au même endroit. Il est donc
-  // RETIRÉ de la grille générique plus bas, sinon il s'y afficherait en double.
+  // Il prend place sur la LIGNE DES COMMANDES RAPIDES, avec Bureau / Chargeur /
+  // Atelier / Portail : ce sont les mêmes gestes (un appui, un état), on les
+  // veut tous à portée de pouce au même endroit. Il est donc RETIRÉ de la
+  // grille générique plus bas, sinon il s'y afficherait en double.
   // Reconnu par son NOM (nom + pièce), pas par son nodeId : celui-ci est
   // attribué à la commission et n'est pas connu d'avance. Le nom vient de
   // SWITCH_NAMES si le device y figure, sinon de son NodeLabel Matter — donc
@@ -178,6 +179,12 @@
   );
   const restOthers = $derived(
     flatZigbeeOthers.filter((d) => d !== atelierDevice && d !== portailDevice)
+  );
+  // Colonnes de la ligne rapide : autant que de tuiles réellement présentes —
+  // une classe Tailwind fixe laisserait un trou (spot non appairé) ou ferait
+  // déborder la 5ᵉ tuile sur une seconde ligne.
+  const quickTiles = $derived(
+    [bureauSwitch, chargeurSwitch, atelierDevice, terraceSpot, portailDevice].filter(Boolean).length
   );
 
   // ─── Tri custom des volets (ordre choisi par Laurent) ───
@@ -325,15 +332,20 @@
       </div>
     {/if}
 
-    <!-- ═══ Vue condensée — Ligne 1 : Bureau / Chargeur / Atelier / Portail ═══ -->
-    <!-- 4 commandes sur une seule ligne : ce sont les mêmes gestes (un appui, un
-         état), elles se lisent d'un coup d'œil. Les libellés sont déjà tronqués
-         proprement dans les tuiles (`truncate`), ce qui tient sur un iPhone étroit. -->
-    {#if bureauSwitch || chargeurSwitch || atelierDevice || portailDevice}
-      <div class="grid grid-cols-4 gap-2.5 sm:gap-3">
+    <!-- ═══ Vue condensée — Ligne 1 : Bureau / Chargeur / Atelier / Spot / Portail ═══ -->
+    <!-- Toutes les commandes « un appui, un état » sur une seule ligne : elles se
+         lisent d'un coup d'œil. Les deux lumières (Atelier, Spot terrasse) sont
+         côte à côte. Les libellés sont déjà tronqués proprement dans les tuiles
+         (`truncate`), ce qui tient sur un iPhone étroit. -->
+    {#if quickTiles > 0}
+      <div
+        class="grid gap-2.5 sm:gap-3"
+        style="grid-template-columns: repeat({quickTiles}, minmax(0, 1fr));"
+      >
         {#if bureauSwitch}<SwitchTile sw={bureauSwitch} />{/if}
         {#if chargeurSwitch}<SwitchTile sw={chargeurSwitch} />{/if}
         {#if atelierDevice}<ZigbeeGenericTile device={atelierDevice} />{/if}
+        {#if terraceSpot}<SwitchTile sw={terraceSpot} />{/if}
         {#if portailDevice}<ZigbeeGenericTile device={portailDevice} />{/if}
       </div>
     {/if}
@@ -371,11 +383,10 @@
     {/if}
   {/if}
 
-  <!-- ═══ Terrasse — LEDS (WLED, QuinLed Dig-Uno) + Spot (Matter). Le ruban est
-       indépendant de Matter, la carte reste donc HORS du bloc conditionnel
-       ci-dessus (toujours visible) ; la rangée Spot, elle, n'apparaît que si le
-       spot est appairé. ═══ -->
-  <WledCard spot={terraceSpot} />
+  <!-- ═══ Terrasse — le ruban LEDS (WLED, QuinLed Dig-Uno). Indépendant de
+       Matter, la carte reste donc HORS du bloc conditionnel ci-dessus (toujours
+       visible). Le spot, lui, est monté sur la ligne des commandes rapides. ═══ -->
+  <WledCard />
 
   <!-- ═══ Imprimante — descendue sous l'éclairage terrasse : on la consulte
        (niveaux d'encre), on ne la commande pas au quotidien. Elle sort du bloc

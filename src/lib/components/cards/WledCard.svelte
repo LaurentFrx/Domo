@@ -1,11 +1,8 @@
 <script lang="ts">
   /**
-   * Carte « Terrasse » : les deux lumières du même lieu, réunies.
-   *
-   *   - « LEDS » — le ruban WLED (QuinLed Dig-Uno V3), rendu par `WledTile` :
-   *     la tuile EST la lumière (couleur réelle, remplie jusqu'à la
-   *     luminosité) ; glissé horizontal = luminosité, tap = feuille.
-   *   - « Spot » — un simple on/off Matter, en rangée sous le ruban.
+   * Carte « Terrasse » : le ruban WLED (QuinLed Dig-Uno V3), rendu par
+   * `WledTile` — la tuile EST la lumière (couleur réelle, remplie jusqu'à la
+   * luminosité) ; glissé horizontal = luminosité, tap = feuille.
    *
    * `WledSheet` n'est PAS rendue ici : /pieces vit dans le rail du Pager
    * (`will-change: transform` + `overflow: hidden`), qui piège tout
@@ -20,13 +17,6 @@
   import WledTile from './WledTile.svelte';
   import { openWledSheet } from './wled-sheet-state.svelte';
   import { wledMusic } from '$stores/wledMusic.svelte';
-  import { matter, type Switch } from '$stores/matter.svelte';
-
-  interface Props {
-    /** Spot Matter de la terrasse (`null` tant qu'il n'est pas appairé). */
-    spot?: Switch | null;
-  }
-  let { spot = null }: Props = $props();
 
   $effect(() => {
     wledMusic.openLive();
@@ -34,10 +24,4 @@
   });
 </script>
 
-<WledTile
-  onopen={openWledSheet}
-  {spot}
-  onSpotToggle={() => {
-    if (spot) matter.toggleSwitch(spot.nodeId);
-  }}
-/>
+<WledTile onopen={openWledSheet} />

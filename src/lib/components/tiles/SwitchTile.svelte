@@ -13,7 +13,8 @@
   // Renommage d'affichage LOCAL à cette vue (n'affecte pas /energie, qui lit le
   // nom Matter réel via le store). Ex : « Bureau multimédia » → « Bureau ».
   const DISPLAY_NAMES: Record<string, string> = {
-    'bureau multimédia': 'Bureau'
+    'bureau multimédia': 'Bureau',
+    'spot terrasse': 'Spot'
   };
   const displayName = $derived(DISPLAY_NAMES[sw.name.toLowerCase()] ?? sw.name);
 
@@ -65,7 +66,7 @@
   // ─── Icône + couleur selon le nom du device ───────────────────────────
   // glow* = halos box-shadow pré-calculés (tokens app.css) — jamais de
   // color-mix() dans une box-shadow via var() (piège Chrome).
-  type Glyph = 'ev-charger' | 'monitor' | 'towel-heater' | 'plug';
+  type Glyph = 'ev-charger' | 'monitor' | 'towel-heater' | 'spot' | 'plug';
   type TileStyle = {
     glyph: Glyph;
     color: string;
@@ -115,6 +116,11 @@
       n.includes('radiateur')
     ) {
       return palette('hp', 'towel-heater');
+    }
+    // Éclairage (spot terrasse) : même code couleur que la lumière d'atelier
+    // rendue par ZigbeeGenericTile — éteint bleu (charte), allumé ambre.
+    if (n.includes('spot') || n.includes('lampe') || n.includes('lumi')) {
+      return palette('solar', 'spot', 'consumption');
     }
     return palette('primary', 'plug');
   });
@@ -187,6 +193,21 @@
         <line x1="6" y1="7" x2="18" y2="7" />
         <line x1="6" y1="12" x2="18" y2="12" />
         <line x1="6" y1="17" x2="18" y2="17" />
+      </svg>
+    {:else if style.glyph === 'spot'}
+      <!-- Spot orienté vers le bas, rayons -->
+      <svg
+        width="22"
+        height="22"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.75"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M7 4h10l-1.6 5.5H8.6z" />
+        <path d="M12 12.5v3M8.2 12.8l-1.4 2.4M15.8 12.8l1.4 2.4" />
       </svg>
     {:else}
       <!-- Prise classique -->

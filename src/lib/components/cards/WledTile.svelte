@@ -1,21 +1,19 @@
 <script lang="ts">
   /**
-   * Carte « Terrasse » — surface par défaut sur /pieces. Deux lumières du même
-   * lieu, l'une sous l'autre :
-   *   - « LEDS » — le ruban WLED, bloc `.tile-light` : la tuile EST la lumière,
-   *     son fond se remplit de la couleur réelle du ruban sur la largeur = la
-   *     luminosité. Tout le réglage fin vit dans la feuille (WledSheet).
-   *   - « Spot » — rangée sobre, un simple on/off Matter injecté en props
-   *     (`spot` + `onSpotToggle`) pour que ce composant reste ignorant du
-   *     store Matter. Absente tant que le spot n'est pas appairé.
+   * Carte « Terrasse » — surface par défaut sur /pieces. Le ruban WLED, bloc
+   * `.tile-light` : la tuile EST la lumière, son fond se remplit de la couleur
+   * réelle du ruban sur la largeur = la luminosité. Tout le réglage fin vit
+   * dans la feuille (WledSheet). Le spot de la terrasse, lui, est une tuile
+   * ordinaire sur la ligne des commandes rapides de /pieces — il n'a ni niveau
+   * ni réglages, il n'a rien à faire dans cette carte.
    *
    * Le panneau de contrôle empilé (barre héros + luminosité + scènes + styles
    * musicaux + accordéon de réglages) coûtait 5 à 7 rangées au milieu d'une
    * page déjà dense ; le ruban se résume désormais à UN objet.
    *
    * ⚠️ Les couches lumineuses et la surface de geste sont en `inset: 0` sur
-   * `.tile-light`, PAS sur la carte : sans ce bloc, le glissé de luminosité
-   * s'étendrait sous la rangée Spot et le lavage la déborderait.
+   * `.tile-light`, PAS sur la carte : c'est ce qui borne le glissé de
+   * luminosité et le lavage coloré au bloc du ruban.
    *
    * Gestes (façon Maison iOS, mais à l'HORIZONTALE — le ruban est horizontal) :
    *   - glissé HORIZONTAL sur la tuile → luminosité, en direct ;
@@ -43,22 +41,12 @@
     wrapStops
   } from '$lib/wled/preview-model';
   import { haptic } from '$utils/haptic';
-  import type { Switch } from '$stores/matter.svelte';
-  import { onDestroy } from 'svelte';
 
   interface Props {
     /** Ouvre la feuille de réglages (tap sur la tuile ou bouton dédié). */
     onopen: () => void;
-    /**
-     * Spot Matter de la terrasse, s'il est appairé. La carte regroupe les deux
-     * lumières du même lieu : le ruban (« LEDS ») et ce spot (« Spot »).
-     * `null` tant qu'il n'est pas commissionné → la carte se réduit au ruban.
-     */
-    spot?: Switch | null;
-    /** Bascule le spot. Injectée pour que cette tuile reste ignorante de Matter. */
-    onSpotToggle?: () => void;
   }
-  let { onopen, spot = null, onSpotToggle }: Props = $props();
+  let { onopen }: Props = $props();
 
   // ─── Modèle d'affichage ────────────────────────────────────────────────
   // Une tuile = UN résumé : on peint la ligne la plus longue effectivement
@@ -336,48 +324,6 @@
     model.lit && wledMusic.reactive && wledMusic.playing && preferences.animationsEnabled && !hidden
   );
 
-  // ─── Spot Matter : reflet optimiste ────────────────────────────────────
-  // `matter.toggleSwitch` n'anticipe rien — il attend le rapport du device.
-  // Sans ce reflet local l'interrupteur reviendrait en arrière sous le doigt
-  // pendant l'aller-retour. Même filet que SwitchTile : la valeur optimiste
-  // tombe dès que le serveur bouge, et au bout de 5 s quoi qu'il arrive (une
-  // commande perdue ne doit pas figer un état mensonger).
-  let optimisticSpot = $state<boolean | null>(null);
-  let spotTimer: ReturnType<typeof setTimeout> | null = null;
-  let lastSpotServer: boolean | null = null;
-  const spotOn = $derived(optimisticSpot !== null ? optimisticSpot : (spot?.isOn ?? false));
-
-  $effect(() => {
-    const cur = spot?.isOn ?? null;
-    if (cur === null || lastSpotServer === null) {
-      lastSpotServer = cur;
-      return;
-    }
-    if (cur === lastSpotServer) return;
-    lastSpotServer = cur;
-    if (spotTimer) {
-      clearTimeout(spotTimer);
-      spotTimer = null;
-    }
-    optimisticSpot = null;
-  });
-
-  function toggleSpot(): void {
-    if (!spot?.available) return;
-    optimisticSpot = !spotOn;
-    haptic('light');
-    if (spotTimer) clearTimeout(spotTimer);
-    spotTimer = setTimeout(() => {
-      optimisticSpot = null;
-      spotTimer = null;
-    }, 5000);
-    onSpotToggle?.();
-  }
-
-  onDestroy(() => {
-    if (spotTimer) clearTimeout(spotTimer);
-  });
-
   let tileEl = $state<HTMLDivElement | null>(null);
   $effect(() => {
     if (!pulsing || !tileEl) return;
@@ -547,37 +493,6 @@
       </div>
     </div>
   </div>
-
-  {#if spot}
-    <!-- ═══ Spot — même lieu, autre lumière. Rangée sobre et parallèle à
-         l'en-tête du ruban ([icône] [nom] … [interrupteur]) : c'est un simple
-         on/off Matter, il n'a ni niveau ni réglages à porter. ═══ -->
-    <div class="spot-row">
-      <span class="spot-icon" class:on={spotOn && spot.available} aria-hidden="true">
-        <svg
-          width="20"
-          height="20"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.75"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <path d="M7 4h10l-1.6 5.5H8.6z" />
-          <path d="M12 12.5v3M8.2 12.8l-1.4 2.4M15.8 12.8l1.4 2.4" />
-        </svg>
-      </span>
-      <span class="spot-name">Spot</span>
-      {#if !spot.available}
-        <span class="spot-badge" style="color: var(--color-alert);">Hors ligne</span>
-      {/if}
-      <label class="toggle-pill" aria-label="Allumer / éteindre le spot de la terrasse">
-        <input type="checkbox" checked={spotOn} disabled={!spot.available} onchange={toggleSpot} />
-        <span class="toggle-pill-knob"></span>
-      </label>
-    </div>
-  {/if}
 </div>
 
 <style>
@@ -1009,50 +924,6 @@
     align-self: stretch;
     pointer-events: auto;
   }
-  /* ─── Rangée Spot ────────────────────────────────────────────────────── */
-  /* Hors du bloc lumineux : fond de carte nu, séparé par un filet. La lumière
-     du ruban ne doit pas déteindre dessus — ce sont deux appareils. */
-  .spot-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 14px;
-    border-top: 1px solid var(--color-border);
-  }
-  .spot-icon {
-    display: flex;
-    height: 36px;
-    width: 36px;
-    flex-shrink: 0;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-lg);
-    background: var(--color-consumption-muted);
-    color: var(--color-consumption);
-    transition:
-      background-color var(--duration-normal) var(--ease-default),
-      color var(--duration-normal) var(--ease-default);
-  }
-  .spot-icon.on {
-    background: var(--color-primary);
-    color: var(--color-primary-fg);
-  }
-  .spot-name {
-    flex: 1;
-    min-width: 0;
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--color-fg);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .spot-badge {
-    font-size: 11px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-
   .tile-more {
     display: inline-flex;
     height: 36px;
@@ -1126,7 +997,6 @@
     .tile-bar-fill,
     .tile-bar-tip,
     .tile-icon,
-    .spot-icon,
     .toggle-pill-knob,
     .toggle-pill-knob::after {
       transition: none;
