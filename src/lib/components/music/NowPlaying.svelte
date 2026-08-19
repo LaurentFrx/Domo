@@ -413,7 +413,7 @@
         ></button>
         <div
           class="modal-card info-card"
-          style="background: var(--color-card); border-color: var(--color-border);"
+          style="background: linear-gradient(var(--color-card), var(--color-card)), var(--color-bg); border-color: var(--color-border);"
         >
           <div class="info-head">
             <span class="info-thumb">
@@ -962,6 +962,11 @@
   .info-card {
     position: relative;
     text-align: left;
+    /* Fond OPAQUE (empilement `--color-card` sur `--color-bg`, comme le
+       MiniPlayer) : la pochette plein écran du lecteur passait au travers et
+       noyait les valeurs (débit, taille, nom de fichier). Ce fond composé sort
+       du sélecteur centralisé d'app.css → l'ombre du verre est reposée ici. */
+    box-shadow: var(--shadow-md);
   }
   .info-head {
     display: flex;
