@@ -151,7 +151,6 @@ function inp(o: Partial<CumulusInputs> = {}): CumulusInputs {
     maxAcSocPct: null,
     maxAcChargeW: null,
     pvApsW: 800,
-    apsCapW: 960, // plafond APS au maximum : pas de bridage par défaut dans les tests
     apsAvailable: true,
     apsAgeSec: 5,
     indoorC: 24,

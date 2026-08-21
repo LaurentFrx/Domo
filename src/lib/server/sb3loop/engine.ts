@@ -110,9 +110,7 @@ async function writePreset(
 ): Promise<WriteResult> {
   const token = env.SB3_BRIDGE_WRITE_TOKEN;
   if (!token) return { ok: false, confirmedW: null };
-  // Plafond ALIGNÉ sur la config (bridage Consuel : 2 × 800 W). C'était 2400 en
-  // dur — un second plafond, silencieux, qu'il aurait fallu penser à changer.
-  presetW = Math.round(Math.min(defaultSb3LoopConfig().maxPresetW, Math.max(0, presetW)));
+  presetW = Math.round(Math.min(2400, Math.max(0, presetW)));
   try {
     const r = await fetch(`${bridgeUrl()}/api/sb3/output`, {
       method: 'POST',

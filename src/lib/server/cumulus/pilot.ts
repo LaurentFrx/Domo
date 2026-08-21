@@ -266,20 +266,7 @@ export function pilotStep(
     (socAvg !== null && socAvg >= p.battFullPct && inputs.batteryChargeW < p.chargeIdleW);
   const exportFrank = inputs.em50Available && exportW > p.exportOnW && exportProof;
   const quietHouse = !inputs.appliances.some((a) => a.powerW !== null && a.powerW >= a.onW);
-  // ── « Y a-t-il du soleil ? » — sans se laisser aveugler par notre propre bridage ──
-  // `apsMinW` exige une production APS minimale comme preuve de soleil RÉEL. Le
-  // piège (constaté en direct le 10/08) : la boucle anti-injection écrête l'APS
-  // jusqu'à 30 W quand le réseau injecte. Le pilote lisait alors « APS 50 W » et
-  // concluait « pas de soleil », alors que ses six autres conditions étaient
-  // vertes — don franc de 737 W compris. Notre propre régulation fermait la porte
-  // au seul appareil capable de consommer ce surplus.
-  // Le raisonnement qui débloque : la boucle APS ne descend son plafond QUE sur
-  // une injection soutenue. Un plafond sous le seuil est donc lui-même la preuve
-  // qu'il y a eu du surplus — donc du soleil. On ne peut pas conclure « pas de
-  // soleil » d'une mesure que nous avons nous-mêmes plafonnée.
-  const apsBride = inputs.apsCapW !== null && inputs.apsCapW < p.apsMinW;
-  const soleilReel = inputs.pvApsW >= p.apsMinW || apsBride;
-  const windowOk = windowOpen && soleilReel && windowLeftMin >= p.minUsefulHeatMin;
+  const windowOk = windowOpen && inputs.pvApsW >= p.apsMinW && windowLeftMin >= p.minUsefulHeatMin;
   const resumeFree = pilot.lastCessionCause === 'buy' || pilot.lastCessionCause === 'hard_buy';
   const quotaOk = resumeFree || pilot.solarStartsToday < p.solarStartsPerDay;
   const delaysOk =
@@ -685,8 +672,7 @@ export function pilotStep(
         'Fenêtre solaire',
         windowOk,
         windowOpen
-          ? `${sunWindowStart ?? '?'} → ${sunWindowEnd ?? '?'} · soleil ${Math.round(sun.elevationDeg)}° · ` +
-              `APS ${inputs.pvApsW} W${apsBride ? ` (bridé à ${inputs.apsCapW} W)` : ''} · reste ${windowLeftMin} min`
+          ? `${sunWindowStart ?? '?'} → ${sunWindowEnd ?? '?'} · soleil ${Math.round(sun.elevationDeg)}° · APS ${inputs.pvApsW} W · reste ${windowLeftMin} min`
           : sunWindowStart && sunWindowEnd
             ? `fermée · aujourd'hui ${sunWindowStart} → ${sunWindowEnd}`
             : 'fermée'

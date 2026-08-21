@@ -376,9 +376,9 @@ test('SMITH : sans correction en vol, l’erreur mesurée est suivie en plein', 
       cloud: { ...inp().cloud, sb3OutW: 200 }
     }),
     cfg,
-    st({ lastCmdW: 700, enVol: [] })
+    st({ lastCmdW: 1000, enVol: [] })
   );
-  assert.equal(d.writeW, 1500, 'correction pleine et immédiate (règle 3)');
+  assert.equal(d.writeW, 1800, 'correction pleine et immédiate (règle 3)');
 });
 
 test('SMITH : une correction PÉRIMÉE ne bloque plus rien', () => {
@@ -389,9 +389,9 @@ test('SMITH : une correction PÉRIMÉE ne bloque plus rien', () => {
       cloud: { ...inp().cloud, sb3OutW: 200 }
     }),
     cfg,
-    st({ lastCmdW: 700, enVol: [{ ts: NOW - 120_000, dW: 800 }] })
+    st({ lastCmdW: 1000, enVol: [{ ts: NOW - 120_000, dW: 800 }] })
   );
-  assert.equal(d.writeW, 1500, 'au-delà de enVolS, le compteur a vu : on agit');
+  assert.equal(d.writeW, 1800, 'au-delà de enVolS, le compteur a vu : on agit');
 });
 
 test('SMITH : toute écriture alimente la file des corrections en vol', () => {
@@ -429,45 +429,22 @@ test('SMITH : les corrections en vol se CUMULENT', () => {
 });
 
 test('le rééquilibrage ne dépasse jamais la marge de puissance de la Max AC', () => {
-  // Max AC déjà à 600 W sur les 800 W que le bridage Consuel lui autorise en
-  // sortie : elle ne peut reprendre que 200 W de plus. Le prorata voudrait
-  // baisser la consigne de bien plus — ce serait du soutirage.
+  // Max AC déjà à 1 870 W sur 2 000 : elle ne peut reprendre que 130 W de plus.
+  // Le prorata voudrait baisser la consigne de bien plus — ce serait du soutirage.
   const d = decide(
     inp({
       em50: { ok: true, gridW: 0 },
-      maxac: { ok: true, socPct: 40, acNetW: 600, ratedEnergyWh: 7200 },
-      cloud: { ...inp().cloud, sb3OutW: 1600, sb3Packs: packs(100) }
+      maxac: { ok: true, socPct: 40, acNetW: 1870, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 2400, sb3Packs: packs(100) }
     }),
     cfg,
-    st({ lastCmdW: 1600 })
+    st({ lastCmdW: 2400 })
   );
-  const marge = cfg.maxAcPowerW - 600;
+  const marge = cfg.maxAcPowerW - 1870;
   assert.ok(
-    d.writeW === null || d.writeW >= 1600 - marge - 1,
+    d.writeW === null || d.writeW >= 2400 - marge - 1,
     `baisse limitée à ${marge} W, obtenu ${d.writeW}`
   );
-});
-
-test('BORNE ASYMÉTRIQUE : une Max AC qui CHARGE fort ne gèle pas la marge', () => {
-  // Piège du 10/08 : borne symétrique calée sur les 800 W de bridage. La Max AC
-  // chargeait à 1 116 W → marge = 800 − 1116 → 0, et le rééquilibrage devenait
-  // inerte EN PERMANENCE. Or le bridage ne porte que sur sa SORTIE : côté
-  // absorption elle a encore de la réserve, et la boucle doit pouvoir MONTER.
-  const d = decide(
-    inp({
-      em50: { ok: true, gridW: 0 },
-      maxac: { ok: true, socPct: 91, acNetW: -1116, ratedEnergyWh: 7100 },
-      cloud: { ...inp().cloud, sb3OutW: 200, sb3Packs: packs(100) }
-    }),
-    cfg,
-    st({ lastCmdW: 200 })
-  );
-  // marge d'absorption = 2100 − 1116 = 984 W : largement de quoi bouger.
-  assert.ok(
-    d.writeW === null || d.writeW > 200,
-    `la montée doit rester possible (obtenu ${d.writeW})`
-  );
-  assert.notEqual(d.reason, undefined);
 });
 
 // ─── RÈGLE 0 — la PUISSANCE du parc doit rester disponible ───────────────
@@ -595,8 +572,7 @@ test('RÈGLE 0 : baisse interdite → on RÉÉQUILIBRE au lieu d’attendre', ()
 
 test('FEEDFORWARD : pré-armement au prorata de l’énergie utilisable', () => {
   // SB3 2×2688 à 80 % → 3 763,2 Wh ; Max AC 7 200 à 60 % → 3 600 Wh
-  // part SB3 = 3763,2/7363,2 ≈ 51 % ; +2 900 W → +1 482 W sur la consigne, soit
-  // 1 782 W — AU-DESSUS du plafond 1 600 W (SB3 bridées 2 × 800 W) : on écrête.
+  // part SB3 = 3763,2/7363,2 ≈ 51 % ; +2 900 W → +1 482 W sur la consigne.
   const t = feedforwardTarget(
     inp({ cloud: { ...inp().cloud, sb3Packs: packs(80), sb3PresetW: 300 } }),
     cfg,
@@ -606,7 +582,7 @@ test('FEEDFORWARD : pré-armement au prorata de l’énergie utilisable', () => 
   assert.ok(t.ok);
   if (t.ok) {
     assert.equal(t.baseW, 300);
-    assert.equal(t.targetW, cfg.maxPresetW, 'écrêté au plafond de consigne');
+    assert.ok(Math.abs(t.targetW - 1782) <= 5, `cible ≈ 1782 W (obtenu ${t.targetW})`);
     assert.equal(t.sharePct, 51);
   }
 });
@@ -615,19 +591,18 @@ test('FEEDFORWARD : désarmement — la part SB3 mesurée est rendue', () => {
   const t = feedforwardTarget(
     inp({ cloud: { ...inp().cloud, sb3Packs: packs(80) } }),
     cfg,
-    st({ lastCmdW: 1600 }),
+    st({ lastCmdW: 1800 }),
     -2900
   );
   assert.ok(t.ok);
-  // 1 600 − 51 % × 2 900 = 118 W : la part SB3 de l'échelon est rendue.
-  if (t.ok) assert.ok(Math.abs(t.targetW - 118) <= 5, `cible ≈ 118 W (obtenu ${t.targetW})`);
+  if (t.ok) assert.ok(Math.abs(t.targetW - 318) <= 5, `cible ≈ 318 W (obtenu ${t.targetW})`);
 });
 
 test('FEEDFORWARD : la cible est écrêtée au plafond de consigne', () => {
   const t = feedforwardTarget(
     inp({ cloud: { ...inp().cloud, sb3Packs: packs(80) } }),
     cfg,
-    st({ lastCmdW: 1000 }),
+    st({ lastCmdW: 2000 }),
     2900
   );
   assert.ok(t.ok);
@@ -675,12 +650,12 @@ test('HOLD : pendant le pré-armement, l’injection transitoire n’est PAS cor
     inp({
       em50: { ok: true, gridW: -400 },
       maxac: { ok: true, socPct: 60, acNetW: -50, ratedEnergyWh: 7200 }, // absorbe un peu
-      cloud: { ...inp().cloud, sb3OutW: 800, sb3Packs: packs(80) }
+      cloud: { ...inp().cloud, sb3OutW: 1800, sb3Packs: packs(80) }
     }),
     cfg,
-    st({ lastCmdW: 800, lastWriteTs: NOW - 5_000, ffHoldUntilTs: NOW + 20_000 })
+    st({ lastCmdW: 1800, lastWriteTs: NOW - 5_000, ffHoldUntilTs: NOW + 20_000 })
   );
-  assert.ok(d.writeW === null || d.writeW >= 800, `pas de baisse (obtenu ${d.writeW})`);
+  assert.ok(d.writeW === null || d.writeW >= 1800, `pas de baisse (obtenu ${d.writeW})`);
 });
 
 test('HOLD : la RÈGLE 1 prime — un soutirage pendant le hold monte quand même', () => {
@@ -688,12 +663,12 @@ test('HOLD : la RÈGLE 1 prime — un soutirage pendant le hold monte quand mêm
     inp({
       em50: { ok: true, gridW: 800 },
       maxac: { ok: true, socPct: 60, acNetW: 2500, ratedEnergyWh: 7200 },
-      cloud: { ...inp().cloud, sb3OutW: 800, sb3Packs: packs(80) }
+      cloud: { ...inp().cloud, sb3OutW: 1800, sb3Packs: packs(80) }
     }),
     cfg,
-    st({ lastCmdW: 800, lastWriteTs: NOW - 5_000, ffHoldUntilTs: NOW + 20_000 })
+    st({ lastCmdW: 1800, lastWriteTs: NOW - 5_000, ffHoldUntilTs: NOW + 20_000 })
   );
-  assert.equal(d.writeW, cfg.maxPresetW, 'le soutirage est couvert jusqu’au plafond');
+  assert.ok((d.writeW ?? 0) >= 2400, `le soutirage est couvert (obtenu ${d.writeW})`);
 });
 
 test('HOLD : expiré → la baisse redevient normale', () => {

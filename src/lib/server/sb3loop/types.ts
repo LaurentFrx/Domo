@@ -32,18 +32,11 @@ export interface Sb3LoopConfig {
   enVolS: number;
   /** Puissance AC max de la Max AC (W) — borne le rééquilibrage de partage :
    *  on ne déplace pas vers elle plus qu'elle ne peut fournir ou absorber.
-   *  ⚠️ 800 W depuis le 10/08/2026 : Laurent a bridé sa SORTIE à 800 W en
-   *  attendant le Consuel (c'était 3 540 W mesurés, p99,9 sur 18 259 points).
-   *  Le bridage ne porte que sur la sortie, pas sur la charge — mais la borne
-   *  reste symétrique par sûreté : sur-estimer ce que la Max AC peut reprendre
-   *  crée du SOUTIRAGE (mesuré le 28/07 : un saut de −1 291 W → 867 W d'achat).
-   *  🔁 REMETTRE 3600 à la levée du bridage. */
+   *  MESURÉ sur history.db (18 259 points) : p99,9 = 3 530 W, max 3 540 W —
+   *  cohérent avec les 3 600 W annoncés par le constructeur. La valeur de 2 000 W
+   *  posée initialement était FAUSSE (dépassée 2 % du temps) et gelait le
+   *  rééquilibrage dès que la Max AC débitait fort : marge calculée à 0. */
   maxAcPowerW: number;
-  /** Puissance de CHARGE max de la Max AC (W) — l'autre moitié de la borne de
-   *  rééquilibrage. Volontairement DISTINCTE de maxAcPowerW : le bridage Consuel
-   *  ne limite que la sortie, jamais l'absorption. 2 100 W ≈ les 2 050 W mesurés
-   *  en direct le 28/07 ; à affiner sur quelques jours d'observation. */
-  maxAcChargePowerW: number;
   /** Fraction de l'écart de partage corrigée par cycle. Le rééquilibrage ENTRE
    *  batteries est un objectif de confort, pas une réponse à la maison : il ne
    *  doit pas bousculer l'équilibre du compteur que la règle 1 protège. La
@@ -232,8 +225,7 @@ export function defaultSb3LoopConfig(): Sb3LoopConfig {
     reservePct: 10,
     enVolS: 20,
     ffHoldS: 30,
-    maxAcPowerW: 800,
-    maxAcChargePowerW: 2100,
+    maxAcPowerW: 3600,
     shareGain: 0.5,
     rebalanceBandFrac: 0.1,
     rebalanceGain: 0.5,
@@ -241,9 +233,7 @@ export function defaultSb3LoopConfig(): Sb3LoopConfig {
     deadbandW: 100, // < marginW — sinon la cible « charge − marge » est piégée dans la bande
     failLowDwellS: 300,
     settleS: 180,
-    // Consigne système SB3 : 2 × 800 W depuis le bridage Consuel (c'était 2 × 1 200).
-    // 🔁 REMETTRE 2400 à la levée du bridage.
-    maxPresetW: 1600,
+    maxPresetW: 2400,
     cloudStaleS: 180,
     localMuteS: 120,
     confirmFailMax: 2,

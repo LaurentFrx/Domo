@@ -109,14 +109,7 @@ export interface CumulusInputs {
   maxAcAvailable: boolean; // lecture Modbus locale de la Max AC disponible
   maxAcSocPct: number | null; // SoC de la Max AC (%), null si local muet
   maxAcChargeW: number | null; // puissance de CHARGE de la Max AC (W ≥ 0), null si local muet
-  pvApsW: number; // prod du micro-onduleur APsystems EZ1 (pan Sud), W
-  /** Plafond COURANT de l'APS (W), écrit par NOTRE boucle anti-injection ; null si
-   *  inconnu. ⚠️ L'APS a longtemps été décrit ici comme « l'étalon jamais bridé » —
-   *  c'est FAUX depuis que la boucle APS est en réel (27/07/2026). Quand elle
-   *  écrête à 30 W, `pvApsW` ne dit plus rien du soleil, et tout ce qui s'appuie
-   *  dessus (condition « soleil réel », estimateur de potentiel) se retrouve
-   *  aveuglé par notre propre régulation. Ce champ permet de faire la différence. */
-  apsCapW: number | null;
+  pvApsW: number; // prod du micro-onduleur APsystems EZ1 (pan Sud), W — l'ÉTALON (jamais bridé)
   apsAvailable: boolean; // le bridge APS répond (distinguer « injoignable » de « 0 W réel »)
   apsAgeSec: number | null; // fraîcheur de la donnée APS (s), null si inconnue
 

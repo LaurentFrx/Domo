@@ -227,7 +227,6 @@ const apsystemsUrl = () =>
 
 interface ApsRead {
   powerW: number; // production instantanée (0 si indispo)
-  capW: number | null; // plafond COURANT écrit par la boucle anti-injection (null si inconnu)
   available: boolean; // le bridge répond ET se dit disponible
   ageSec: number | null; // fraîcheur de la donnée (now − ts), null si ts absent
 }
@@ -235,31 +234,19 @@ interface ApsRead {
 /** Production du micro-onduleur APS EZ1 (pan Sud) + disponibilité/fraîcheur
  *  (l'alerte « APS muet » a besoin de distinguer « injoignable » de « 0 W réel »). */
 async function readApsystems(nowMs: number): Promise<ApsRead> {
-  const fail: ApsRead = { powerW: 0, capW: null, available: false, ageSec: null };
+  const fail: ApsRead = { powerW: 0, available: false, ageSec: null };
   try {
     const r = await fetch(`${apsystemsUrl()}/api/apsystems/status`, {
       signal: AbortSignal.timeout(TIMEOUT_MS)
     });
     if (!r.ok) return fail;
-    const d = (await r.json()) as {
-      available?: boolean;
-      power_w?: number;
-      max_power_w?: number;
-      ts?: number;
-    };
+    const d = (await r.json()) as { available?: boolean; power_w?: number; ts?: number };
     const ageSec =
       typeof d.ts === 'number' && Number.isFinite(d.ts)
         ? Math.max(0, Math.round(nowMs / 1000 - d.ts))
         : null;
-    // `max_power_w` = plafond COURANT du bridage, celui que notre propre boucle
-    // anti-injection écrit. Sans lui, le pilote confondait « pas de soleil » et
-    // « APS bridé par nous-mêmes » — cf. la condition « soleil réel » du pilote.
-    const capW =
-      typeof d.max_power_w === 'number' && Number.isFinite(d.max_power_w)
-        ? Math.round(d.max_power_w)
-        : null;
-    if (d.available === false) return { powerW: 0, capW, available: false, ageSec };
-    return { powerW: Math.max(0, Math.round(num(d.power_w))), capW, available: true, ageSec };
+    if (d.available === false) return { powerW: 0, available: false, ageSec };
+    return { powerW: Math.max(0, Math.round(num(d.power_w))), available: true, ageSec };
   } catch {
     return fail;
   }
@@ -544,7 +531,6 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     sbInputW: anker.sbInputW,
     sb3ChargeW: anker.sb3ChargeW,
     pvApsW: aps.powerW,
-    apsCapW: aps.capW,
     apsAvailable: aps.available,
     apsAgeSec: aps.ageSec,
     indoorC,
