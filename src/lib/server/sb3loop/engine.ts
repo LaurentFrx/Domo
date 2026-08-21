@@ -23,6 +23,7 @@ import {
   defaultSb3LoopConfig,
   defaultSb3LoopState,
   type Sb3DecisionLogEntry,
+  type Sb3LoopConfig,
   type Sb3LoopState,
   type Sb3PlanSlot
 } from './types';
@@ -132,6 +133,38 @@ async function writePreset(
   }
 }
 
+/**
+ * Une consigne BORNÉE par le matériel n'est pas une consigne REFUSÉE.
+ *
+ * Le parc plafonne la sortie AC des SB3. Mesuré le 21/08/2026 dans le pont :
+ * `sb3/output: preset=2376 → confirmé=1800.0 mode=3` — la commande est passée,
+ * le matériel l'a saturée. La traiter comme un échec avait trois effets, tous
+ * observés le même jour à 09:57 lors d'une chauffe forcée du cumulus :
+ *   - `lastCmdW` restait sur la valeur d'AVANT (179 W) alors que le matériel
+ *     était à 1800 W → le tick suivant repartait d'une base fausse et ÉCRASAIT
+ *     la consigne en place (1800 → 386 W) 11 s avant l'échelon du ballon, donc
+ *     1 275 W achetés à EDF et VETO au bout de 38 s de chauffe ;
+ *   - `ffHoldUntilTs` n'était pas armé → la garde anti-baisse qui existe
+ *     PRÉCISÉMENT pour protéger un pré-armement ne jouait pas ;
+ *   - `confirmFailCount` montait → auto-désactivation de la boucle au 2ᵉ coup,
+ *     alors que le cloud répondait et appliquait (épisode du 21/08).
+ *
+ * Critère tiré de la sémantique du pont (`server.py`, POST /api/sb3/output) :
+ * `ok: false` n'arrive QUE sur refus franc du cloud (`set_sb2_home_load`
+ * renvoie False) ; `ok: true` signifie POST accepté PUIS planning RELU, et
+ * `confirmed_w` est alors la vérité du créneau courant. Une valeur relue qui
+ * diffère de la cible n'est donc jamais une transmission perdue : c'est le parc
+ * qui borne. Le compteur d'échecs — et l'auto-désactivation qu'il déclenche —
+ * reste réservé au refus franc, la seule panne qu'il sait vraiment décrire.
+ */
+type WriteVerdict = 'confirmed' | 'clamped' | 'failed';
+
+function classifyWrite(w: WriteResult, targetW: number, cfg: Sb3LoopConfig): WriteVerdict {
+  if (!w.ok || w.confirmedW === null) return 'failed';
+  if (Math.abs(w.confirmedW - targetW) <= cfg.confirmToleranceW) return 'confirmed';
+  return 'clamped';
+}
+
 /** Champs cloud dont dépend la boucle — le canary vérifie leur présence. */
 function canaryOk(payload: Record<string, unknown>): string | null {
   if (payload.sb3_output_power_w === undefined) return 'sb3_output_power_w absent';
@@ -233,25 +266,36 @@ export async function feedforwardCumulusStep(stepW: number): Promise<Feedforward
       slot !== null ? staticPlanW(cfg, slot) : null,
       FF_WRITE_TIMEOUT_MS
     );
-    const confirmed =
-      w.ok && w.confirmedW !== null && Math.abs(w.confirmedW - t.targetW) <= cfg.confirmToleranceW;
-    if (confirmed) {
-      state.lastCmdW = t.targetW;
+    const verdict = classifyWrite(w, t.targetW, cfg);
+    const pris = verdict !== 'failed';
+    if (pris) {
+      // On enregistre ce que le matériel a RÉELLEMENT pris, pas ce qu'on visait :
+      // c'est cette valeur qui sert de base au tick suivant. Une cible bornée
+      // enregistrée comme cible ferait croire à la boucle qu'elle sur-livre.
+      state.lastCmdW = verdict === 'confirmed' ? t.targetW : (w.confirmedW as number);
       state.lastWriteTs = now; // settle : la boucle substitue la consigne écrite
       if (stepW > 0) {
         // L'excédent transitoire d'ici la fermeture du relais est VOULU : la
         // boucle ne doit pas le « corriger » en annulant le pré-armement.
-        // (Les montées restent libres — règle 1 intouchée.)
+        // (Les montées restent libres — règle 1 intouchée.) Armé AUSSI quand la
+        // consigne a été bornée : c'est justement le cas où la marge est mince,
+        // celui où l'annuler coûte un achat EDF.
         state.ffHoldUntilTs = now + cfg.ffHoldS * 1000;
       }
     }
     // Pas d'escalade confirmFailCount ici : la politique d'auto-désactivation
     // appartient aux écritures de la boucle elle-même — un feedforward raté
     // laisse simplement le comportement d'aujourd'hui.
+    const suffixe =
+      verdict === 'confirmed'
+        ? ''
+        : verdict === 'clamped'
+          ? ` (bornée à ${Math.round(w.confirmedW as number)} W par le parc)`
+          : ' (NON confirmée)';
     const note =
       `${stepW > 0 ? 'PRÉ-ARMEMENT' : 'DÉSARMEMENT'} cumulus ${stepW > 0 ? '+' : '−'}` +
       `${Math.abs(Math.round(stepW))} W — part SB3 ${t.sharePct} % : consigne ` +
-      `${t.baseW} → ${t.targetW} W${confirmed ? '' : ' (NON confirmée)'}`;
+      `${t.baseW} → ${t.targetW} W${suffixe}`;
     pushLog(state, {
       ts: now,
       mode: 'allocate',
@@ -263,7 +307,7 @@ export async function feedforwardCumulusStep(stepW: number): Promise<Feedforward
       confirmedW: w.confirmedW
     });
     await writeJsonAtomic(STATE_FILE, state);
-    return { wrote: confirmed, targetW: t.targetW, note };
+    return { wrote: pris, targetW: t.targetW, note };
   });
 }
 
@@ -367,10 +411,12 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
       const w = await writePreset(d.writeW, slot !== null ? staticPlanW(cfg, slot) : null);
       writtenW = d.writeW;
       confirmedW = w.confirmedW;
-      const confirmed =
-        w.ok && w.confirmedW !== null && Math.abs(w.confirmedW - d.writeW) <= cfg.confirmToleranceW;
-      if (confirmed) {
-        state.lastCmdW = d.writeW;
+      const verdict = classifyWrite(w, d.writeW, cfg);
+      if (verdict !== 'failed') {
+        // Bornée par le parc = commande PRISE : on garde la valeur en place comme
+        // base, et on ne fait surtout pas monter le compteur d'échecs (il coupe
+        // la boucle au 2ᵉ coup, cf. l'auto-désactivation du 21/08).
+        state.lastCmdW = verdict === 'confirmed' ? d.writeW : (w.confirmedW as number);
         state.lastWriteTs = now;
         state.confirmFailCount = 0;
       } else {
@@ -391,7 +437,10 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
       pushLog(state, {
         ts: now,
         mode: d.mode,
-        reason: d.reason,
+        reason:
+          verdict === 'clamped'
+            ? `${d.reason} — bornée à ${Math.round(w.confirmedW as number)} W par le parc`
+            : d.reason,
         houseLoadW: d.houseLoadW,
         targetW: d.targetW,
         beforeW,
