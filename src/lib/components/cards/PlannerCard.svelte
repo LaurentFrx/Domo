@@ -73,10 +73,12 @@
         ? 'var(--color-success)'
         : 'var(--color-muted-fg)'
   );
+  // Sous le titre : un repère court, dans les mots de tout le monde. « Alimenté ·
+  // température atteinte » décrivait l'état du contacteur, pas ce que vit l'eau.
   const statusLine = $derived.by(() => {
     if (voyant === 'offline') return 'Boîtier injoignable';
-    if (voyant === 'heating') return `En chauffe · ${(cumulusW / 1000).toFixed(1)} kW`;
-    if (voyant === 'supplied') return 'Alimenté · température atteinte';
+    if (voyant === 'heating') return 'Chauffe en cours';
+    if (voyant === 'supplied') return 'Sous tension — l’eau est déjà à température';
     return 'Éteint';
   });
 
