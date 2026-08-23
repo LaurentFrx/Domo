@@ -83,7 +83,12 @@
     {/if}
     <div class="ios-group">
       {#each group.items as item (item.href)}
-        <a href={item.href} class="ios-cell has-icon" data-sveltekit-preload-data>
+        <a
+          href={item.href}
+          class="ios-cell has-icon"
+          data-sveltekit-preload-data={item.hard ? 'off' : true}
+          data-sveltekit-reload={item.hard ? true : undefined}
+        >
           <span class="ios-icon" style="background: {item.tint};">
             <svg
               width="17"

@@ -28,6 +28,9 @@ export interface MenuItem {
   keywords?: string;
   /** Page hors espace /menu : garde le design de l'app. */
   external?: boolean;
+  /** Lien HORS SvelteKit (service voisin derrière le même cookie, ex. /files) :
+   *  navigation navigateur pleine, jamais le routeur ni son préchargement. */
+  hard?: boolean;
 }
 
 export interface MenuGroup {
@@ -112,6 +115,15 @@ export const menuGroups: MenuGroup[] = [
         icon: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M22 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',
         tint: 'var(--ios-blue)',
         keywords: 'utilisateurs comptes famille invitation lien code pin 4 chiffres droits isabelle'
+      },
+      {
+        href: '/files',
+        label: 'Fichiers',
+        description: 'Documents partagés de la maison',
+        icon: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z',
+        tint: 'var(--ios-teal)',
+        keywords: 'filebrowser documents partage téléverser télécharger dossier',
+        hard: true
       },
       {
         href: '/menu/apparence',
