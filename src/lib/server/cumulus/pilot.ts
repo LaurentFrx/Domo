@@ -72,10 +72,16 @@ export interface PilotStepResult {
   /** Cause de la coupure quand le pilote interrompt une chauffe (null sinon).
    *  Transmise à decide() pour que la protection prime sur l'anti-court-cycle. */
   cutCause: CessionCause | null;
-  /** Réserve du soir en Wh — JOURNALISÉE SEULEMENT pour l'instant : elle ne
-   *  décide encore de rien. Elle remplacera batteryFloorCutPct (40 % du parc)
-   *  une fois ses valeurs vérifiées en service. */
+  /** Réserve du soir en Wh — ce que la maison consommera de la fin du solaire au
+   *  début des heures creuses. Remplace batteryFloorCutPct (40 % du parc). */
   reserve: ReserveResult;
+  /** Bilan énergétique de la décision : ce que le parc a, ce qu'il faut. */
+  energy: {
+    uParcWh: number | null;
+    eChauffeWh: number | null;
+    besoinWh: number | null;
+    trigger: boolean;
+  };
 }
 
 export function defaultPilotState(): PilotState {
@@ -455,7 +461,50 @@ export function pilotStep(
   // l'export franc PROUVE que le parc n'absorbe plus (zéro-export Max AC), la
   // voie saturation exige la réserve locale, le secours invisible garde son
   // exigence « batteries pleines » en interne.
-  const trigger = exportFrank || saturationTrigger || invisibleTrigger;
+  // ── VOIE ÉNERGÉTIQUE (C1) — « ai-je de quoi finir sans acheter ? » ──────
+  // Les trois voies précédentes mesurent un SURPLUS INSTANTANÉ : elles répondent
+  // « le soleil produit-il assez EN CE MOMENT », jamais « le parc a-t-il de quoi
+  // mener la chauffe au bout ». D'où le blocage constaté le 23/08 à 11:08 —
+  // 390 W de surplus mesurés contre 2 000 exigés, alors que le parc portait
+  // 6,7 kWh utilisables pour une chauffe de 2 kWh, et que le ballon a tourné
+  // sans acheter dès qu'il a été lancé par l'autre voie.
+  //
+  //     énergie utilisable du parc  ≥  chauffe estimée + réserve du soir + tampon
+  //
+  // Réserve du soir : cf. reserve.ts — ce que la maison consommera entre la fin
+  // de production solaire et le début des heures creuses, appris heure par heure.
+  // Tampon : 1 500 Wh, valeur posée par Laurent pour l'usage exceptionnel ;
+  // corroborée par la mesure (usages concurrents pendant une chauffe : 202 Wh en
+  // médiane, 656 au p90, 1 460 au maximum observé sur 62 épisodes).
+  // Estimateur de chauffe : 120 Wh/°C sous la coupure + 40 Wh par heure écoulée
+  // depuis le dernier plein — MAE 375 Wh en validation croisée sur 40 chauffes
+  // réelles, contre 951 Wh pour le déficit calorimétrique.
+  //
+  // Le PV encore attendu n'est PAS crédité : le critère est donc plus strict que
+  // la spec, ce qui est le bon sens pour une première mise en service.
+  const TAMPON_WH = 1500;
+  const uParcWh =
+    inputs.ankerAvailable && inputs.batteryCapacityWh > 0
+      ? Math.max(0, inputs.batteryEnergyWh - 0.1 * inputs.batteryCapacityWh) * 0.95
+      : null;
+  const hSincePlein =
+    state.energy.lastAnchorTs !== null
+      ? Math.min(72, Math.max(0, (now - state.energy.lastAnchorTs) / 3_600_000))
+      : 24;
+  const eChauffeWh =
+    inputs.tempC !== null
+      ? Math.min(8000, Math.max(250, 120 * Math.max(0, 55 - inputs.tempC) + 40 * hSincePlein))
+      : null;
+  const besoinTotalWh =
+    eChauffeWh !== null && reserve.wh !== null ? eChauffeWh + reserve.wh + TAMPON_WH : null;
+  const energyTrigger =
+    uParcWh !== null &&
+    besoinTotalWh !== null &&
+    inputs.em50Available &&
+    buyW <= 50 &&
+    uParcWh >= besoinTotalWh;
+
+  const trigger = exportFrank || saturationTrigger || invisibleTrigger || energyTrigger;
   const commonOk = tankNotFull && quietHouse && windowOk && quotaOk && delaysOk;
   const allOn = commonOk && trigger;
 
@@ -523,6 +572,13 @@ export function pilotStep(
         ) {
           cutCause = 'buy';
           note = `achat réseau ${buyW} W soutenu ${p.cutBuySustainSec} s — la maison a besoin de sa puissance`;
+        } else if (uParcWh !== null && reserve.wh !== null && uParcWh < reserve.wh + TAMPON_WH) {
+          // La réserve du soir n'est plus un pourcentage de SoC mais l'énergie
+          // que la maison consommera jusqu'aux heures creuses. Le plancher à 40 %
+          // coupait une chauffe le 21/08 à 10:41 ALORS QUE LE COMPTEUR INJECTAIT
+          // 45 W — il immobilisait ~5 000 Wh toute l'année, y compris à midi.
+          cutCause = 'battery';
+          note = `réserve du soir : ${Math.round(uParcWh)} Wh dans le parc pour ${Math.round(reserve.wh + TAMPON_WH)} Wh nécessaires d'ici les heures creuses`;
         } else if (socParc !== null && socParc < p.batteryFloorCutPct) {
           // PLANCHER — inconditionnel. Il était gardé par socStartOfHeat !== null,
           // donc inerte dès qu'une chauffe démarrait sans SoC disponible (cloud +
@@ -785,7 +841,21 @@ export function pilotStep(
     computedAt: now
   };
 
-  return { wantOn, reason: wantOn ? reason : 'wait', view, events, pilot, cutCause, reserve };
+  return {
+    wantOn,
+    reason: wantOn ? reason : 'wait',
+    view,
+    events,
+    pilot,
+    cutCause,
+    reserve,
+    energy: {
+      uParcWh: uParcWh === null ? null : Math.round(uParcWh),
+      eChauffeWh: eChauffeWh === null ? null : Math.round(eChauffeWh),
+      besoinWh: besoinTotalWh === null ? null : Math.round(besoinTotalWh),
+      trigger: energyTrigger
+    }
+  };
 }
 
 function cond(key: string, label: string, ok: boolean, detail: string): PilotView['conds'][number] {
