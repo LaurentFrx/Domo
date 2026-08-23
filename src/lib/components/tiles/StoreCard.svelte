@@ -20,11 +20,14 @@
   import type { Shutter } from '$stores/matter.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { haptic } from '$utils/haptic';
+  import { sunPosition, HOME_LAT, HOME_LON } from '$utils/sun';
 
   interface Props {
     shutter: Shutter;
+    /** Instant de référence pour le soleil (epoch ms) — tests ; défaut : maintenant. */
+    now?: number;
   }
-  let { shutter }: Props = $props();
+  let { shutter, now: nowProp }: Props = $props();
 
   const DEFAULT_TRAVEL_MS = 10_000; // course pleine si travelMs absent (10 %/s)
   const SCENE_W = 332;
@@ -142,6 +145,66 @@
     movingDirection = null;
   }
 
+  // ── Soleil réel → lumière de la scène ──────────────────────────────────
+  // Le mur est orienté au 280° (ouest). Repère monde : x le long du mur vers
+  // le nord (droite), y vers le bas, z vers l'extérieur (ouest). Les ombres
+  // suivent l'heure : à 14 h 50 le 23/08 elles tombent à droite, vers le mur
+  // (photos de référence) ; le matin la maison ombrage toute la terrasse ;
+  // la nuit, la scène s'éteint et l'applique s'allume.
+  let clock = $state(untrack(() => nowProp ?? Date.now()));
+  $effect(() => {
+    if (nowProp !== undefined) {
+      clock = nowProp;
+      return;
+    }
+    const id = setInterval(() => (clock = Date.now()), 60_000);
+    return () => clearInterval(id);
+  });
+  const WALL_AZ = 280; // orientation du mur (°, 0 = nord)
+  const light = $derived.by(() => {
+    const sun = sunPosition(clock, HOME_LAT, HOME_LON);
+    const el = sun.elevationDeg;
+    const day = Math.max(0, Math.min(1, (el + 4) / 10)); // 0 = nuit, 1 = plein jour
+    const rad = (d: number) => (d * Math.PI) / 180;
+    const phi = sun.azimuthDeg + 180; // direction vers laquelle tombent les ombres
+    const Lx = Math.cos(rad(el)) * Math.cos(rad(phi - (WALL_AZ - 270)));
+    const Lz = Math.cos(rad(el)) * Math.cos(rad(phi - WALL_AZ));
+    const Ly = Math.max(0.05, Math.sin(rad(el)));
+    const wallLit = el > 0 && Math.cos(rad(sun.azimuthDeg - WALL_AZ)) > 0;
+    // Ombre de la toile sur le SOL : rectangle décalé (arrière h=140 px) et cisaillé
+    // (la toile descend de 13 px sur sa course de 120 px, pente 6°).
+    const sxR = (Lx * 140) / Ly;
+    const szR = (Lz * 140) / Ly;
+    const dshK = 120 - (13 * Lz) / Ly; // hauteur = p × dshK
+    const dshSkew = (Math.atan2((-13 * Lx) / Ly, dshK) * 180) / Math.PI;
+    // Ombre de la toile sur le MUR : bande cisaillée sous le coffre (si Lz < 0).
+    const wshHk = Lz < -0.01 ? (Ly * 120) / -Lz : 0; // hauteur = min(118, p × wshHk)
+    const wshSkew = (Math.atan2(Lx, Ly) * 180) / Math.PI;
+    // Ombre de la MAISON sur le sol quand le soleil est derrière elle.
+    const hshD = !wallLit && el > 0 ? Math.min(240, (290 * Math.max(0, Lz)) / Ly) : 0;
+    return {
+      day,
+      wallLit,
+      sunUp: el > 0,
+      dshLeft: 44 + sxR,
+      dshTop: szR,
+      dshK,
+      dshSkew,
+      dshOn: wallLit ? 1 : 0,
+      wshHk,
+      wshSkew,
+      hshD
+    };
+  });
+  const lightStyle = $derived(
+    `--day: ${light.day.toFixed(3)}; --night: ${(1 - light.day).toFixed(3)};` +
+      ` --wall-dim: ${light.sunUp && !light.wallLit ? 0.32 : 0};` +
+      ` --dsh-left: ${light.dshLeft.toFixed(1)}px; --dsh-top: ${light.dshTop.toFixed(1)}px;` +
+      ` --dsh-k: ${light.dshK.toFixed(1)}px; --dsh-skew: ${light.dshSkew.toFixed(1)}deg; --dsh-on: ${light.dshOn};` +
+      ` --wsh-hk: ${light.wshHk.toFixed(1)}px; --wsh-skew: ${light.wshSkew.toFixed(1)}deg;` +
+      ` --hsh-d: ${light.hshD.toFixed(1)}px;`
+  );
+
   const stateLabel = $derived.by(() => {
     if (isMoving) return 'En manœuvre…';
     if (target <= 1) return shutter.labelMin ?? 'Rentré';
@@ -149,6 +212,34 @@
     return `Déployé à ${target} %`;
   });
 </script>
+
+<!-- Boîte 3D (3 faces visibles depuis le sud-ouest : dessus, face avant, côté gauche).
+     x,z = coin arrière-gauche ; yTop = hauteur du dessus (y vers le bas) ; w/h/d. -->
+{#snippet box(
+  x: number,
+  yTop: number,
+  z: number,
+  w: number,
+  h: number,
+  d: number,
+  top: string,
+  front: string,
+  side: string
+)}
+  <div
+    class="face"
+    style="left: {x}px; top: {yTop}px; width: {w}px; height: {d}px; transform: translateZ({z}px) rotateX(90deg); transform-origin: top; background: {top};"
+  ></div>
+  <div
+    class="face"
+    style="left: {x}px; top: {yTop}px; width: {w}px; height: {h}px; transform: translateZ({z +
+      d}px); background: {front};"
+  ></div>
+  <div
+    class="face"
+    style="left: {x}px; top: {yTop}px; width: {d}px; height: {h}px; transform: translateZ({z}px) rotateY(-90deg); transform-origin: left; background: {side};"
+  ></div>
+{/snippet}
 
 <div
   class="store3d rounded-[var(--radius-xl)] border"
@@ -166,36 +257,100 @@
     </span>
   </div>
 
-  <!-- Scène 3D : dessinée à 332×210 puis mise à l'échelle de la carte. -->
+  <!-- Scène 3D : la terrasse réelle (mur ouest au 280°), dessinée à 332×210
+       puis mise à l'échelle de la carte. Repère : 1 px = 2,5 cm. -->
   <div class="scene-wrap" bind:clientWidth={wrapW} style="--k: {k};">
     <div
       bind:this={sceneEl}
       class="scene"
-      style="--store-p: {target / 100}; --dur: {Math.round(dur)}ms;"
+      style="--store-p: {target / 100}; --dur: {Math.round(dur)}ms; {lightStyle}"
       ontransitionend={onTransitionEnd}
       role="img"
       aria-label="Store-banne {stateLabel}"
     >
-      <span class="sun" aria-hidden="true"></span>
+      <div class="sky-night" aria-hidden="true"></div>
       <div class="world" aria-hidden="true">
-        <div class="wall"></div>
-        <div class="ground">
-          <div class="shadow"></div>
-          <div class="chair a"></div>
-          <div class="chair b"></div>
-          <div class="table-top"></div>
+        <!-- Mur crépi (plan xy), ombre de la maison, porte à volet, applique -->
+        <div class="wall">
+          <div class="wall-dim"></div>
+          <div class="wall-shadow"></div>
+          <div class="door">
+            <div class="shutter"></div>
+            <div class="glass"></div>
+          </div>
+          <div class="lamp"><i class="lamp-glow"></i></div>
+          <div class="roof-edge"></div>
         </div>
-        <div class="table-leg"></div>
-        <div class="box-top"></div>
-        <div class="box-side"></div>
+        <!-- Abri à poutres bois au coin droit -->
+        <div class="abri-back"></div>
+        <div class="abri-roof"></div>
+        <div class="abri-post"></div>
+        <!-- Deck en lames grises (plan xz) + ombres portées -->
+        <div class="ground">
+          <div class="house-shadow"></div>
+          <div class="deck-shadow"></div>
+        </div>
+        <!-- Mobilier (boîtes : dessus, face, côté gauche) -->
+        {@render box(
+          -52,
+          172,
+          8,
+          44,
+          3,
+          36,
+          'var(--ftab-top)',
+          'var(--ftab-top)',
+          'var(--ftab-top)'
+        )}
+        <div class="leg" style="left: -48px; top: 175px; transform: translateZ(40px);"></div>
+        <div class="leg" style="left: -14px; top: 175px; transform: translateZ(12px);"></div>
+        {@render box(116, 186, 6, 116, 14, 36, 'var(--cush)', 'var(--frame)', 'var(--frame)')}
+        {@render box(
+          116,
+          158,
+          6,
+          116,
+          28,
+          9,
+          'var(--cush-side)',
+          'var(--cush)',
+          'var(--cush-side)'
+        )}
+        {@render box(116, 186, 42, 36, 14, 54, 'var(--cush)', 'var(--frame)', 'var(--frame)')}
+        {@render box(
+          116,
+          158,
+          42,
+          7,
+          28,
+          54,
+          'var(--cush-side)',
+          'var(--cush-side)',
+          'var(--cush)'
+        )}
+        {@render box(158, 188, 54, 46, 12, 44, 'var(--teak)', 'var(--frame)', 'var(--frame)')}
+        {@render box(268, 184, 62, 16, 16, 16, 'var(--pot-top)', 'var(--pot)', 'var(--pot-dark)')}
+        <!-- Olivier (panneau face caméra) -->
+        <div class="olive">
+          <i class="trunk"></i>
+          <i class="leaves l1"></i>
+          <i class="leaves l2"></i>
+          <i class="leaves l3"></i>
+          <i class="leaves l4"></i>
+          <i class="leaves l5"></i>
+        </div>
+        <!-- Store-banne : coffre, bras, toile (dessus + dessous), barre de front -->
         <div class="box-front"></div>
+        <div class="box-top"></div>
+        <div class="box-bottom"></div>
+        <div class="box-side"></div>
         <div class="arm l"><div class="seg seg1"><div class="seg seg2"></div></div></div>
         <div class="arm r"><div class="seg seg1"><div class="seg seg2"></div></div></div>
-        <div class="fabric">
-          <div class="front-bar"></div>
-          <div class="valance"></div>
-        </div>
+        <div class="fabric fabric-top"></div>
+        <div class="fabric fabric-under"></div>
+        <div class="fabric fabric-bar"><div class="front-bar"></div></div>
       </div>
+      <div class="night-veil" aria-hidden="true"></div>
     </div>
   </div>
 
@@ -270,57 +425,38 @@
     flex-direction: column;
     gap: 12px;
     padding: 14px;
-    /* Toile : écru rayé bleu charte (hue 262). */
-    --toile-a: oklch(0.93 0.025 85);
-    --toile-b: oklch(0.47 0.12 262);
-    /* Décor clair (jour) ; le sombre redéfinit plus bas. */
-    --sky-a: oklch(0.86 0.06 232);
-    --sky-b: oklch(0.93 0.03 225);
-    --sky-c: oklch(0.95 0.02 200);
-    --wall-a: oklch(0.88 0.02 80);
-    --wall-b: oklch(0.93 0.02 80);
-    --wall-shade: oklch(0.6 0.03 80 / 0.35);
-    --window-a: oklch(0.7 0.07 240);
-    --window-b: oklch(0.45 0.06 262);
-    --frame: oklch(0.75 0.02 80);
-    --wood-a: oklch(0.74 0.05 70);
-    --wood-b: oklch(0.69 0.05 70);
-    --wood-c: oklch(0.77 0.05 75);
-    --wood-line: oklch(0.62 0.05 70);
-    --ground-fade: oklch(0.4 0.04 286 / 0.25);
-    --shade: oklch(0.25 0.05 286 / 0.42);
-    --metal-a: oklch(0.9 0.01 286);
-    --metal-b: oklch(0.72 0.015 286);
-    --metal-c: oklch(0.8 0.01 286);
-    --metal-d: oklch(0.62 0.015 286);
-    --furn-a: oklch(0.8 0.03 80);
-    --furn-b: oklch(0.6 0.03 70);
-    --furn-c: oklch(0.45 0.03 70);
-    --sun: oklch(0.9 0.16 88);
-  }
-  :global([data-theme='dark']) .store3d {
-    --sky-a: oklch(0.3 0.06 262);
-    --sky-b: oklch(0.27 0.05 280);
-    --sky-c: oklch(0.24 0.045 286);
-    --wall-a: oklch(0.42 0.04 286);
-    --wall-b: oklch(0.5 0.04 286);
-    --wall-shade: oklch(0.2 0.03 286 / 0.5);
-    --window-a: oklch(0.62 0.08 262);
-    --window-b: oklch(0.35 0.06 280);
-    --frame: oklch(0.36 0.03 286);
-    --wood-a: oklch(0.5 0.035 70);
-    --wood-b: oklch(0.46 0.035 70);
-    --wood-c: oklch(0.52 0.035 75);
-    --wood-line: oklch(0.47 0.035 70);
-    --ground-fade: oklch(0.2 0.03 286 / 0.35);
-    --shade: oklch(0.14 0.04 286 / 0.6);
-    --metal-a: oklch(0.82 0.02 286);
-    --metal-b: oklch(0.58 0.02 286);
-    --metal-c: oklch(0.78 0.02 286);
-    --metal-d: oklch(0.62 0.02 286);
-    --furn-a: oklch(0.72 0.03 80);
-    --furn-b: oklch(0.5 0.03 70);
-    --furn-c: oklch(0.4 0.03 70);
+    /* Palette de la terrasse réelle (photos du 23/08/2026). */
+    --wall-a: oklch(0.9 0.035 85);
+    --wall-b: oklch(0.86 0.04 85);
+    --streak: oklch(0.78 0.035 85 / 0.35);
+    --anthracite: oklch(0.33 0.012 250);
+    --toile-top: oklch(0.79 0.03 78);
+    --toile-under: oklch(0.66 0.028 76);
+    --deck-a: oklch(0.8 0.012 85);
+    --deck-b: oklch(0.76 0.012 80);
+    --deck-gap: oklch(0.66 0.012 85);
+    --frame: oklch(0.95 0.003 80);
+    --cush: oklch(0.9 0.018 85);
+    --cush-side: oklch(0.84 0.02 85);
+    --teak: repeating-linear-gradient(90deg, oklch(0.7 0.09 62) 0 5px, oklch(0.6 0.09 58) 5px 6px);
+    --ftab-top: oklch(0.7 0.02 80);
+    --pot: oklch(0.55 0.2 28);
+    --pot-top: oklch(0.62 0.2 30);
+    --pot-dark: oklch(0.45 0.18 27);
+    --olive-a: oklch(0.62 0.05 125);
+    --olive-b: oklch(0.5 0.045 122);
+    --olive-c: oklch(0.72 0.045 120);
+    --trunk: oklch(0.45 0.04 70);
+    --abri-wood: oklch(0.46 0.06 55);
+    --abri-back: oklch(0.34 0.03 60);
+    /* Ombres OPAQUES (couleur de la surface déjà assombrie) : un calque
+       translucide posé sur un plan 3D est perdu au tri des calques. */
+    --shade-wall: oklch(0.64 0.04 85);
+    --shade-deck: oklch(0.56 0.015 85);
+    --sky-a: oklch(0.74 0.1 240);
+    --sky-b: oklch(0.92 0.04 225);
+    --shutter: oklch(0.95 0.004 80);
+    --glass: oklch(0.32 0.03 250);
   }
 
   .head {
@@ -381,200 +517,347 @@
     transform-origin: top left;
     overflow: hidden;
     border-radius: calc(12px / var(--k));
-    perspective: 820px;
-    perspective-origin: 56% 18%;
-    background:
-      radial-gradient(220px 120px at 88% 6%, oklch(0.9 0.12 90 / 0.22), transparent 70%),
-      linear-gradient(180deg, var(--sky-a) 0%, var(--sky-b) 55%, var(--sky-c) 100%);
+    /* Caméra (≈ 67° de champ) : l'œil est au centre du cadre, à 250 px du plan. */
+    --yaw: 49deg;
+    perspective: 250px;
+    perspective-origin: 50% 50%;
+    background: linear-gradient(180deg, var(--sky-a) 0%, var(--sky-b) 70%);
     transition: --store-p var(--dur, 0ms) linear;
   }
+  .sky-night {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, oklch(0.2 0.05 272), oklch(0.3 0.05 280));
+    opacity: var(--night, 0);
+  }
+  .night-veil {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: oklch(0.2 0.05 275);
+    opacity: calc(var(--night, 0) * 0.55);
+    mix-blend-mode: multiply;
+  }
+  /* Vue = Rx(tangage) · Ry(lacet) · T(−caméra). Caméra au coin sud-ouest du deck :
+     x −90 (2,25 m à gauche du mur visible), 1,75 m de haut (y 130), z 230 (5,75 m
+     devant le mur), lacet 50° vers le salon — l'angle des photos de référence. */
   .world {
     position: absolute;
-    left: 82px;
-    top: 34px;
+    left: 50%;
+    top: 50%;
     width: 0;
     height: 0;
     transform-style: preserve-3d;
-    transform: rotateX(-12deg) rotateY(-30deg);
+    transform-origin: 0 0 0;
+    transform: rotateX(8deg) rotateY(var(--yaw)) translate3d(70px, -156px, -150px);
   }
   .world :global(*) {
     position: absolute;
     transform-style: preserve-3d;
     box-sizing: border-box;
   }
-  /* Mur (plan xy) + fenêtre */
+  /* Mur crépi (plan xy) : x −60…300, y −90…200 (deck) */
   .wall {
-    left: -40px;
-    top: -20px;
-    width: 300px;
-    height: 150px;
-    background: linear-gradient(90deg, var(--wall-a), var(--wall-b));
-    box-shadow: inset 0 0 40px var(--wall-shade);
+    left: -400px;
+    top: -90px;
+    width: 700px;
+    height: 290px;
+    background:
+      repeating-linear-gradient(
+        90deg,
+        transparent 0 23px,
+        var(--streak) 23px 26px,
+        transparent 26px 41px
+      ),
+      linear-gradient(90deg, var(--wall-a), var(--wall-b));
   }
-  .wall::after {
-    content: '';
-    position: absolute;
-    left: 262px;
-    top: 40px;
-    width: 54px;
-    height: 70px;
-    border-radius: 3px;
-    background: linear-gradient(160deg, var(--window-a), var(--window-b));
-    border: 4px solid var(--frame);
+  .wall-dim {
+    inset: 0;
+    background: oklch(0.3 0.03 80);
+    opacity: var(--wall-dim, 0);
+    transform: translateZ(0.4px);
   }
-  /* Sol (plan xz), lames de terrasse */
-  .ground {
-    left: -80px;
-    top: 130px;
-    width: 380px;
-    height: 210px;
+  /* Ombre de la toile sur le mur : sous le coffre (x 44…204, y 82), cisaillée vers la droite */
+  .wall-shadow {
+    left: 444px;
+    top: 154px;
+    width: 160px;
+    height: min(136px, calc(var(--store-p) * var(--wsh-hk, 0px)));
+    background: var(--shade-wall);
+    transform: translateZ(0.6px) skewX(var(--wsh-skew, 0deg));
     transform-origin: top left;
-    transform: rotateX(90deg);
+  }
+  .door {
+    left: 458px;
+    top: 194px;
+    width: 48px;
+    height: 96px;
+    border: 2px solid var(--frame);
+    background: var(--glass);
+  }
+  .shutter {
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 56%;
     background: repeating-linear-gradient(
-      0deg,
-      var(--wood-a) 0 18px,
-      var(--wood-line) 18px 19px,
-      var(--wood-c) 19px 36px,
-      var(--wood-b) 36px 37px
+      180deg,
+      var(--shutter) 0 3px,
+      oklch(0.82 0.006 80) 3px 4px
     );
   }
-  .ground::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(180deg, var(--ground-fade), transparent 45%);
+  .glass {
+    left: 0;
+    top: 56%;
+    width: 100%;
+    height: 44%;
+    background: linear-gradient(160deg, oklch(0.45 0.04 245), var(--glass) 60%);
   }
-  /* Ombre portée de la toile : profondeur = p × course */
-  .shadow {
-    left: 66px;
+  .lamp {
+    left: 436px;
+    top: 190px;
+    width: 6px;
+    height: 16px;
+    border-radius: 1px;
+    background: var(--anthracite);
+  }
+  .lamp-glow {
+    left: -22px;
+    top: -14px;
+    width: 50px;
+    height: 44px;
+    border-radius: 9999px;
+    background: radial-gradient(circle, oklch(0.9 0.12 85 / 0.75), transparent 70%);
+    opacity: var(--night, 0);
+  }
+  /* Rive du toit (pignon) : bande sombre qui monte vers la gauche depuis le coin */
+  .roof-edge {
+    right: -4px;
+    top: 34px;
+    width: 230px;
+    height: 9px;
+    transform-origin: right center;
+    transform: rotate(-32deg);
+    background: linear-gradient(180deg, oklch(0.5 0.03 70), oklch(0.36 0.03 70));
+  }
+  /* Abri bois au coin droit : fond sombre, toit à poutres, poteau */
+  .abri-back {
+    left: 300px;
+    top: 96px;
+    width: 90px;
+    height: 104px;
+    background: var(--abri-back);
+  }
+  .abri-roof {
+    left: 300px;
+    top: 96px;
+    width: 90px;
+    height: 64px;
+    transform-origin: top;
+    transform: rotateX(82deg);
+    background: repeating-linear-gradient(
+      90deg,
+      var(--abri-wood) 0 6px,
+      oklch(0.38 0.05 55) 6px 8px,
+      oklch(0.5 0.06 58) 8px 12px
+    );
+  }
+  .abri-post {
+    left: 386px;
+    top: 106px;
+    width: 5px;
+    height: 94px;
+    background: var(--abri-wood);
+    transform: translateZ(60px);
+  }
+  /* Deck en lames parallèles au mur (plan xz) : x −100…420, z 0…240 */
+  .ground {
+    left: -300px;
+    top: 200px;
+    width: 760px;
+    height: 420px;
+    transform-origin: top left;
+    transform: rotateX(90deg);
+    overflow: hidden;
+    background: repeating-linear-gradient(
+      0deg,
+      var(--deck-a) 0 6px,
+      var(--deck-gap) 6px 7px,
+      var(--deck-b) 7px 13px,
+      var(--deck-gap) 13px 14px
+    );
+  }
+  .house-shadow {
+    left: 0;
     top: 0;
-    width: 224px;
-    height: calc(var(--store-p) * 132px);
-    background: var(--shade);
-    filter: blur(4px);
-    transform: skewX(-16deg);
+    width: 100%;
+    height: var(--hsh-d, 0px);
+    background: var(--shade-deck);
+    transform: translateZ(0.4px);
+  }
+  /* Ombre de la toile sur le deck : décalée par le soleil, cisaillée, hauteur = p × k */
+  .deck-shadow {
+    left: calc(300px + var(--dsh-left, 44px));
+    top: var(--dsh-top, 0px);
+    width: 160px;
+    height: calc(var(--store-p) * var(--dsh-k, 120px));
+    background: var(--shade-deck);
+    opacity: var(--dsh-on, 1);
+    transform: translateZ(0.6px) skewX(var(--dsh-skew, 0deg));
     transform-origin: top left;
   }
-  .table-top {
-    left: 120px;
-    top: 70px;
-    width: 64px;
-    height: 64px;
-    border-radius: 9999px;
-    background: radial-gradient(circle at 40% 35%, var(--furn-a), var(--furn-b));
-    transform: translateZ(36px);
-    box-shadow: 0 0 0 2px oklch(0.35 0.03 70 / 0.4);
+  .leg {
+    width: 2px;
+    height: 25px;
+    background: oklch(0.55 0.02 80);
   }
-  .table-leg {
-    left: 70px;
-    top: 94px;
-    width: 4px;
-    height: 36px;
-    background: var(--furn-c);
-    transform: translateZ(102px);
-  }
-  .chair {
-    width: 22px;
-    height: 22px;
-    border-radius: 5px;
-    background: var(--furn-a);
-    transform: translateZ(22px);
-  }
-  .chair.a {
-    left: 92px;
-    top: 96px;
-  }
-  .chair.b {
-    left: 190px;
-    top: 84px;
-  }
-  /* Caisson */
-  .box-front {
-    left: 0;
+  /* Olivier : panneau face caméra (contre-rotation du monde), feuillage en dégradés */
+  .olive {
+    left: 245px;
     top: 0;
-    width: 220px;
-    height: 14px;
+    width: 180px;
+    height: 200px;
+    transform-origin: 50% 100%;
+    transform: translateZ(130px) rotateY(calc(-1 * var(--yaw)));
+  }
+  .olive .trunk {
+    left: 86px;
+    top: 120px;
+    width: 9px;
+    height: 80px;
     border-radius: 3px;
-    background: linear-gradient(180deg, var(--metal-a), var(--metal-b));
-    transform: translateZ(14px);
+    background: var(--trunk);
+  }
+  .olive .leaves {
+    border-radius: 9999px;
+    background: radial-gradient(
+      circle at 40% 35%,
+      var(--olive-c),
+      var(--olive-a) 45%,
+      var(--olive-b) 80%,
+      transparent 100%
+    );
+  }
+  .olive .l1 {
+    left: 20px;
+    top: 0;
+    width: 150px;
+    height: 130px;
+  }
+  .olive .l2 {
+    left: 0;
+    top: 50px;
+    width: 110px;
+    height: 95px;
+    opacity: 0.95;
+  }
+  .olive .l3 {
+    left: 80px;
+    top: 60px;
+    width: 100px;
+    height: 85px;
+    opacity: 0.9;
+  }
+  .olive .l4 {
+    left: 60px;
+    top: -10px;
+    width: 90px;
+    height: 70px;
+    opacity: 0.85;
+  }
+  .olive .l5 {
+    left: 110px;
+    top: 30px;
+    width: 80px;
+    height: 70px;
+    opacity: 0.9;
+  }
+  /* Coffre anthracite : x 44…204, y 74…82, profondeur 8 */
+  .box-front {
+    left: 44px;
+    top: 56px;
+    width: 160px;
+    height: 8px;
+    background: linear-gradient(180deg, oklch(0.42 0.012 250), var(--anthracite));
+    transform: translateZ(8px);
   }
   .box-top {
-    left: 0;
-    top: 0;
-    width: 220px;
-    height: 14px;
-    background: var(--metal-c);
+    left: 44px;
+    top: 56px;
+    width: 160px;
+    height: 8px;
+    background: oklch(0.4 0.012 250);
+    transform-origin: top;
+    transform: rotateX(90deg);
+  }
+  .box-bottom {
+    left: 44px;
+    top: 64px;
+    width: 160px;
+    height: 8px;
+    background: oklch(0.26 0.012 250);
     transform-origin: top;
     transform: rotateX(90deg);
   }
   .box-side {
-    left: 0;
-    top: 0;
-    width: 14px;
-    height: 14px;
-    background: var(--metal-d);
+    left: 44px;
+    top: 56px;
+    width: 8px;
+    height: 8px;
+    background: oklch(0.3 0.012 250);
     transform-origin: left;
     transform: rotateY(-90deg);
   }
-  /* Toile : plan incliné de 14°, profondeur = p × 136px, rayures dans le sens de sortie */
+  /* Toile greige unie : plan incliné de 15°, profondeur = p × 120 px (3 m) */
   .fabric {
-    left: 0;
-    top: 8px;
-    width: 220px;
-    height: calc(var(--store-p) * 136px);
-    transform-origin: top;
-    transform: translateZ(12px) rotateX(76deg);
-    background-image:
-      linear-gradient(180deg, oklch(1 0 0 / 0.18), transparent 40%, oklch(0 0 0 / 0.12)),
-      repeating-linear-gradient(90deg, var(--toile-a) 0 16px, var(--toile-b) 16px 32px);
-    box-shadow: 0 0 0 1px oklch(0 0 0 / 0.08);
+    left: 44px;
+    top: 60px;
+    width: 160px;
+    height: calc(var(--store-p) * 120px);
+    transform-origin: 50% 0;
+    backface-visibility: hidden;
   }
-  /* Lambrequin festonné, pendu à l'avant */
-  .valance {
-    left: 0;
-    top: 100%;
-    width: 220px;
-    height: 16px;
-    transform-origin: top;
-    transform: rotateX(-76deg);
-    background-image:
-      linear-gradient(180deg, oklch(0 0 0 / 0.08), oklch(0 0 0 / 0.28)),
-      repeating-linear-gradient(90deg, var(--toile-a) 0 16px, var(--toile-b) 16px 32px);
-    -webkit-mask:
-      linear-gradient(#000, #000) 0 0 / 100% 9px no-repeat,
-      radial-gradient(circle 7px at 50% 9px, #000 98%, transparent) 0 0 / 14px 100% repeat-x;
-    mask:
-      linear-gradient(#000, #000) 0 0 / 100% 9px no-repeat,
-      radial-gradient(circle 7px at 50% 9px, #000 98%, transparent) 0 0 / 14px 100% repeat-x;
+  .fabric-top {
+    transform: translateZ(8px) rotateX(84deg);
+    background: linear-gradient(180deg, oklch(1 0 0 / 0.1), transparent 40%), var(--toile-top);
+  }
+  .fabric-under {
+    transform: translateZ(7.5px) rotateX(84deg) rotateY(180deg);
+    background: linear-gradient(180deg, oklch(0 0 0 / 0.12), transparent 50%), var(--toile-under);
+  }
+  .fabric-bar {
+    transform: translateZ(8px) rotateX(84deg);
+    backface-visibility: visible;
   }
   .front-bar {
     left: 0;
     top: calc(100% - 3px);
-    width: 220px;
-    height: 3px;
-    background: var(--metal-b);
-    transform: translateZ(1px);
+    width: 160px;
+    height: 4px;
+    background: var(--anthracite);
+    transform-origin: top;
+    transform: rotateX(-84deg);
   }
-  /* Bras articulés : deux segments de 68px, coude replié vers le centre, θ = acos(p). */
+  /* Bras articulés anthracite : deux segments de 60 px, θ = acos(p) */
   .arm {
-    top: 19px;
+    top: 68px;
     width: 0;
     height: 0;
-    transform: translateZ(12px) rotateX(76deg);
+    transform: translateZ(8px) rotateX(84deg);
   }
   .arm.l {
-    left: 22px;
+    left: 58px;
   }
   .arm.r {
-    left: 198px;
+    left: 190px;
   }
   .seg {
-    left: -2px;
+    left: -1.5px;
     top: 0;
-    width: 4px;
-    height: 68px;
-    border-radius: 2px;
-    background: linear-gradient(90deg, var(--metal-d), var(--metal-a), var(--metal-d));
+    width: 3px;
+    height: 60px;
+    border-radius: 1.5px;
+    background: var(--anthracite);
     transform-origin: top center;
   }
   .arm.l .seg1 {
@@ -584,23 +867,13 @@
     transform: rotate(acos(var(--store-p)));
   }
   .seg2 {
-    top: 68px;
+    top: 60px;
   }
   .arm.l .seg2 {
     transform: rotate(calc(2 * acos(var(--store-p))));
   }
   .arm.r .seg2 {
     transform: rotate(calc(-2 * acos(var(--store-p))));
-  }
-  .sun {
-    position: absolute;
-    right: 18px;
-    top: 14px;
-    width: 26px;
-    height: 26px;
-    border-radius: 9999px;
-    background: var(--sun);
-    box-shadow: 0 0 22px 6px oklch(0.9 0.16 88 / 0.45);
   }
 
   /* ───────────── Boutons ───────────── */
