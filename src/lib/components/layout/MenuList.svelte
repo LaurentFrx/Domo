@@ -18,15 +18,27 @@
    * on n'y met que ce qui est GRATUIT — préférences déjà hydratées et santé déjà
    * pollée app-wide. Aucun store lourd n'est connecté pour décorer une liste.
    */
-  import { menuGroups, filterGroups, type MenuItem } from './menu-items';
+  import { menuGroups, filterGroups, type MenuItem, type MenuGroup } from './menu-items';
   import { preferences } from '$stores/preferences.svelte';
   import { health } from '$stores/health.svelte';
+  import { page } from '$app/state';
 
   let { searchable = true }: { searchable?: boolean } = $props();
 
   let query = $state('');
 
-  const groups = $derived(query ? filterGroups(query) : menuGroups);
+  // Les entrées adminOnly n'existent pas pour les autres rôles — ni dans la
+  // liste, ni dans la recherche. Le serveur garde de toute façon (la sonde
+  // /api/auth/check répond 403) : ceci n'est que l'ergonomie.
+  const isAdmin = $derived(page.data.user?.role === 'admin');
+  function visibles(gs: MenuGroup[]): MenuGroup[] {
+    if (isAdmin) return gs;
+    return gs
+      .map((g) => ({ ...g, items: g.items.filter((i) => !i.adminOnly) }))
+      .filter((g) => g.items.length > 0);
+  }
+
+  const groups = $derived(visibles(query ? filterGroups(query) : menuGroups));
   const empty = $derived(groups.length === 0);
 
   const incidents = $derived(health.incidents.length);
@@ -86,8 +98,10 @@
         <a
           href={item.href}
           class="ios-cell has-icon"
-          data-sveltekit-preload-data={item.hard ? 'off' : true}
+          data-sveltekit-preload-data={item.hard ? 'off' : ''}
           data-sveltekit-reload={item.hard ? true : undefined}
+          target={item.hard ? '_blank' : undefined}
+          rel={item.hard ? 'noopener' : undefined}
         >
           <span class="ios-icon" style="background: {item.tint};">
             <svg

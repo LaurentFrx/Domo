@@ -31,6 +31,8 @@ export interface MenuItem {
   /** Lien HORS SvelteKit (service voisin derrière le même cookie, ex. /files) :
    *  navigation navigateur pleine, jamais le routeur ni son préchargement. */
   hard?: boolean;
+  /** Visible et accessible pour l'administrateur seul (le serveur garde aussi). */
+  adminOnly?: boolean;
 }
 
 export interface MenuGroup {
@@ -123,7 +125,8 @@ export const menuGroups: MenuGroup[] = [
         icon: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z',
         tint: 'var(--ios-teal)',
         keywords: 'filebrowser documents partage téléverser télécharger dossier',
-        hard: true
+        hard: true,
+        adminOnly: true
       },
       {
         href: '/menu/apparence',

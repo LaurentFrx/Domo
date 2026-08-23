@@ -9,4 +9,9 @@
  */
 import type { RequestHandler } from './$types';
 
-export const GET: RequestHandler = () => new Response(null, { status: 204 });
+// Réservé à l'ADMINISTRATEUR (demande de Laurent, 23/08) : les fichiers sont les
+// siens, pas ceux de la maison. Un membre famille authentifié reçoit 403 —
+// non-2xx, donc refus côté Caddy — sans être renvoyé vers /denied (son cookie
+// est valide, c'est la ressource qui est privée).
+export const GET: RequestHandler = ({ locals }) =>
+  new Response(null, { status: locals.user?.role === 'admin' ? 204 : 403 });
