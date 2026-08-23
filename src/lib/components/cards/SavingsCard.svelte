@@ -15,9 +15,10 @@
    * pas sa décomposition.
    *
    * Le RETOUR SUR INVESTISSEMENT (ex-tuile « ROI restant » de /energie) vit ici
-   * depuis le 23/08/2026, SOUS la ligne des médailles (qui ne bouge pas) : jauge
-   * d'amortissement + durée restante et mois d'amortissement (le pourcentage et
-   * « X € sur Y € » ont été retirés à la demande de Laurent, même jour).
+   * depuis le 23/08/2026, SOUS la ligne des médailles (qui ne bouge pas) : une
+   * seule ligne « reste 7a 8m 18j · fin ~mai 2034 », la durée en gros chiffre.
+   * (Jauge, pourcentage, « X € sur Y € » et libellé retirés par Laurent le même
+   * jour : il ne veut que le temps restant.)
    * Piste « Jauge » du canevas Claude Design « Économies solaires et ROI ».
    * Masqué tant que le coût d'installation n'est pas renseigné (Bilan).
    */
@@ -145,11 +146,6 @@
     })
   );
   const showRoi = $derived(connected && roi.available);
-  // La jauge se remplit 0 → part amortie à l'apparition (one-shot, comme le count-up).
-  const tPct = new Tween(0, { easing: expoOut });
-  $effect(() => {
-    tPct.set(showRoi ? roi.amortizedPct : 0, { duration: rich ? 1400 : 0 });
-  });
 </script>
 
 {#if compact}
@@ -243,24 +239,17 @@
       {#if showRoi}
         <div class="roi" data-testid="savings-roi">
           <div class="roi-rule" aria-hidden="true"></div>
-          <span class="roi-label">Retour sur investissement</span>
-          <div
-            class="roi-track"
-            role="progressbar"
-            aria-label="Part de l'installation amortie"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            aria-valuenow={roi.amortizedPct}
-          >
-            <div class="roi-fill" style="width: {tPct.current}%"></div>
-          </div>
-          <span class="roi-rest">
+          <p class="roi-line">
             {#if roi.amortized}
-              ✓ amorti
+              <span class="roi-big">✓ amorti</span>
             {:else}
-              reste {roi.label}{roi.payoff ? ` · fin ~${roi.payoff}` : ''}
+              <span class="roi-small">reste</span>
+              <span class="roi-big">{roi.label}</span>
+              {#if roi.payoff}
+                <span class="roi-small">· fin ~{roi.payoff}</span>
+              {/if}
             {/if}
-          </span>
+          </p>
         </div>
       {/if}
     </div>
@@ -445,46 +434,40 @@
   }
 
   /* ───────────── Retour sur investissement ───────────── */
+  /* Une seule ligne sous les médailles : la durée restante en gros chiffre
+     (registre Yeldra), « reste » / « fin ~mois » en petit autour. */
   .roi {
     display: flex;
     flex-direction: column;
-    gap: 9px;
+    gap: 12px;
   }
   .roi-rule {
     height: 1px;
-    margin-bottom: 5px;
     background: var(--color-border);
     opacity: 0.55;
   }
-  .roi-label {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--color-muted-fg);
-  }
-  .roi-track {
-    position: relative;
-    height: 8px;
-    border-radius: 9999px;
-    background: var(--color-muted);
-    box-shadow: inset 1px 1px 2px oklch(0.15 0.03 286 / 0.35);
-    overflow: hidden;
-  }
-  .roi-fill {
-    position: absolute;
-    inset: 0 auto 0 0;
-    min-width: 8px;
-    border-radius: 9999px;
-    background: linear-gradient(90deg, var(--color-consumption), var(--color-battery));
-    box-shadow: 0 0 10px 0 oklch(0.7 0.15 149 / 0.55);
-  }
-  .roi-rest {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--color-fg);
-    text-align: right;
+  .roi-line {
+    display: flex;
+    justify-content: center;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0 8px;
+    margin: 0;
     font-variant-numeric: tabular-nums;
+  }
+  .roi-big {
+    font-size: clamp(24px, 6.5vw, 30px);
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--color-fg);
+    white-space: nowrap;
+  }
+  .roi-small {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-muted-fg);
+    white-space: nowrap;
   }
 
   @keyframes fade-in {
