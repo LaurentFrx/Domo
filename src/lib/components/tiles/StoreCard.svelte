@@ -218,61 +218,130 @@
         </div>
         <div class="ground">
           <div class="shadow"></div>
+          <div class="sofa-shadow"></div>
         </div>
-        <!-- Banquette d'angle (retour à DROITE) : structure alu blanche sur pieds,
-             assises et dossiers en toile gris clair, tablette teck au bout.
-             Chaque volume = dessus / face avant / côté droit (vus depuis la droite). -->
-        {@render box(30, 116, 6, 150, 4, 46, 'var(--frame)', 'var(--frame)', 'var(--frame-dk)')}
+        <!-- Banquette d'angle (retour à DROITE), décalée de ~25 cm du mur (z 20).
+             Structure alu blanche sur pieds ; assises : 2 coussins + angle +
+             méridienne, dossiers assortis, toile gris clair ; 2 coussins d'appoint
+             écru ; tablette teck à lattes au bout. Volumes = dessus/face/côté droit. -->
+        {@render box(30, 116, 20, 150, 4, 46, 'var(--rail)', 'var(--rail)', 'var(--frame-dk)')}
+        {@render box(134, 116, 66, 46, 4, 60, 'var(--rail)', 'var(--rail)', 'var(--frame-dk)')}
         {@render box(
           32,
           104,
-          8,
-          146,
+          22,
+          48,
           12,
-          42,
+          40,
           'var(--seat-top)',
-          'var(--cush-side)',
+          'var(--seat-front)',
+          'var(--cush-side)'
+        )}
+        {@render box(
+          82,
+          104,
+          22,
+          48,
+          12,
+          40,
+          'var(--seat-top)',
+          'var(--seat-front)',
+          'var(--cush-side)'
+        )}
+        {@render box(
+          134,
+          104,
+          22,
+          44,
+          12,
+          44,
+          'var(--seat-top)',
+          'var(--seat-front)',
+          'var(--cush-side)'
+        )}
+        {@render box(
+          134,
+          104,
+          68,
+          44,
+          12,
+          56,
+          'var(--seat-top)',
+          'var(--seat-front)',
           'var(--cush-side)'
         )}
         {@render box(
           32,
           82,
-          8,
-          146,
+          22,
+          48,
           22,
           10,
-          'var(--cush-side)',
+          'var(--cush-top)',
           'var(--back-front)',
           'var(--cush-side)'
         )}
-        {@render box(134, 116, 52, 46, 4, 60, 'var(--frame)', 'var(--frame)', 'var(--frame-dk)')}
         {@render box(
-          136,
-          104,
-          52,
-          42,
-          12,
-          58,
-          'var(--cush)',
-          'var(--cush-side)',
+          82,
+          82,
+          22,
+          48,
+          22,
+          10,
+          'var(--cush-top)',
+          'var(--back-front)',
           'var(--cush-side)'
         )}
         {@render box(
-          170,
+          134,
           82,
-          52,
+          22,
+          44,
+          22,
+          10,
+          'var(--cush-top)',
+          'var(--back-front)',
+          'var(--cush-side)'
+        )}
+        {@render box(
+          168,
+          82,
+          34,
           10,
           22,
-          58,
-          'var(--cush-side)',
+          90,
+          'var(--cush-top)',
           'var(--cush-side)',
           'var(--back-front)'
         )}
-        {@render box(134, 116, 112, 46, 4, 16, 'var(--teak)', 'var(--frame)', 'var(--frame-dk)')}
-        <div class="leg" style="left: 30px; top: 120px; transform: translateZ(52px);"></div>
-        <div class="leg" style="left: 134px; top: 120px; transform: translateZ(128px);"></div>
-        <div class="leg" style="left: 177px; top: 120px; transform: translateZ(128px);"></div>
-        <div class="leg" style="left: 177px; top: 120px; transform: translateZ(52px);"></div>
+        {@render box(
+          44,
+          86,
+          32,
+          20,
+          18,
+          5,
+          'var(--pillow-top)',
+          'var(--pillow)',
+          'var(--pillow-dk)'
+        )}
+        {@render box(
+          140,
+          86,
+          32,
+          20,
+          18,
+          5,
+          'var(--pillow-top)',
+          'var(--pillow)',
+          'var(--pillow-dk)'
+        )}
+        {@render box(134, 116, 126, 46, 4, 16, 'var(--teak)', 'var(--rail)', 'var(--frame-dk)')}
+        <div class="leg" style="left: 30px; top: 120px; transform: translateZ(66px);"></div>
+        <div class="leg" style="left: 82px; top: 120px; transform: translateZ(66px);"></div>
+        <div class="leg" style="left: 134px; top: 120px; transform: translateZ(142px);"></div>
+        <div class="leg" style="left: 177px; top: 120px; transform: translateZ(142px);"></div>
+        <div class="leg" style="left: 177px; top: 120px; transform: translateZ(66px);"></div>
         <div class="box-top"></div>
         <div class="box-side"></div>
         <div class="box-front"></div>
@@ -378,16 +447,28 @@
     --metal-d: oklch(0.62 0.015 286);
     --frame: oklch(0.96 0.003 80);
     --frame-dk: oklch(0.86 0.004 80);
+    --rail: linear-gradient(
+      180deg,
+      oklch(0.99 0 0),
+      oklch(0.92 0.003 80) 45%,
+      oklch(0.84 0.004 80)
+    );
     --cush: oklch(0.82 0.006 260);
     --cush-side: oklch(0.74 0.007 260);
-    /* dessus d'assise : 3 coussins séparés par une couture, liseré clair au bord */
+    /* coussins : galbe (lumière haut-gauche), passepoil clair au bord */
     --seat-top:
-      repeating-linear-gradient(90deg, transparent 0 48px, oklch(0.62 0.007 260) 48px 49px),
-      linear-gradient(180deg, oklch(1 0 0 / 0.25), transparent 25%), var(--cush);
+      radial-gradient(ellipse 70% 60% at 38% 30%, oklch(1 0 0 / 0.28), transparent 70%),
+      linear-gradient(180deg, oklch(1 0 0 / 0.35), transparent 12%), var(--cush);
+    --seat-front:
+      linear-gradient(180deg, oklch(1 0 0 / 0.22), transparent 40%, oklch(0 0 0 / 0.1)), var(--cush);
+    --cush-top: linear-gradient(180deg, oklch(1 0 0 / 0.3), transparent 60%), var(--cush);
     --back-front:
-      linear-gradient(180deg, oklch(1 0 0 / 0.18), transparent 35%, oklch(0 0 0 / 0.08)),
-      var(--cush);
-    --teak: repeating-linear-gradient(90deg, oklch(0.7 0.09 62) 0 4px, oklch(0.6 0.09 58) 4px 5px);
+      radial-gradient(ellipse 70% 80% at 45% 35%, oklch(1 0 0 / 0.2), transparent 70%),
+      linear-gradient(180deg, transparent 70%, oklch(0 0 0 / 0.1)), var(--cush);
+    --pillow: oklch(0.93 0.02 85);
+    --pillow-top: oklch(0.97 0.015 85);
+    --pillow-dk: oklch(0.86 0.02 85);
+    --teak: repeating-linear-gradient(90deg, oklch(0.7 0.09 62) 0 4px, oklch(0.58 0.09 58) 4px 5px);
     --glass-a: oklch(0.72 0.06 240);
     --glass-b: oklch(0.5 0.05 252);
   }
@@ -411,8 +492,17 @@
     --metal-d: oklch(0.62 0.02 286);
     --frame: oklch(0.9 0.004 80);
     --frame-dk: oklch(0.78 0.005 80);
+    --rail: linear-gradient(
+      180deg,
+      oklch(0.95 0 0),
+      oklch(0.86 0.003 80) 45%,
+      oklch(0.76 0.004 80)
+    );
     --cush: oklch(0.76 0.007 260);
     --cush-side: oklch(0.66 0.008 260);
+    --pillow: oklch(0.88 0.02 85);
+    --pillow-top: oklch(0.92 0.015 85);
+    --pillow-dk: oklch(0.8 0.02 85);
     --glass-a: oklch(0.5 0.07 262);
     --glass-b: oklch(0.3 0.05 275);
   }
@@ -558,6 +648,18 @@
     filter: blur(4px);
     transform: skewX(-16deg);
     transform-origin: top left;
+  }
+  /* Ombre de la banquette sur le deck (repère sol : x +80, y = z) */
+  .sofa-shadow {
+    left: 104px;
+    top: 24px;
+    width: 156px;
+    height: 120px;
+    background: var(--shade);
+    filter: blur(4px);
+    transform: skewX(-16deg);
+    transform-origin: top left;
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 66% 100%, 66% 40%, 0 40%);
   }
   .leg {
     width: 3px;
