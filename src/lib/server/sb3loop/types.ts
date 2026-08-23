@@ -83,6 +83,10 @@ export interface Sb3LoopConfig {
   localMuteS: number;
   /** Écritures non confirmées consécutives avant auto-désactivation. */
   confirmFailMax: number;
+  /** Échecs de transport consécutifs au-delà desquels on prévient (sans couper
+   *  la boucle : elle ne peut de toute façon rien écrire, et elle doit repartir
+   *  seule dès que le pont répond). */
+  transportFailAlert: number;
   /** Tentatives de restauration du plan statique avant abandon + notification.
    *  Réarmé chaque jour Paris : un échec nocturne ne doit pas condamner la
    *  restauration du lendemain. */
@@ -179,6 +183,10 @@ export interface Sb3LoopState {
    *  pré-armement cumulus vient de monter la consigne AVANT l'échelon de
    *  charge — l'excédent que voit le compteur est voulu et éphémère. */
   ffHoldUntilTs: number | null;
+  /** Écritures perdues AVANT le pont (réseau/timeout), d'affilée. Distinct de
+   *  `confirmFailCount`, qui ne compte que les refus du cloud : une requête qui
+   *  n'arrive pas ne prouve rien sur le cloud et ne doit pas couper la boucle. */
+  transportFailCount: number;
   /** Dernière consigne ÉCRITE par la boucle (ancrage du slew). */
   lastCmdW: number | null;
   lastWriteTs: number | null;
@@ -207,6 +215,7 @@ export function defaultSb3LoopState(): Sb3LoopState {
     autoDisabledTs: null,
     enVol: [],
     ffHoldUntilTs: null,
+    transportFailCount: 0,
     lastCmdW: null,
     lastWriteTs: null,
     confirmFailCount: 0,
@@ -237,6 +246,8 @@ export function defaultSb3LoopConfig(): Sb3LoopConfig {
     cloudStaleS: 180,
     localMuteS: 120,
     confirmFailMax: 2,
+    transportFailAlert: 20, // ~7 min de ticks : au-delà, la panne n'est plus un hoquet
+
     restoreAttemptsMax: 3,
     confirmToleranceW: 25,
     staticNightW: 300,

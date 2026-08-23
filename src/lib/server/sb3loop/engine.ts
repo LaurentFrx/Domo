@@ -58,6 +58,7 @@ export async function setSb3LoopEnabled(enabled: boolean): Promise<Sb3LoopState>
       s.autoDisabledReason = null;
       s.autoDisabledTs = null;
       s.confirmFailCount = 0;
+      s.transportFailCount = 0;
       // Repart sur un budget de restauration neuf : la boucle va de toute façon
       // réécrire les créneaux, et un abandon passé ne doit pas la condamner.
       s.restoreAttempts = 0;
@@ -70,6 +71,9 @@ export async function setSb3LoopEnabled(enabled: boolean): Promise<Sb3LoopState>
 interface WriteResult {
   ok: boolean;
   confirmedW: number | null;
+  /** Le PONT a-t-il répondu ? false = la requête n'est jamais arrivée (réseau,
+   *  timeout, token absent) — à distinguer d'un refus, cf. classifyWrite(). */
+  reached: boolean;
 }
 
 /**
@@ -110,7 +114,7 @@ async function writePreset(
   timeoutMs = 45_000
 ): Promise<WriteResult> {
   const token = env.SB3_BRIDGE_WRITE_TOKEN;
-  if (!token) return { ok: false, confirmedW: null };
+  if (!token) return { ok: false, confirmedW: null, reached: false };
   presetW = Math.round(Math.min(2400, Math.max(0, presetW)));
   try {
     const r = await fetch(`${bridgeUrl()}/api/sb3/output`, {
@@ -122,14 +126,19 @@ async function writePreset(
       body: JSON.stringify({ preset: presetW, safe_preset: safePresetW }),
       signal: AbortSignal.timeout(timeoutMs)
     });
-    if (!r.ok) return { ok: false, confirmedW: null };
+    // Le pont a RÉPONDU, même en erreur : un 502 signale que l'écriture cloud a
+    // échoué de son côté — c'est un refus, pas une requête perdue.
+    if (!r.ok) return { ok: false, confirmedW: null, reached: true };
     const d = (await r.json()) as { ok?: boolean; confirmed_w?: number | null };
     return {
       ok: d.ok === true,
-      confirmedW: typeof d.confirmed_w === 'number' ? d.confirmed_w : null
+      confirmedW: typeof d.confirmed_w === 'number' ? d.confirmed_w : null,
+      reached: true
     };
   } catch {
-    return { ok: false, confirmedW: null };
+    // Réseau coupé, tunnel Tailscale tombé, budget de 45 s dépassé : le pont
+    // n'a rien vu passer. Rien n'a été écrit — rien n'est à réparer non plus.
+    return { ok: false, confirmedW: null, reached: false };
   }
 }
 
@@ -149,6 +158,16 @@ async function writePreset(
  *   - `confirmFailCount` montait → auto-désactivation de la boucle au 2ᵉ coup,
  *     alors que le cloud répondait et appliquait (épisode du 21/08).
  *
+ * Même distinction, un cran plus bas : une requête QUI N'ARRIVE PAS n'est pas
+ * une consigne refusée. Le 22/08 à 08:57, deux écritures de 2400 W ont expiré
+ * sans que le pont en voie une seule (aucun `sb3/output` dans son journal, alors
+ * qu'il en logge une toutes les 3 min avant et après) : la boucle s'est
+ * auto-désactivée pour « consigne non prise 2× » et le parc est resté sans
+ * pilotage 24 h, jusqu'à réactivation à la main. Or désactiver n'apporte RIEN
+ * quand le pont est injoignable — la boucle ne peut de toute façon plus écrire,
+ * et le bail rend le plan statique tout seul au bout de 900 s. Ce que ça coûte,
+ * en revanche, c'est la reprise automatique quand le réseau revient.
+ *
  * Critère tiré de la sémantique du pont (`server.py`, POST /api/sb3/output) :
  * `ok: false` n'arrive QUE sur refus franc du cloud (`set_sb2_home_load`
  * renvoie False) ; `ok: true` signifie POST accepté PUIS planning RELU, et
@@ -157,9 +176,10 @@ async function writePreset(
  * qui borne. Le compteur d'échecs — et l'auto-désactivation qu'il déclenche —
  * reste réservé au refus franc, la seule panne qu'il sait vraiment décrire.
  */
-type WriteVerdict = 'confirmed' | 'clamped' | 'failed';
+type WriteVerdict = 'confirmed' | 'clamped' | 'failed' | 'unreachable';
 
 function classifyWrite(w: WriteResult, targetW: number, cfg: Sb3LoopConfig): WriteVerdict {
+  if (!w.reached) return 'unreachable';
   if (!w.ok || w.confirmedW === null) return 'failed';
   if (Math.abs(w.confirmedW - targetW) <= cfg.confirmToleranceW) return 'confirmed';
   return 'clamped';
@@ -267,7 +287,7 @@ export async function feedforwardCumulusStep(stepW: number): Promise<Feedforward
       FF_WRITE_TIMEOUT_MS
     );
     const verdict = classifyWrite(w, t.targetW, cfg);
-    const pris = verdict !== 'failed';
+    const pris = verdict === 'confirmed' || verdict === 'clamped';
     if (pris) {
       // On enregistre ce que le matériel a RÉELLEMENT pris, pas ce qu'on visait :
       // c'est cette valeur qui sert de base au tick suivant. Une cible bornée
@@ -291,7 +311,9 @@ export async function feedforwardCumulusStep(stepW: number): Promise<Feedforward
         ? ''
         : verdict === 'clamped'
           ? ` (bornée à ${Math.round(w.confirmedW as number)} W par le parc)`
-          : ' (NON confirmée)';
+          : verdict === 'unreachable'
+            ? ' (pont injoignable — rien écrit)'
+            : ' (NON confirmée)';
     const note =
       `${stepW > 0 ? 'PRÉ-ARMEMENT' : 'DÉSARMEMENT'} cumulus ${stepW > 0 ? '+' : '−'}` +
       `${Math.abs(Math.round(stepW))} W — part SB3 ${t.sharePct} % : consigne ` +
@@ -412,7 +434,22 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
       writtenW = d.writeW;
       confirmedW = w.confirmedW;
       const verdict = classifyWrite(w, d.writeW, cfg);
-      if (verdict !== 'failed') {
+      if (verdict === 'unreachable') {
+        // Rien n'est parti : ni consigne à enregistrer, ni refus à compter. On
+        // suit la panne à part et on réessaie au tick suivant — c'est la seule
+        // façon que la boucle reparte SEULE quand le réseau revient.
+        state.transportFailCount += 1;
+        if (state.transportFailCount === cfg.transportFailAlert) {
+          void sendPush({
+            title: '⚠️ Pont Anker injoignable',
+            body: `${state.transportFailCount} écritures de consigne SB3 perdues d'affilée (le pont ne répond pas). La boucle reste ACTIVE et réessaie ; le bail rendra le plan statique tout seul si la panne dure.`,
+            tag: 'sb3loop-bridge-unreachable',
+            severity: 'warning',
+            url: '/energie'
+          });
+        }
+      } else if (verdict !== 'failed') {
+        state.transportFailCount = 0;
         // Bornée par le parc = commande PRISE : on garde la valeur en place comme
         // base, et on ne fait surtout pas monter le compteur d'échecs (il coupe
         // la boucle au 2ᵉ coup, cf. l'auto-désactivation du 21/08).
@@ -420,6 +457,7 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
         state.lastWriteTs = now;
         state.confirmFailCount = 0;
       } else {
+        state.transportFailCount = 0;
         state.confirmFailCount += 1;
         if (state.confirmFailCount >= cfg.confirmFailMax) {
           state.enabled = false;
@@ -440,7 +478,9 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
         reason:
           verdict === 'clamped'
             ? `${d.reason} — bornée à ${Math.round(w.confirmedW as number)} W par le parc`
-            : d.reason,
+            : verdict === 'unreachable'
+              ? `${d.reason} — pont injoignable, rien écrit`
+              : d.reason,
         houseLoadW: d.houseLoadW,
         targetW: d.targetW,
         beforeW,
@@ -544,6 +584,16 @@ async function restoreStaticPlan(
   // On écrit le plan statique ET on le déclare comme repli : le pont referme
   // alors le bail (plus rien à surveiller).
   const w = await writePreset(target, target);
+  if (!w.reached) {
+    // Le pont n'a rien reçu : la tentative n'a pas eu lieu. La compter userait
+    // les 3 essais sur une panne réseau et déclencherait l'alerte « plan non
+    // restauré » alors que rien n'a été tenté.
+    return {
+      note: `restauration ${slot} différée — pont injoignable`,
+      writtenW: null,
+      confirmedW: null
+    };
+  }
   const confirmed =
     w.ok && w.confirmedW !== null && Math.abs(w.confirmedW - target) <= cfg.confirmToleranceW;
 
