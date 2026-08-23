@@ -1,17 +1,13 @@
 /**
- * Sonde d'authentification pour Caddy (`forward_auth`) — protège /files.
+ * Sonde d'authentification pour Caddy (`forward_auth`) — garde les services
+ * voisins du même domaine derrière le cookie Domo (ex. /apercu, le rendu brut
+ * des fichiers partagés). Répond 204 pour TOUT membre actif de la maison :
+ * les hooks ont déjà refusé les autres (cookie absent/invalide ⇒ 303 /denied,
+ * compte révoqué ⇒ pareil — non-2xx = refus côté Caddy).
  *
- * Le Filebrowser (loopback 8081) tourne SANS mot de passe : c'est cette route
- * qui porte toute la garde. Caddy rejoue chaque requête /files ici avec les
- * cookies du visiteur ; les hooks font le travail — cookie de session absent ou
- * invalide ⇒ 303 /denied (non-2xx = refus côté Caddy), compte révoqué ⇒ pareil.
- * Si on arrive jusqu'ici, c'est qu'un membre actif de la maison est derrière.
+ * Le Filebrowser, lui, est gardé par la sonde voisine `check-admin` :
+ * consulter un fichier est familial, GÉRER les fichiers est réservé à Laurent.
  */
 import type { RequestHandler } from './$types';
 
-// Réservé à l'ADMINISTRATEUR (demande de Laurent, 23/08) : les fichiers sont les
-// siens, pas ceux de la maison. Un membre famille authentifié reçoit 403 —
-// non-2xx, donc refus côté Caddy — sans être renvoyé vers /denied (son cookie
-// est valide, c'est la ressource qui est privée).
-export const GET: RequestHandler = ({ locals }) =>
-  new Response(null, { status: locals.user?.role === 'admin' ? 204 : 403 });
+export const GET: RequestHandler = () => new Response(null, { status: 204 });
