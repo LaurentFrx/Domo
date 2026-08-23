@@ -117,101 +117,91 @@
     return `https://maps.apple.com/?ll=${d.lat},${d.lon}&q=${encodeURIComponent(d.name)}`;
   }
 
-  // ─── Silhouette par type d'appareil : corps (rect arrondi, rempli par la
-  // batterie depuis le bas) + détails (trait). Repère 24×24.
-  type Body = { x: number; y: number; w: number; h: number; rx: number };
-  type Shape = { body: Body | null; extra: string; label: string };
-  function shapeFor(cls: string | null): Shape {
+  // ─── Visuel par type d'appareil : PNG « flat produit » (PommePlate, CC0,
+  // static/devices/) + zone d'écran (%) où la couleur de batterie MONTE depuis
+  // le bas — l'écran s'allume au niveau de la charge. AirPods : boîtier dessiné
+  // en SVG inline (même style), sans jauge (Find My ne donne pas leur batterie).
+  type Art = {
+    src: string | null;
+    /** largeur affichée (px) pour 46 px de haut */
+    w: number;
+    screen: { x: number; y: number; w: number; h: number; r: number } | null;
+    label: string;
+  };
+  function artFor(cls: string | null): Art {
     const s = (cls || '').toLowerCase();
     if (s.includes('iphone'))
       return {
-        body: { x: 6.5, y: 2, w: 11, h: 20, rx: 2.8 },
-        extra: '<line x1="10.6" y1="4.4" x2="13.4" y2="4.4"/>',
+        src: '/devices/iphone.png',
+        w: 23,
+        screen: { x: 5, y: 2.5, w: 90, h: 95, r: 4 },
         label: 'iPhone'
       };
     if (s.includes('ipad'))
       return {
-        body: { x: 3.5, y: 2.5, w: 17, h: 19, rx: 2.4 },
-        extra: '<circle cx="12" cy="19.2" r="0.45"/>',
+        src: '/devices/ipad.png',
+        w: 33,
+        screen: { x: 5, y: 4, w: 90, h: 92, r: 3 },
         label: 'iPad'
       };
     if (s.includes('watch'))
       return {
-        body: { x: 6.5, y: 6.5, w: 11, h: 11, rx: 3 },
-        extra: '<path d="M8.8 6.5l.5-3h5.4l.5 3"/><path d="M8.8 17.5l.5 3h5.4l.5-3"/>',
+        src: '/devices/watch.png',
+        w: 27,
+        screen: { x: 9, y: 21.5, w: 82, h: 56.5, r: 7 },
         label: 'Watch'
       };
-    if (s.includes('mac'))
-      return {
-        body: { x: 3, y: 4.5, w: 18, h: 12, rx: 1.8 },
-        extra: '<path d="M1.5 19.5h21"/>',
-        label: 'Mac'
-      };
     if (s.includes('accessory') || s.includes('airpod'))
-      return {
-        body: null,
-        extra:
-          '<path d="M5 13v-1.5a7 7 0 0 1 14 0V13"/><rect x="3.2" y="12.5" width="4" height="6.5" rx="1.6"/><rect x="16.8" y="12.5" width="4" height="6.5" rx="1.6"/>',
-        label: 'AirPods'
-      };
-    return {
-      body: null,
-      extra:
-        '<path d="M12 21s-5.5-4.8-5.5-9.2A5.5 5.5 0 0 1 12 6.3a5.5 5.5 0 0 1 5.5 5.5C17.5 16.2 12 21 12 21z"/><circle cx="12" cy="11.6" r="1.9"/>',
-      label: cls || 'Appareil'
-    };
+      return { src: null, w: 30, screen: null, label: 'AirPods' };
+    return { src: null, w: 30, screen: null, label: cls || 'Appareil' };
   }
 </script>
 
-<!-- Silhouette d'appareil remplie par la batterie (depuis le bas), couleur selon le
-     niveau ; éclair si en charge ; pointillés pour un appareil en attente de partage. -->
-{#snippet glyph(
-  cls: string | null,
-  pct: number | null,
-  color: string,
-  uid: string,
-  dashed: boolean
-)}
-  {@const sh = shapeFor(cls)}
-  <svg class="fm-glyph" viewBox="0 0 24 24" aria-hidden="true">
-    {#if sh.body && pct != null}
-      <defs>
-        <clipPath id="fm-clip-{uid}">
-          <rect x={sh.body.x} y={sh.body.y} width={sh.body.w} height={sh.body.h} rx={sh.body.rx} />
-        </clipPath>
-      </defs>
-      <rect
-        x={sh.body.x}
-        y={sh.body.y + (sh.body.h * (100 - pct)) / 100}
-        width={sh.body.w}
-        height={(sh.body.h * pct) / 100}
-        fill={color}
-        opacity="0.9"
-        clip-path="url(#fm-clip-{uid})"
-      />
-    {/if}
-    <g
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      stroke-dasharray={dashed ? '1.8 1.4' : undefined}
-    >
-      {#if sh.body}
-        <rect x={sh.body.x} y={sh.body.y} width={sh.body.w} height={sh.body.h} rx={sh.body.rx} />
+<!-- Visuel d'appareil : PNG produit, écran rempli par la batterie depuis le bas
+     (couleur selon le niveau) ; boîtier AirPods en SVG assorti ; grisé en attente
+     de partage. -->
+{#snippet deviceArt(cls: string | null, pct: number | null, color: string, ph: boolean)}
+  {@const art = artFor(cls)}
+  <span class="fm-art" class:fm-art-ph={ph} style="width: {art.w}px;">
+    {#if art.src}
+      <img class="fm-art-img" src={art.src} alt="" draggable="false" />
+      {#if art.screen && pct != null}
+        <span
+          class="fm-screen"
+          style="left: {art.screen.x}%; top: {art.screen.y}%; width: {art.screen.w}%; height: {art
+            .screen.h}%; border-radius: {art.screen.r}px;"
+        >
+          <span class="fm-fill" style="height: {pct}%; background: {color};"></span>
+        </span>
       {/if}
-      {@html sh.extra}
-    </g>
-  </svg>
+    {:else}
+      <!-- Boîtier AirPods, flat produit (dessin maison, cf. static/devices/LICENSE.md) -->
+      <svg viewBox="0 0 40 46" aria-hidden="true" style="width: 100%; height: auto;">
+        <rect x="3" y="9" width="34" height="30" rx="9" fill="#b9babd" />
+        <rect
+          x="3"
+          y="9"
+          width="34"
+          height="30"
+          rx="9"
+          fill="none"
+          stroke="#8e8f93"
+          stroke-width="1"
+        />
+        <path d="M3.4 21.5h33.2" stroke="#96979b" stroke-width="1.2" />
+        <rect x="14" y="19.9" width="12" height="3.2" rx="1.6" fill="#a2a3a7" />
+        <circle cx="20" cy="30" r="1.3" fill="#7c7d81" />
+      </svg>
+    {/if}
+  </span>
 {/snippet}
 
-<!-- Cellule appareil : silhouette (lien Plans si position connue) + nom court. -->
+<!-- Cellule appareil : visuel (lien Plans si position connue) + nom court. -->
 {#snippet deviceCell(item: RowItem, uid: string)}
   {#if item.placeholder}
     <div class="fm-cell fm-cell-ph" title="{item.name} — partage en attente">
-      {@render glyph(item.deviceClass, null, 'transparent', uid, true)}
-      <span class="fm-cell-name">{shapeFor(item.deviceClass).label}</span>
+      {@render deviceArt(item.deviceClass, null, 'transparent', true)}
+      <span class="fm-cell-name">{artFor(item.deviceClass).label}</span>
     </div>
   {:else}
     {@const d = item.device}
@@ -227,15 +217,15 @@
         title={tip}
         aria-label="Voir {d.name} sur le plan — {tip}"
       >
-        {@render glyph(d.deviceClass, pct, color, uid, false)}
+        {@render deviceArt(d.deviceClass, pct, color, false)}
         {#if d.charging}<span class="fm-bolt" aria-hidden="true">⚡︎</span>{/if}
-        <span class="fm-cell-name">{shapeFor(d.deviceClass).label}</span>
+        <span class="fm-cell-name">{artFor(d.deviceClass).label}</span>
       </a>
     {:else}
       <div class="fm-cell" title={tip} aria-label={tip}>
-        {@render glyph(d.deviceClass, pct, color, uid, false)}
+        {@render deviceArt(d.deviceClass, pct, color, false)}
         {#if d.charging}<span class="fm-bolt" aria-hidden="true">⚡︎</span>{/if}
-        <span class="fm-cell-name">{shapeFor(d.deviceClass).label}</span>
+        <span class="fm-cell-name">{artFor(d.deviceClass).label}</span>
       </div>
     {/if}
   {/if}
@@ -355,9 +345,37 @@
   .fm-cell-ph {
     opacity: 0.45;
   }
-  .fm-glyph {
-    width: 34px;
-    height: 34px;
+  .fm-art {
+    position: relative;
+    display: inline-flex;
+    height: 46px;
+    align-items: center;
+    justify-content: center;
+  }
+  .fm-art-img {
+    height: 100%;
+    width: auto;
+    display: block;
+    -webkit-user-drag: none;
+  }
+  .fm-art-ph {
+    filter: grayscale(1);
+    opacity: 0.75;
+  }
+  /* Écran : la couleur de batterie monte depuis le bas (l'écran s'allume). */
+  .fm-screen {
+    position: absolute;
+    overflow: hidden;
+    display: flex;
+    align-items: flex-end;
+  }
+  /* « Liquide » : légèrement translucide (l'écran affleure dessous), ligne de
+     surface plus claire en haut du niveau. */
+  .fm-fill {
+    width: 100%;
+    opacity: 0.82;
+    box-shadow: inset 0 1.5px 0 oklch(1 0 0 / 0.4);
+    transition: height var(--duration-slow, 300ms) var(--ease-default, ease);
   }
   .fm-cell-name {
     font-size: 9.5px;
