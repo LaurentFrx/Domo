@@ -36,7 +36,13 @@ import type {
   HcPlan,
   ShadowEvent
 } from './types';
-import { accumulateHouseLoad, emptyHouseProfile, reserveWh, type ReserveResult } from './reserve';
+import {
+  accumulateHouseLoad,
+  emptyHouseProfile,
+  reserveWh,
+  PV_END_ELEVATION_DEG,
+  type ReserveResult
+} from './reserve';
 import { nextTariffSwitch, isHC } from '$lib/server/tariffs';
 import { sunPosition } from './sun.ts';
 import type { PotentialResult } from './solar-potential';
@@ -249,10 +255,18 @@ export function pilotStep(
   // début des heures creuses. En HC, il n'y a plus de fenêtre chère devant nous.
   const minutesToHcStart =
     isHC(nowDate) || tariffSwitch.period !== 'HC' ? null : tariffSwitch.inMinutes;
+  // Fin de PRODUCTION solaire — pas la fin de la fenêtre d'allumage, que les
+  // seuils d'azimut ferment plus d'une heure trop tôt (cf. PV_END_ELEVATION_DEG).
+  let minutesToPvEnd = 0;
+  for (let m = 0; m <= 720; m += 10) {
+    const sp = sunPosition(now + m * 60_000, p.latDeg, p.lonDeg);
+    if (sp.elevationDeg < PV_END_ELEVATION_DEG) break;
+    minutesToPvEnd = m;
+  }
   const reserve: ReserveResult = reserveWh(
     pilot.houseProfile,
     ctx.minuteOfDay,
-    windowLeftMin,
+    minutesToPvEnd,
     minutesToHcStart
   );
 

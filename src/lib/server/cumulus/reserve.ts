@@ -42,6 +42,20 @@ export const PROFILE_DAYS = 21;
 /** Quantile du profil — seul paramètre de prudence de la réserve. */
 export const PROFILE_QUANTILE = 0.75;
 
+/**
+ * Élévation solaire à laquelle la production PV s'éteint — début de la fenêtre
+ * chère. MESURÉE, pas posée : sur 54 jours (01/07 → 23/08), l'élévation au
+ * dernier échantillon au-dessus de 100 W a pour médiane 5,9° (p10 3,9° les jours
+ * clairs, p90 13,2° les jours couverts).
+ *
+ * À ne PAS confondre avec la fin de la fenêtre d'ALLUMAGE du pilote, que les
+ * seuils d'azimut ferment bien plus tôt : le 23/08, fenêtre close à 19h20 contre
+ * une production réelle jusqu'à 20h11-20h47 les jours précédents. Prendre la
+ * fenêtre d'allumage gonflait la réserve de ~1,3 kWh en lui faisant couvrir
+ * l'heure de 19 h, l'une des plus chargées de la soirée (1 374 W au p75).
+ */
+export const PV_END_ELEVATION_DEG = 6;
+
 export function emptyHouseProfile(): HouseProfile {
   return Array.from({ length: 24 }, () => []);
 }
