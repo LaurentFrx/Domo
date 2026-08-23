@@ -102,12 +102,58 @@ Tampon = min( 3000 ; 1500 · f_météo · f_patience ) + E_maison_horizon
 - `f_patience = clamp(windowLeftMin / (2·T̂_min) ; 1,0 ; 1,3)` : beaucoup de
   fenêtre devant ⇒ plus exigeant, on peut attendre un créneau franc ; dernière
   fenêtre du jour ⇒ marges relâchées. Continu ;
-- `E_maison_horizon = max(0, P̄_maison_nuit · Δt(t → lever) − Ê_PV(t → lever))`,
-  avec `P̄_maison_nuit = 256 W` mesuré sur 20 891 échantillons. **C'est la réserve
-  du soir** : ≈ 0 en plein jour, ≈ 2,7 kWh à 19h30. Une grandeur continue en Wh,
-  subordonnée à la chauffe — plus un plancher à 40 %.
+- `E_réserve` : voir §3.5. **C'est la réserve du soir**, une grandeur continue en
+  Wh — plus un plancher en pourcentage.
 
-### 3.5 Les inéquations
+### 3.5 Réserve du soir — la fenêtre où l'énergie est chère
+
+La réserve ne doit pas couvrir la nuit entière : elle doit couvrir **la fenêtre
+pendant laquelle l'énergie coûte cher**, c'est-à-dire de la fin de la production
+solaire au début des heures creuses. Passé cette heure, le réseau prend le relais
+au tarif plancher et le parc n'a plus rien à garder.
+
+```
+E_réserve(t) = Σ_{h ∈ [t_finPV , t_HC]} P̄_maison(h) · dh  −  Ê_PV(t → t_finPV)
+```
+
+| Terme         | Source                                                                                               |
+| ------------- | ---------------------------------------------------------------------------------------------------- |
+| `t_finPV`     | coucher solaire, éphéméride NOAA déjà présente dans `sun.ts` — aucune dépendance réseau              |
+| `t_HC`        | **lu dans `data/tariffs.json`**, jamais écrit en dur : `hc_windows` vaut aujourd'hui `00:06 → 08:06` |
+| `P̄_maison(h)` | profil horaire **mesuré**, glissant, par heure de la journée, quantile p75                           |
+
+Profil horaire relevé (bilan AC hors ballon, 22/07 → 23/08, ~2 200 échantillons
+par tranche) :
+
+| heure (Paris) | médiane | p90     |
+| ------------- | ------- | ------- |
+| 18h-19h       | 1 554 W | 2 372 W |
+| 19h-20h       | 1 003 W | 1 713 W |
+| 20h-21h       | 492 W   | 1 772 W |
+| 21h-22h       | 291 W   | 688 W   |
+| 22h-23h       | 292 W   | 704 W   |
+| 23h-00h       | 359 W   | 728 W   |
+
+Énergie réellement consommée sur la fenêtre, mesurée nuit par nuit sur 19 nuits
+complètes : **médiane 1 094 Wh**, moyenne 1 271, p10 571, p90 2 281, maximum
+2 658 Wh — pour une fenêtre de 3,1 à 4,6 h en été.
+
+**Ce terme se dimensionne tout seul avec la saison**, et c'est son intérêt
+principal : en hiver le coucher tombe vers 17h30, la fenêtre couvre alors les
+heures les plus chargées de la journée et la réserve passe mécaniquement de
+~1,1 kWh à ~4 kWh, sans qu'aucune constante ne change. À comparer aux ~5 000 Wh
+que le plancher de 40 % immobilise aujourd'hui **toute l'année, y compris à midi
+en plein soleil**.
+
+Le quantile p75 est le seul paramètre de prudence : la médiane laisserait une
+soirée sur deux à découvert, le p90 immobiliserait 2,3 kWh la plupart du temps
+pour un risque qui se solde de toute façon en heures creuses.
+
+**Plancher dur, distinct** : `reservePct = 10 %` reste en place — c'est la réserve
+constructeur des batteries, une contrainte matérielle et non une politique. La
+réserve du soir, elle, n'est plus un pourcentage.
+
+### 3.6 Les inéquations
 
 ```
 (C1) ÉNERGIE   U_parc + Ê_PV  ≥  Ê_besoin + Tampon
@@ -209,7 +255,6 @@ quand l'hiver aura fourni de l'amplitude.
 
 ## 8. Reste à trancher
 
-- **Plancher de sécurité dur** du parc, une fois `batteryFloorCutPct` retiré.
 - Le budget d'import par chauffe doit-il s'appliquer **aussi au boost manuel** ?
   Le boost passe aujourd'hui au-dessus du pilote et n'est retenu que par le VETO
   à 500 W : c'est par lui que sont passés les 1 723 Wh du 15/08.
