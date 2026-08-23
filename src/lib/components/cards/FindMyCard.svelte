@@ -88,26 +88,6 @@
   let laurentImgError = $state(false);
   let isabelleImgError = $state(false);
 
-  // ─── État de santé global (chip d'en-tête) ───
-  type Health = { label: string; color: string };
-  const health = $derived.by<Health>(() => {
-    if (findmy.connectionStatus === 'connecting') return { label: 'Connexion…', color: 'muted-fg' };
-    if (findmy.connectionStatus === 'disconnected')
-      return { label: 'Hors ligne', color: 'warning' };
-    switch (findmy.status) {
-      case 'ok':
-        return { label: 'À jour', color: 'battery' };
-      case 'starting':
-        return { label: 'Démarrage…', color: 'warning' };
-      case 'reauth_required':
-        return { label: 'Ré-auth iCloud requise', color: 'alert' };
-      case 'offline':
-        return { label: 'Bridge hors ligne', color: 'muted-fg' };
-      default:
-        return { label: '', color: 'muted-fg' };
-    }
-  });
-
   // Batterie fiable seulement si statut ≠ Unknown (AirPods / appareils hors ligne
   // remontent souvent « 0 % / Unknown » → on affiche « — » plutôt qu'un faux 0 %).
   function batteryPct(d: FindMyDevice): number | null {
@@ -137,224 +117,200 @@
     return `https://maps.apple.com/?ll=${d.lat},${d.lon}&q=${encodeURIComponent(d.name)}`;
   }
 
-  // Icône SVG par type d'appareil (trait = currentColor, hérite de la pastille).
-  function iconSvg(cls: string | null): string {
+  // ─── Silhouette par type d'appareil : corps (rect arrondi, rempli par la
+  // batterie depuis le bas) + détails (trait). Repère 24×24.
+  type Body = { x: number; y: number; w: number; h: number; rx: number };
+  type Shape = { body: Body | null; extra: string; label: string };
+  function shapeFor(cls: string | null): Shape {
     const s = (cls || '').toLowerCase();
-    const open =
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true">';
-    let inner: string;
     if (s.includes('iphone'))
-      inner =
-        '<rect x="7" y="2.5" width="10" height="19" rx="2.6"/><line x1="10.5" y1="5" x2="13.5" y2="5"/>';
-    else if (s.includes('ipad'))
-      inner =
-        '<rect x="4.5" y="3" width="15" height="18" rx="2.2"/><circle cx="12" cy="18" r="0.5"/>';
-    else if (s.includes('watch'))
-      inner =
-        '<rect x="7" y="6.5" width="10" height="11" rx="3"/><path d="M9 6.5l.6-3.2h4.8l.6 3.2"/><path d="M9 17.5l.6 3.2h4.8l.6-3.2"/>';
-    else if (s.includes('mac'))
-      inner = '<rect x="3.5" y="5" width="17" height="11" rx="1.6"/><path d="M2 19.5h20"/>';
-    else if (s.includes('accessory') || s.includes('airpod'))
-      inner =
-        '<path d="M5 13v-1.5a7 7 0 0 1 14 0V13"/><rect x="3.2" y="12.5" width="4" height="6.5" rx="1.6"/><rect x="16.8" y="12.5" width="4" height="6.5" rx="1.6"/>';
-    else
-      inner =
-        '<path d="M12 21s-5.5-4.8-5.5-9.2A5.5 5.5 0 0 1 12 6.3a5.5 5.5 0 0 1 5.5 5.5C17.5 16.2 12 21 12 21z"/><circle cx="12" cy="11.6" r="1.9"/>';
-    return open + inner + '</svg>';
+      return {
+        body: { x: 6.5, y: 2, w: 11, h: 20, rx: 2.8 },
+        extra: '<line x1="10.3" y1="4.6" x2="13.7" y2="4.6"/>',
+        label: 'iPhone'
+      };
+    if (s.includes('ipad'))
+      return {
+        body: { x: 3.5, y: 2.5, w: 17, h: 19, rx: 2.4 },
+        extra: '<circle cx="12" cy="19" r="0.6"/>',
+        label: 'iPad'
+      };
+    if (s.includes('watch'))
+      return {
+        body: { x: 6.5, y: 6.5, w: 11, h: 11, rx: 3 },
+        extra: '<path d="M8.6 6.5l.6-3.5h5.6l.6 3.5"/><path d="M8.6 17.5l.6 3.5h5.6l.6-3.5"/>',
+        label: 'Watch'
+      };
+    if (s.includes('mac'))
+      return {
+        body: { x: 3, y: 4.5, w: 18, h: 12, rx: 1.8 },
+        extra: '<path d="M1.5 19.5h21"/>',
+        label: 'Mac'
+      };
+    if (s.includes('accessory') || s.includes('airpod'))
+      return {
+        body: null,
+        extra:
+          '<path d="M5 13v-1.5a7 7 0 0 1 14 0V13"/><rect x="3.2" y="12.5" width="4" height="6.5" rx="1.6"/><rect x="16.8" y="12.5" width="4" height="6.5" rx="1.6"/>',
+        label: 'AirPods'
+      };
+    return {
+      body: null,
+      extra:
+        '<path d="M12 21s-5.5-4.8-5.5-9.2A5.5 5.5 0 0 1 12 6.3a5.5 5.5 0 0 1 5.5 5.5C17.5 16.2 12 21 12 21z"/><circle cx="12" cy="11.6" r="1.9"/>',
+      label: cls || 'Appareil'
+    };
   }
 </script>
 
-<!-- Rangée appareil (live) ou placeholder « en attente de partage ». -->
-{#snippet deviceRow(item: RowItem)}
+<!-- Silhouette d'appareil remplie par la batterie (depuis le bas), couleur selon le
+     niveau ; éclair si en charge ; pointillés pour un appareil en attente de partage. -->
+{#snippet glyph(
+  cls: string | null,
+  pct: number | null,
+  color: string,
+  uid: string,
+  dashed: boolean
+)}
+  {@const sh = shapeFor(cls)}
+  <svg class="fm-glyph" viewBox="0 0 24 24" aria-hidden="true">
+    {#if sh.body && pct != null}
+      <defs>
+        <clipPath id="fm-clip-{uid}">
+          <rect x={sh.body.x} y={sh.body.y} width={sh.body.w} height={sh.body.h} rx={sh.body.rx} />
+        </clipPath>
+      </defs>
+      <rect
+        x={sh.body.x}
+        y={sh.body.y + (sh.body.h * (100 - pct)) / 100}
+        width={sh.body.w}
+        height={(sh.body.h * pct) / 100}
+        fill={color}
+        opacity="0.9"
+        clip-path="url(#fm-clip-{uid})"
+      />
+    {/if}
+    <g
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      stroke-dasharray={dashed ? '2 1.6' : undefined}
+    >
+      {#if sh.body}
+        <rect x={sh.body.x} y={sh.body.y} width={sh.body.w} height={sh.body.h} rx={sh.body.rx} />
+      {/if}
+      {@html sh.extra}
+    </g>
+  </svg>
+{/snippet}
+
+<!-- Cellule appareil : silhouette (lien Plans si position connue) + nom court. -->
+{#snippet deviceCell(item: RowItem, uid: string)}
   {#if item.placeholder}
-    <article class="fm-row fm-row-ph" aria-label="{item.name} — en attente de partage">
-      <div class="fm-row-top">
-        <span class="fm-chip" aria-hidden="true">{@html iconSvg(item.deviceClass)}</span>
-        <span class="fm-name">{item.name}</span>
-      </div>
-      <span class="fm-ph-badge">Partage en attente</span>
-    </article>
+    <div class="fm-cell fm-cell-ph" title="{item.name} — partage en attente">
+      {@render glyph(item.deviceClass, null, 'transparent', uid, true)}
+      <span class="fm-cell-name">{shapeFor(item.deviceClass).label}</span>
+    </div>
   {:else}
     {@const d = item.device}
-    {@const pct = batteryPct(d)}
+    {@const pct = isAirpods(d) ? null : batteryPct(d)}
     {@const color = batteryColor(d)}
-    <article class="fm-row">
-      <div class="fm-row-top">
-        {#if d.lat != null && d.lon != null}
-          <a
-            class="fm-chip fm-chip-link"
-            href={mapsUrl(d)}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Voir {d.name} sur le plan">{@html iconSvg(d.deviceClass)}</a
-          >
-        {:else}
-          <span class="fm-chip" aria-hidden="true">{@html iconSvg(d.deviceClass)}</span>
-        {/if}
-        <span class="fm-name">{shortName(d)}</span>
+    {@const tip = `${shortName(d)}${pct == null ? '' : ` — ${pct} %`}${d.charging ? ' (en charge)' : ''}`}
+    {#if d.lat != null && d.lon != null}
+      <a
+        class="fm-cell fm-cell-link"
+        href={mapsUrl(d)}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={tip}
+        aria-label="Voir {d.name} sur le plan — {tip}"
+      >
+        {@render glyph(d.deviceClass, pct, color, uid, false)}
+        {#if d.charging}<span class="fm-bolt" aria-hidden="true">⚡︎</span>{/if}
+        <span class="fm-cell-name">{shapeFor(d.deviceClass).label}</span>
+      </a>
+    {:else}
+      <div class="fm-cell" title={tip} aria-label={tip}>
+        {@render glyph(d.deviceClass, pct, color, uid, false)}
+        {#if d.charging}<span class="fm-bolt" aria-hidden="true">⚡︎</span>{/if}
+        <span class="fm-cell-name">{shapeFor(d.deviceClass).label}</span>
       </div>
-
-      {#if !isAirpods(d)}
-        <div class="fm-batt-line">
-          {#if d.charging}
-            <svg
-              viewBox="0 0 24 24"
-              width="11"
-              height="11"
-              fill="var(--color-battery)"
-              aria-hidden="true"
-            >
-              <path d="M13 2 4 14h6l-1 8 9-12h-6z" />
-            </svg>
-          {/if}
-          <span class="fm-batt-pct" style="color: {color};">
-            {pct == null ? '—' : `${pct} %`}
-          </span>
-          <div class="fm-batt-track" aria-hidden="true">
-            <div
-              class="fm-batt-fill"
-              style="width: {pct == null ? 0 : pct}%; background: {color};"
-            ></div>
-          </div>
-        </div>
-      {/if}
-    </article>
+    {/if}
   {/if}
 {/snippet}
 
 {#if visible}
   <section
-    class="rounded-[var(--radius-2xl)] border p-4 sm:p-5"
+    class="fm-card rounded-[var(--radius-2xl)] border"
     style="background: var(--color-card); border-color: var(--color-border);"
     aria-label="Appareils Localiser"
   >
-    <!-- ─── En-tête global ─── -->
-    <header class="mb-3 flex items-center justify-between gap-3">
-      <div class="flex items-center gap-2">
-        <span class="fm-title-icon" aria-hidden="true">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.7"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            width="16"
-            height="16"
-          >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
-          </svg>
-        </span>
-        <h2 class="text-base font-semibold tracking-tight" style="color: var(--color-fg);">
-          Localiser
-        </h2>
-        {#if shownCount > 0}
-          <span
-            class="rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums"
-            style="background: var(--color-primary-muted); color: var(--color-primary);"
-          >
-            {shownCount}
-          </span>
-        {/if}
-      </div>
-
-      {#if health.label}
-        <span
-          class="flex shrink-0 items-center gap-1.5 text-[11px] font-medium"
-          style="color: var(--color-{health.color});"
-        >
-          <span class="h-1.5 w-1.5 rounded-full" style="background: var(--color-{health.color});"
-          ></span>
-          {health.label}
-        </span>
+    <!-- Une rangée par personne : figurine + silhouettes remplies par la batterie. -->
+    <div class="fm-person">
+      {#if !laurentImgError}
+        <img
+          class="fm-avatar"
+          src="/avatars/laurent.jpg"
+          alt="Laurent"
+          onerror={() => (laurentImgError = true)}
+        />
+      {:else}
+        <span class="fm-avatar fm-avatar-fallback" role="img" aria-label="Laurent">L</span>
       {/if}
-    </header>
-
-    <!-- ─── Deux colonnes : Laurent | Isabelle (côte à côte, mobile inclus) ─── -->
-    <div class="fm-cols">
-      <!-- Colonne Laurent -->
-      <div class="fm-col">
-        <div class="fm-col-head">
-          {#if !laurentImgError}
-            <img
-              class="fm-avatar"
-              src="/avatars/laurent.jpg"
-              alt="Laurent"
-              onerror={() => (laurentImgError = true)}
-            />
-          {:else}
-            <span class="fm-avatar fm-avatar-fallback" role="img" aria-label="Laurent">L</span>
-          {/if}
-        </div>
-        <div class="fm-col-list">
-          {#each laurentItems as item (item.device.topicId)}
-            {@render deviceRow(item)}
-          {/each}
-        </div>
+      <div class="fm-devices">
+        {#each laurentItems as item (item.device.topicId)}
+          {@render deviceCell(item, item.device.topicId)}
+        {/each}
       </div>
-
-      <!-- Colonne Isabelle -->
-      <div class="fm-col">
-        <div class="fm-col-head">
-          {#if !isabelleImgError}
-            <img
-              class="fm-avatar"
-              src="/avatars/isabelle.jpg"
-              alt="Isabelle"
-              onerror={() => (isabelleImgError = true)}
-            />
-          {:else}
-            <span class="fm-avatar fm-avatar-fallback" role="img" aria-label="Isabelle">I</span>
-          {/if}
-        </div>
-        <div class="fm-col-list">
-          {#each isabelleItems as item (item.placeholder ? `ph-${item.deviceClass}` : item.device.topicId)}
-            {@render deviceRow(item)}
-          {/each}
-        </div>
+    </div>
+    <div class="fm-person">
+      {#if !isabelleImgError}
+        <img
+          class="fm-avatar"
+          src="/avatars/isabelle.jpg"
+          alt="Isabelle"
+          onerror={() => (isabelleImgError = true)}
+        />
+      {:else}
+        <span class="fm-avatar fm-avatar-fallback" role="img" aria-label="Isabelle">I</span>
+      {/if}
+      <div class="fm-devices">
+        {#each isabelleItems as item (item.placeholder ? `ph-${item.deviceClass}` : item.device.topicId)}
+          {@render deviceCell(
+            item,
+            item.placeholder ? `ph-${item.deviceClass}` : item.device.topicId
+          )}
+        {/each}
       </div>
     </div>
   </section>
 {/if}
 
 <style>
-  .fm-title-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--color-primary);
-  }
-
-  /* Deux colonnes côte à côte, dès le mobile (demi-largeur chacune). */
-  .fm-cols {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
-  }
-  @media (min-width: 640px) {
-    .fm-cols {
-      gap: 1rem;
-    }
-  }
-
-  .fm-col {
+  /* Carte condensée (23/08/2026) : plus de titre ni d'état « À jour » (il vit
+     dans le menu), deux rangées figurine + silhouettes ; le niveau de batterie
+     REMPLIT le dessin de l'appareil. */
+  .fm-card {
     display: flex;
-    min-width: 0;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 6px;
+    padding: 10px 12px;
   }
-
-  /* En-tête de colonne : figurine seule (le nom passe en aria-label). */
-  .fm-col-head {
+  .fm-person {
     display: flex;
     align-items: center;
-    justify-content: center;
-    padding-bottom: 0.125rem;
+    gap: 10px;
+  }
+  .fm-person + .fm-person {
+    padding-top: 6px;
+    border-top: 1px solid color-mix(in oklch, var(--color-border) 55%, transparent);
   }
   .fm-avatar {
-    width: 44px;
-    height: 44px;
+    width: 38px;
+    height: 38px;
+    flex-shrink: 0;
     border-radius: 9999px;
     object-fit: cover;
     background: var(--color-primary-muted);
@@ -365,117 +321,58 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.15rem;
+    font-size: 1rem;
     font-weight: 700;
     color: var(--color-primary);
   }
-
-  .fm-col-list {
+  .fm-devices {
     display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  /* Rangée appareil : empilée (titre / état / batterie) pour tenir en demi-largeur.
-     Pas de fond « verre » (évite le double backdrop-filter) — liseré + survol. */
-  .fm-row {
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-    padding: 0.55rem;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    background: transparent;
-    transition:
-      border-color var(--duration-normal, 200ms),
-      background var(--duration-normal, 200ms);
-  }
-  .fm-row:hover {
-    border-color: var(--color-border-strong);
-  }
-  /* Placeholder « en attente de partage » : grisé, sobre. */
-  .fm-row-ph {
-    opacity: 0.5;
-    border-style: dashed;
-  }
-
-  .fm-row-top {
-    display: flex;
+    flex: 1 1 auto;
     min-width: 0;
-    align-items: center;
-    gap: 0.5rem;
+    justify-content: space-around;
+    align-items: flex-start;
+    gap: 4px;
   }
-  .fm-chip {
-    display: inline-flex;
-    width: 1.875rem;
-    height: 1.875rem;
-    flex-shrink: 0;
+  .fm-cell {
+    position: relative;
+    display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-md, 0.5rem);
-    background: var(--color-primary-muted);
-    color: var(--color-primary);
-  }
-  /* Logo cliquable → ouvre la position de l'appareil dans Plans. */
-  .fm-chip-link {
-    cursor: pointer;
+    gap: 1px;
+    min-width: 44px;
+    padding: 2px 0;
+    color: var(--color-fg);
     text-decoration: none;
     -webkit-tap-highlight-color: transparent;
-    transition:
-      background var(--duration-fast, 100ms),
-      color var(--duration-fast, 100ms),
-      transform var(--duration-fast, 100ms);
   }
-  .fm-chip-link:hover {
-    background: var(--color-primary);
-    color: var(--color-primary-fg);
+  .fm-cell-link {
+    cursor: pointer;
+    transition: transform var(--duration-fast, 100ms);
   }
-  .fm-chip-link:active {
-    transform: scale(0.92);
+  .fm-cell-link:active {
+    transform: scale(0.94);
   }
-  /* Noms raccourcis : pas de troncature, on autorise le retour à la ligne. */
-  .fm-name {
-    min-width: 0;
-    font-size: 12.5px;
-    line-height: 1.15;
-    font-weight: 600;
-    color: var(--color-fg);
-    overflow-wrap: anywhere;
+  .fm-cell-ph {
+    opacity: 0.45;
   }
-
-  .fm-ph-badge {
-    align-self: flex-start;
-    padding: 0.05rem 0.45rem;
-    border: 1px dashed var(--color-border-strong, var(--color-border));
-    border-radius: 9999px;
+  .fm-glyph {
+    width: 34px;
+    height: 34px;
+  }
+  .fm-cell-name {
     font-size: 9.5px;
     font-weight: 600;
+    letter-spacing: 0.02em;
     color: var(--color-muted-fg);
+    white-space: nowrap;
   }
-
-  .fm-batt-line {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-  }
-  .fm-batt-pct {
-    font-size: 12px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-  }
-  /* Jauge batterie : piste arrondie + remplissage coloré (pas de box-shadow
-     color-mix → conforme au piège Chrome documenté). */
-  .fm-batt-track {
-    width: 40px;
-    height: 5px;
-    flex-shrink: 0;
-    border-radius: 9999px;
-    background: var(--color-border);
-    overflow: hidden;
-  }
-  .fm-batt-fill {
-    height: 100%;
-    border-radius: 9999px;
-    transition: width var(--duration-slow, 300ms) var(--ease-default, ease);
+  .fm-bolt {
+    position: absolute;
+    right: 2px;
+    top: 18px;
+    font-size: 11px;
+    line-height: 1;
+    color: var(--color-battery);
+    text-shadow: 0 0 3px oklch(0.2 0.03 286 / 0.8);
   }
 </style>
