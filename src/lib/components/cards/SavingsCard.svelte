@@ -16,7 +16,8 @@
    *
    * Le RETOUR SUR INVESTISSEMENT (ex-tuile « ROI restant » de /energie) vit ici
    * depuis le 23/08/2026, SOUS la ligne des médailles (qui ne bouge pas) : jauge
-   * d'amortissement + « X € sur Y € » + durée restante et mois d'amortissement.
+   * d'amortissement + durée restante et mois d'amortissement (le pourcentage et
+   * « X € sur Y € » ont été retirés à la demande de Laurent, même jour).
    * Piste « Jauge » du canevas Claude Design « Économies solaires et ROI ».
    * Masqué tant que le coût d'installation n'est pas renseigné (Bilan).
    */
@@ -144,7 +145,6 @@
     })
   );
   const showRoi = $derived(connected && roi.available);
-  const eurRound = (v: number) => `${Math.round(v).toLocaleString('fr-FR')} €`;
   // La jauge se remplit 0 → part amortie à l'apparition (one-shot, comme le count-up).
   const tPct = new Tween(0, { easing: expoOut });
   $effect(() => {
@@ -243,12 +243,7 @@
       {#if showRoi}
         <div class="roi" data-testid="savings-roi">
           <div class="roi-rule" aria-hidden="true"></div>
-          <div class="roi-row">
-            <span class="roi-label">Retour sur investissement</span>
-            <span class="roi-pct"
-              >{roi.amortized ? '✓ amorti' : `${roi.amortizedPct} % amorti`}</span
-            >
-          </div>
+          <span class="roi-label">Retour sur investissement</span>
           <div
             class="roi-track"
             role="progressbar"
@@ -259,14 +254,13 @@
           >
             <div class="roi-fill" style="width: {tPct.current}%"></div>
           </div>
-          <div class="roi-row">
-            <span class="roi-sub">{eurRound(total.eur)} sur {eurRound(installEur)}</span>
-            {#if !roi.amortized}
-              <span class="roi-rest"
-                >reste {roi.label}{roi.payoff ? ` · fin ~${roi.payoff}` : ''}</span
-              >
+          <span class="roi-rest">
+            {#if roi.amortized}
+              ✓ amorti
+            {:else}
+              reste {roi.label}{roi.payoff ? ` · fin ~${roi.payoff}` : ''}
             {/if}
-          </div>
+          </span>
         </div>
       {/if}
     </div>
@@ -462,25 +456,12 @@
     background: var(--color-border);
     opacity: 0.55;
   }
-  .roi-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 12px;
-    font-variant-numeric: tabular-nums;
-  }
   .roi-label {
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--color-muted-fg);
-  }
-  .roi-pct {
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--color-fg);
-    white-space: nowrap;
   }
   .roi-track {
     position: relative;
@@ -498,15 +479,12 @@
     background: linear-gradient(90deg, var(--color-consumption), var(--color-battery));
     box-shadow: 0 0 10px 0 oklch(0.7 0.15 149 / 0.55);
   }
-  .roi-sub {
-    font-size: 12px;
-    color: var(--color-muted-fg);
-  }
   .roi-rest {
     font-size: 12px;
     font-weight: 600;
     color: var(--color-fg);
     text-align: right;
+    font-variant-numeric: tabular-nums;
   }
 
   @keyframes fade-in {
