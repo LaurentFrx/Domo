@@ -6,9 +6,12 @@
 
   interface Props {
     shutter: Shutter;
+    /** Rangée SANS carte propre (posée dans ShuttersCard) : pas de bordure ni de
+     *  fond, et sur iPhone nom + état + barre + boutons sur UNE ligne. */
+    embedded?: boolean;
   }
 
-  let { shutter }: Props = $props();
+  let { shutter, embedded = false }: Props = $props();
 
   // ─── Convention Matter (à ne pas modifier) ───
   // shutter.position = % de fermeture (0 = ouvert, 100 = fermé)
@@ -243,9 +246,12 @@
 </script>
 
 <div
-  class="shutter-tile rounded-[var(--radius-xl)] border"
+  class="shutter-tile"
+  class:embedded
+  class:rounded-[var(--radius-xl)]={!embedded}
+  class:border={!embedded}
   class:opacity-50={!shutter.available}
-  style="background: var(--color-card); border-color: var(--color-border);"
+  style={embedded ? '' : 'background: var(--color-card); border-color: var(--color-border);'}
   aria-label="{shutter.name} — {positionLabel}"
 >
   <!-- ═══ Desktop / iPad : slider vertical draggable (INCHANGÉ) — masqué sur iPhone ═══ -->
@@ -407,8 +413,41 @@
       --body-h: 150px; /* 3 × 44 + 2 × 9 gap */
     }
   }
-  .shutter-tile:hover {
+  .shutter-tile:not(.embedded):hover {
     border-color: var(--color-border-strong);
+  }
+
+  /* ═══ Variante rangée (dans ShuttersCard) — iPhone : tout sur UNE ligne ═══ */
+  .embedded .m-shutter {
+    padding: 4px 12px 4px 14px;
+    min-height: 44px;
+    gap: 10px;
+  }
+  .embedded .m-left {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+  .embedded .m-name {
+    flex: 0 1 auto;
+    min-width: 64px;
+    max-width: 118px;
+    font-size: 13px;
+  }
+  .embedded .m-left > div {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .embedded .m-status {
+    min-width: 34px;
+    font-size: 10.5px;
+  }
+  .embedded .m-bar {
+    min-width: 28px;
+  }
+  .embedded .m-btn {
+    width: 36px;
+    height: 36px;
   }
 
   .shutter-name {

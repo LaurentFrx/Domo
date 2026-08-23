@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import ShutterTile from '$components/tiles/ShutterTile.svelte';
+  import ShuttersCard from '$components/tiles/ShuttersCard.svelte';
   import StoreCard from '$components/tiles/StoreCard.svelte';
   import SwitchTile from '$components/tiles/SwitchTile.svelte';
   import ZigbeePlugTile from '$components/tiles/ZigbeePlugTile.svelte';
@@ -286,43 +286,13 @@
       <p class="text-sm" style="color: var(--color-muted-fg);">Aucun appareil détecté</p>
     </div>
   {:else}
-    <!-- ═══ Volets roulants — tuiles posées directement sur la page (pas de carte
-         englobante ni de titre) ; boutons globaux à droite, dès l'iPad. ═══ -->
+    <!-- ═══ Volets roulants — UNE carte pour les 7 (rangées d'une ligne sur iPhone,
+         grille de sliders dès l'iPad ; boutons globaux en tête dès l'iPad). ═══ -->
     {#if rollerShutters.length > 0}
-      <div class="flex flex-col gap-2">
-        {#if matterConnected && matter.onlineCount > 0}
-          <!-- Boutons globaux masqués sur iPhone (place compacte) — visibles dès iPad. -->
-          <div class="hidden justify-end gap-2 sm:flex">
-            <button
-              type="button"
-              class="pill-open"
-              onclick={() => {
-                haptic('heavy');
-                matter.openAll();
-              }}
-              aria-label="Ouvrir tous les volets"
-            >
-              <span aria-hidden="true">▲</span> Tout ouvrir
-            </button>
-            <button
-              type="button"
-              class="pill-close"
-              onclick={() => {
-                haptic('heavy');
-                matter.closeAll();
-              }}
-              aria-label="Fermer tous les volets"
-            >
-              <span aria-hidden="true">▼</span> Tout fermer
-            </button>
-          </div>
-        {/if}
-        <div class="shutters-strip" style="--shutter-count: {rollerShutters.length};">
-          {#each rollerShutters as shutter (shutter.nodeId)}
-            <ShutterTile {shutter} />
-          {/each}
-        </div>
-      </div>
+      <ShuttersCard
+        shutters={rollerShutters}
+        showGlobal={matterConnected && matter.onlineCount > 0}
+      />
     {/if}
 
     <!-- ═══ Store-banne — commande dédiée, à part des volets roulants ═══ -->
@@ -401,63 +371,6 @@
 </div>
 
 <style>
-  .pill-open,
-  .pill-close {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.375rem;
-    padding: 0.375rem 0.875rem;
-    border-radius: 9999px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    border: 1px solid transparent;
-    transition: all var(--duration-fast) var(--ease-default);
-  }
-  .pill-open {
-    color: var(--color-battery);
-    background: var(--color-battery-muted);
-    border-color: var(--color-battery);
-  }
-  .pill-open:hover {
-    background: var(--color-battery);
-    color: var(--color-primary-fg);
-  }
-  .pill-close {
-    color: var(--color-primary);
-    background: var(--color-primary-muted);
-    border-color: var(--color-primary);
-  }
-  .pill-close:hover {
-    background: var(--color-primary);
-    color: var(--color-primary-fg);
-  }
-  .pill-open:active,
-  .pill-close:active {
-    transform: scale(0.97);
-  }
-
-  /* Volets : tuiles-cartes posées directement sur la page (pas de conteneur).
-     iPhone : 1 colonne de rangées horizontales (chaque volet = sa propre carte) ;
-     iPad+ : grille (auto-fit, puis N colonnes pleine ligne dès lg). */
-  .shutters-strip {
-    display: grid;
-    gap: 0.375rem;
-    grid-template-columns: 1fr;
-  }
-  @media (min-width: 640px) {
-    .shutters-strip {
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    }
-  }
-  @media (min-width: 1024px) {
-    .shutters-strip {
-      grid-template-columns: repeat(var(--shutter-count, 6), minmax(0, 1fr));
-    }
-  }
-
   /* Carte store : pleine largeur sur iPhone, largeur bornée sur iPad+
      (barre + 3 boutons sur une ligne → besoin de plus de place qu'avant). */
   @media (min-width: 640px) {
