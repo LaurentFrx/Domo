@@ -126,19 +126,19 @@
     if (s.includes('iphone'))
       return {
         body: { x: 6.5, y: 2, w: 11, h: 20, rx: 2.8 },
-        extra: '<line x1="10.3" y1="4.6" x2="13.7" y2="4.6"/>',
+        extra: '<line x1="10.6" y1="4.4" x2="13.4" y2="4.4"/>',
         label: 'iPhone'
       };
     if (s.includes('ipad'))
       return {
         body: { x: 3.5, y: 2.5, w: 17, h: 19, rx: 2.4 },
-        extra: '<circle cx="12" cy="19" r="0.6"/>',
+        extra: '<circle cx="12" cy="19.2" r="0.45"/>',
         label: 'iPad'
       };
     if (s.includes('watch'))
       return {
         body: { x: 6.5, y: 6.5, w: 11, h: 11, rx: 3 },
-        extra: '<path d="M8.6 6.5l.6-3.5h5.6l.6 3.5"/><path d="M8.6 17.5l.6 3.5h5.6l.6-3.5"/>',
+        extra: '<path d="M8.8 6.5l.5-3h5.4l.5 3"/><path d="M8.8 17.5l.5 3h5.4l.5-3"/>',
         label: 'Watch'
       };
     if (s.includes('mac'))
@@ -193,10 +193,10 @@
     <g
       fill="none"
       stroke="currentColor"
-      stroke-width="1.5"
+      stroke-width="1"
       stroke-linecap="round"
       stroke-linejoin="round"
-      stroke-dasharray={dashed ? '2 1.6' : undefined}
+      stroke-dasharray={dashed ? '1.8 1.4' : undefined}
     >
       {#if sh.body}
         <rect x={sh.body.x} y={sh.body.y} width={sh.body.w} height={sh.body.h} rx={sh.body.rx} />
