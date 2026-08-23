@@ -219,31 +219,68 @@
         <div class="ground">
           <div class="shadow"></div>
         </div>
-        <!-- Banquette d'angle : module le long du mur + retour à gauche,
-             chaque volume = dessus / face / côté droit (vus depuis la droite) -->
-        {@render box(50, 111, 6, 150, 19, 46, 'var(--cush)', 'var(--frame)', 'var(--frame)')}
-        {@render box(50, 94, 6, 150, 17, 8, 'var(--cush-side)', 'var(--cush)', 'var(--cush-side)')}
-        {@render box(50, 111, 52, 46, 19, 58, 'var(--cush)', 'var(--frame)', 'var(--frame)')}
+        <!-- Banquette d'angle (retour à DROITE) : structure alu blanche sur pieds,
+             assises et dossiers en toile gris clair, tablette teck au bout.
+             Chaque volume = dessus / face avant / côté droit (vus depuis la droite). -->
+        {@render box(30, 116, 6, 150, 4, 46, 'var(--frame)', 'var(--frame)', 'var(--frame-dk)')}
         {@render box(
-          50,
-          94,
-          52,
+          32,
+          104,
           8,
-          17,
-          58,
-          'var(--cush-side)',
+          146,
+          12,
+          42,
+          'var(--seat-top)',
           'var(--cush-side)',
           'var(--cush-side)'
         )}
+        {@render box(
+          32,
+          82,
+          8,
+          146,
+          22,
+          10,
+          'var(--cush-side)',
+          'var(--back-front)',
+          'var(--cush-side)'
+        )}
+        {@render box(134, 116, 52, 46, 4, 60, 'var(--frame)', 'var(--frame)', 'var(--frame-dk)')}
+        {@render box(
+          136,
+          104,
+          52,
+          42,
+          12,
+          58,
+          'var(--cush)',
+          'var(--cush-side)',
+          'var(--cush-side)'
+        )}
+        {@render box(
+          170,
+          82,
+          52,
+          10,
+          22,
+          58,
+          'var(--cush-side)',
+          'var(--cush-side)',
+          'var(--back-front)'
+        )}
+        {@render box(134, 116, 112, 46, 4, 16, 'var(--teak)', 'var(--frame)', 'var(--frame-dk)')}
+        <div class="leg" style="left: 30px; top: 120px; transform: translateZ(52px);"></div>
+        <div class="leg" style="left: 134px; top: 120px; transform: translateZ(128px);"></div>
+        <div class="leg" style="left: 177px; top: 120px; transform: translateZ(128px);"></div>
+        <div class="leg" style="left: 177px; top: 120px; transform: translateZ(52px);"></div>
         <div class="box-top"></div>
         <div class="box-side"></div>
         <div class="box-front"></div>
         <div class="arm l"><div class="seg seg1"><div class="seg seg2"></div></div></div>
         <div class="arm r"><div class="seg seg1"><div class="seg seg2"></div></div></div>
-        <div class="fabric">
-          <div class="front-bar"></div>
-          <div class="valance"></div>
-        </div>
+        <div class="fabric"></div>
+        <div class="front-bar"></div>
+        <div class="valance"></div>
       </div>
     </div>
   </div>
@@ -339,9 +376,18 @@
     --metal-b: oklch(0.72 0.015 286);
     --metal-c: oklch(0.8 0.01 286);
     --metal-d: oklch(0.62 0.015 286);
-    --frame: oklch(0.93 0.005 80);
-    --cush: oklch(0.9 0.018 85);
-    --cush-side: oklch(0.84 0.02 85);
+    --frame: oklch(0.96 0.003 80);
+    --frame-dk: oklch(0.86 0.004 80);
+    --cush: oklch(0.82 0.006 260);
+    --cush-side: oklch(0.74 0.007 260);
+    /* dessus d'assise : 3 coussins séparés par une couture, liseré clair au bord */
+    --seat-top:
+      repeating-linear-gradient(90deg, transparent 0 48px, oklch(0.62 0.007 260) 48px 49px),
+      linear-gradient(180deg, oklch(1 0 0 / 0.25), transparent 25%), var(--cush);
+    --back-front:
+      linear-gradient(180deg, oklch(1 0 0 / 0.18), transparent 35%, oklch(0 0 0 / 0.08)),
+      var(--cush);
+    --teak: repeating-linear-gradient(90deg, oklch(0.7 0.09 62) 0 4px, oklch(0.6 0.09 58) 4px 5px);
     --glass-a: oklch(0.72 0.06 240);
     --glass-b: oklch(0.5 0.05 252);
   }
@@ -349,9 +395,10 @@
     --sky-a: oklch(0.3 0.06 262);
     --sky-b: oklch(0.27 0.05 280);
     --sky-c: oklch(0.24 0.045 286);
-    --wall-a: oklch(0.42 0.04 286);
-    --wall-b: oklch(0.5 0.04 286);
-    --wall-shade: oklch(0.2 0.03 286 / 0.5);
+    /* Mur CRÈME aussi en sombre (Laurent, 23/08/2026) — juste un peu moins éclairé. */
+    --wall-a: oklch(0.82 0.035 85);
+    --wall-b: oklch(0.87 0.035 85);
+    --wall-shade: oklch(0.4 0.04 80 / 0.45);
     --wood-a: oklch(0.5 0.035 70);
     --wood-b: oklch(0.46 0.035 70);
     --wood-c: oklch(0.52 0.035 75);
@@ -362,9 +409,10 @@
     --metal-b: oklch(0.58 0.02 286);
     --metal-c: oklch(0.78 0.02 286);
     --metal-d: oklch(0.62 0.02 286);
-    --frame: oklch(0.72 0.01 286);
-    --cush: oklch(0.8 0.018 85);
-    --cush-side: oklch(0.72 0.02 85);
+    --frame: oklch(0.9 0.004 80);
+    --frame-dk: oklch(0.78 0.005 80);
+    --cush: oklch(0.76 0.007 260);
+    --cush-side: oklch(0.66 0.008 260);
     --glass-a: oklch(0.5 0.07 262);
     --glass-b: oklch(0.3 0.05 275);
   }
@@ -511,6 +559,11 @@
     transform: skewX(-16deg);
     transform-origin: top left;
   }
+  .leg {
+    width: 3px;
+    height: 10px;
+    background: var(--frame-dk);
+  }
   /* Caisson */
   .box-front {
     left: 0;
@@ -548,19 +601,22 @@
     width: 220px;
     height: calc(var(--store-p) * 136px);
     transform-origin: top;
+    transform-style: flat;
     transform: translateZ(12px) rotateX(76deg);
     background-image:
       linear-gradient(180deg, oklch(1 0 0 / 0.18), transparent 40%, oklch(0 0 0 / 0.12)),
       repeating-linear-gradient(90deg, var(--toile-a) 0 16px, var(--toile-b) 16px 32px);
   }
-  /* Lambrequin festonné, pendu à l'avant */
+  /* Lambrequin festonné et barre de front : FRÈRES de la toile (pas enfants),
+     posés sur son bord avant par la même --store-p — un enfant qui déborde
+     d'un plan preserve-3d fait tronquer le calque parent en densité 3.
+     Bord avant : y = 8 + h·cos76°, z = 12 + h·sin76°, h = p × 136 px. */
   .valance {
     left: 0;
-    top: 100%;
+    top: calc(8px + var(--store-p) * 32.9px);
     width: 220px;
     height: 16px;
-    transform-origin: top;
-    transform: rotateX(-76deg);
+    transform: translateZ(calc(12px + var(--store-p) * 131.96px));
     background-image:
       linear-gradient(180deg, oklch(0 0 0 / 0.08), oklch(0 0 0 / 0.28)),
       repeating-linear-gradient(90deg, var(--toile-a) 0 16px, var(--toile-b) 16px 32px);
@@ -573,11 +629,11 @@
   }
   .front-bar {
     left: 0;
-    top: calc(100% - 3px);
+    top: calc(5px + var(--store-p) * 32.9px);
     width: 220px;
     height: 3px;
     background: var(--metal-b);
-    transform: translateZ(1px);
+    transform: translateZ(calc(13px + var(--store-p) * 131.96px));
   }
   /* Bras articulés : deux segments de 68px, coude replié vers le centre, θ = acos(p). */
   .arm {
