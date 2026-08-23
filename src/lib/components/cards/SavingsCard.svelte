@@ -13,10 +13,18 @@
    * valorisée », débit €/h, ventilation Pleines/Creuses) : il vit dans le menu ☰ →
    * « Bilan & installation ». L'accueil garde le chiffre qu'on vient y chercher,
    * pas sa décomposition.
+   *
+   * Le RETOUR SUR INVESTISSEMENT (ex-tuile « ROI restant » de /energie) vit ici
+   * depuis le 23/08/2026, SOUS la ligne des médailles (qui ne bouge pas) : jauge
+   * d'amortissement + « X € sur Y € » + durée restante et mois d'amortissement.
+   * Piste « Jauge » du canevas Claude Design « Économies solaires et ROI ».
+   * Masqué tant que le coût d'installation n'est pas renseigné (Bilan).
    */
   import { savings } from '$stores/savings.svelte';
+  import { settings } from '$stores/settings.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { formatCurrency } from '$utils/format';
+  import { computeRoi } from '$utils/roi';
   import { Tween } from 'svelte/motion';
   import { expoOut } from 'svelte/easing';
 
@@ -124,6 +132,24 @@
   const uniformFz = $derived(
     Math.min(valueFz(today.eur), valueFz(month.eur), valueFz(year.eur), valueFz(total.eur))
   );
+
+  // ── Retour sur investissement (calcul pur, $utils/roi) ──
+  const installEur = $derived(settings.installationTotalEur);
+  const roi = $derived(
+    computeRoi({
+      installEur,
+      firstDateISO: settings.firstInstallationDateISO,
+      savedTotalEur: total.eur,
+      yearEur: year.eur
+    })
+  );
+  const showRoi = $derived(connected && roi.available);
+  const eurRound = (v: number) => `${Math.round(v).toLocaleString('fr-FR')} €`;
+  // La jauge se remplit 0 → part amortie à l'apparition (one-shot, comme le count-up).
+  const tPct = new Tween(0, { easing: expoOut });
+  $effect(() => {
+    tPct.set(showRoi ? roi.amortizedPct : 0, { duration: rich ? 1400 : 0 });
+  });
 </script>
 
 {#if compact}
@@ -212,6 +238,37 @@
           </div>
         {/each}
       </div>
+
+      <!-- Retour sur investissement — sous les médailles, jamais dedans. -->
+      {#if showRoi}
+        <div class="roi" data-testid="savings-roi">
+          <div class="roi-rule" aria-hidden="true"></div>
+          <div class="roi-row">
+            <span class="roi-label">Retour sur investissement</span>
+            <span class="roi-pct"
+              >{roi.amortized ? '✓ amorti' : `${roi.amortizedPct} % amorti`}</span
+            >
+          </div>
+          <div
+            class="roi-track"
+            role="progressbar"
+            aria-label="Part de l'installation amortie"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow={roi.amortizedPct}
+          >
+            <div class="roi-fill" style="width: {tPct.current}%"></div>
+          </div>
+          <div class="roi-row">
+            <span class="roi-sub">{eurRound(total.eur)} sur {eurRound(installEur)}</span>
+            {#if !roi.amortized}
+              <span class="roi-rest"
+                >reste {roi.label}{roi.payoff ? ` · fin ~${roi.payoff}` : ''}</span
+              >
+            {/if}
+          </div>
+        </div>
+      {/if}
     </div>
   </section>
 {/if}
@@ -391,6 +448,65 @@
   }
   .disconnected .orb {
     filter: saturate(0.3) opacity(0.7);
+  }
+
+  /* ───────────── Retour sur investissement ───────────── */
+  .roi {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .roi-rule {
+    height: 1px;
+    margin-bottom: 5px;
+    background: var(--color-border);
+    opacity: 0.55;
+  }
+  .roi-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .roi-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted-fg);
+  }
+  .roi-pct {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--color-fg);
+    white-space: nowrap;
+  }
+  .roi-track {
+    position: relative;
+    height: 8px;
+    border-radius: 9999px;
+    background: var(--color-muted);
+    box-shadow: inset 1px 1px 2px oklch(0.15 0.03 286 / 0.35);
+    overflow: hidden;
+  }
+  .roi-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    min-width: 8px;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, var(--color-consumption), var(--color-battery));
+    box-shadow: 0 0 10px 0 oklch(0.7 0.15 149 / 0.55);
+  }
+  .roi-sub {
+    font-size: 12px;
+    color: var(--color-muted-fg);
+  }
+  .roi-rest {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-fg);
+    text-align: right;
   }
 
   @keyframes fade-in {
