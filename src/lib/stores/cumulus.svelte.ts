@@ -73,6 +73,8 @@ export interface PilotViewClient {
   sunWindowStart: string | null;
   sunWindowEnd: string | null;
   sunWindowNote: string;
+  surplusW: number;
+  surplusNeedW: number;
   invisibleSurplusW: number;
   potTotalW: number;
   pApsW: number;
@@ -188,6 +190,10 @@ class CumulusState {
   eFullWh = $state<number | null>(null);
   /** Réserve exprimée en nombre de douches équivalent. */
   showers = $state<number | null>(null);
+  /** Température MOYENNE du ballon (modèle calorimétrique) — celle qui a un sens
+   *  pour l'utilisateur. `waterTempC` est la sonde de POINT BAS, structurellement
+   *  plus froide (stratification ~×2,7) : l'afficher seule inquiète pour rien. */
+  tankTempC = $state<number | null>(null);
   /** Dernier « ballon plein » (epoch ms), null si jamais observé. */
   lastAnchorTs = $state<number | null>(null);
   /** Calibration courante de la relaxation post-plein (débogage, 04/07). */
@@ -371,6 +377,7 @@ class CumulusState {
         const ev = s.energyView;
         this.eFullWh = typeof ev?.eFullWh === 'number' ? ev.eFullWh : null;
         this.showers = typeof ev?.showers === 'number' ? ev.showers : null;
+        this.tankTempC = typeof ev?.tTankC === 'number' ? ev.tTankC : null;
         this.relaxAmplitudeC = typeof ev?.relaxAmplitudeC === 'number' ? ev.relaxAmplitudeC : null;
         this.relaxTauMin = typeof ev?.relaxTauMin === 'number' ? ev.relaxTauMin : null;
         const pv = s.pilotView;
@@ -391,6 +398,8 @@ class CumulusState {
                 sunWindowStart: typeof pv.sunWindowStart === 'string' ? pv.sunWindowStart : null,
                 sunWindowEnd: typeof pv.sunWindowEnd === 'string' ? pv.sunWindowEnd : null,
                 sunWindowNote: typeof pv.sunWindowNote === 'string' ? pv.sunWindowNote : '',
+                surplusW: typeof pv.surplusW === 'number' ? pv.surplusW : 0,
+                surplusNeedW: typeof pv.surplusNeedW === 'number' ? pv.surplusNeedW : 0,
                 invisibleSurplusW:
                   typeof pv.invisibleSurplusW === 'number' ? pv.invisibleSurplusW : 0,
                 potTotalW: typeof pv.potTotalW === 'number' ? pv.potTotalW : 0,

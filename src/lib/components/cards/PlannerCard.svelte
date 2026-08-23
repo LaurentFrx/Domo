@@ -2,14 +2,20 @@
   /**
    * Carte « Eau chaude » — pilotage + visualisation du PILOTE V2 (règle zéro achat EDF).
    *
-   * Trois niveaux de lecture :
-   *   1. COUP D'ŒIL  — réserve « ≈ N douches » + jauge + phase du pilote en clair ;
-   *   2. AGIR        — Auto / Manuel / Vacances + « Chauffer maintenant » ;
-   *   3. COMPRENDRE  — économies, mini-stats, journal du jour (transitions de phase
-   *      incluses), et le panneau « détail » exigé par la spec : l'état VRAI/FAUX des
-   *      7 conditions d'allumage, le surplus invisible estimé, la production APS et
-   *      le potentiel total, le niveau des batteries (+ delta depuis le début de la
-   *      chauffe), le compteur d'allumages (spontanés vs reprises), la prochaine action.
+   * ÉCRITE POUR LA MAISON, PAS POUR L'INGÉNIEUR (refonte 23/08/2026). Trois
+   * niveaux, du plus humain au plus technique :
+   *   1. COMBIEN reste-t-il — « ≈ N douches », jauge, température de l'eau ;
+   *   2. QUE FAIT-IL, en une phrase de français courant, avec la seule jauge qui
+   *      ait un sens pour un habitant : le soleil disponible face à ce qu'il faut ;
+   *   3. AGIR — Auto / Manuel / Vacances + « Chauffer maintenant ».
+   * Tout le reste (les 7 conditions, le surplus invisible, la calibration de la
+   * sonde, les compteurs) vit derrière « Détails techniques », replié par défaut.
+   *
+   * Deux pièges d'affichage corrigés au passage :
+   *   - la température montrée est la MOYENNE du ballon, pas la sonde de point bas
+   *     (structurellement ~12 °C plus froide : elle inquiétait pour rien) ;
+   *   - les puisages consécutifs sont REGROUPÉS : un tick en détectait quatre
+   *     bouts, la carte affichait « douche » quatre fois pour une seule.
    */
   import { cumulus, CUMULUS_ANOMALY_LABELS, PILOT_PHASE_LABELS } from '$stores/cumulus.svelte';
   import { em50 } from '$stores/em50.svelte';
@@ -84,24 +90,86 @@
   );
 
   // ── Phase du pilote, en une ligne ──
-  const phaseEmoji: Record<string, string> = {
-    repos: '😴',
-    allumage: '🚀',
-    chauffe: '☀️',
-    cession: '🤝',
-    plein: '✅',
-    recharge_hc: '🌙'
+
+  // ── Traduction des 7 conditions du pilote en français de tous les jours ──
+  // Le serveur nomme les conditions pour un diagnostic ; la carte les nomme pour
+  // quelqu'un qui veut juste savoir s'il aura de l'eau chaude.
+  const COND_HUMAN: Record<string, { label: string; ko: string }> = {
+    tank: { label: 'Place dans le ballon', ko: 'Le ballon est déjà plein.' },
+    surplus: {
+      label: 'Assez de soleil en trop',
+      ko: 'Le soleil ne produit pas encore assez pour chauffer sans rien acheter.'
+    },
+    battery: {
+      label: 'Batteries assez chargées',
+      ko: 'Les batteries se rechargent d’abord.'
+    },
+    quiet: {
+      label: 'Pas de gros appareil en marche',
+      ko: 'Un gros appareil tourne — on attend qu’il ait fini.'
+    },
+    window: { label: 'Il fait assez jour', ko: 'Il ne fait pas encore assez clair.' },
+    quota: {
+      label: 'Essais restants aujourd’hui',
+      ko: 'Le chauffe-eau a déjà fait ses essais de la journée.'
+    },
+    delays: {
+      label: 'Chauffe-eau prêt à repartir',
+      ko: 'Le chauffe-eau se repose quelques minutes avant de repartir.'
+    }
   };
-  const status = $derived.by((): { line: string; sub: string | null } => {
-    if (!pilot)
+
+  /** Ce que fait le chauffe-eau, en une phrase — et pourquoi, s'il attend. */
+  const human = $derived.by((): { emoji: string; title: string; sub: string | null } => {
+    if (voyant === 'offline')
       return {
-        line: heatingNow ? '🔥 Le chauffe-eau chauffe' : '💤 Pilote en attente de données',
-        sub: null
+        emoji: '🔌',
+        title: 'Le boîtier ne répond pas',
+        sub: 'Le chauffe-eau garde son dernier réglage.'
       };
-    const label = PILOT_PHASE_LABELS[pilot.phase] ?? pilot.phase;
+    if (heatingNow)
+      return {
+        emoji: '🔥',
+        title: 'L’eau chauffe en ce moment',
+        sub: 'Au soleil, sans rien acheter.'
+      };
+    if (mode === 'off')
+      return { emoji: '🌴', title: 'Mode vacances', sub: 'Le chauffe-eau reste éteint.' };
+    if (mode === 'manual')
+      return {
+        emoji: '✋',
+        title: relayOn ? 'Allumé à la main' : 'Éteint',
+        sub: 'C’est vous qui commandez.'
+      };
+    if (cumulus.boostUntilFull)
+      return {
+        emoji: '🔥',
+        title: 'Chauffe demandée',
+        sub: 'Elle démarrera dès que ce sera gratuit.'
+      };
+    if (!pilot) return { emoji: '⏳', title: 'En cours de démarrage', sub: null };
+    if (pilot.phase === 'plein')
+      return { emoji: '✅', title: 'Ballon plein', sub: 'Rien à faire.' };
+    if (pilot.phase === 'recharge_hc')
+      return { emoji: '🌙', title: 'Chauffe de nuit en cours', sub: 'Au tarif le moins cher.' };
+    const ko = pilot.conds.find((c) => !c.ok);
+    if (!ko) return { emoji: '👌', title: 'Prêt à chauffer', sub: 'Le démarrage est imminent.' };
     return {
-      line: `${phaseEmoji[pilot.phase] ?? ''} ${label}`,
-      sub: pilot.nextAction || null
+      emoji: '⏳',
+      title: 'En attente de soleil',
+      sub: COND_HUMAN[ko.key]?.ko ?? ko.detail
+    };
+  });
+
+  /** Jauge « soleil disponible » — la seule qui parle à un habitant. */
+  const sunGauge = $derived.by(() => {
+    if (!pilot || pilot.surplusNeedW <= 0) return null;
+    const ko = pilot.conds.find((c) => !c.ok);
+    if (ko?.key !== 'surplus') return null;
+    return {
+      w: pilot.surplusW,
+      need: pilot.surplusNeedW,
+      pct: Math.min(100, Math.max(0, (pilot.surplusW / pilot.surplusNeedW) * 100))
     };
   });
 
@@ -129,8 +197,18 @@
     `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(2).replace('.', ',')} €`;
 
   // ── Mini-stats ──
+  // La sonde est en POINT BAS : elle lit ~12 °C de moins que la moyenne du ballon
+  // (stratification). Montrer 36 °C quand l'eau est à 48 °C fait croire à une
+  // panne — on affiche la moyenne du modèle, la sonde reste dans les détails.
   const ballonTemp = $derived(
-    cumulus.waterTempC !== null ? `${cumulus.waterTempC.toFixed(0)} °C` : '—'
+    cumulus.tankTempC !== null
+      ? `${cumulus.tankTempC.toFixed(0)} °C`
+      : cumulus.waterTempC !== null
+        ? `${cumulus.waterTempC.toFixed(0)} °C`
+        : '—'
+  );
+  const sondeTemp = $derived(
+    cumulus.waterTempC !== null ? `${cumulus.waterTempC.toFixed(1)} °C` : '—'
   );
   const consoToday = $derived(`${cumulus.energyTodayKwh.toFixed(1)} kWh`);
   function fmtSince(ts: number | null): string {
@@ -185,8 +263,31 @@
         return { ts: e.ts, emoji: '✓', text: 'Ballon plein' };
       });
   });
-  const visibleEvents = $derived(showAllEvents ? events : events.slice(0, EVENTS_FOLDED));
-  const hiddenCount = $derived(Math.max(0, events.length - EVENTS_FOLDED));
+  /**
+   * Regroupe les puisages qui se suivent. Le moteur détecte la baisse de
+   * température tick par tick : une seule douche produit 3 ou 4 événements
+   * consécutifs (mesuré le 23/08 : 10:16, 10:17, 10:18, 10:19 pour 415 Wh au
+   * total). Les afficher séparément fait croire à quatre douches.
+   */
+  const GROUP_GAP_MS = 12 * 60_000;
+  const groupedEvents = $derived.by(() => {
+    const out: { ts: number; emoji: string; text: string }[] = [];
+    for (const e of events) {
+      const prev = out[out.length - 1];
+      const isDraw = e.emoji === '🚿';
+      if (isDraw && prev?.emoji === '🚿' && prev.ts - e.ts <= GROUP_GAP_MS) {
+        prev.ts = e.ts; // le groupe porte l'heure de DÉBUT du puisage
+        prev.text = 'Eau chaude utilisée (douche / robinet)';
+        continue;
+      }
+      out.push({ ...e });
+    }
+    return out;
+  });
+  const visibleEvents = $derived(
+    showAllEvents ? groupedEvents : groupedEvents.slice(0, EVENTS_FOLDED)
+  );
+  const hiddenCount = $derived(Math.max(0, groupedEvents.length - EVENTS_FOLDED));
 </script>
 
 <section
@@ -208,16 +309,6 @@
       </div>
     </div>
     <div class="flex items-center gap-1.5">
-      <button
-        type="button"
-        onclick={() => (showPilot = !showPilot)}
-        class="flex h-6 items-center justify-center rounded-full px-2.5 text-xs font-semibold"
-        style="background: color-mix(in oklch, var(--color-primary) 16%, transparent); color: var(--color-primary);"
-        aria-label="Détail du pilote"
-        aria-expanded={showPilot}
-      >
-        pilote
-      </button>
       <button
         type="button"
         onclick={() => (showHelp = !showHelp)}
@@ -260,13 +351,26 @@
     </div>
   {/if}
 
-  <!-- ═══ 1. COUP D'ŒIL ═══ -->
+  <!-- ═══ 1. COMBIEN RESTE-T-IL ═══ -->
   <div class="flex flex-col gap-2">
-    <div class="flex items-baseline gap-2">
-      <span class="text-[34px] leading-none font-bold" style="color: var(--color-fg);"
-        >{!pilotMuet && showers != null ? `≈ ${showers}` : '—'}</span
-      >
-      <span class="text-sm" style="color: var(--color-muted-fg);">douches d'eau chaude</span>
+    <div class="flex items-end justify-between gap-3">
+      <div class="flex items-baseline gap-2">
+        <span class="text-[40px] leading-none font-bold" style="color: var(--color-fg);"
+          >{!pilotMuet && showers != null ? `≈ ${showers}` : '—'}</span
+        >
+        <span class="text-sm" style="color: var(--color-muted-fg);">douches</span>
+      </div>
+      <div class="shrink-0 text-right">
+        <div
+          class="text-[10.5px] font-semibold tracking-[0.08em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          eau à
+        </div>
+        <div class="text-lg leading-tight font-semibold" style="color: var(--color-hp);">
+          {ballonTemp}
+        </div>
+      </div>
     </div>
     <div
       class="h-2.5 overflow-hidden rounded-full"
@@ -277,13 +381,45 @@
         style="width: {fillPct}%; background: var(--color-success); transition: width 700ms var(--ease-out);"
       ></div>
     </div>
-    <div class="text-sm font-medium" style="color: var(--color-fg);">{status.line}</div>
-    {#if status.sub}
-      <div class="text-[12.5px]" style="color: var(--color-muted-fg);">{status.sub}</div>
+  </div>
+
+  <!-- ═══ 2. QUE FAIT-IL — une phrase, et la seule jauge qui parle ═══ -->
+  <div class="state">
+    <div class="flex items-start gap-2.5">
+      <span class="text-xl leading-none" aria-hidden="true">{human.emoji}</span>
+      <div class="min-w-0 flex-1">
+        <div class="text-[15px] leading-snug font-semibold" style="color: var(--color-fg);">
+          {human.title}
+        </div>
+        {#if human.sub}
+          <div class="mt-0.5 text-[13px] leading-snug" style="color: var(--color-muted-fg);">
+            {human.sub}
+          </div>
+        {/if}
+      </div>
+    </div>
+    {#if sunGauge}
+      <div class="mt-2.5 flex flex-col gap-1">
+        <div
+          class="h-2 overflow-hidden rounded-full"
+          style="background: color-mix(in oklch, var(--color-muted-fg) 15%, transparent);"
+        >
+          <div
+            class="h-full rounded-full"
+            style="width: {sunGauge.pct}%; background: var(--color-solar); transition: width 700ms var(--ease-out);"
+          ></div>
+        </div>
+        <div class="text-[12px]" style="color: var(--color-muted-fg);">
+          Soleil disponible : <strong style="color: var(--color-fg);"
+            >{Math.round(sunGauge.w)} W</strong
+          >
+          sur les <strong style="color: var(--color-fg);">{sunGauge.need} W</strong> qu'il faut
+        </div>
+      </div>
     {/if}
   </div>
 
-  <!-- ═══ 2. AGIR ═══ -->
+  <!-- ═══ 3. AGIR ═══ -->
   <div class="flex flex-col gap-2">
     <div class="seg" role="radiogroup" aria-label="Mode de pilotage">
       <button
@@ -343,7 +479,7 @@
     {/if}
   </div>
 
-  <!-- ═══ 3. COMPRENDRE ═══ -->
+  <!-- ═══ 4. COMPRENDRE ═══ -->
   <div class="gain">
     <span class="gain-label">💶 Économies vs recharge de nuit</span>
     <span class="gain-vals tabular-nums">
@@ -420,7 +556,18 @@
     {/if}
   </div>
 
-  <!-- ═══ Détail du PILOTE (spec : conditions, estimateur, compteurs, prochaine action) ═══ -->
+  <!-- ═══ Repli technique — tout ce qui ne sert qu'au diagnostic ═══ -->
+  {#if pilot}
+    <button
+      type="button"
+      class="fold-btn"
+      onclick={() => (showPilot = !showPilot)}
+      aria-expanded={showPilot}
+    >
+      {showPilot ? 'Masquer les détails techniques' : 'Détails techniques'}
+    </button>
+  {/if}
+
   {#if showPilot && pilot}
     <div
       class="flex flex-col gap-2.5 rounded-xl p-3 text-sm"
@@ -436,16 +583,22 @@
       </div>
       <p class="text-[12.5px]" style="color: var(--color-muted-fg);">{pilot.note}</p>
 
-      <!-- Les 7 conditions, VRAI/FAUX d'un coup d'œil -->
+      <!-- Les 7 conditions — nommées comme les comprend un habitant, la mesure
+           technique restant lisible à droite pour qui veut vérifier -->
       <div class="conds">
         {#each pilot.conds as c (c.key)}
           <div class="cond" class:cond-ok={c.ok}>
             <span class="cond-dot">{c.ok ? '✓' : '✗'}</span>
-            <span class="cond-label">{c.label}</span>
+            <span class="cond-label">{COND_HUMAN[c.key]?.label ?? c.label}</span>
             <span class="cond-detail">{c.detail}</span>
           </div>
         {/each}
       </div>
+
+      <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+        <dt style="color: var(--color-muted-fg);">Sonde (point bas du ballon)</dt>
+        <dd class="text-right tabular-nums" style="color: var(--color-fg);">{sondeTemp}</dd>
+      </dl>
 
       <!-- Horaires de la fenêtre solaire du jour (éphémérides) -->
       {#if pilot.sunWindowStart && pilot.sunWindowEnd}
@@ -633,6 +786,16 @@
   .boost-on {
     background: oklch(0.66 0.14 40 / 0.16);
     border-color: oklch(0.66 0.14 40 / 0.55);
+  }
+
+  /* ─── Encart d'état : la phrase qui répond à « et alors ? » ───
+     Surface légèrement soulevée sur le verre de la carte, sans concurrencer le
+     gros chiffre : c'est le deuxième regard, pas le premier. */
+  .state {
+    border-radius: var(--radius-lg);
+    padding: 12px 13px;
+    background: color-mix(in oklch, var(--color-fg) 5%, transparent);
+    border: 1px solid var(--color-border);
   }
 
   .gain {

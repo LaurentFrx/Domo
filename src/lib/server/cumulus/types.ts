@@ -366,6 +366,10 @@ export interface PilotView {
   sunWindowEnd: string | null;
   /** Note si la fenêtre effective est resserrée à l'exécution (cloud Anker muet). */
   sunWindowNote: string;
+  /** Surplus solaire réorientable MESURÉ et seuil exigé (W) — publiés pour que
+   *  l'interface puisse en faire une jauge lisible sans réanalyser une phrase. */
+  surplusW: number;
+  surplusNeedW: number;
   invisibleSurplusW: number; // surplus invisible estimé (W)
   potTotalW: number; // potentiel solaire total estimé (W)
   pApsW: number; // production APS (l'étalon)

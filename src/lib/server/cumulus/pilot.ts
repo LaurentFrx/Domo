@@ -759,6 +759,8 @@ export function pilotStep(
     sunWindowStart,
     sunWindowEnd,
     sunWindowNote,
+    surplusW: Math.round(surplusDispoW),
+    surplusNeedW: p.surplusOnW,
     invisibleSurplusW: ctx.potential.invisibleSurplusW,
     potTotalW: ctx.potential.potTotalW,
     pApsW: Math.round(inputs.pvApsW),

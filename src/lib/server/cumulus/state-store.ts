@@ -443,6 +443,8 @@ function normPilotView(v: unknown): PilotView | null {
     sunWindowStart: typeof o.sunWindowStart === 'string' ? o.sunWindowStart : null,
     sunWindowEnd: typeof o.sunWindowEnd === 'string' ? o.sunWindowEnd : null,
     sunWindowNote: typeof o.sunWindowNote === 'string' ? o.sunWindowNote : '',
+    surplusW: numOr(o.surplusW, 0),
+    surplusNeedW: numOr(o.surplusNeedW, 0),
     invisibleSurplusW: numOr(o.invisibleSurplusW, 0),
     potTotalW: numOr(o.potTotalW, 0),
     pApsW: numOr(o.pApsW, 0),
