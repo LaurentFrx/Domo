@@ -17,6 +17,8 @@
   //  • 23/08/2026 (Laurent) : la banquette d'angle remplace la table et les
   //    tabourets ; plus de soleil ni de fenêtre ; une baie vitrée deux pans
   //    sous le store. Couleurs de la toile et angle de vue INCHANGÉS.
+  //  • Plus de ligne de titre : l'état (« Déployé à 59 % ») est inscrit dans
+  //    le dessin, en pastille ; boutons à 40 px.
   // ════════════════════════════════════════════════════════════════════════
   import { onDestroy, untrack } from 'svelte';
   import { matter } from '$stores/matter.svelte';
@@ -188,18 +190,15 @@
   style="background: var(--color-card); border-color: var(--color-border);"
   aria-label="Store — {stateLabel}"
 >
-  <div class="head">
-    <span class="name">Store</span>
-    <span class="status">
+  <!-- Scène 3D : dessinée à 332×210 puis mise à l'échelle de la carte. -->
+  <div class="scene-wrap" bind:clientWidth={wrapW} style="--k: {k};">
+    <!-- État inscrit dans le dessin (pastille en haut à gauche) -->
+    <span class="scene-label">
       {#if isMoving}
         <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
       {/if}
       <span class="tabular-nums">{stateLabel}</span>
     </span>
-  </div>
-
-  <!-- Scène 3D : dessinée à 332×210 puis mise à l'échelle de la carte. -->
-  <div class="scene-wrap" bind:clientWidth={wrapW} style="--k: {k};">
     <div
       bind:this={sceneEl}
       class="scene"
@@ -507,24 +506,24 @@
     --glass-b: oklch(0.3 0.05 275);
   }
 
-  .head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-  }
-  .name {
-    font-size: 14px;
-    font-weight: 600;
-    line-height: 1.15;
-    color: var(--color-fg);
-  }
-  .status {
+  /* Pastille d'état posée sur le dessin (hors de la scène mise à l'échelle → nette) */
+  .scene-label {
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    z-index: 2;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
+    padding: 5px 10px;
+    border-radius: 9999px;
     font-size: 12px;
-    color: var(--color-muted-fg);
+    font-weight: 600;
+    color: oklch(0.98 0.01 286);
+    background: oklch(0.22 0.04 286 / 0.55);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    pointer-events: none;
   }
   .dots {
     display: inline-flex;
@@ -786,7 +785,7 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    height: 48px;
+    height: 40px;
     border-radius: 12px;
     border: 1px solid var(--color-border);
     font-size: 15px;
