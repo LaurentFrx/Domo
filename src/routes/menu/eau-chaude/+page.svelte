@@ -6,27 +6,39 @@
    * basse. Le pilotage réel vit dans la config serveur ; le geste quotidien
    * (marche forcée, journal) est sur la carte « Eau chaude » de la page Énergie.
    */
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import PlannerCard from '$components/cards/PlannerCard.svelte';
   import { cumulus } from '$stores/cumulus.svelte';
+  import { acquireFns } from '$stores/refcount';
 
+  // La carte « Eau chaude » vit ICI depuis le 23/08 (décision Laurent) — plus
+  // sur /energie. Mêmes acquisitions refcountées que là-bas : relais Shelly +
+  // orchestrateur (mode, décision, énergie, journal). em50 est app-wide (layout).
+  let releases: (() => void)[] = [];
   onMount(() => {
-    cumulus.refreshOrchestrator(); // état du moteur (one-shot, sans polling)
+    releases = [
+      acquireFns(
+        'cumulus:relay',
+        () => cumulus.connectRelay(),
+        () => cumulus.disconnectRelay()
+      ),
+      acquireFns(
+        'cumulus:orchestrator',
+        () => cumulus.connectOrchestrator(),
+        () => cumulus.disconnectOrchestrator()
+      )
+    ];
+  });
+  onDestroy(() => {
+    releases.forEach((r) => r());
+    releases = [];
   });
 </script>
 
+<!-- La carte garde le langage visuel de l'app (verre Yeldra) sur la surface
+     Réglages : c'est un écran de pilotage, pas une liste de préférences. -->
 <section class="ios-section">
-  <div class="ios-group">
-    <div class="ios-cell">
-      <span class="ios-cell-label">Pilotage automatique</span>
-      <span class="ios-cell-value is-green">Actif</span>
-    </div>
-  </div>
-  <p class="ios-group-footer">
-    Le chauffe-eau chauffe au soleil quand il y a du surplus, et complète la nuit en heures creuses
-    si la réserve d'eau chaude ne suffit pas. Il ne fait jamais acheter d'électricité au réseau pour
-    chauffer. Rien à régler ici : la marche forcée et le journal du jour sont sur la carte « Eau
-    chaude » de la page Énergie.
-  </p>
+  <PlannerCard />
 </section>
 
 <section class="ios-section">

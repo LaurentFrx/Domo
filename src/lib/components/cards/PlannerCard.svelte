@@ -97,6 +97,8 @@
   const fillPct = $derived(
     eAvail && eFull && eFull > 0 ? Math.min(100, Math.max(0, (eAvail / eFull) * 100)) : 0
   );
+  /** Haut de l'eau dans la cuve SVG (zone utile y = 8 → 188). */
+  const tankWaterY = $derived(8 + 180 * (1 - Math.min(100, Math.max(0, fillPct)) / 100));
 
   // ── Phase du pilote, en une ligne ──
 
@@ -325,24 +327,86 @@
     </div>
   {/if}
 
-  <!-- ═══ 1. COMBIEN RESTE-T-IL ═══ -->
-  <div class="flex flex-col gap-2">
-    <div class="flex items-end justify-between gap-3">
-      <div class="flex items-baseline gap-2">
-        <span class="text-[40px] leading-none font-bold" style="color: var(--color-fg);"
+  <!-- ═══ 1+2. LE BALLON — variante « Le ballon » adoptée par Laurent (23/08).
+       L'eau chaude se VOIT : cuve remplie au niveau de la réserve, chaude en
+       haut, froide en bas — fidèle à la stratification réelle. À droite, le
+       chiffre qui compte et la phrase d'état. ═══ -->
+  <div class="flex items-stretch gap-[18px]">
+    <svg width="120" height="196" viewBox="0 0 120 196" class="shrink-0" aria-hidden="true">
+      <defs>
+        <linearGradient id="planner-eau" x1="0" y1="0" x2="0" y2="1">
+          <stop
+            offset="0"
+            style="stop-color: color-mix(in oklch, var(--color-hp) 90%, transparent);"
+          />
+          <stop
+            offset="1"
+            style="stop-color: color-mix(in oklch, var(--color-hc) 75%, transparent);"
+          />
+        </linearGradient>
+        <clipPath id="planner-cuve"><rect x="8" y="8" width="104" height="180" rx="22" /></clipPath>
+      </defs>
+      <rect
+        x="3"
+        y="3"
+        width="114"
+        height="190"
+        rx="26"
+        style="fill: color-mix(in oklch, var(--color-muted) 50%, transparent); stroke: var(--color-border-strong);"
+        stroke-width="2"
+      />
+      <g clip-path="url(#planner-cuve)">
+        <rect
+          x="8"
+          y={tankWaterY}
+          width="104"
+          height={188 - tankWaterY}
+          fill="url(#planner-eau)"
+          style="transition: y 700ms var(--ease-out), height 700ms var(--ease-out);"
+        />
+        {#if fillPct > 4}
+          <path
+            d="M8 {tankWaterY} q13 -7 26 0 t26 0 t26 0 t26 0 v8 h-104 Z"
+            style="fill: color-mix(in oklch, var(--color-hp) 45%, transparent);"
+          />
+        {/if}
+      </g>
+      <path
+        d="M112 143 h5 M112 98 h5 M112 53 h5"
+        style="stroke: var(--color-border-strong);"
+        stroke-width="1.6"
+      />
+      <rect
+        x="32"
+        y="106"
+        width="56"
+        height="28"
+        rx="14"
+        style="fill: oklch(0.205 0.04 286 / 0.6);"
+      />
+      <text
+        x="60"
+        y="126"
+        text-anchor="middle"
+        font-size="20"
+        font-weight="700"
+        style="fill: oklch(0.985 0.01 286); font-family: inherit;"
+        >{eFull && eAvail != null ? `${Math.round(fillPct)} %` : '—'}</text
+      >
+    </svg>
+    <div class="flex min-w-0 flex-1 flex-col justify-center gap-2.5">
+      <div class="flex flex-col gap-0.5">
+        <span class="text-[44px] leading-none font-bold" style="color: var(--color-fg);"
           >{!pilotMuet && showers != null ? `≈ ${showers}` : '—'}</span
         >
-        <span class="text-sm" style="color: var(--color-muted-fg);">douches</span>
+        <span class="text-sm" style="color: var(--color-muted-fg);">douches d'eau chaude</span>
       </div>
-    </div>
-    <div
-      class="h-2.5 overflow-hidden rounded-full"
-      style="background: color-mix(in oklch, var(--color-muted-fg) 15%, transparent);"
-    >
-      <div
-        class="h-full rounded-full"
-        style="width: {fillPct}%; background: var(--color-success); transition: width 700ms var(--ease-out);"
-      ></div>
+      <div class="flex items-start gap-2">
+        <span class="shrink-0 text-lg leading-none" aria-hidden="true">{human.emoji}</span>
+        <span class="min-w-0 text-[13.5px] leading-snug font-medium" style="color: var(--color-fg);"
+          >{human.text}</span
+        >
+      </div>
     </div>
   </div>
 
@@ -351,19 +415,6 @@
       🚿 Il ne reste presque plus d'eau chaude — la prochaine douche sera tiède.
     </div>
   {/if}
-
-  <!-- ═══ 2. QUE FAIT-IL — une phrase, et la seule jauge qui parle ═══ -->
-  <div class="state">
-    <div class="flex items-start gap-2.5">
-      <span class="text-xl leading-none" aria-hidden="true">{human.emoji}</span>
-      <div
-        class="min-w-0 flex-1 text-[15px] leading-snug font-medium"
-        style="color: var(--color-fg);"
-      >
-        {human.text}
-      </div>
-    </div>
-  </div>
 
   <!-- ═══ 3. AGIR ═══ -->
   <div class="flex flex-col gap-2">
@@ -428,14 +479,21 @@
   <!-- ═══ SECOND PLAN — un seul repli pour tout ce qui n'est pas « ai-je de l'eau
        chaude, et que fait le chauffe-eau ». Rien de ce qui suit n'a sa place dans
        la vue de tous les jours ; le premier écran doit tenir en quatre regards. ═══ -->
-  <button
-    type="button"
-    class="fold-btn"
-    onclick={() => (showPilot = !showPilot)}
-    aria-expanded={showPilot}
-  >
-    {showPilot ? 'Masquer' : 'Plus d’infos'}
-  </button>
+  <div class="flex items-center justify-between gap-3">
+    <button
+      type="button"
+      class="fold-btn"
+      onclick={() => (showPilot = !showPilot)}
+      aria-expanded={showPilot}
+    >
+      {showPilot ? 'Masquer' : 'Plus d’infos'}
+    </button>
+    <span
+      class="text-[12px] font-semibold tabular-nums"
+      style="color: {gainWeek >= 0 ? 'var(--color-success)' : 'var(--color-warning)'};"
+      >{fmtEur(gainWeek)} cette semaine</span
+    >
+  </div>
 
   {#if showPilot}
     <!-- Économies, chiffres du jour, journal -->
@@ -743,16 +801,6 @@
   .boost-on {
     background: oklch(0.66 0.14 40 / 0.16);
     border-color: oklch(0.66 0.14 40 / 0.55);
-  }
-
-  /* ─── Encart d'état : la phrase qui répond à « et alors ? » ───
-     Surface légèrement soulevée sur le verre de la carte, sans concurrencer le
-     gros chiffre : c'est le deuxième regard, pas le premier. */
-  .state {
-    border-radius: var(--radius-lg);
-    padding: 12px 13px;
-    background: color-mix(in oklch, var(--color-fg) 5%, transparent);
-    border: 1px solid var(--color-border);
   }
 
   /* Avertissement réserve basse — la seule information sur la température qui

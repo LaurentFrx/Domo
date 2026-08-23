@@ -8,10 +8,9 @@
   import { savings } from '$stores/savings.svelte';
   import { settings } from '$stores/settings.svelte';
   import { energyMonthly, type MonthAgg } from '$stores/energyMonthly.svelte';
-  import { cumulus } from '$stores/cumulus.svelte';
   import { preferences } from '$stores/preferences.svelte';
   import { matter } from '$stores/matter.svelte';
-  import { acquire, acquireFns } from '$stores/refcount';
+  import { acquire } from '$stores/refcount';
   import { formatPower, formatCurrency } from '$utils/format';
   import {
     smoothLinePath,
@@ -24,7 +23,6 @@
   import KpiCard from '$components/cards/KpiCard.svelte';
   import ChartHoverLayer from '$components/charts/ChartHoverLayer.svelte';
   import ApplianceCard from '$components/tiles/ApplianceCard.svelte';
-  import PlannerCard from '$components/cards/PlannerCard.svelte';
   import HpHcSplitCard from '$components/cards/HpHcSplitCard.svelte';
 
   // Stores page-scoped : refcountés → une page voisine (pager) qui se démonte ne
@@ -46,19 +44,9 @@
       // de bridage APS ont rejoint le menu (/menu/energie), qui les refcounte.
       acquire(forecast),
       acquire(productionHistory),
-      acquire(energyMonthly), // ventilation mensuelle (tableau + KPI)
-      // Relais cumulus RÉEL (Shelly Pro 1) — état + pilotage dans la carte Eau chaude.
-      acquireFns(
-        'cumulus:relay',
-        () => cumulus.connectRelay(),
-        () => cumulus.disconnectRelay()
-      ),
-      // Orchestrateur (mode, raison de décision, énergie réelle, anomalie).
-      acquireFns(
-        'cumulus:orchestrator',
-        () => cumulus.connectOrchestrator(),
-        () => cumulus.disconnectOrchestrator()
-      )
+      acquire(energyMonthly) // ventilation mensuelle (tableau + KPI)
+      // La carte Eau chaude (relais + orchestrateur cumulus) a rejoint
+      // /menu/eau-chaude le 23/08 — c'est elle qui refcounte ces connexions.
     ];
   });
   onDestroy(() => {
@@ -441,7 +429,6 @@
   </header>
 
   <!-- ═══ Eau chaude (ECS) — carte unique pilotage + journal, en tête de page ═══ -->
-  <PlannerCard />
 
   <!-- ═══ Paysage (iPad/desktop) : production + prévisions côte à côte ═══ -->
   <div class="grid gap-6 lg:grid-cols-2 lg:items-start">
