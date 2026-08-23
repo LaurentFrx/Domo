@@ -2,14 +2,18 @@
   /**
    * Carte « Eau chaude » — pilotage + visualisation du PILOTE V2 (règle zéro achat EDF).
    *
-   * ÉCRITE POUR LA MAISON, PAS POUR L'INGÉNIEUR (refonte 23/08/2026). Trois
-   * niveaux, du plus humain au plus technique :
-   *   1. COMBIEN reste-t-il — « ≈ N douches », jauge, température de l'eau ;
-   *   2. QUE FAIT-IL, en une phrase de français courant, avec la seule jauge qui
-   *      ait un sens pour un habitant : le soleil disponible face à ce qu'il faut ;
-   *   3. AGIR — Auto / Manuel / Vacances + « Chauffer maintenant ».
-   * Tout le reste (les 7 conditions, le surplus invisible, la calibration de la
-   * sonde, les compteurs) vit derrière « Détails techniques », replié par défaut.
+   * ÉCRITE POUR LA MAISON, PAS POUR L'INGÉNIEUR (refonte 23/08/2026).
+   *
+   * QUATRE REGARDS, ET RIEN D'AUTRE :
+   *   1. combien il reste — « ≈ N douches », jauge, température de l'eau ;
+   *   2. ce que fait le chauffe-eau — UNE phrase ;
+   *   3. le geste — « Chauffer maintenant », puis le choix du mode ;
+   *   4. « Plus d'infos » — économies, chiffres du jour, journal, diagnostic.
+   *
+   * La faute de la première version était de tout traduire sans rien SUPPRIMER :
+   * l'état se lisait sous le titre, puis en gros dans un encart, puis en légende
+   * de jauge, puis dans les conditions. Chaque information ne doit vivre qu'à UN
+   * endroit — c'est la seule règle qui rend la carte lisible.
    *
    * Deux pièges d'affichage corrigés au passage :
    *   - la température montrée est la MOYENNE du ballon, pas la sonde de point bas
@@ -73,14 +77,6 @@
         ? 'var(--color-success)'
         : 'var(--color-muted-fg)'
   );
-  // Sous le titre : un repère court, dans les mots de tout le monde. « Alimenté ·
-  // température atteinte » décrivait l'état du contacteur, pas ce que vit l'eau.
-  const statusLine = $derived.by(() => {
-    if (voyant === 'offline') return 'Boîtier injoignable';
-    if (voyant === 'heating') return 'Chauffe en cours';
-    if (voyant === 'supplied') return 'Sous tension — l’eau est déjà à température';
-    return 'Éteint';
-  });
 
   // ── Réserve d'eau chaude ──
   const showersRaw = $derived(cumulus.showers);
@@ -96,71 +92,49 @@
   // ── Traduction des 7 conditions du pilote en français de tous les jours ──
   // Le serveur nomme les conditions pour un diagnostic ; la carte les nomme pour
   // quelqu'un qui veut juste savoir s'il aura de l'eau chaude.
-  const COND_HUMAN: Record<string, { label: string; ko: string }> = {
-    tank: { label: 'Place dans le ballon', ko: 'Le ballon est déjà plein.' },
-    surplus: {
-      label: 'Assez de soleil en trop',
-      ko: 'Le soleil ne produit pas encore assez pour chauffer sans rien acheter.'
-    },
-    battery: {
-      label: 'Batteries assez chargées',
-      ko: 'Les batteries se rechargent d’abord.'
-    },
-    quiet: {
-      label: 'Pas de gros appareil en marche',
-      ko: 'Un gros appareil tourne — on attend qu’il ait fini.'
-    },
-    window: { label: 'Il fait assez jour', ko: 'Il ne fait pas encore assez clair.' },
-    quota: {
-      label: 'Essais restants aujourd’hui',
-      ko: 'Le chauffe-eau a déjà fait ses essais de la journée.'
-    },
-    delays: {
-      label: 'Chauffe-eau prêt à repartir',
-      ko: 'Le chauffe-eau se repose quelques minutes avant de repartir.'
-    }
+  /**
+   * Ce que fait le chauffe-eau — UNE phrase, jamais deux qui disent la même
+   * chose. Première version : titre « En attente de soleil » + sous-titre « Le
+   * soleil ne produit pas encore assez… » — le lecteur lisait deux fois le même
+   * message. La cause EST l'état : « Chauffera dès qu'il y aura assez de soleil »
+   * dit les deux d'un coup.
+   */
+  const COND_WAIT: Record<string, string> = {
+    tank: 'Ballon plein — rien à faire',
+    surplus: 'Chauffera dès qu’il y aura assez de soleil',
+    battery: 'Les batteries se rechargent d’abord',
+    quiet: 'Un gros appareil tourne — la chauffe attend qu’il ait fini',
+    window: 'Chauffera quand il fera plus clair',
+    quota: 'Assez d’essais pour aujourd’hui — ça reprend demain',
+    delays: 'Le chauffe-eau se repose quelques minutes'
   };
 
-  /** Ce que fait le chauffe-eau, en une phrase — et pourquoi, s'il attend. */
-  const human = $derived.by((): { emoji: string; title: string; sub: string | null } => {
-    if (voyant === 'offline')
-      return {
-        emoji: '🔌',
-        title: 'Le boîtier ne répond pas',
-        sub: 'Le chauffe-eau garde son dernier réglage.'
-      };
-    if (heatingNow)
-      return {
-        emoji: '🔥',
-        title: 'L’eau chauffe en ce moment',
-        sub: 'Au soleil, sans rien acheter.'
-      };
-    if (mode === 'off')
-      return { emoji: '🌴', title: 'Mode vacances', sub: 'Le chauffe-eau reste éteint.' };
+  /** Libellés des 7 conditions dans le repli, pour qui va y regarder. */
+  const COND_HUMAN: Record<string, string> = {
+    tank: 'Place dans le ballon',
+    surplus: 'Assez de soleil en trop',
+    battery: 'Batteries assez chargées',
+    quiet: 'Pas de gros appareil en marche',
+    window: 'Il fait assez jour',
+    quota: 'Essais restants aujourd’hui',
+    delays: 'Chauffe-eau prêt à repartir'
+  };
+
+  const human = $derived.by((): { emoji: string; text: string } => {
+    if (voyant === 'offline') return { emoji: '🔌', text: 'Le boîtier ne répond pas' };
+    if (heatingNow) return { emoji: '🔥', text: 'L’eau chauffe en ce moment' };
+    if (mode === 'off') return { emoji: '🌴', text: 'Mode vacances — chauffe-eau éteint' };
     if (mode === 'manual')
-      return {
-        emoji: '✋',
-        title: relayOn ? 'Allumé à la main' : 'Éteint',
-        sub: 'C’est vous qui commandez.'
-      };
+      return { emoji: '✋', text: relayOn ? 'Allumé à la main' : 'Éteint — à vous de l’allumer' };
     if (cumulus.boostUntilFull)
-      return {
-        emoji: '🔥',
-        title: 'Chauffe demandée',
-        sub: 'Elle démarrera dès que ce sera gratuit.'
-      };
-    if (!pilot) return { emoji: '⏳', title: 'En cours de démarrage', sub: null };
-    if (pilot.phase === 'plein')
-      return { emoji: '✅', title: 'Ballon plein', sub: 'Rien à faire.' };
+      return { emoji: '🔥', text: 'Chauffe demandée — dès que ce sera gratuit' };
+    if (!pilot) return { emoji: '⏳', text: 'Démarrage en cours' };
+    if (pilot.phase === 'plein') return { emoji: '✅', text: 'Ballon plein' };
     if (pilot.phase === 'recharge_hc')
-      return { emoji: '🌙', title: 'Chauffe de nuit en cours', sub: 'Au tarif le moins cher.' };
+      return { emoji: '🌙', text: 'Chauffe de nuit, au tarif le moins cher' };
     const ko = pilot.conds.find((c) => !c.ok);
-    if (!ko) return { emoji: '👌', title: 'Prêt à chauffer', sub: 'Le démarrage est imminent.' };
-    return {
-      emoji: '⏳',
-      title: 'En attente de soleil',
-      sub: COND_HUMAN[ko.key]?.ko ?? ko.detail
-    };
+    if (!ko) return { emoji: '👌', text: 'Prêt — la chauffe va démarrer' };
+    return { emoji: '⏳', text: COND_WAIT[ko.key] ?? ko.detail };
   });
 
   /** Jauge « soleil disponible » — la seule qui parle à un habitant. */
@@ -307,7 +281,6 @@
         >
           Eau chaude
         </h3>
-        <div class="text-[12px] font-medium" style="color: {voyantColor};">{statusLine}</div>
       </div>
     </div>
     <div class="flex items-center gap-1.5">
@@ -389,15 +362,11 @@
   <div class="state">
     <div class="flex items-start gap-2.5">
       <span class="text-xl leading-none" aria-hidden="true">{human.emoji}</span>
-      <div class="min-w-0 flex-1">
-        <div class="text-[15px] leading-snug font-semibold" style="color: var(--color-fg);">
-          {human.title}
-        </div>
-        {#if human.sub}
-          <div class="mt-0.5 text-[13px] leading-snug" style="color: var(--color-muted-fg);">
-            {human.sub}
-          </div>
-        {/if}
+      <div
+        class="min-w-0 flex-1 text-[15px] leading-snug font-medium"
+        style="color: var(--color-fg);"
+      >
+        {human.text}
       </div>
     </div>
     {#if sunGauge}
@@ -411,11 +380,8 @@
             style="width: {sunGauge.pct}%; background: var(--color-solar); transition: width 700ms var(--ease-out);"
           ></div>
         </div>
-        <div class="text-[12px]" style="color: var(--color-muted-fg);">
-          Soleil disponible : <strong style="color: var(--color-fg);"
-            >{Math.round(sunGauge.w)} W</strong
-          >
-          sur les <strong style="color: var(--color-fg);">{sunGauge.need} W</strong> qu'il faut
+        <div class="text-right text-[11.5px] tabular-nums" style="color: var(--color-muted-fg);">
+          {Math.round(sunGauge.w)} / {sunGauge.need} W
         </div>
       </div>
     {/if}
@@ -423,27 +389,6 @@
 
   <!-- ═══ 3. AGIR ═══ -->
   <div class="flex flex-col gap-2">
-    <div class="seg" role="radiogroup" aria-label="Mode de pilotage">
-      <button
-        type="button"
-        class="seg-btn"
-        class:seg-on={mode === 'auto'}
-        onclick={() => setMode('auto')}>Auto</button
-      >
-      <button
-        type="button"
-        class="seg-btn"
-        class:seg-on={mode === 'manual'}
-        onclick={() => setMode('manual')}>Manuel</button
-      >
-      <button
-        type="button"
-        class="seg-btn"
-        class:seg-on={mode === 'off'}
-        onclick={() => setMode('off')}>Vacances</button
-      >
-    </div>
-
     {#if mode === 'manual'}
       <div class="flex items-center justify-between px-0.5">
         <span class="text-sm" style="color: var(--color-muted-fg);"
@@ -479,193 +424,216 @@
         Le chauffe-eau reste éteint jusqu'au retour en Auto.
       </div>
     {/if}
+
+    <div class="seg" role="radiogroup" aria-label="Mode de pilotage">
+      <button
+        type="button"
+        class="seg-btn"
+        class:seg-on={mode === 'auto'}
+        onclick={() => setMode('auto')}>Auto</button
+      >
+      <button
+        type="button"
+        class="seg-btn"
+        class:seg-on={mode === 'manual'}
+        onclick={() => setMode('manual')}>Manuel</button
+      >
+      <button
+        type="button"
+        class="seg-btn"
+        class:seg-on={mode === 'off'}
+        onclick={() => setMode('off')}>Vacances</button
+      >
+    </div>
   </div>
 
-  <!-- ═══ 4. COMPRENDRE ═══ -->
-  <div class="gain">
-    <span class="gain-label">💶 Économies vs recharge de nuit</span>
-    <span class="gain-vals tabular-nums">
-      <strong style="color: {gainToday >= 0 ? 'var(--color-success)' : 'var(--color-warning)'};"
-        >{fmtEur(gainToday)}</strong
-      >
-      <span class="gain-unit">auj.</span>
-      <span class="gain-sep">·</span>
-      <strong style="color: {gainWeek >= 0 ? 'var(--color-success)' : 'var(--color-warning)'};"
-        >{fmtEur(gainWeek)}</strong
-      >
-      <span class="gain-unit">/ 7 j</span>
-    </span>
-  </div>
+  <!-- ═══ SECOND PLAN — un seul repli pour tout ce qui n'est pas « ai-je de l'eau
+       chaude, et que fait le chauffe-eau ». Rien de ce qui suit n'a sa place dans
+       la vue de tous les jours ; le premier écran doit tenir en quatre regards. ═══ -->
+  <button
+    type="button"
+    class="fold-btn"
+    onclick={() => (showPilot = !showPilot)}
+    aria-expanded={showPilot}
+  >
+    {showPilot ? 'Masquer' : 'Plus d’infos'}
+  </button>
 
-  <div class="ministats">
-    <div class="ministat">
-      <span class="ministat-label">Ballon</span>
-      {#if cumulus.waterTempC !== null}
-        <button
-          type="button"
-          class="temp-link"
-          aria-label="Historique 4 h — eau chaude (ballon)"
-          onclick={() => openTempHistory('thermo_cumulus', 'Eau chaude (ballon)')}
+  {#if showPilot}
+    <!-- Économies, chiffres du jour, journal -->
+    <div class="gain">
+      <span class="gain-label">💶 Économies vs recharge de nuit</span>
+      <span class="gain-vals tabular-nums">
+        <strong style="color: {gainToday >= 0 ? 'var(--color-success)' : 'var(--color-warning)'};"
+          >{fmtEur(gainToday)}</strong
         >
-          <strong class="ministat-value">{ballonTemp}</strong>
-        </button>
-      {:else}
-        <strong class="ministat-value">{ballonTemp}</strong>
-      {/if}
+        <span class="gain-unit">auj.</span>
+        <span class="gain-sep">·</span>
+        <strong style="color: {gainWeek >= 0 ? 'var(--color-success)' : 'var(--color-warning)'};"
+          >{fmtEur(gainWeek)}</strong
+        >
+        <span class="gain-unit">/ 7 j</span>
+      </span>
     </div>
-    <div class="ministat">
-      <span class="ministat-label">Dernier plein</span>
-      <strong class="ministat-value">{lastFull}</strong>
-    </div>
-    <div class="ministat">
-      <span class="ministat-label">Consommé auj.</span>
-      <strong class="ministat-value">{consoToday}</strong>
-    </div>
-  </div>
 
-  <!-- Journal du jour -->
-  <div class="flex flex-col gap-2">
-    <div
-      class="text-[11px] font-semibold tracking-[0.08em] uppercase"
-      style="color: var(--color-muted-fg);"
-    >
-      Aujourd'hui
-    </div>
-    {#if events.length}
-      {#each visibleEvents as e (e.ts + e.text)}
-        <div class="flex items-center gap-2 text-sm">
-          <span class="w-10 shrink-0 tabular-nums" style="color: var(--color-muted-fg);"
-            >{hhmm(e.ts)}</span
+    <div class="ministats">
+      <div class="ministat">
+        <span class="ministat-label">Ballon</span>
+        {#if cumulus.waterTempC !== null}
+          <button
+            type="button"
+            class="temp-link"
+            aria-label="Historique 4 h — eau chaude (ballon)"
+            onclick={() => openTempHistory('thermo_cumulus', 'Eau chaude (ballon)')}
           >
-          <span class="shrink-0">{e.emoji}</span>
-          <span class="min-w-0 flex-1 truncate" style="color: var(--color-fg);">{e.text}</span>
-        </div>
-      {/each}
-      {#if hiddenCount > 0 || showAllEvents}
-        <button
-          type="button"
-          class="fold-btn"
-          onclick={() => (showAllEvents = !showAllEvents)}
-          aria-expanded={showAllEvents}
-        >
-          {showAllEvents ? 'Réduire' : `Afficher les ${hiddenCount} autres`}
-        </button>
-      {/if}
-    {:else}
-      <div class="text-sm" style="color: var(--color-muted-fg);">
-        Rien à signaler — la journée s'affichera ici (chauffes, douches…).
+            <strong class="ministat-value">{ballonTemp}</strong>
+          </button>
+        {:else}
+          <strong class="ministat-value">{ballonTemp}</strong>
+        {/if}
       </div>
-    {/if}
-  </div>
-
-  <!-- ═══ Repli technique — tout ce qui ne sert qu'au diagnostic ═══ -->
-  {#if pilot}
-    <button
-      type="button"
-      class="fold-btn"
-      onclick={() => (showPilot = !showPilot)}
-      aria-expanded={showPilot}
-    >
-      {showPilot ? 'Masquer les détails techniques' : 'Détails techniques'}
-    </button>
-  {/if}
-
-  {#if showPilot && pilot}
-    <div
-      class="flex flex-col gap-2.5 rounded-xl p-3 text-sm"
-      style="background: color-mix(in oklch, var(--color-primary) 8%, transparent);"
-    >
-      <div class="flex items-baseline justify-between gap-2">
-        <p class="font-semibold" style="color: var(--color-fg);">
-          {PILOT_PHASE_LABELS[pilot.phase] ?? pilot.phase}
-        </p>
-        <span class="text-xs" style="color: var(--color-muted-fg);"
-          >depuis {fmtSince(pilot.phaseSinceTs)}</span
-        >
+      <div class="ministat">
+        <span class="ministat-label">Dernier plein</span>
+        <strong class="ministat-value">{lastFull}</strong>
       </div>
-      <p class="text-[12.5px]" style="color: var(--color-muted-fg);">{pilot.note}</p>
+      <div class="ministat">
+        <span class="ministat-label">Consommé auj.</span>
+        <strong class="ministat-value">{consoToday}</strong>
+      </div>
+    </div>
 
-      <!-- Les 7 conditions — nommées comme les comprend un habitant, la mesure
-           technique restant lisible à droite pour qui veut vérifier -->
-      <div class="conds">
-        {#each pilot.conds as c (c.key)}
-          <div class="cond" class:cond-ok={c.ok}>
-            <span class="cond-dot">{c.ok ? '✓' : '✗'}</span>
-            <span class="cond-label">{COND_HUMAN[c.key]?.label ?? c.label}</span>
-            <span class="cond-detail">{c.detail}</span>
+    <!-- Journal du jour -->
+    <div class="flex flex-col gap-2">
+      <div
+        class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+        style="color: var(--color-muted-fg);"
+      >
+        Aujourd'hui
+      </div>
+      {#if events.length}
+        {#each visibleEvents as e (e.ts + e.text)}
+          <div class="flex items-center gap-2 text-sm">
+            <span class="w-10 shrink-0 tabular-nums" style="color: var(--color-muted-fg);"
+              >{hhmm(e.ts)}</span
+            >
+            <span class="shrink-0">{e.emoji}</span>
+            <span class="min-w-0 flex-1 truncate" style="color: var(--color-fg);">{e.text}</span>
           </div>
         {/each}
-      </div>
-
-      <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-        <dt style="color: var(--color-muted-fg);">Sonde (point bas du ballon)</dt>
-        <dd class="text-right tabular-nums" style="color: var(--color-fg);">{sondeTemp}</dd>
-      </dl>
-
-      <!-- Horaires de la fenêtre solaire du jour (éphémérides) -->
-      {#if pilot.sunWindowStart && pilot.sunWindowEnd}
-        <div class="sun-window">
-          <span>☀️ Fenêtre solaire aujourd'hui</span>
-          <strong class="tabular-nums">{pilot.sunWindowStart} → {pilot.sunWindowEnd}</strong>
-        </div>
-        {#if pilot.sunWindowNote}
-          <div class="sun-window-note">{pilot.sunWindowNote}</div>
+        {#if hiddenCount > 0 || showAllEvents}
+          <button
+            type="button"
+            class="fold-btn"
+            onclick={() => (showAllEvents = !showAllEvents)}
+            aria-expanded={showAllEvents}
+          >
+            {showAllEvents ? 'Réduire' : `Afficher les ${hiddenCount} autres`}
+          </button>
         {/if}
-      {/if}
-
-      <!-- Déclencheur de SECOURS (bridage) : une voie d'allumage ALTERNATIVE, pas une
-           8e condition — état neutre, jamais de ✗ rouge -->
-      <div
-        class="rescue"
-        class:rescue-armed={pilot.rescue.state === 'armed'}
-        class:rescue-unavailable={pilot.rescue.state === 'unavailable'}
-      >
-        <div class="rescue-head">
-          <span class="rescue-title">Déclencheur de secours (bridage)</span>
-          <span class="rescue-state">{pilot.rescue.detail}</span>
+      {:else}
+        <div class="text-sm" style="color: var(--color-muted-fg);">
+          Rien à signaler — la journée s'affichera ici (chauffes, douches…).
         </div>
+      {/if}
+    </div>
+
+    {#if pilot}
+      <div
+        class="flex flex-col gap-2.5 rounded-xl p-3 text-sm"
+        style="background: color-mix(in oklch, var(--color-primary) 8%, transparent);"
+      >
+        <div class="flex items-baseline justify-between gap-2">
+          <p class="font-semibold" style="color: var(--color-fg);">
+            {PILOT_PHASE_LABELS[pilot.phase] ?? pilot.phase}
+          </p>
+          <span class="text-xs" style="color: var(--color-muted-fg);"
+            >depuis {fmtSince(pilot.phaseSinceTs)}</span
+          >
+        </div>
+        <p class="text-[12.5px]" style="color: var(--color-muted-fg);">{pilot.note}</p>
+
+        <!-- Les 7 conditions — nommées comme les comprend un habitant, la mesure
+           technique restant lisible à droite pour qui veut vérifier -->
+        <div class="conds">
+          {#each pilot.conds as c (c.key)}
+            <div class="cond" class:cond-ok={c.ok}>
+              <span class="cond-dot">{c.ok ? '✓' : '✗'}</span>
+              <span class="cond-label">{COND_HUMAN[c.key] ?? c.label}</span>
+              <span class="cond-detail">{c.detail}</span>
+            </div>
+          {/each}
+        </div>
+
         <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-          <dt style="color: var(--color-muted-fg);">Surplus invisible estimé</dt>
+          <dt style="color: var(--color-muted-fg);">Sonde (point bas du ballon)</dt>
+          <dd class="text-right tabular-nums" style="color: var(--color-fg);">{sondeTemp}</dd>
+        </dl>
+
+        <!-- Horaires de la fenêtre solaire du jour (éphémérides) -->
+        {#if pilot.sunWindowStart && pilot.sunWindowEnd}
+          <div class="sun-window">
+            <span>☀️ Fenêtre solaire aujourd'hui</span>
+            <strong class="tabular-nums">{pilot.sunWindowStart} → {pilot.sunWindowEnd}</strong>
+          </div>
+          {#if pilot.sunWindowNote}
+            <div class="sun-window-note">{pilot.sunWindowNote}</div>
+          {/if}
+        {/if}
+
+        <!-- Déclencheur de SECOURS (bridage) : une voie d'allumage ALTERNATIVE, pas une
+           8e condition — état neutre, jamais de ✗ rouge -->
+        <div
+          class="rescue"
+          class:rescue-armed={pilot.rescue.state === 'armed'}
+          class:rescue-unavailable={pilot.rescue.state === 'unavailable'}
+        >
+          <div class="rescue-head">
+            <span class="rescue-title">Déclencheur de secours (bridage)</span>
+            <span class="rescue-state">{pilot.rescue.detail}</span>
+          </div>
+          <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+            <dt style="color: var(--color-muted-fg);">Surplus invisible estimé</dt>
+            <dd class="text-right tabular-nums" style="color: var(--color-fg);">
+              {pilot.invisibleSurplusW} W
+            </dd>
+            <dt style="color: var(--color-muted-fg);">Production APS (étalon)</dt>
+            <dd class="text-right tabular-nums" style="color: var(--color-fg);">{pilot.pApsW} W</dd>
+            <dt style="color: var(--color-muted-fg);">Potentiel solaire total</dt>
+            <dd class="text-right tabular-nums" style="color: var(--color-fg);">
+              {pilot.potTotalW} W
+            </dd>
+          </dl>
+        </div>
+
+        <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
+          <dt style="color: var(--color-muted-fg);">Batteries</dt>
           <dd class="text-right tabular-nums" style="color: var(--color-fg);">
-            {pilot.invisibleSurplusW} W
+            {pilot.socNow !== null ? `${pilot.socNow} %` : '—'}
+            {#if pilot.socStart !== null && pilot.socNow !== null}
+              <span style="color: var(--color-muted-fg);">
+                ({pilot.socNow - pilot.socStart >= 0 ? '+' : ''}{pilot.socNow - pilot.socStart} pts depuis
+                l'allumage)</span
+              >
+            {/if}
           </dd>
-          <dt style="color: var(--color-muted-fg);">Production APS (étalon)</dt>
-          <dd class="text-right tabular-nums" style="color: var(--color-fg);">{pilot.pApsW} W</dd>
-          <dt style="color: var(--color-muted-fg);">Potentiel solaire total</dt>
+
+          <dt style="color: var(--color-muted-fg);">Allumages aujourd'hui</dt>
           <dd class="text-right tabular-nums" style="color: var(--color-fg);">
-            {pilot.potTotalW} W
+            {pilot.solarStartsToday}/{pilot.quota} spontanés · {pilot.resumesToday} reprises
           </dd>
+
+          <dt style="color: var(--color-muted-fg);">Prochaine action</dt>
+          <dd class="text-right" style="color: var(--color-fg);">{pilot.nextAction}</dd>
+
+          {#if cumulus.relaxAmplitudeC !== null && cumulus.relaxTauMin !== null}
+            <dt style="color: var(--color-muted-fg);">Relaxation sonde (calibration)</dt>
+            <dd class="text-right tabular-nums" style="color: var(--color-fg);">
+              {cumulus.relaxAmplitudeC.toFixed(1)} °C · τ {Math.round(cumulus.relaxTauMin)} min
+            </dd>
+          {/if}
         </dl>
       </div>
-
-      <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
-        <dt style="color: var(--color-muted-fg);">Batteries</dt>
-        <dd class="text-right tabular-nums" style="color: var(--color-fg);">
-          {pilot.socNow !== null ? `${pilot.socNow} %` : '—'}
-          {#if pilot.socStart !== null && pilot.socNow !== null}
-            <span style="color: var(--color-muted-fg);">
-              ({pilot.socNow - pilot.socStart >= 0 ? '+' : ''}{pilot.socNow - pilot.socStart} pts depuis
-              l'allumage)</span
-            >
-          {/if}
-        </dd>
-
-        <dt style="color: var(--color-muted-fg);">Allumages aujourd'hui</dt>
-        <dd class="text-right tabular-nums" style="color: var(--color-fg);">
-          {pilot.solarStartsToday}/{pilot.quota} spontanés · {pilot.resumesToday} reprises
-        </dd>
-
-        <dt style="color: var(--color-muted-fg);">Prochaine action</dt>
-        <dd class="text-right" style="color: var(--color-fg);">{pilot.nextAction}</dd>
-
-        {#if cumulus.relaxAmplitudeC !== null && cumulus.relaxTauMin !== null}
-          <dt style="color: var(--color-muted-fg);">Relaxation sonde (calibration)</dt>
-          <dd class="text-right tabular-nums" style="color: var(--color-fg);">
-            {cumulus.relaxAmplitudeC.toFixed(1)} °C · τ {Math.round(cumulus.relaxTauMin)} min
-          </dd>
-        {/if}
-      </dl>
-    </div>
+    {/if}
   {/if}
 
   <!-- Comment ça marche ? -->
