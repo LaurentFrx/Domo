@@ -116,11 +116,11 @@ au tarif plancher et le parc n'a plus rien à garder.
 E_réserve(t) = Σ_{h ∈ [t_finPV , t_HC]} P̄_maison(h) · dh  −  Ê_PV(t → t_finPV)
 ```
 
-| Terme         | Source                                                                                               |
-| ------------- | ---------------------------------------------------------------------------------------------------- |
-| `t_finPV`     | coucher solaire, éphéméride NOAA déjà présente dans `sun.ts` — aucune dépendance réseau              |
-| `t_HC`        | **lu dans `data/tariffs.json`**, jamais écrit en dur : `hc_windows` vaut aujourd'hui `00:06 → 08:06` |
-| `P̄_maison(h)` | profil horaire **mesuré**, glissant, par heure de la journée, quantile p75                           |
+| Terme         | Source                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `t_finPV`     | éphéméride NOAA (`sun.ts`), **élévation solaire 6°** — mesurée : sur 54 jours la production tombe sous 100 W à 5,9° en médiane (p10 3,9° par ciel clair, p90 13,2° par ciel couvert). À ne pas confondre avec la fin de la fenêtre d'allumage du pilote, que les seuils d'azimut ferment plus d'une heure trop tôt : la prendre pour `t_finPV` gonflait la réserve de ~1,3 kWh en lui faisant couvrir l'heure de 19 h, l'une des plus chargées |
+| `t_HC`        | **lu dans `data/tariffs.json`**, jamais écrit en dur : `hc_windows` vaut aujourd'hui `00:06 → 08:06`                                                                                                                                                                                                                                                                                                                                           |
+| `P̄_maison(h)` | profil horaire **mesuré**, glissant, par heure de la journée, quantile p75                                                                                                                                                                                                                                                                                                                                                                     |
 
 Profil horaire relevé (bilan AC hors ballon, 22/07 → 23/08, ~2 200 échantillons
 par tranche) :
