@@ -5,10 +5,21 @@
    * ÉCRITE POUR LA MAISON, PAS POUR L'INGÉNIEUR (refonte 23/08/2026).
    *
    * QUATRE REGARDS, ET RIEN D'AUTRE :
-   *   1. combien il reste — « ≈ N douches », jauge, température de l'eau ;
-   *   2. ce que fait le chauffe-eau — UNE phrase ;
+   *   1. combien il reste — « ≈ N douches » et sa jauge, RIEN d'autre ;
+   *   2. ce que fait le chauffe-eau — UNE phrase, sans un seul watt ;
    *   3. le geste — « Chauffer maintenant », puis le choix du mode ;
    *   4. « Plus d'infos » — économies, chiffres du jour, journal, diagnostic.
+   *
+   * NI WATT NI DEGRÉ dans la vue de tous les jours (retour de Laurent, 23/08) :
+   *   - « 896 / 2 000 W » ne veut rien dire pour qui veut juste de l'eau chaude —
+   *     et le seuil lui-même est un artefact (le ballon tire 2 965 W, les 2 000 W
+   *     ne sont que la part exigée du soleil, le reste venant des batteries) ;
+   *   - aucune température affichée n'était CELLE DU ROBINET : la sonde lit le
+   *     point bas (36 °C), le modèle calcule une moyenne (49 °C), et l'eau qui
+   *     sort vient du HAUT, à la consigne du thermostat. Elle ne varie pas tant
+   *     qu'il reste de la réserve, puis tiédit d'un coup — d'où le seul message
+   *     utile : un avertissement quand la réserve tire à sa fin.
+   * Watts et degrés restent disponibles sous « Plus d'infos », nommés.
    *
    * La faute de la première version était de tout traduire sans rien SUPPRIMER :
    * l'état se lisait sous le titre, puis en gros dans un encart, puis en légende
@@ -135,18 +146,6 @@
     const ko = pilot.conds.find((c) => !c.ok);
     if (!ko) return { emoji: '👌', text: 'Prêt — la chauffe va démarrer' };
     return { emoji: '⏳', text: COND_WAIT[ko.key] ?? ko.detail };
-  });
-
-  /** Jauge « soleil disponible » — la seule qui parle à un habitant. */
-  const sunGauge = $derived.by(() => {
-    if (!pilot || pilot.surplusNeedW <= 0) return null;
-    const ko = pilot.conds.find((c) => !c.ok);
-    if (ko?.key !== 'surplus') return null;
-    return {
-      w: pilot.surplusW,
-      need: pilot.surplusNeedW,
-      pct: Math.min(100, Math.max(0, (pilot.surplusW / pilot.surplusNeedW) * 100))
-    };
   });
 
   // ── Pilotage ──
@@ -335,17 +334,6 @@
         >
         <span class="text-sm" style="color: var(--color-muted-fg);">douches</span>
       </div>
-      <div class="shrink-0 text-right">
-        <div
-          class="text-[10.5px] font-semibold tracking-[0.08em] uppercase"
-          style="color: var(--color-muted-fg);"
-        >
-          eau à
-        </div>
-        <div class="text-lg leading-tight font-semibold" style="color: var(--color-hp);">
-          {ballonTemp}
-        </div>
-      </div>
     </div>
     <div
       class="h-2.5 overflow-hidden rounded-full"
@@ -358,6 +346,12 @@
     </div>
   </div>
 
+  {#if !pilotMuet && showersRaw !== null && showersRaw < 1.2}
+    <div class="cc-lowwater">
+      🚿 Il ne reste presque plus d'eau chaude — la prochaine douche sera tiède.
+    </div>
+  {/if}
+
   <!-- ═══ 2. QUE FAIT-IL — une phrase, et la seule jauge qui parle ═══ -->
   <div class="state">
     <div class="flex items-start gap-2.5">
@@ -369,22 +363,6 @@
         {human.text}
       </div>
     </div>
-    {#if sunGauge}
-      <div class="mt-2.5 flex flex-col gap-1">
-        <div
-          class="h-2 overflow-hidden rounded-full"
-          style="background: color-mix(in oklch, var(--color-muted-fg) 15%, transparent);"
-        >
-          <div
-            class="h-full rounded-full"
-            style="width: {sunGauge.pct}%; background: var(--color-solar); transition: width 700ms var(--ease-out);"
-          ></div>
-        </div>
-        <div class="text-right text-[11.5px] tabular-nums" style="color: var(--color-muted-fg);">
-          {Math.round(sunGauge.w)} / {sunGauge.need} W
-        </div>
-      </div>
-    {/if}
   </div>
 
   <!-- ═══ 3. AGIR ═══ -->
@@ -478,7 +456,7 @@
 
     <div class="ministats">
       <div class="ministat">
-        <span class="ministat-label">Ballon</span>
+        <span class="ministat-label">Eau (moyenne)</span>
         {#if cumulus.waterTempC !== null}
           <button
             type="button"
@@ -766,6 +744,18 @@
     padding: 12px 13px;
     background: color-mix(in oklch, var(--color-fg) 5%, transparent);
     border: 1px solid var(--color-border);
+  }
+
+  /* Avertissement réserve basse — la seule information sur la température qui
+     serve à quelque chose : l'eau du robinet ne tiédit qu'une fois le ballon vidé. */
+  .cc-lowwater {
+    border-radius: var(--radius-lg);
+    padding: 9px 12px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--color-hp);
+    background: color-mix(in oklch, var(--color-hp) 12%, transparent);
+    border: 1px solid color-mix(in oklch, var(--color-hp) 35%, transparent);
   }
 
   .gain {
