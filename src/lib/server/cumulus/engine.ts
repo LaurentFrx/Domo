@@ -338,6 +338,7 @@ async function runTick(apply: boolean): Promise<TickResult> {
       ` | APS=${pilotRes.view.pApsW}W potentiel=${pilotRes.view.potTotalW}W` +
       ` surplus_invisible=${pilotRes.view.invisibleSurplusW}W` +
       ` | allumages ${pilotRes.view.solarStartsToday}/${pilotRes.view.quota} (+${pilotRes.view.resumesToday} reprises)` +
+      ` | réserve_soir=${pilotRes.reserve.wh ?? '—'}Wh (${pilotRes.reserve.note})` +
       ` | ${pilotRes.view.nextAction}`
   );
 

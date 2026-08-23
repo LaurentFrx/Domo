@@ -109,6 +109,10 @@ export interface CumulusInputs {
   maxAcAvailable: boolean; // lecture Modbus locale de la Max AC disponible
   maxAcSocPct: number | null; // SoC de la Max AC (%), null si local muet
   maxAcChargeW: number | null; // puissance de CHARGE de la Max AC (W ≥ 0), null si local muet
+  /** Flux AC net de la Max AC, SIGNÉ (+ elle débite vers la maison / − elle charge),
+   *  null si le Modbus local est muet. Le signe est indispensable au bilan de charge
+   *  maison : sans lui, une Max AC qui absorbe l'excédent se compte comme une source. */
+  maxAcNetW: number | null;
   pvApsW: number; // prod du micro-onduleur APsystems EZ1 (pan Sud), W — l'ÉTALON (jamais bridé)
   apsAvailable: boolean; // le bridge APS répond (distinguer « injoignable » de « 0 W réel »)
   apsAgeSec: number | null; // fraîcheur de la donnée APS (s), null si inconnue
@@ -297,6 +301,8 @@ export interface PilotConfig {
 }
 
 /** État persistant du pilote (mémoire de la machine à phases). */
+import type { HouseAccum, HouseHourSample } from './reserve';
+
 export interface PilotState {
   /** Depuis quand les conditions d'allumage sont TOUTES vraies (null = pas toutes vraies). */
   condsSinceTs: number | null;
@@ -322,6 +328,11 @@ export interface PilotState {
   /** Fenêtre solaire du jour (éphémérides), calculée une fois par jour calendaire
    *  et mise en cache (indépendante de l'instant courant — ne dépend que de la date). */
   sunWindow: { forDate: string; startMin: number; endMin: number } | null;
+  /** Profil horaire APPRIS de la charge maison hors ballon (24 tranches × jours),
+   *  base de la réserve du soir en Wh. Cf. cumulus/reserve.ts. */
+  houseProfile: HouseHourSample[][];
+  /** Accumulateur de l'heure en cours (persisté : un redémarrage ne perd pas l'heure). */
+  houseAccum: HouseAccum | null;
 }
 
 /** Plan de recharge nocturne calculé à hcPlanHour. */

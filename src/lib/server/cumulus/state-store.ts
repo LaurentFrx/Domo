@@ -11,6 +11,7 @@
 
 import path from 'node:path';
 import { readJsonSafe, writeJsonAtomic } from '../atomic-store';
+import { emptyHouseProfile, normalizeHouseProfile, type HouseAccum } from './reserve';
 import type {
   CumulusRuntimeState,
   AutoMode,
@@ -332,8 +333,21 @@ function defaultPilotStateStore(): PilotState {
     wouldOnSinceTs: null,
     apsLowSinceTs: null,
     apsAlert: 'none',
-    sunWindow: null
+    sunWindow: null,
+    houseProfile: emptyHouseProfile(),
+    houseAccum: null
   };
+}
+
+function normHouseAccum(v: unknown): HouseAccum | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.day !== 'string') return null;
+  const hour = Number(o.hour);
+  const sumW = Number(o.sumW);
+  const n = Number(o.n);
+  if (!Number.isFinite(hour) || !Number.isFinite(sumW) || !Number.isFinite(n)) return null;
+  return { day: o.day, hour: Math.max(0, Math.min(23, Math.floor(hour))), sumW, n: Math.max(0, n) };
 }
 
 function normSunWindow(v: unknown): PilotState['sunWindow'] {
@@ -382,7 +396,9 @@ function normPilot(v: unknown): PilotState {
     apsAlert: ['none', 'unreachable', 'fault'].includes(o.apsAlert as string)
       ? (o.apsAlert as PilotState['apsAlert'])
       : 'none',
-    sunWindow: normSunWindow(o.sunWindow)
+    sunWindow: normSunWindow(o.sunWindow),
+    houseProfile: normalizeHouseProfile(o.houseProfile),
+    houseAccum: normHouseAccum(o.houseAccum)
   };
 }
 

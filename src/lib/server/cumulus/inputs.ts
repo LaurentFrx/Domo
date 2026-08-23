@@ -528,6 +528,9 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     maxAcAvailable: sbLocal.available,
     maxAcSocPct: sbLocal.available ? sbLocal.soc_pct : null,
     maxAcChargeW: sbLocal.available ? Math.max(0, -sbLocal.battery_power_w) : null,
+    // Signé, converti côté AC par le module Modbus (CONV_ETA) : + elle débite,
+    // − elle charge. Sert au bilan de charge maison de la réserve du soir.
+    maxAcNetW: sbLocal.available ? sbLocal.ac_net_w : null,
     sbInputW: anker.sbInputW,
     sb3ChargeW: anker.sb3ChargeW,
     pvApsW: aps.powerW,

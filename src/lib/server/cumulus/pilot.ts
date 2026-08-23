@@ -36,6 +36,8 @@ import type {
   HcPlan,
   ShadowEvent
 } from './types';
+import { accumulateHouseLoad, emptyHouseProfile, reserveWh, type ReserveResult } from './reserve';
+import { nextTariffSwitch, isHC } from '$lib/server/tariffs';
 import { sunPosition } from './sun.ts';
 import type { PotentialResult } from './solar-potential';
 
@@ -64,6 +66,10 @@ export interface PilotStepResult {
   /** Cause de la coupure quand le pilote interrompt une chauffe (null sinon).
    *  Transmise à decide() pour que la protection prime sur l'anti-court-cycle. */
   cutCause: CessionCause | null;
+  /** Réserve du soir en Wh — JOURNALISÉE SEULEMENT pour l'instant : elle ne
+   *  décide encore de rien. Elle remplacera batteryFloorCutPct (40 % du parc)
+   *  une fois ses valeurs vérifiées en service. */
+  reserve: ReserveResult;
 }
 
 export function defaultPilotState(): PilotState {
@@ -80,7 +86,9 @@ export function defaultPilotState(): PilotState {
     wouldOnSinceTs: null,
     apsLowSinceTs: null,
     apsAlert: 'none',
-    sunWindow: null
+    sunWindow: null,
+    houseProfile: emptyHouseProfile(),
+    houseAccum: null
   };
 }
 
@@ -200,6 +208,53 @@ export function pilotStep(
       windowLeftMin = m;
     }
   }
+
+  // ── RÉSERVE DU SOIR (Wh) — la fenêtre « plus de soleil, pas encore d'HC » ──
+  // Décision de Laurent (23/08) : ce que le parc doit garder n'est pas un
+  // pourcentage de SoC mais l'énergie que la maison consommera entre la fin de
+  // la production solaire et le début des heures creuses. Au-delà, le réseau
+  // prend le relais au tarif plancher et il n'y a plus rien à garder.
+  //
+  // Charge maison hors ballon : MÊME bilan AC que la boucle SB3
+  // (sb3loop/decide.ts:167) — réseau signé + APS + sortie SB3 + flux AC net
+  // Max AC SIGNÉ — moins la voie 1 de l'EM-50. Le signe de la Max AC est vital :
+  // sans lui, une Max AC qui absorbe l'excédent se compterait comme une source.
+  // Une seule entrée manquante ⇒ `null`, jamais 0 : une maison silencieuse par
+  // défaut ferait apprendre un profil creux et sous-dimensionnerait la réserve.
+  const houseLoadW =
+    inputs.em50Available && inputs.maxAcNetW !== null && inputs.ankerAvailable
+      ? Math.max(
+          0,
+          inputs.gridPowerW +
+            inputs.pvApsW +
+            inputs.sbOutputPowerW +
+            inputs.maxAcNetW -
+            Math.max(0, inputs.cumulusPowerW)
+        )
+      : null;
+  {
+    const acc = accumulateHouseLoad(
+      pilot.houseProfile,
+      pilot.houseAccum,
+      inputs.todayParis,
+      Math.floor(ctx.hourLocal),
+      houseLoadW
+    );
+    pilot.houseProfile = acc.profile;
+    pilot.houseAccum = acc.accum;
+  }
+  const nowDate = new Date(now);
+  const tariffSwitch = nextTariffSwitch(nowDate);
+  // `nextTariffSwitch` rend le régime qui SUIT la bascule : en HP, c'est le
+  // début des heures creuses. En HC, il n'y a plus de fenêtre chère devant nous.
+  const minutesToHcStart =
+    isHC(nowDate) || tariffSwitch.period !== 'HC' ? null : tariffSwitch.inMinutes;
+  const reserve: ReserveResult = reserveWh(
+    pilot.houseProfile,
+    ctx.minuteOfDay,
+    windowLeftMin,
+    minutesToHcStart
+  );
 
   // Fenêtre du jour (horaires HH:MM) — calculée une fois par jour, mise en cache
   // (ne dépend que de la date + lat/lon + seuils, pas de l'instant courant).
@@ -705,7 +760,7 @@ export function pilotStep(
     computedAt: now
   };
 
-  return { wantOn, reason: wantOn ? reason : 'wait', view, events, pilot, cutCause };
+  return { wantOn, reason: wantOn ? reason : 'wait', view, events, pilot, cutCause, reserve };
 }
 
 function cond(key: string, label: string, ok: boolean, detail: string): PilotView['conds'][number] {
