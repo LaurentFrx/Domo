@@ -708,8 +708,17 @@ export function pilotStep(
         'surplus',
         'Surplus disponible',
         exportFrank || (inputs.em50Available && buyW <= 50 && surplusDispoW >= p.surplusOnW),
+        // « Max AC 0 W » se lisait « elle ne débite rien » alors que le terme compte
+        // ce qu'elle ABSORBE. Quand elle débite, on le dit — sinon le lecteur
+        // conclut qu'il n'y a pas de soleil au moment précis où la batterie
+        // alimente le ballon (constaté le 23/08 : ✗ affiché pendant une chauffe
+        // à 3 009 W avec le compteur à +17 W).
         (inputs.maxAcAvailable
-          ? `${surplusDispoW} W réorientables (Max AC ${Math.round(inputs.maxAcChargeW ?? 0)} W + SB3 ${inputs.sb3ChargeW} W + don ${exportW} W)`
+          ? `${surplusDispoW} W réorientables (Max AC ${
+              (inputs.maxAcNetW ?? 0) > 20
+                ? `débite ${Math.round(inputs.maxAcNetW ?? 0)} W — rien à réorienter`
+                : `charge ${Math.round(inputs.maxAcChargeW ?? 0)} W`
+            } + SB3 ${inputs.sb3ChargeW} W + don ${exportW} W)`
           : exportW > 0
             ? `${exportW} W donnés (mesure locale muette)`
             : '≈ 0 W') + (buyW > 50 ? ` · achat ${buyW} W` : '')

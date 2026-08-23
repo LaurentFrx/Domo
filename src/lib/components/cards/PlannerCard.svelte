@@ -530,17 +530,26 @@
         </div>
         <p class="text-[12.5px]" style="color: var(--color-muted-fg);">{pilot.note}</p>
 
-        <!-- Les 7 conditions — nommées comme les comprend un habitant, la mesure
-           technique restant lisible à droite pour qui veut vérifier -->
-        <div class="conds">
-          {#each pilot.conds as c (c.key)}
-            <div class="cond" class:cond-ok={c.ok}>
-              <span class="cond-dot">{c.ok ? '✓' : '✗'}</span>
-              <span class="cond-label">{COND_HUMAN[c.key] ?? c.label}</span>
-              <span class="cond-detail">{c.detail}</span>
-            </div>
-          {/each}
-        </div>
+        <!-- Les 7 conditions ne gouvernent QUE l'allumage. Les afficher pendant une
+             chauffe en cours se lit comme une contradiction — « ✗ pas assez de
+             soleil » sous « l'eau chauffe en ce moment », constaté le 23/08. Une
+             fois le chauffe-eau lancé, ce sont les protections qui décident. -->
+        {#if !heatingNow && !relayOn}
+          <div class="conds">
+            {#each pilot.conds as c (c.key)}
+              <div class="cond" class:cond-ok={c.ok}>
+                <span class="cond-dot">{c.ok ? '✓' : '✗'}</span>
+                <span class="cond-label">{COND_HUMAN[c.key] ?? c.label}</span>
+                <span class="cond-detail">{c.detail}</span>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="text-[12.5px]" style="color: var(--color-muted-fg);">
+            Les conditions d'allumage ne s'appliquent plus : le chauffe-eau est lancé, ce sont les
+            protections (achat réseau, réserve batterie) qui décident maintenant.
+          </div>
+        {/if}
 
         <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
           <dt style="color: var(--color-muted-fg);">Sonde (point bas du ballon)</dt>
