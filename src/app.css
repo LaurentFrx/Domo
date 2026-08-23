@@ -5,6 +5,16 @@
 
 @import './lib/theme/animations.css';
 
+/* Propriétés personnalisées ANIMABLES (enregistrées ici, jamais dans un
+   composant : un @property doit être global et déclaré une seule fois).
+   --store-p : déploiement du store-banne 0→1, transitionné par StoreCard ;
+   la géométrie 3D (toile, bras via acos()) en découle dans le CSS. */
+@property --store-p {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
 /* ════════════════════════════════════════════════════════════════════════ */
 /*   Tokens — Design system Domo (Yeldra v2, OKLCH)                         */
 /* ════════════════════════════════════════════════════════════════════════ */
