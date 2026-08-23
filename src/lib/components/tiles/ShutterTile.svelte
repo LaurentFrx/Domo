@@ -417,37 +417,66 @@
     border-color: var(--color-border-strong);
   }
 
-  /* ═══ Variante rangée (dans ShuttersCard) — iPhone : tout sur UNE ligne ═══ */
+  /* ═══ Variante rangée (dans ShuttersCard) — iPhone : tout sur UNE rangée de 44 px ═══
+     Colonne nom FIXE (le nom peut se replier sur deux lignes dans la rangée) →
+     barres de largeur identique ; barre 12 px ; glyphes ▲ ■ ▼ agrandis. */
   .embedded .m-shutter {
     padding: 4px 12px 4px 14px;
     min-height: 44px;
-    gap: 10px;
+    gap: 8px;
   }
   .embedded .m-left {
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
   .embedded .m-name {
-    flex: 0 1 auto;
-    min-width: 64px;
-    max-width: 118px;
-    font-size: 13px;
+    flex: 0 0 88px;
+    font-size: 15px;
+    line-height: 1.1;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
   }
   .embedded .m-left > div {
     flex: 1 1 auto;
     min-width: 0;
+    gap: 6px;
   }
   .embedded .m-status {
     min-width: 34px;
     font-size: 10.5px;
   }
   .embedded .m-bar {
+    height: 12px;
     min-width: 28px;
+  }
+  /* Points de manœuvre SUPERPOSÉS au bout de la barre (ambre, lisible sur le
+     rail comme sur le remplissage) → la barre garde sa largeur. */
+  .embedded .m-left > div {
+    position: relative;
+  }
+  .embedded .m-left .moving-dots {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 7px;
+    letter-spacing: -1px;
+    color: var(--color-solar) !important;
+    text-shadow: 0 0 3px oklch(0.2 0.03 286 / 0.7);
   }
   .embedded .m-btn {
     width: 36px;
     height: 36px;
+  }
+  .embedded .m-btn svg {
+    width: 74%;
+    height: 74%;
+  }
+  .embedded .m-btn--stop svg {
+    width: 60%;
+    height: 60%;
   }
 
   .shutter-name {
