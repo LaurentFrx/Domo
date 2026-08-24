@@ -23,6 +23,7 @@
   import ChartHoverLayer from '$components/charts/ChartHoverLayer.svelte';
   import ApplianceCard from '$components/tiles/ApplianceCard.svelte';
   import HpHcSplitCard from '$components/cards/HpHcSplitCard.svelte';
+  import MonthlyEnergyChart from '$components/cards/MonthlyEnergyChart.svelte';
 
   // Stores page-scoped : refcountés → une page voisine (pager) qui se démonte ne
   // coupe pas un store encore utilisé par une autre. anker/apsystems restent
@@ -293,35 +294,6 @@
   // 12 mois affichés : store live si année courante, sinon l'année passée fetchée.
   const displayMonths = $derived<MonthAgg[]>(isCurrentYear ? energyMonthly.months : pastMonths);
 
-  // Lignes du tableau dérivées des 12 mois agrégés (kWh / €). « — » géré au rendu.
-  const rows = $derived<{ label: string; values: number[]; unit: string }[]>([
-    {
-      label: 'Production PV',
-      values: displayMonths.map((m) => m.production_kwh),
-      unit: 'kWh'
-    },
-    {
-      label: 'Autoconsommation',
-      values: displayMonths.map((m) => m.autoconso_kwh),
-      unit: 'kWh'
-    },
-    {
-      label: 'Surplus injecté',
-      values: displayMonths.map((m) => m.surplus_kwh),
-      unit: 'kWh'
-    },
-    {
-      label: 'Import réseau',
-      values: displayMonths.map((m) => m.import_kwh),
-      unit: 'kWh'
-    },
-    {
-      label: 'Économies',
-      values: displayMonths.map((m) => m.savings_eur),
-      unit: '€'
-    }
-  ]);
-
   // ─── Section 4 : KPIs humanisés (mois courant réel) ─────────────────
   // Mois courant : auto-conso + import réels (store mensuel). Le ROI a rejoint
   // la carte « Économies solaires » de l'accueil le 23/08/2026 ($utils/roi).
@@ -340,13 +312,6 @@
     const denom = auto + (curMonth?.import_live_kwh ?? 0);
     return denom > 0 ? Math.round((100 * auto) / denom) : 0;
   });
-  // Rendu d'une cellule : kWh arrondi (≥ 1), € via formatCurrency (≥ 0,005),
-  // sinon tiret « — » (mois sans donnée, ou valeur négligeable).
-  function fmtCell(v: number, unit: string): string {
-    if (unit === '€') return v >= 0.005 ? formatCurrency(v) : '—';
-    const r = Math.round(v);
-    return r >= 1 ? r.toString() : '—';
-  }
 </script>
 
 <div class="flex flex-col gap-6 py-4">
@@ -784,39 +749,9 @@
         connus.
       </p>
     {/if}
-    <div class="overflow-x-auto">
-      <table class="yeldra-table w-full text-[12px]">
-        <thead>
-          <tr>
-            <th></th>
-            {#each months as m, i (m)}
-              <th
-                class:active={isCurrentYear && i === currentMonthIdx}
-                class:future={isCurrentYear && i > currentMonthIdx}
-              >
-                {m}
-              </th>
-            {/each}
-          </tr>
-        </thead>
-        <tbody>
-          {#each rows as row (row.label)}
-            <tr>
-              <td class="row-label">{row.label}</td>
-              {#each row.values as v, i (i)}
-                <td
-                  class:active={isCurrentYear && i === currentMonthIdx}
-                  class:future={isCurrentYear && i > currentMonthIdx}
-                  class="numeric"
-                >
-                  {fmtCell(v, row.unit)}
-                </td>
-              {/each}
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
+    <!-- Graphe « Saisons » (canevas Design 24/08) : conso par mois, part solaire
+         en jaune, achat réseau en bleu — détail chiffré au tap sur un mois. -->
+    <MonthlyEnergyChart data={displayMonths} labels={months} {isCurrentYear} {currentMonthIdx} />
 
     <!-- Répartition HP/HC des imports réseau (suit l'année sélectionnée). -->
     <HpHcSplitCard data={displayMonths} labels={months} year={selectedYear} />
@@ -850,50 +785,4 @@
 </div>
 
 <style>
-  .yeldra-table {
-    border-collapse: separate;
-    border-spacing: 0;
-    min-width: 720px;
-  }
-  .yeldra-table th,
-  .yeldra-table td {
-    padding: 8px 10px;
-    text-align: center;
-    border-bottom: 1px solid var(--color-border);
-    color: var(--color-muted-fg);
-  }
-  .yeldra-table th {
-    font-weight: 600;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    background: var(--color-muted);
-  }
-  .yeldra-table th:first-child,
-  .yeldra-table td:first-child {
-    text-align: left;
-    background: transparent;
-    border-right: 1px solid var(--color-border);
-  }
-  .yeldra-table td.row-label {
-    color: var(--color-fg);
-    font-weight: 500;
-  }
-  .yeldra-table td.numeric {
-    font-variant-numeric: tabular-nums;
-  }
-  .yeldra-table th.active {
-    background: var(--color-primary);
-    color: var(--color-primary-fg);
-    border-radius: var(--radius-md) var(--radius-md) 0 0;
-  }
-  .yeldra-table td.active {
-    background: var(--color-primary-muted);
-    color: var(--color-primary);
-    font-weight: 700;
-  }
-  .yeldra-table td.future,
-  .yeldra-table th.future {
-    opacity: 0.4;
-  }
 </style>
