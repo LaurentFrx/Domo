@@ -13,9 +13,18 @@
     data,
     labels,
     isCurrentYear,
-    currentMonthIdx
-  }: { data: MonthAgg[]; labels: string[]; isCurrentYear: boolean; currentMonthIdx: number } =
-    $props();
+    currentMonthIdx,
+    scaleMax = 0
+  }: {
+    data: MonthAgg[];
+    labels: string[];
+    isCurrentYear: boolean;
+    currentMonthIdx: number;
+    /** Échelle FIXE toutes années (plus gros mois de conso, fourni par l'API) :
+     * les hauteurs se comparent d'une année à l'autre. 0 = repli sur le max de
+     * l'année affichée. */
+    scaleMax?: number;
+  } = $props();
 
   // Même bleu que la barre Réseau EDF de l'accueil (+page.svelte) : l'import
   // réseau garde UNE couleur dans toute l'app. Le solaire et le vert économies
@@ -25,6 +34,7 @@
   const nf0 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
 
   const totalAuto = $derived(data.reduce((s, m) => s + (m.autoconso_kwh || 0), 0));
+  const anyEst = $derived(data.some((m) => m.autoconso_estimated && (m.autoconso_kwh || 0) > 0));
   const totalImport = $derived(data.reduce((s, m) => s + (m.import_kwh || 0), 0));
   const totalEur = $derived(data.reduce((s, m) => s + (m.savings_eur || 0), 0));
 
@@ -33,7 +43,12 @@
   const monthTotal = (m: MonthAgg) => (m.autoconso_kwh || 0) + (m.import_kwh || 0);
   const isEmpty = (m: MonthAgg, i: number) =>
     (isCurrentYear && i > currentMonthIdx) || monthTotal(m) < 0.5;
-  const maxTotal = $derived(data.reduce((mx, m) => Math.max(mx, monthTotal(m)), 0));
+  const maxTotal = $derived(
+    Math.max(
+      scaleMax,
+      data.reduce((mx, m) => Math.max(mx, monthTotal(m)), 0)
+    )
+  );
 
   const H = 120; // hauteur de piste (px), alignée sur la carte HC/HP
   // Un flux réel mais minuscule reste VISIBLE (plancher 2 px) — le liseré bleu
@@ -61,7 +76,7 @@
     {#if totalAuto >= 1}
       <div class="flex flex-col gap-0.5">
         <span class="text-[22px] font-extrabold tracking-tight" style="color: var(--color-solar);">
-          {nf0.format(totalAuto)}<span
+          {anyEst ? '~' : ''}{nf0.format(totalAuto)}<span
             class="text-[12px] font-semibold"
             style="color: var(--color-muted-fg);"
           >
@@ -120,14 +135,17 @@
           : `${labels[i]} : ${fmtKwh(monthTotal(m))} consommés`}
         onclick={() => (selected = selected === i || empty ? null : i)}
       >
-        <span class="col-val" class:cur>{empty ? '' : nf0.format(monthTotal(m))}</span>
+        <span class="col-val" class:cur
+          >{empty ? '' : `${m.autoconso_estimated ? '~' : ''}${nf0.format(monthTotal(m))}`}</span
+        >
         <div class="track" class:empty class:sel={selected === i}>
           {#if !empty}
             <div
               class="seg"
+              class:est={m.autoconso_estimated}
               style="height: {segH(
                 m.autoconso_kwh
-              )}px; background: var(--color-solar); border-radius: 5px 5px 0 0;"
+              )}px; background-color: var(--color-solar); border-radius: 5px 5px 0 0;"
             ></div>
             <div
               class="seg"
@@ -160,6 +178,11 @@
         <span class="dot" style="background: var(--color-success);"></span> Économies du mois
       </span>
     {/if}
+    {#if anyEst}
+      <span class="inline-flex items-center gap-1.5" style="color: var(--color-muted-fg);">
+        <span class="dot dot-est"></span> Rayé : solaire estimé (d'avant Domo)
+      </span>
+    {/if}
   </div>
 
   {#if sel && selected !== null}
@@ -174,7 +197,10 @@
         ></span
       >
       <span
-        >Autoconsommé <strong style="color: var(--color-fg);">{fmtKwh(sel.autoconso_kwh)}</strong
+        >Autoconsommé <strong style="color: var(--color-fg);"
+          >{sel.autoconso_estimated
+            ? `~${fmtKwh(sel.autoconso_kwh)}`
+            : fmtKwh(sel.autoconso_kwh)}</strong
         ></span
       >
       <span>Réseau <strong style="color: var(--color-fg);">{fmtKwh(sel.import_kwh)}</strong></span>
@@ -266,5 +292,25 @@
     width: 8px;
     height: 8px;
     border-radius: 9999px;
+  }
+
+  /* Solaire ESTIMÉ (reconstruit des € HA, pré-recorder) : hachures diagonales
+     par-dessus le jaune — même recette que la carte HC/HP (voile sombre teinté
+     charte hue 262, jamais noir pur) : la couleur reste lisible, la texture dit
+     « estimation ». */
+  .seg.est {
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent 0 3px,
+      oklch(0.32 0.06 262 / 0.34) 3px 6px
+    );
+  }
+  .dot-est {
+    background: var(--color-solar);
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent 0 1.5px,
+      oklch(0.32 0.06 262 / 0.55) 1.5px 3px
+    );
   }
 </style>

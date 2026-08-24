@@ -6,7 +6,20 @@
   // Lecture seule. Deux provenances possibles, distinguées visuellement : relevé
   // compteur facturé (tariffs.json) ou ventilation dérivée de la mesure EM-50
   // (mois pas encore relevés, dont le mois en cours) — hachurée + annoncée en clair.
-  let { data, labels, year }: { data: MonthAgg[]; labels: string[]; year: number } = $props();
+  let {
+    data,
+    labels,
+    year,
+    scaleMaxKwh = 0
+  }: {
+    data: MonthAgg[];
+    labels: string[];
+    year: number;
+    /** Échelle de volume FIXE toutes années (plus gros mois d'import, fourni par
+     * l'API) : la largeur des barres se compare d'une année à l'autre. 0 = repli
+     * sur le max de l'année affichée. */
+    scaleMaxKwh?: number;
+  } = $props();
 
   const nf1 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
   const nf0 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
@@ -20,7 +33,10 @@
 
   // Référence de volume = plus gros mois (HC + HP) de l'année affichée.
   const maxMonth = $derived(
-    data.reduce((mx, m) => Math.max(mx, (m.import_hc_kwh || 0) + (m.import_hp_kwh || 0)), 0)
+    Math.max(
+      scaleMaxKwh,
+      data.reduce((mx, m) => Math.max(mx, (m.import_hc_kwh || 0) + (m.import_hp_kwh || 0)), 0)
+    )
   );
 
   const monthTotal = (m: MonthAgg) => (m.import_hc_kwh || 0) + (m.import_hp_kwh || 0);

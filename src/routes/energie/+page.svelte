@@ -269,7 +269,8 @@
       import_hp_kwh: 0,
       import_split_source: null,
       import_live_kwh: 0,
-      savings_eur: 0
+      savings_eur: 0,
+      autoconso_estimated: false
     }));
   let selectedYear = $state(curYear);
   let pastMonths = $state<MonthAgg[]>(zeros12());
@@ -751,10 +752,21 @@
     {/if}
     <!-- Graphe « Saisons » (canevas Design 24/08) : conso par mois, part solaire
          en jaune, achat réseau en bleu — détail chiffré au tap sur un mois. -->
-    <MonthlyEnergyChart data={displayMonths} labels={months} {isCurrentYear} {currentMonthIdx} />
+    <MonthlyEnergyChart
+      data={displayMonths}
+      labels={months}
+      {isCurrentYear}
+      {currentMonthIdx}
+      scaleMax={energyMonthly.scaleMaxKwh}
+    />
 
     <!-- Répartition HP/HC des imports réseau (suit l'année sélectionnée). -->
-    <HpHcSplitCard data={displayMonths} labels={months} year={selectedYear} />
+    <HpHcSplitCard
+      data={displayMonths}
+      labels={months}
+      year={selectedYear}
+      scaleMaxKwh={energyMonthly.scaleMaxImportKwh}
+    />
   </section>
 
   <!-- ═══ Section 4 : KPIs humanisés ═══ -->

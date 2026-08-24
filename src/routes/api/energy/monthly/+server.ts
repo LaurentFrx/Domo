@@ -64,12 +64,24 @@ interface MonthAgg {
   import_live_kwh: number;
   import_split_source: SplitSource;
   savings_eur: number;
+  /** Vrai quand autoconso_kwh est RECONSTRUIT depuis les € importés de HA
+   * (pré-recorder, juin 2025 → mai 2026) : kWh = € / tarif HP du régime —
+   * l'autoconso solaire se fait quasi exclusivement en HP (les HC sont
+   * 00:06-08:06, la nuit). L'UI hachure ces mois. */
+  autoconso_estimated: boolean;
 }
 
 interface MonthlyPayload {
   year: number;
   months: MonthAgg[]; // toujours 12 entrées, index 0 = janvier
   min_year: number; // première année disposant de données (borne du sélecteur)
+  /** Plus gros MOIS DE CONSO (import + autoconso, estimée incluse) toutes
+   * années confondues : l'échelle FIXE du graphe Saisons — les hauteurs
+   * restent comparables d'une année à l'autre. */
+  scale_max_kwh: number;
+  /** Plus gros mois d'IMPORT toutes années confondues (échelle de volume de
+   * la carte HC/HP). */
+  scale_max_import_kwh: number;
 }
 
 function zeroMonth(): MonthAgg {
@@ -82,7 +94,8 @@ function zeroMonth(): MonthAgg {
     import_hp_kwh: 0,
     import_live_kwh: 0,
     import_split_source: null,
-    savings_eur: 0
+    savings_eur: 0,
+    autoconso_estimated: false
   };
 }
 
@@ -349,6 +362,23 @@ export const GET: RequestHandler = async ({ url }) => {
       if (typeof v === 'number' && v > 0) months[i].savings_eur = v;
     }
 
+    // ── Autoconso PRÉ-RECORDER reconstruite (parc en service juin 2025, recorder
+    // né juin 2026) : HA ne nous a légué que des € par mois (tariffs.json) — les
+    // kWh sont reconstruits par le tarif évité : kWh = € / HP du régime
+    // (l'autoconso solaire vit en HP ; la fenêtre HC 00:06-08:06 est nocturne).
+    // Marquée `autoconso_estimated` → hachures côté UI, jamais vendue comme une
+    // mesure. Ne touche pas import_live ni le KPI du mois courant (mesuré). ──
+    for (let i = 0; i < 12; i++) {
+      if (months[i].autoconso_kwh >= 1) continue; // mesuré par le recorder : on garde
+      const eur = history[`${year}-${String(i + 1).padStart(2, '0')}`];
+      if (typeof eur !== 'number' || eur <= 0) continue;
+      const hp = regimeAt(new Date(Date.UTC(year, i, 15))).hp_eur_kwh;
+      if (hp > 0) {
+        months[i].autoconso_kwh = eur / hp;
+        months[i].autoconso_estimated = true;
+      }
+    }
+
     // Import « live » = ce que le recorder a effectivement mesuré ce mois
     // (savings_daily), AVANT tout remplacement par un relevé compteur mensuel
     // ci-dessous. Base du KPI d'autosuffisance, cohérent en période avec l'autoconso.
@@ -470,9 +500,67 @@ export const GET: RequestHandler = async ({ url }) => {
       /* table enedis_daily absente */
     }
 
+    // ── Échelles FIXES toutes années confondues (demande Laurent 24/08) : le
+    // graphe Saisons et la carte HC/HP gardent la même échelle d'une année à
+    // l'autre — un mois d'hiver 2024 et un été 2026 se comparent d'un regard.
+    // Conso du mois = import (max des sources par mois : Enedis, recorder,
+    // relevé saisi) + autoconso (mesurée ou reconstruite HA). Léger (agrégats
+    // sur ~1 100 lignes), pas de cache nécessaire. ──
+    let scaleMaxKwh = 0;
+    let scaleMaxImportKwh = 0;
+    {
+      const importYm = new Map<string, number>();
+      const autoYm = new Map<string, number>();
+      const bump = (map: Map<string, number>, ym: string, v: number) => {
+        if (Number.isFinite(v)) map.set(ym, Math.max(map.get(ym) ?? 0, v));
+      };
+      try {
+        for (const r of db
+          .prepare(
+            'SELECT substr(date,1,7) AS ym, SUM(soutirage_kwh) AS kwh FROM enedis_daily GROUP BY ym'
+          )
+          .all() as { ym: string; kwh: number }[])
+          bump(importYm, r.ym, r.kwh);
+      } catch {
+        /* table absente */
+      }
+      if (hasSavings) {
+        for (const r of db
+          .prepare(
+            'SELECT substr(date,1,7) AS ym, SUM(import_wh)/1000.0 AS imp,' +
+              ' SUM(wh_hp+wh_hc)/1000.0 AS auto FROM savings_daily GROUP BY ym'
+          )
+          .all() as { ym: string; imp: number; auto: number }[]) {
+          bump(importYm, r.ym, r.imp);
+          bump(autoYm, r.ym, r.auto);
+        }
+      }
+      for (const [ym, hc] of Object.entries(importHc)) {
+        const hp = importHp[ym];
+        bump(importYm, ym, (typeof hc === 'number' ? hc : 0) + (typeof hp === 'number' ? hp : 0));
+      }
+      for (const [ym, eur] of Object.entries(history)) {
+        if ((autoYm.get(ym) ?? 0) >= 1 || typeof eur !== 'number' || eur <= 0) continue;
+        const hp = regimeAt(new Date(`${ym}-15T12:00:00Z`)).hp_eur_kwh;
+        if (hp > 0) bump(autoYm, ym, eur / hp);
+      }
+      for (const [ym, imp] of importYm) {
+        scaleMaxImportKwh = Math.max(scaleMaxImportKwh, imp);
+        scaleMaxKwh = Math.max(scaleMaxKwh, imp + (autoYm.get(ym) ?? 0));
+      }
+      for (const [ym, auto] of autoYm)
+        if (!importYm.has(ym)) scaleMaxKwh = Math.max(scaleMaxKwh, auto);
+    }
+
     foldBaseline(months, year);
 
-    const payload: MonthlyPayload = { year, months, min_year: minYear };
+    const payload: MonthlyPayload = {
+      year,
+      months,
+      min_year: minYear,
+      scale_max_kwh: scaleMaxKwh,
+      scale_max_import_kwh: scaleMaxImportKwh
+    };
     return json(payload);
   } catch (e) {
     // Détail en log serveur SEULEMENT (un message SQLite peut exposer un chemin interne).
