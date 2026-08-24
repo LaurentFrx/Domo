@@ -765,7 +765,7 @@
       data={displayMonths}
       labels={months}
       year={selectedYear}
-      scaleMaxKwh={energyMonthly.scaleMaxImportKwh}
+      scaleMaxKwh={energyMonthly.scaleMaxKwh}
     />
   </section>
 

@@ -42,7 +42,6 @@ export interface MonthlyPayload {
   months: MonthAgg[]; // 12 entrées, index 0 = janvier
   min_year?: number; // première année avec des données (borne du sélecteur)
   scale_max_kwh?: number; // plus gros mois de CONSO toutes années (échelle fixe du graphe)
-  scale_max_import_kwh?: number; // plus gros mois d'IMPORT toutes années (volume carte HC/HP)
 }
 
 function zeroMonth(): MonthAgg {
@@ -100,7 +99,6 @@ class EnergyMonthlyState {
   #year = $state<number>(new Date().getFullYear());
   #minYear = $state<number>(new Date().getFullYear());
   #scaleMaxKwh = $state<number>(0);
-  #scaleMaxImportKwh = $state<number>(0);
 
   connected = $state(false);
   status = $state<'idle' | 'polling' | 'connected' | 'unconfigured' | 'error'>('idle');
@@ -123,10 +121,6 @@ class EnergyMonthlyState {
   /** Échelle fixe du graphe Saisons : plus gros mois de conso, toutes années. */
   get scaleMaxKwh(): number {
     return this.#scaleMaxKwh;
-  }
-  /** Échelle de volume de la carte HC/HP : plus gros mois d'import, toutes années. */
-  get scaleMaxImportKwh(): number {
-    return this.#scaleMaxImportKwh;
   }
 
   connect() {
@@ -203,7 +197,6 @@ class EnergyMonthlyState {
       this.#year = typeof p.year === 'number' ? p.year : new Date().getFullYear();
       this.#minYear = typeof p.min_year === 'number' ? p.min_year : this.#year;
       this.#scaleMaxKwh = num(p.scale_max_kwh);
-      this.#scaleMaxImportKwh = num(p.scale_max_import_kwh);
       this.connected = true;
       this.status = 'connected';
       this.lastError = null;

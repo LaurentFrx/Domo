@@ -79,9 +79,6 @@ interface MonthlyPayload {
    * années confondues : l'échelle FIXE du graphe Saisons — les hauteurs
    * restent comparables d'une année à l'autre. */
   scale_max_kwh: number;
-  /** Plus gros mois d'IMPORT toutes années confondues (échelle de volume de
-   * la carte HC/HP). */
-  scale_max_import_kwh: number;
 }
 
 function zeroMonth(): MonthAgg {
@@ -507,7 +504,6 @@ export const GET: RequestHandler = async ({ url }) => {
     // relevé saisi) + autoconso (mesurée ou reconstruite HA). Léger (agrégats
     // sur ~1 100 lignes), pas de cache nécessaire. ──
     let scaleMaxKwh = 0;
-    let scaleMaxImportKwh = 0;
     {
       const importYm = new Map<string, number>();
       const autoYm = new Map<string, number>();
@@ -544,10 +540,8 @@ export const GET: RequestHandler = async ({ url }) => {
         const hp = regimeAt(new Date(`${ym}-15T12:00:00Z`)).hp_eur_kwh;
         if (hp > 0) bump(autoYm, ym, eur / hp);
       }
-      for (const [ym, imp] of importYm) {
-        scaleMaxImportKwh = Math.max(scaleMaxImportKwh, imp);
+      for (const [ym, imp] of importYm)
         scaleMaxKwh = Math.max(scaleMaxKwh, imp + (autoYm.get(ym) ?? 0));
-      }
       for (const [ym, auto] of autoYm)
         if (!importYm.has(ym)) scaleMaxKwh = Math.max(scaleMaxKwh, auto);
     }
@@ -558,8 +552,7 @@ export const GET: RequestHandler = async ({ url }) => {
       year,
       months,
       min_year: minYear,
-      scale_max_kwh: scaleMaxKwh,
-      scale_max_import_kwh: scaleMaxImportKwh
+      scale_max_kwh: scaleMaxKwh
     };
     return json(payload);
   } catch (e) {

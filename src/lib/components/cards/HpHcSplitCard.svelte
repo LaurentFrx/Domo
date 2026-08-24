@@ -3,9 +3,12 @@
 
   // Répartition Heures Creuses / Heures Pleines des imports réseau, pour les 12
   // mois de l'année affichée (suit le sélecteur de la page Énergie via `data`).
-  // Lecture seule. Deux provenances possibles, distinguées visuellement : relevé
-  // compteur facturé (tariffs.json) ou ventilation dérivée de la mesure EM-50
-  // (mois pas encore relevés, dont le mois en cours) — hachurée + annoncée en clair.
+  // Lecture seule. Les barres parlent la MÊME langue que le graphe Saisons juste
+  // au-dessus (demande Laurent 24/08) : largeur constante, hauteur = volume
+  // d'import du mois sur l'échelle FIXE commune — la barre d'un mois arrive à la
+  // même hauteur que sa part bleue dans le graphe du dessus ; l'empilement
+  // cyan/corail dit la répartition. Provenances distinguées : relevé compteur
+  // facturé (tariffs.json) ou ventilation estimée — hachurée + annoncée en clair.
   let {
     data,
     labels,
@@ -15,9 +18,9 @@
     data: MonthAgg[];
     labels: string[];
     year: number;
-    /** Échelle de volume FIXE toutes années (plus gros mois d'import, fourni par
-     * l'API) : la largeur des barres se compare d'une année à l'autre. 0 = repli
-     * sur le max de l'année affichée. */
+    /** Échelle FIXE commune avec le graphe Saisons (plus gros mois de CONSO,
+     * toutes années — fourni par l'API) : les hauteurs des deux graphes se
+     * comparent. 0 = repli sur le max de l'année affichée. */
     scaleMaxKwh?: number;
   } = $props();
 
@@ -31,7 +34,7 @@
   const pctHc = $derived(totalAll > 0 ? Math.round((100 * totalHc) / totalAll) : 0);
   const pctHp = $derived(totalAll > 0 ? 100 - pctHc : 0);
 
-  // Référence de volume = plus gros mois (HC + HP) de l'année affichée.
+  // Échelle de hauteur = celle du graphe Saisons (repli : max de l'année).
   const maxMonth = $derived(
     Math.max(
       scaleMaxKwh,
@@ -42,22 +45,10 @@
   const monthTotal = (m: MonthAgg) => (m.import_hc_kwh || 0) + (m.import_hp_kwh || 0);
   const pct = (part: number, whole: number) => (whole > 0 ? Math.round((100 * part) / whole) : 0);
 
-  // DEUX lectures dans une seule barre :
-  //  · la HAUTEUR dit la PART creuses/pleines du mois (chaque barre est pleine) —
-  //    c'est le sujet de la carte, et ça reste lisible même sur un mois minuscule ;
-  //  · la LARGEUR dit le VOLUME du mois. L'import va de 849 kWh en janvier à 15 en
-  //    juillet : à échelle de hauteur commune, tout l'été s'écrasait en filets de
-  //    2 px. Largeur en RACINE du volume (perception d'aire) et plancher à 38 % :
-  //    un petit mois reste cliquable et visible, un gros mois reste dominant.
-  // Largeur en PIXELS, pas en % : la colonne fait ~74 px en desktop pour une piste
-  // plafonnée à 26 px — un pourcentage du parent saturait le plafond dès 38 % et
-  // toutes les barres sortaient à la même largeur.
-  const TRACK_MAX_PX = 26;
-  const segH = (v: number, tot: number) => (tot > 0 ? (100 * v) / tot : 0);
-  const colW = (tot: number) =>
-    maxMonth > 0 && tot > 0
-      ? TRACK_MAX_PX * (0.38 + 0.62 * Math.sqrt(tot / maxMonth))
-      : TRACK_MAX_PX * 0.38;
+  // Hauteur de segment en px sur l'échelle commune (piste 120 px, comme le graphe
+  // Saisons) ; un flux réel mais minuscule reste visible (plancher 2 px).
+  const H = 120;
+  const segH = (v: number) => (maxMonth > 0 && v > 0 ? Math.max((H * v) / maxMonth, 2) : 0);
 
   // Mois dont la VENTILATION est estimée : 'local' (total ET répartition mesure
   // maison) ou 'enedis' (total = compteur Linky, répartition encore estimée).
@@ -130,9 +121,9 @@
             : `${labels[i]} ${year} — pas de relevé`}
         >
           <span class="col-val">{tot > 0 ? nf0.format(tot) : ''}</span>
-          <div class="track" style="width: {colW(tot)}px;">
-            <div class="seg seg-hp" class:est style="height: {segH(m.import_hp_kwh, tot)}%;"></div>
-            <div class="seg seg-hc" class:est style="height: {segH(m.import_hc_kwh, tot)}%;"></div>
+          <div class="track" class:filled={tot > 0}>
+            <div class="seg seg-hp" class:est style="height: {segH(m.import_hp_kwh)}px;"></div>
+            <div class="seg seg-hc" class:est style="height: {segH(m.import_hc_kwh)}px;"></div>
           </div>
           <span class="col-lbl" class:est>{labels[i]}</span>
         </div>
@@ -147,7 +138,6 @@
       <span class="inline-flex items-center gap-1.5" style="color: var(--color-muted-fg);">
         <span class="dot" style="background: var(--color-hp);"></span> Heures pleines
       </span>
-      <span style="color: var(--color-muted-fg);">Barre large = gros mois</span>
       {#if estLabels.length > 0}
         <span class="inline-flex items-center gap-1.5" style="color: var(--color-muted-fg);">
           <span class="dot dot-est"></span>
@@ -210,19 +200,20 @@
     font-variant-numeric: tabular-nums;
     color: var(--color-muted-fg);
   }
-  /* Piste : barre empilée HP (haut) + HC (bas), ancrée en bas. La largeur est
-     posée en ligne (∝ volume du mois, cf. colW) ; le plafond en px garde des
-     colonnes fines sur iPhone. */
+  /* Piste : largeur CONSTANTE, barre empilée HP (haut) + HC (bas) ancrée en
+     bas, hauteur ∝ import du mois sur l'échelle commune avec le graphe Saisons. */
   .track {
     display: flex;
-    max-width: 100%; /* iPhone : la colonne peut être plus étroite que 26 px */
+    width: 100%;
     height: 120px;
     flex-direction: column;
     justify-content: flex-end;
     overflow: hidden;
-    border-radius: var(--radius-sm, 4px);
+    border-radius: 5px;
     background: var(--color-muted);
-    transition: width var(--duration-slow, 300ms) var(--ease-default, ease);
+  }
+  .track.filled .seg:first-child {
+    border-radius: 5px 5px 0 0;
   }
   .seg {
     width: 100%;
