@@ -3,7 +3,11 @@
  * domo-recorder. Alimente le « Tableau mensuel » de la page Énergie (12 mois
  * d'une année), en remplacement des valeurs mockées.
  *
- * Deux sources, agrégées par mois et fusionnées :
+ * Sources, agrégées par mois et fusionnées :
+ *  · enedis_daily (compteur Linky J+1 via MyElectricalData, backfillé 36 mois)
+ *    → import CANONIQUE, fusionné PAR JOUR avec savings_daily (le jour courant
+ *    n'existe qu'en mesure maison) ; les relevés mensuels saisis gardent le
+ *    dernier mot sur la ventilation HC/HP.
  *  · savings_daily (déjà DATÉE Paris + intégrée HP/HC + gaps gérés par le
  *    recorder) → autoconso_kwh (wh_hp+wh_hc), import_kwh (import_wh),
  *    savings_eur (eur_hp+eur_hc). Mêmes chiffres que /api/savings et la
@@ -39,10 +43,12 @@ import {
 import type { RequestHandler } from './$types';
 
 /** D'où vient la ventilation HC/HP d'un mois : relevé compteur facturé (saisi
- * dans tariffs.json) ou dérivée de la mesure locale EM-50. `null` = pas de
- * ventilation connue. Exposé pour que la carte n'affiche pas une estimation
- * comme un relevé. */
-type SplitSource = 'meter' | 'local' | null;
+ * dans tariffs.json), dérivée de la mesure locale EM-50, ou `enedis` = total
+ * importé du compteur Linky (enedis_daily) avec répartition HC/HP encore
+ * estimée (la courbe ½h n'est pas activée). `null` = pas de ventilation
+ * connue. Exposé pour que la carte n'affiche pas une estimation comme un
+ * relevé. */
+type SplitSource = 'meter' | 'local' | 'enedis' | null;
 
 interface MonthAgg {
   production_kwh: number;
@@ -271,7 +277,8 @@ export const GET: RequestHandler = async ({ url }) => {
     // `em50_daily.import_wh` sous-compte de −23 % (jusqu'à −59 % le 23/06, jour
     // d'incident bridge), quand le proxy compteur-Anker de `savings_daily` colle à
     // −4 %. Une intégration d'instantanés rate les appels brefs ; un compteur
-    // cumulé, non. Hiérarchie de l'import : Enedis (canonique, pas encore branché)
+    // cumulé, non. Hiérarchie de l'import : Enedis (canonique, branché 24/08/2026
+    // via enedis_daily — cf. bloc ci-dessous)
     // > savings_daily > EM-50, qui ne sert qu'à la FORME intraday (ratio HC/HP
     // ci-dessous). L'EXPORT, lui, reste sur l'EM-50 : le compteur cloud est muet
     // (facteur 6) et Enedis ne publie rien en CACSI.
@@ -347,6 +354,58 @@ export const GET: RequestHandler = async ({ url }) => {
     // ci-dessous. Base du KPI d'autosuffisance, cohérent en période avec l'autoconso.
     for (let i = 0; i < 12; i++) months[i].import_live_kwh = months[i].import_kwh;
 
+    // ── enedis_daily (Linky J+1 via MyElectricalData) : l'import CANONIQUE ──
+    // Fusion PAR JOUR et non par mois : Enedis publie à J+1, donc le jour courant
+    // n'existe jamais côté compteur — un total mensuel purement Enedis perdrait
+    // 1 à 3 jours du mois en cours. Jour par jour : Enedis s'il existe, sinon la
+    // mesure maison (savings_daily, qui sous-compte d'~18 % — validé le 24/08 sur
+    // 7 j croisés). Vient APRÈS la copie import_live_kwh (qui doit RESTER la
+    // mesure maison, cohérente en période avec l'autoconso pour le KPI) et AVANT
+    // les relevés mensuels saisis, qui gardent le dernier mot ('meter').
+    const enedisDominant = new Set<number>();
+    try {
+      const eRows = db
+        .prepare(
+          'SELECT date, soutirage_kwh AS kwh FROM enedis_daily' +
+            ' WHERE substr(date,1,4) = ? AND soutirage_kwh IS NOT NULL'
+        )
+        .all(String(year)) as { date: string; kwh: number }[];
+      if (eRows.length > 0) {
+        const sByDay = new Map<string, number>();
+        if (hasSavings) {
+          const sRows = db
+            .prepare(
+              'SELECT date, import_wh/1000.0 AS kwh FROM savings_daily WHERE substr(date,1,4) = ?'
+            )
+            .all(String(year)) as { date: string; kwh: number }[];
+          for (const r of sRows) sByDay.set(r.date, Math.max(0, r.kwh));
+        }
+        const enedisKwh = new Array<number>(12).fill(0);
+        const fallbackKwh = new Array<number>(12).fill(0);
+        const eDays = new Set<string>();
+        for (const r of eRows) {
+          const i = Number(r.date.slice(5, 7)) - 1;
+          if (i < 0 || i > 11 || !Number.isFinite(r.kwh)) continue;
+          eDays.add(r.date);
+          enedisKwh[i] += Math.max(0, r.kwh);
+        }
+        for (const [day, kwh] of sByDay) {
+          const i = Number(day.slice(5, 7)) - 1;
+          if (i < 0 || i > 11 || eDays.has(day)) continue;
+          fallbackKwh[i] += kwh;
+        }
+        for (let i = 0; i < 12; i++) {
+          if (enedisKwh[i] <= 0) continue; // mois sans compteur : comportement d'avant
+          months[i].import_kwh = enedisKwh[i] + fallbackKwh[i];
+          // La ventilation dérivée (plus bas) marquera 'enedis' si l'essentiel
+          // des kWh du mois vient du compteur (mois courant : tout sauf ~1 jour).
+          if (enedisKwh[i] >= fallbackKwh[i]) enedisDominant.add(i);
+        }
+      }
+    } catch {
+      /* table enedis_daily absente (base d'avant l'intégration) */
+    }
+
     // ── Imports réseau relevés au compteur, ventilés HC / HP (pré-recorder) ──
     // Relevés Linky/EDF (= facturés) → source de vérité. Quand un mois a un relevé,
     // il PRIME sur le recorder (≠ logique des économies) : le recorder ne ventile
@@ -383,7 +442,7 @@ export const GET: RequestHandler = async ({ url }) => {
       const tot = months[i].import_kwh;
       months[i].import_hc_kwh = tot * share;
       months[i].import_hp_kwh = tot * (1 - share);
-      months[i].import_split_source = 'local';
+      months[i].import_split_source = enedisDominant.has(i) ? 'enedis' : 'local';
     }
 
     // ── Borne basse du sélecteur d'année : première année avec des données ──
@@ -399,6 +458,16 @@ export const GET: RequestHandler = async ({ url }) => {
       };
       const y = Number(r?.y);
       if (Number.isFinite(y) && y >= 2000 && y < minYear) minYear = y;
+    }
+
+    try {
+      const r = db.prepare('SELECT MIN(substr(date,1,4)) AS y FROM enedis_daily').get() as {
+        y: string | null;
+      };
+      const y = Number(r?.y);
+      if (Number.isFinite(y) && y >= 2000 && y < minYear) minYear = y;
+    } catch {
+      /* table enedis_daily absente */
     }
 
     foldBaseline(months, year);

@@ -43,9 +43,13 @@
       ? TRACK_MAX_PX * (0.38 + 0.62 * Math.sqrt(tot / maxMonth))
       : TRACK_MAX_PX * 0.38;
 
-  // Mois dont la ventilation est estimée (mesure maison) et non relevée au compteur.
-  const isEst = (m: MonthAgg) => m.import_split_source === 'local' && monthTotal(m) > 0;
+  // Mois dont la VENTILATION est estimée : 'local' (total ET répartition mesure
+  // maison) ou 'enedis' (total = compteur Linky, répartition encore estimée).
+  const isEst = (m: MonthAgg) =>
+    (m.import_split_source === 'local' || m.import_split_source === 'enedis') && monthTotal(m) > 0;
+  const isEnedis = (m: MonthAgg) => m.import_split_source === 'enedis' && monthTotal(m) > 0;
   const estLabels = $derived(data.map((m, i) => (isEst(m) ? labels[i] : null)).filter(Boolean));
+  const anyEnedis = $derived(data.some(isEnedis));
 </script>
 
 <section
@@ -101,7 +105,11 @@
                 m.import_hc_kwh,
                 tot
               )} %) · Pleines ${nf1.format(m.import_hp_kwh)} kWh (${pct(m.import_hp_kwh, tot)} %)${
-                est ? ' · estimé (mesure maison)' : ''
+                isEnedis(m)
+                  ? ' · total compteur EDF, répartition estimée'
+                  : est
+                    ? ' · estimé (mesure maison)'
+                    : ''
               }`
             : `${labels[i]} ${year} — pas de relevé`}
         >
@@ -127,8 +135,10 @@
       {#if estLabels.length > 0}
         <span class="inline-flex items-center gap-1.5" style="color: var(--color-muted-fg);">
           <span class="dot dot-est"></span>
-          {estLabels.length === 1 ? estLabels[0] : estLabels.join(', ')} : mesuré à la maison, en attente
-          du relevé EDF
+          {estLabels.length === 1 ? estLabels[0] : estLabels.join(', ')} :
+          {anyEnedis
+            ? 'total du compteur EDF, répartition Creuses/Pleines estimée'
+            : 'mesuré à la maison, en attente du relevé EDF'}
         </span>
       {/if}
     </div>
