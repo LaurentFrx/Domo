@@ -77,7 +77,8 @@ export const menuGroups: MenuGroup[] = [
         label: 'Eau chaude',
         icon: 'M12 3s6 5.5 6 10a6 6 0 0 1-12 0c0-4.5 6-10 6-10Z',
         tint: 'var(--ios-teal)',
-        keywords: 'cumulus ballon chauffe-eau douches chauffer maintenant boost vacances shelly labo shadow'
+        keywords:
+          'cumulus ballon chauffe-eau douches chauffer maintenant boost vacances shelly labo shadow'
       },
       {
         href: '/menu/chauffage',
