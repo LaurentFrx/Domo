@@ -732,11 +732,18 @@ export function pilotStep(
     }
     if (!inputs.em50Available) return 'compteur EM-50 muet — aucun allumage possible';
     if (!trigger) {
+      // Le critère ÉNERGIE gouverne : c'est SA raison qu'on affiche quand il
+      // sait la donner. Annoncer « la Max AC fait sa réserve (53 %/65 %) »
+      // pendant que la vraie limite est le bilan en Wh a fait croire à Laurent
+      // que le vieux seuil décidait encore (24/08) — il ne fait plus que
+      // s'ajouter en OU, il ne bloque plus rien.
+      if (uParcWh !== null && besoinTotalWh !== null) {
+        const manqueWh = Math.max(0, Math.round(besoinTotalWh - uParcWh));
+        return `attente : il manque ${manqueWh} Wh au parc pour chauffer sans entamer la soirée (${Math.round(uParcWh)} / ${Math.round(besoinTotalWh)} Wh)`;
+      }
       if (!inputs.maxAcAvailable)
         return `attente d’un don franc au réseau (> ${p.exportOnW} W) — mesure locale muette`;
-      return inputs.maxAcSocPct !== null && inputs.maxAcSocPct < p.maxAcSocOnPct
-        ? `attente : la Max AC fait sa réserve (${Math.round(inputs.maxAcSocPct)} % / ${p.maxAcSocOnPct} %)`
-        : `attente de surplus — ${surplusDispoW} W réorientables / ${p.surplusOnW} W`;
+      return `attente de surplus — ${surplusDispoW} W réorientables / ${p.surplusOnW} W`;
     }
     if (!quotaOk) return 'quota d’allumages du jour épuisé';
     if (!delaysOk) return 'délais de protection du matériel en cours';
@@ -782,15 +789,14 @@ export function pilotStep(
       cond(
         'reserve',
         'Réserve batterie',
-        exportFrank ||
-          (inputs.maxAcAvailable &&
-            inputs.maxAcSocPct !== null &&
-            inputs.maxAcSocPct >= p.maxAcSocOnPct),
+        exportFrank || (uParcWh !== null && besoinTotalWh !== null && uParcWh >= besoinTotalWh),
         exportFrank
           ? 'prouvée par le don franc (le parc n’absorbe plus)'
-          : inputs.maxAcAvailable && inputs.maxAcSocPct !== null
-            ? `Max AC ${Math.round(inputs.maxAcSocPct)} % (seuil ${p.maxAcSocOnPct} %)`
-            : 'mesure locale muette — voies don franc et secours seulement'
+          : uParcWh !== null && besoinTotalWh !== null
+            ? `${Math.round(uParcWh)} Wh dans le parc / ${Math.round(besoinTotalWh)} Wh nécessaires (chauffe + soirée + tampon)`
+            : inputs.maxAcAvailable && inputs.maxAcSocPct !== null
+              ? `Max AC ${Math.round(inputs.maxAcSocPct)} % (seuil ${p.maxAcSocOnPct} %)`
+              : 'mesure locale muette — voies don franc et secours seulement'
       ),
       cond(
         'quiet',
