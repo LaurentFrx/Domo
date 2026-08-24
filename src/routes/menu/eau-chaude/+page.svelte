@@ -46,8 +46,8 @@
   <div class="ios-group">
     <a href="/cumulus-labo" class="ios-cell" data-sveltekit-preload-data>
       <span class="ios-cell-text">
-        <span class="ios-cell-label">Labo — modèle shadow</span>
-        <span class="ios-cell-sub">Ne pilote rien, observe seulement</span>
+        <span class="ios-cell-label">Labo — critère énergie</span>
+        <span class="ios-cell-sub">Le critère face au réel, tick par tick</span>
       </span>
       <svg
         class="ios-chevron"
@@ -66,7 +66,7 @@
     </a>
   </div>
   <p class="ios-group-footer">
-    Ce que le modèle mathématique « aurait » décidé, tick par tick — pour comparer au réel avant
-    toute décision.
+    Le journal de validation du nouveau critère de chauffe : ce qu'il décide, ce que les anciens
+    seuils auraient fait, et ce que ça a coûté — la pièce qui autorisera leur retrait.
   </p>
 </section>

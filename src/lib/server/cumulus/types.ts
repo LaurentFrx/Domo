@@ -395,28 +395,37 @@ export interface DecisionLogEntry {
 }
 
 /**
- * Échantillon du modèle SHADOW de désirabilité (page diagnostic /cumulus-labo).
- * OBSERVATION SEULE — ne pilote jamais le relais. Un point par tick.
+ * Échantillon du LABO du critère énergie (page /cumulus-labo) — un point par
+ * tick : le bilan du critère, le verdict des voies historiques, et ce qui s'est
+ * réellement passé. C'est ce journal qui décidera du retrait des vieux seuils
+ * (étape 7 de docs/cumulus-reserve-dynamique.md). A remplacé le shadow de
+ * désirabilité le 24/08 (modèle jugé NO-GO à l'audit, supprimé).
  */
-export interface DesirShadowSample {
+export interface CriterionSample {
   ts: number;
-  d: number; // désirabilité D ∈ [0,1]
-  wouldOn: boolean; // le modèle AURAIT chauffé (après hystérésis)
-  heatingNow: boolean; // le ballon chauffe RÉELLEMENT (conso EM-50)
-  relayOn: boolean; // relais réel ON
-  tankRoom: number; // portail place cuve
-  freeExport: number; // don franc au réseau
-  freeCharge: number; // charge batterie > heater
-  freeCurtail: number; // écrêtage prouvé
-  freeSurplus: number; // max des trois
-  solarWindow: number; // fenêtre solaire
-  socPct: number; // SoC moyen parc
-  socMinPct: number; // SoC du pack le moins plein
-  eAvailWh: number; // énergie cuve
-  gridPowerW: number; // réseau signé
-  reason: string;
+  /** Bilan du critère (Wh AC) — null quand une source est muette. */
+  uParcWh: number | null;
+  eChauffeWh: number | null;
+  reserveWh: number | null;
+  besoinWh: number | null; // chauffe + réserve du soir + tampon
+  /** Verdicts à cet instant. */
+  energyOk: boolean; // le critère énergie autorise
+  legacyOk: boolean; // les voies historiques (export/saturation/invisible) autorisent
+  commonOk: boolean; // tronc commun (ballon pas plein, maison calme, fenêtre, quota, délais)
+  /** Fenêtre solaire ouverte (éphémérides) — les comparaisons de voies n'ont
+   *  de sens que le jour ; le quota, lui, n'est PAS dans ce drapeau. */
+  windowOpen: boolean;
+  /** Réel. */
+  wantOn: boolean; // ce que le pilote a voulu
+  relayOn: boolean;
+  heating: boolean; // conso EM-50 > 500 W
+  /** Cause de la décision du tick (decide) — indispensable pour trier l'achat
+   *  EDF : une recharge HC ou un boost achètent LÉGITIMEMENT, seul l'achat
+   *  d'une chauffe pilot_solar juge le critère. Manque relevé par la revue
+   *  adversariale du 24/08 (le juge de paix comptait la recharge de nuit). */
+  cause: DecisionReason;
+  gridW: number; // réseau signé (+ achat / − injection)
 }
-
 /** Évènement de la timeline — un point du journal du jour (transitions du pilote incluses). */
 export type ShadowEventKind = 'phase' | 'heat_start' | 'heat_end' | 'draw' | 'full' | 'appliance';
 export interface ShadowEvent {
@@ -504,8 +513,8 @@ export interface CumulusRuntimeState {
   pilotView: PilotView | null;
   /** Timeline du jour (transitions de phase, chauffes, puisages, pleins, appareils). */
   shadowLog: ShadowEvent[];
-  /** Journal du modèle SHADOW de désirabilité (diagnostic /cumulus-labo ; ne pilote rien). */
-  desirShadowLog: DesirShadowSample[];
+  /** Journal du LABO du critère énergie (page /cumulus-labo ; n'influence rien). */
+  criterionLog: CriterionSample[];
   /** Suivi interne de la chauffe en cours pour la timeline (début + énergie + gratuit/réseau). */
   shadowHeat: { sinceTs: number; sinceInjWh: number; solar: boolean } | null;
   /** Cycles de gros appareils EN COURS (clé = topic MQTT) — clos → journal + retiré. */

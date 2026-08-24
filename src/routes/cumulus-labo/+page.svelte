@@ -1,408 +1,294 @@
 <script lang="ts">
+  /**
+   * LABO — validation du critère énergie du chauffe-eau, en service depuis le
+   * 23/08 (docs/cumulus-reserve-dynamique.md). La page répond à UNE question :
+   * peut-on retirer les vieux seuils (Max AC 65 %, surplus 2 000 W, surplus
+   * invisible) ? Elle montre, tick par tick : le bilan du critère (le parc
+   * face au besoin), ce que chaque famille de voies aurait décidé, et ce qui
+   * s'est réellement passé — dont l'achat EDF pendant les chauffes, le seul
+   * juge de paix. A remplacé le shadow de désirabilité (NO-GO, supprimé).
+   */
   import { onMount, onDestroy } from 'svelte';
-  import { cumulusShadow } from '$lib/stores/cumulusShadow.svelte';
+  import { cumulusLabo, type CriterionSample } from '$lib/stores/cumulusLabo.svelte';
+  onMount(() => cumulusLabo.connect());
+  onDestroy(() => cumulusLabo.disconnect());
 
-  onMount(() => cumulusShadow.connect());
-  onDestroy(() => cumulusShadow.disconnect());
+  const cur = $derived(cumulusLabo.current);
+  const samples = $derived(cumulusLabo.samples);
 
-  const cur = $derived(cumulusShadow.current);
-  const samples = $derived(cumulusShadow.samples);
-  const dOn = $derived(cumulusShadow.dOn);
-  const dOff = $derived(cumulusShadow.dOff);
+  const fmtTime = (ts: number): string =>
+    new Date(ts).toLocaleTimeString('fr-FR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Europe/Paris'
+    });
+  const kWh = (wh: number | null): string => (wh === null ? '—' : `${(wh / 1000).toFixed(2)} kWh`);
 
-  const fmtTime = (ts: number | null): string =>
-    ts
-      ? new Date(ts).toLocaleTimeString('fr-FR', {
-          hour: '2-digit',
-          minute: '2-digit',
-          timeZone: 'Europe/Paris'
-        })
-      : '—';
-
-  // État « réel » du ballon, lisible.
-  const reel = $derived(
-    !cur ? '—' : cur.heatingNow ? 'chauffe' : cur.relayOn ? 'allumé' : 'éteint'
+  // ── Verdict courant ──
+  const manqueWh = $derived(
+    cur && cur.uParcWh !== null && cur.besoinWh !== null
+      ? Math.max(0, cur.besoinWh - cur.uParcWh)
+      : null
+  );
+  const tamponWh = $derived(
+    cur && cur.besoinWh !== null && cur.eChauffeWh !== null && cur.reserveWh !== null
+      ? cur.besoinWh - cur.eChauffeWh - cur.reserveWh
+      : null
   );
 
-  // Minutes estimées « aurait chauffé » sur la fenêtre (tick ~65 s).
-  const wouldOnMin = $derived(Math.round((cumulusShadow.wouldOnCount * 65) / 60));
-
-  // Les trois voies de surplus + les deux portails, pour les barres.
-  const signaux = $derived(
-    !cur
-      ? []
-      : [
-          {
-            key: 'curt',
-            label: 'Écrêtage (batterie pleine + soleil)',
-            v: cur.freeCurtail,
-            color: 'var(--color-mandarine)'
-          },
-          {
-            key: 'exp',
-            label: 'Don franc au réseau',
-            v: cur.freeExport,
-            color: 'var(--color-cyan)'
-          },
-          {
-            key: 'chg',
-            label: 'Charge batterie > chauffe',
-            v: cur.freeCharge,
-            color: 'var(--color-success)'
-          },
-          {
-            key: 'win',
-            label: 'Fenêtre solaire (portail nuit)',
-            v: cur.solarWindow,
-            color: 'var(--color-ambre)'
-          },
-          {
-            key: 'room',
-            label: 'Place dans la cuve (portail plein)',
-            v: cur.tankRoom,
-            color: 'var(--color-consumption)'
-          }
-        ]
+  // ── Barre besoin (segments chauffe / soirée / tampon) + repère parc ──
+  // Échelle commune = max(besoin, parc) pour que le repère reste dans la barre.
+  const barScale = $derived(
+    cur && cur.besoinWh !== null ? Math.max(cur.besoinWh, cur.uParcWh ?? 0) : null
   );
+  const segPct = (wh: number | null): number =>
+    barScale && wh !== null ? (wh / barScale) * 100 : 0;
 
-  // ── Timeline SVG de D sur la fenêtre chargée ──
-  const W = 320;
-  const H = 96;
-  const PAD = 4;
-  const y = (d: number) => H - PAD - Math.max(0, Math.min(1, d)) * (H - 2 * PAD);
-  const x = (i: number, n: number) => (n <= 1 ? W / 2 : PAD + (i / (n - 1)) * (W - 2 * PAD));
-
-  const dPath = $derived.by(() => {
-    const n = samples.length;
-    if (n === 0) return '';
-    return samples
-      .map((s, i) => `${i === 0 ? 'M' : 'L'}${x(i, n).toFixed(1)},${y(s.d).toFixed(1)}`)
-      .join(' ');
+  // ── Courbe parc vs besoin sur la fenêtre chargée (~12 h) ──
+  const CHART_W = 600;
+  const CHART_H = 130;
+  const chart = $derived.by(() => {
+    const pts = samples.filter((s) => s.uParcWh !== null && s.besoinWh !== null);
+    if (pts.length < 2) return null;
+    const t0 = pts[0].ts;
+    const t1 = pts[pts.length - 1].ts;
+    const span = Math.max(1, t1 - t0);
+    const maxY = Math.max(...pts.map((s) => Math.max(s.uParcWh as number, s.besoinWh as number)));
+    const x = (ts: number) => ((ts - t0) / span) * CHART_W;
+    const y = (wh: number) => CHART_H - (wh / maxY) * (CHART_H - 10);
+    const line = (pick: (s: CriterionSample) => number) =>
+      pts.map((s, i) => `${i ? 'L' : 'M'}${x(s.ts).toFixed(1)} ${y(pick(s)).toFixed(1)}`).join(' ');
+    // Bandes de chauffe réelle (fond) — segments contigus heating.
+    const bands: { x0: number; x1: number }[] = [];
+    let start: number | null = null;
+    for (const s of samples) {
+      if (s.heating && start === null) start = s.ts;
+      if (!s.heating && start !== null) {
+        bands.push({ x0: x(start), x1: x(s.ts) });
+        start = null;
+      }
+    }
+    if (start !== null) bands.push({ x0: x(start), x1: CHART_W });
+    return {
+      parc: line((s) => s.uParcWh as number),
+      besoin: line((s) => s.besoinWh as number),
+      bands,
+      t0,
+      t1,
+      maxY
+    };
   });
-  const dArea = $derived.by(() => {
-    const n = samples.length;
-    if (n === 0) return '';
-    return (
-      `M${x(0, n).toFixed(1)},${(H - PAD).toFixed(1)} ` +
-      samples.map((s, i) => `L${x(i, n).toFixed(1)},${y(s.d).toFixed(1)}`).join(' ') +
-      ` L${x(n - 1, n).toFixed(1)},${(H - PAD).toFixed(1)} Z`
-    );
-  });
-  // Points où le modèle aurait chauffé (marqueurs corail).
-  const onDots = $derived.by(() => {
-    const n = samples.length;
-    return samples.map((s, i) => ({ x: x(i, n), y: y(s.d), on: s.wouldOn })).filter((p) => p.on);
-  });
-  const firstTs = $derived(samples.length ? samples[0].ts : null);
-  const lastTs = $derived(samples.length ? samples[samples.length - 1].ts : null);
 </script>
 
-<div class="flex flex-col gap-6 py-4">
-  <header class="flex items-start justify-between gap-3">
-    <div class="flex flex-col gap-1">
-      <!-- Cette page n'est dans aucune barre de navigation : sans ce retour, on y
-           serait en impasse (elle s'ouvre depuis le menu ☰ → Eau chaude). -->
-      <a
-        href="/menu/eau-chaude"
-        class="text-[12px] font-medium"
-        style="color: var(--color-primary);"
-      >
-        ← Eau chaude
-      </a>
-      <h1 class="text-2xl font-semibold tracking-tight">Labo cumulus — modèle shadow</h1>
-      <span class="text-[12px]" style="color: var(--color-muted-fg);">
-        Ce que le modèle mathématique <em>aurait</em> décidé, tick par tick.
-      </span>
-    </div>
-    <span
-      class="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-[0.06em] uppercase"
-      style="background: color-mix(in oklch, var(--color-glow) 18%, transparent); color: var(--color-glow-bright); border: 1px solid color-mix(in oklch, var(--color-glow) 40%, transparent);"
-    >
-      Observation · ne pilote rien
-    </span>
+<div class="mx-auto flex max-w-2xl flex-col gap-5 px-4 py-4">
+  <a href="/menu/eau-chaude" class="text-[12px] font-medium" style="color: var(--color-primary);">
+    ← Eau chaude
+  </a>
+  <header class="flex flex-col gap-1">
+    <h1 class="text-2xl font-semibold tracking-tight">Labo — critère énergie</h1>
+    <p class="text-[13px]" style="color: var(--color-muted-fg);">
+      Le critère face au réel, tick par tick. C'est ce journal qui décidera du retrait des anciens
+      seuils.
+    </p>
   </header>
 
-  {#if cumulusShadow.status === 'error'}
+  {#if !cur}
     <div
-      class="rounded-[var(--radius-2xl)] border p-4 text-[13px]"
+      class="rounded-[var(--radius-2xl)] border p-4 text-sm"
       style="background: var(--color-card); border-color: var(--color-border); color: var(--color-muted-fg);"
     >
-      Impossible de lire le shadow ({cumulusShadow.lastError}). Nouvelle tentative automatique.
-    </div>
-  {:else if !cur}
-    <div
-      class="rounded-[var(--radius-2xl)] border p-6 text-center text-[14px]"
-      style="background: var(--color-card); border-color: var(--color-border); color: var(--color-muted-fg);"
-    >
-      En attente du premier tick du moteur… (un point toutes les ~65 s)
+      {cumulusLabo.status === 'error'
+        ? `Le journal ne répond pas (${cumulusLabo.lastError}).`
+        : 'Chargement du journal…'}
     </div>
   {:else}
-    <div class="grid gap-6 lg:grid-cols-2 lg:items-start">
-      <!-- ── Verdict courant ── -->
-      <section
-        class="flex flex-col gap-4 rounded-[var(--radius-2xl)] border p-5"
-        style="background: var(--color-card); border-color: var(--color-border);"
-      >
-        <div class="flex items-start justify-between gap-3">
-          <div class="flex flex-col gap-0.5">
-            <span
-              class="text-[11px] tracking-[0.06em] uppercase"
-              style="color: var(--color-muted-fg);"
-            >
-              Aurait chauffé ?
-            </span>
-            <span
-              class="text-3xl font-bold tracking-tight"
-              style="color: {cur.wouldOn ? 'var(--color-hp)' : 'var(--color-muted-fg)'};"
-            >
-              {cur.wouldOn ? 'OUI' : 'NON'}
-            </span>
-          </div>
-          <div class="flex flex-col items-end gap-0.5">
-            <span
-              class="text-[11px] tracking-[0.06em] uppercase"
-              style="color: var(--color-muted-fg);">Réel</span
-            >
-            <span
-              class="text-[15px] font-semibold"
-              style="color: {reel === 'chauffe'
-                ? 'var(--color-hp)'
-                : reel === 'allumé'
-                  ? 'var(--color-success)'
-                  : 'var(--color-muted-fg)'};"
-            >
-              {reel}
-            </span>
-          </div>
-        </div>
+    <!-- ═══ Verdict à l'instant ═══ -->
+    <section
+      class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-4"
+      style="background: var(--color-card); border-color: var(--color-border);"
+    >
+      <div class="flex items-baseline justify-between gap-3">
+        <span class="text-[15px] font-semibold" style="color: var(--color-fg);">
+          {cur.energyOk
+            ? '✓ Le critère autorise la chauffe'
+            : manqueWh !== null
+              ? `Il manque ${kWh(manqueWh)} au parc`
+              : 'Bilan indisponible (source muette)'}
+        </span>
+        <span class="text-[12px] tabular-nums" style="color: var(--color-muted-fg);">
+          {fmtTime(cur.ts)} · réel : {cur.heating ? 'chauffe' : cur.relayOn ? 'allumé' : 'éteint'}
+        </span>
+      </div>
 
-        <!-- Jauge D avec seuils dOff / dOn -->
+      <!-- Barre : le besoin (3 segments) et le repère du parc -->
+      {#if barScale}
         <div class="flex flex-col gap-1.5">
-          <div class="flex items-baseline justify-between">
-            <span
-              class="text-[11px] tracking-[0.06em] uppercase"
-              style="color: var(--color-muted-fg);"
-            >
-              Désirabilité D
-            </span>
-            <span class="text-[15px] font-bold tabular-nums">{cur.d.toFixed(2)}</span>
+          <div
+            class="relative h-5 overflow-hidden rounded-full"
+            style="background: color-mix(in oklch, var(--color-muted-fg) 12%, transparent);"
+          >
+            <div class="absolute inset-y-0 left-0 flex" style="width: {segPct(cur.besoinWh)}%;">
+              <div
+                style="width: {cur.besoinWh
+                  ? ((cur.eChauffeWh ?? 0) / cur.besoinWh) * 100
+                  : 0}%; background: color-mix(in oklch, var(--color-hp) 75%, transparent);"
+              ></div>
+              <div
+                style="width: {cur.besoinWh
+                  ? ((cur.reserveWh ?? 0) / cur.besoinWh) * 100
+                  : 0}%; background: color-mix(in oklch, var(--color-consumption) 70%, transparent);"
+              ></div>
+              <div
+                style="width: {cur.besoinWh
+                  ? ((tamponWh ?? 0) / cur.besoinWh) * 100
+                  : 0}%; background: color-mix(in oklch, var(--color-muted-fg) 45%, transparent);"
+              ></div>
+            </div>
+            <div
+              class="absolute inset-y-0 w-[3px] rounded-full"
+              style="left: calc({segPct(
+                cur.uParcWh
+              )}% - 1.5px); background: var(--color-glow); box-shadow: 0 0 8px var(--color-glow);"
+              title="Énergie utilisable du parc"
+            ></div>
           </div>
           <div
-            class="relative h-3 overflow-hidden rounded-full"
-            style="background: color-mix(in oklch, var(--color-muted-fg) 18%, transparent);"
+            class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] tabular-nums"
+            style="color: var(--color-muted-fg);"
           >
-            <div
-              class="absolute inset-y-0 left-0 rounded-full"
-              style="width: {(cur.d * 100).toFixed(1)}%; background: {cur.d >= dOn
-                ? 'var(--color-hp)'
-                : cur.d >= dOff
-                  ? 'var(--color-ambre)'
-                  : 'var(--color-muted-fg)'};"
-            ></div>
-            <div
-              class="absolute inset-y-0"
-              style="left: {(dOff * 100).toFixed(
-                1
-              )}%; width: 2px; background: var(--color-muted-fg); opacity: 0.6;"
-            ></div>
-            <div
-              class="absolute inset-y-0"
-              style="left: {(dOn * 100).toFixed(
-                1
-              )}%; width: 2px; background: var(--color-hp); opacity: 0.8;"
-            ></div>
-          </div>
-          <div class="flex justify-between text-[10px]" style="color: var(--color-muted-fg);">
-            <span>0</span>
-            <span>éteint ↓{dOff.toFixed(2)} · ↑{dOn.toFixed(2)} allume</span>
-            <span>1</span>
+            <span
+              ><span class="dot" style="background: var(--color-hp);"></span> chauffe {kWh(
+                cur.eChauffeWh
+              )}</span
+            >
+            <span
+              ><span class="dot" style="background: var(--color-consumption);"></span> soirée {kWh(
+                cur.reserveWh
+              )}</span
+            >
+            <span
+              ><span class="dot" style="background: var(--color-muted-fg);"></span> tampon {kWh(
+                tamponWh
+              )}</span
+            >
+            <span
+              ><span class="dot" style="background: var(--color-glow);"></span> parc {kWh(
+                cur.uParcWh
+              )}</span
+            >
           </div>
         </div>
+      {/if}
+    </section>
 
-        <p class="text-[13px] leading-snug" style="color: var(--color-muted-fg);">
-          {cur.reason}
-        </p>
-      </section>
-
-      <!-- ── Batterie : moyenne + PLANCHER (le gate d'écrêtage) ── -->
+    <!-- ═══ La journée : parc vs besoin, chauffes en fond ═══ -->
+    {#if chart}
       <section
-        class="flex flex-col gap-4 rounded-[var(--radius-2xl)] border p-5"
-        style="background: var(--color-card); border-color: var(--color-border);"
-      >
-        <span class="text-[14px] font-semibold">Batterie & cuve</span>
-        <div class="grid grid-cols-2 gap-4">
-          <div class="flex flex-col gap-0.5">
-            <span
-              class="text-[11px] tracking-[0.06em] uppercase"
-              style="color: var(--color-muted-fg);">SoC moyen</span
-            >
-            <span class="text-2xl font-bold tabular-nums">{cur.socPct}%</span>
-          </div>
-          <div class="flex flex-col gap-0.5">
-            <span
-              class="text-[11px] tracking-[0.06em] uppercase"
-              style="color: var(--color-muted-fg);"
-            >
-              SoC plancher
-            </span>
-            <span
-              class="text-2xl font-bold tabular-nums"
-              style="color: {cur.socMinPct >= 95 ? 'var(--color-mandarine)' : 'inherit'};"
-            >
-              {cur.socMinPct}%
-            </span>
-          </div>
-        </div>
-        <p class="text-[12px] leading-snug" style="color: var(--color-muted-fg);">
-          L'écrêtage n'est possible que si le pack le <strong>moins plein</strong> est plein (plancher
-          ≥ 95 %). C'est lui qui ouvre la voie « écrêtage », pas la moyenne.
-        </p>
-        <div
-          class="flex items-center justify-between border-t pt-3 text-[13px]"
-          style="border-color: var(--color-border);"
-        >
-          <span style="color: var(--color-muted-fg);">Énergie cuve</span>
-          <span class="font-semibold tabular-nums"
-            >{(cur.eAvailWh / 1000).toFixed(1)} kWh · {(cur.eAvailWh / 2000).toFixed(1)} douches</span
-          >
-        </div>
-        <div class="flex items-center justify-between text-[13px]">
-          <span style="color: var(--color-muted-fg);">Réseau</span>
-          <span
-            class="font-semibold tabular-nums"
-            style="color: {cur.gridPowerW > 120 ? 'var(--color-hp)' : 'var(--color-success)'};"
-          >
-            {cur.gridPowerW > 0 ? `+${cur.gridPowerW} W (import)` : `${cur.gridPowerW} W`}
-          </span>
-        </div>
-      </section>
-
-      <!-- ── Signaux (potentiomètres) ── -->
-      <section
-        class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-5 lg:col-span-2"
+        class="flex flex-col gap-2 rounded-[var(--radius-2xl)] border p-4"
         style="background: var(--color-card); border-color: var(--color-border);"
       >
         <div class="flex items-baseline justify-between">
-          <span class="text-[14px] font-semibold">Les potentiomètres</span>
-          <span class="text-[11px]" style="color: var(--color-muted-fg);">
-            surplus confirmé = max(écrêtage, don, charge) = <strong
-              >{cur.freeSurplus.toFixed(2)}</strong
-            >
-          </span>
+          <span class="text-[13px] font-semibold" style="color: var(--color-fg);"
+            >Le parc face au besoin</span
+          >
+          <span class="text-[11px] tabular-nums" style="color: var(--color-muted-fg);"
+            >{fmtTime(chart.t0)} → {fmtTime(chart.t1)}</span
+          >
         </div>
-        <div class="flex flex-col gap-2.5">
-          {#each signaux as s (s.key)}
-            <div class="flex flex-col gap-1">
-              <div class="flex items-baseline justify-between text-[12px]">
-                <span>{s.label}</span>
-                <span class="font-semibold tabular-nums">{s.v.toFixed(2)}</span>
-              </div>
-              <div
-                class="h-2 overflow-hidden rounded-full"
-                style="background: color-mix(in oklch, var(--color-muted-fg) 15%, transparent);"
-              >
-                <div
-                  class="h-full rounded-full"
-                  style="width: {(s.v * 100).toFixed(0)}%; background: {s.color};"
-                ></div>
-              </div>
-            </div>
+        <svg
+          viewBox="0 0 {CHART_W} {CHART_H}"
+          class="w-full"
+          style="height: 130px;"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label="Énergie du parc et besoin total au fil de la journée"
+        >
+          {#each chart.bands as b (b.x0)}
+            <rect
+              x={b.x0}
+              y="0"
+              width={Math.max(1, b.x1 - b.x0)}
+              height={CHART_H}
+              style="fill: color-mix(in oklch, var(--color-hp) 14%, transparent);"
+            />
           {/each}
+          <path d={chart.besoin} fill="none" style="stroke: var(--color-hp);" stroke-width="2" />
+          <path d={chart.parc} fill="none" style="stroke: var(--color-glow);" stroke-width="2" />
+        </svg>
+        <div class="flex gap-4 text-[11.5px]" style="color: var(--color-muted-fg);">
+          <span
+            ><span class="dot" style="background: var(--color-glow);"></span> parc utilisable</span
+          >
+          <span
+            ><span class="dot" style="background: var(--color-hp);"></span> besoin (chauffe + soirée +
+            tampon)</span
+          >
+          <span
+            ><span
+              class="dot"
+              style="background: color-mix(in oklch, var(--color-hp) 30%, transparent);"
+            ></span> chauffe réelle</span
+          >
         </div>
-        <p class="text-[12px] leading-snug" style="color: var(--color-muted-fg);">
-          D = fenêtre × place × surplus confirmé, puis vetos (import / compteur muet / cuisine).
-          Tant que le surplus confirmé reste bas, le modèle attend — la batterie d'abord.
+        <p class="text-[12px]" style="color: var(--color-muted-fg);">
+          Quand la ligne verte croise la ligne corail, le critère autorise — la chauffe doit suivre
+          sans acheter un watt.
         </p>
       </section>
+    {/if}
 
-      <!-- ── Timeline D ── -->
-      <section
-        class="flex flex-col gap-3 rounded-[var(--radius-2xl)] border p-5 lg:col-span-2"
-        style="background: var(--color-card); border-color: var(--color-border);"
+    <!-- ═══ Le duel des voies + le juge de paix ═══ -->
+    <section
+      class="flex flex-col gap-2.5 rounded-[var(--radius-2xl)] border p-4"
+      style="background: var(--color-card); border-color: var(--color-border);"
+    >
+      <span class="text-[13px] font-semibold" style="color: var(--color-fg);"
+        >Sur la fenêtre chargée ({samples.length} ticks)</span
       >
-        <div class="flex items-baseline justify-between">
-          <span class="text-[14px] font-semibold">Journée (D dans le temps)</span>
-          <span class="text-[11px]" style="color: var(--color-muted-fg);">
-            {#if firstTs && lastTs}{fmtTime(firstTs)} → {fmtTime(lastTs)}{/if}
-          </span>
-        </div>
-        <div class="w-full overflow-x-auto">
-          <svg
-            viewBox="0 0 {W} {H}"
-            class="h-28 w-full"
-            preserveAspectRatio="none"
-            role="img"
-            aria-label="Courbe de désirabilité D"
-          >
-            <!-- seuils -->
-            <line
-              x1={PAD}
-              x2={W - PAD}
-              y1={y(dOn)}
-              y2={y(dOn)}
-              stroke="var(--color-hp)"
-              stroke-width="1"
-              stroke-dasharray="3 3"
-              opacity="0.6"
-            />
-            <line
-              x1={PAD}
-              x2={W - PAD}
-              y1={y(dOff)}
-              y2={y(dOff)}
-              stroke="var(--color-muted-fg)"
-              stroke-width="1"
-              stroke-dasharray="3 3"
-              opacity="0.5"
-            />
-            <!-- aire + courbe D -->
-            {#if dArea}
-              <path
-                d={dArea}
-                fill="color-mix(in oklch, var(--color-glow) 22%, transparent)"
-                stroke="none"
-              />
-            {/if}
-            {#if dPath}
-              <path
-                d={dPath}
-                fill="none"
-                stroke="var(--color-glow-bright)"
-                stroke-width="1.5"
-                stroke-linejoin="round"
-                stroke-linecap="round"
-              />
-            {/if}
-            <!-- marqueurs aurait=ON -->
-            {#each onDots as p, i (i)}
-              <circle cx={p.x} cy={p.y} r="2.2" fill="var(--color-hp)" />
-            {/each}
-          </svg>
-        </div>
-        <div
-          class="flex flex-wrap items-center justify-between gap-2 text-[11px]"
-          style="color: var(--color-muted-fg);"
+      <dl class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1.5 text-[13px]">
+        <dt style="color: var(--color-muted-fg);">Autorisé par le critère énergie seul</dt>
+        <dd class="text-right font-semibold tabular-nums" style="color: var(--color-glow);">
+          {cumulusLabo.energyOnly} ticks
+        </dd>
+        <dt style="color: var(--color-muted-fg);">Par les anciennes voies seules</dt>
+        <dd class="text-right font-semibold tabular-nums" style="color: var(--color-fg);">
+          {cumulusLabo.legacyOnly} ticks
+        </dd>
+        <dt style="color: var(--color-muted-fg);">Par les deux</dt>
+        <dd class="text-right tabular-nums" style="color: var(--color-muted-fg);">
+          {cumulusLabo.both} ticks
+        </dd>
+        <dt style="color: var(--color-muted-fg);">Chauffe solaire pilotée</dt>
+        <dd class="text-right tabular-nums" style="color: var(--color-muted-fg);">
+          {cumulusLabo.heatMin} min
+        </dd>
+        <dt style="color: var(--color-muted-fg);">Achat EDF pendant ces chauffes</dt>
+        <dd
+          class="text-right font-semibold tabular-nums"
+          style="color: {cumulusLabo.buyDuringHeatWh > 50
+            ? 'var(--color-warning)'
+            : 'var(--color-success)'};"
         >
-          <span
-            ><span style="color: var(--color-hp);">— —</span> seuil d'allumage {dOn.toFixed(2)} ·
-            <span style="color: var(--color-hp);">●</span> aurait chauffé</span
-          >
-          <span class="font-semibold">
-            {#if cumulusShadow.wouldOnCount > 0}
-              aurait chauffé ~{wouldOnMin} min · pic D {cumulusShadow.dPeak.toFixed(2)}
-            {:else}
-              aucune chauffe sur la fenêtre · pic D {cumulusShadow.dPeak.toFixed(2)}
-            {/if}
-          </span>
-        </div>
-      </section>
-    </div>
-
-    <p class="px-1 text-[11px] leading-relaxed" style="color: var(--color-muted-fg);">
-      Le modèle « shadow » calcule et journalise, mais <strong>ne commande jamais le relais</strong>
-      : le cumulus reste piloté par la logique en service. Ce banc sert à comparer, sur plusieurs jours,
-      ce que le modèle <em>aurait</em> fait au réel avant toute décision. Fenêtre ~4 h · dernier
-      tick {fmtTime(cumulusShadow.lastTickTs)}.
-    </p>
+          {cumulusLabo.buyDuringHeatWh} Wh
+        </dd>
+      </dl>
+      <p class="text-[12px]" style="color: var(--color-muted-fg);">
+        Comparaison faite fenêtre solaire ouverte et relais au repos — hors recharges de nuit (qui
+        achètent exprès au tarif creux) et hors chauffes forcées. Les anciens seuils pourront être
+        retirés quand « anciennes voies seules » restera à zéro et que l'achat EDF pendant les
+        chauffes solaires restera négligeable, sur plusieurs jours.
+      </p>
+    </section>
   {/if}
 </div>
+
+<style>
+  .dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    margin-right: 4px;
+    vertical-align: baseline;
+  }
+</style>

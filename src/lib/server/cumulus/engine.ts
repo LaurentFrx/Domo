@@ -21,7 +21,6 @@ import { setRelay } from './relay';
 import { ensureTempSensor } from './temp-sensor';
 import { updateEnergyModel, type EnergyTickResult } from './energy-model';
 import { pilotStep, type PilotCtx } from './pilot';
-import { shadowDesirability } from './desirability-shadow';
 import {
   estimatePotential,
   readSolarCalib,
@@ -35,7 +34,7 @@ import {
 } from './probe-relax-calib';
 import { parisDate } from '../tariffs';
 import { sendPush } from '../monitor/push';
-import type { AutoMode, DecisionLogEntry, ShadowEvent, DesirShadowSample } from './types';
+import type { AutoMode, CriterionSample, DecisionLogEntry, ShadowEvent } from './types';
 
 const TICK_TIMEOUT_MS = 45_000; // < intervalle timer (60 s)
 // Budget d'attente du PRÉ-ARMEMENT SB3 avant fermeture du relais : au-delà, on
@@ -44,7 +43,7 @@ const TICK_TIMEOUT_MS = 45_000; // < intervalle timer (60 s)
 const PREARM_BUDGET_MS = 22_000;
 const SHADOW_HEAT_W = 500; // conso EM-50 voie cumulus au-dessus → « en chauffe » (timeline)
 const SHADOW_LOG_MAX = 80; // taille du journal (timeline du jour)
-const DESIR_SHADOW_MAX = 240; // journal du modèle shadow de désirabilité (~4,3 h à 65 s/tick)
+const CRITERION_LOG_MAX = 660; // journal du labo du critère énergie (~12 h à 65 s/tick)
 const APPLIANCE_OFF_GRACE_MS = 10 * 60_000; // sous le seuil > 10 min → cycle terminé
 const LOG_MAX = 60;
 
@@ -171,19 +170,6 @@ async function runTick(apply: boolean): Promise<TickResult> {
   };
   const pilotRes = pilotStep(inputs, config, state, ctx);
 
-  // ── SHADOW : modèle continu de désirabilité (OBSERVATION SEULE) ──
-  // Calcule D et journalise « aurait chauffé » à côté du pilote booléen, SANS
-  // toucher au relais ni à la décision. Banc de validation live avant tout
-  // passage aux commandes. Une exception ici ne doit JAMAIS casser le tick.
-  let desirSample: DesirShadowSample | null = null;
-  try {
-    const sr = shadowDesirability(inputs, ctx, config);
-    console.log(sr.logLine);
-    desirSample = { ts: now, ...sr.sample };
-  } catch (e) {
-    console.warn('[desir-shadow] erreur (ignorée):', e instanceof Error ? e.message : e);
-  }
-
   const pilotWant: PilotWant = {
     wantOn: pilotRes.wantOn,
     reason: pilotRes.reason === 'wait' ? 'wait' : pilotRes.reason,
@@ -196,10 +182,30 @@ async function runTick(apply: boolean): Promise<TickResult> {
   const next = decision.nextState;
   next.pilot = pilotRes.pilot;
   next.pilotView = pilotRes.view;
-  // Journal SHADOW de désirabilité (diagnostic /cumulus-labo) — n'influence RIEN.
-  next.desirShadowLog = desirSample
-    ? [...state.desirShadowLog, desirSample].slice(-DESIR_SHADOW_MAX)
-    : state.desirShadowLog;
+  // ── LABO : journal du critère énergie (n'influence RIEN) ──
+  // Un point par tick : le bilan du critère, le verdict des voies historiques,
+  // la CAUSE réelle de la décision (decide) et le réseau. C'est CE journal qui
+  // décidera du retrait des vieux seuils (étape 7 de la spec) — il a remplacé
+  // le shadow de désirabilité (NO-GO à l'audit d'août, supprimé le 24/08).
+  // Assemblé APRÈS decide() : la cause distingue une chauffe pilot_solar (qui
+  // JUGE le critère) d'une recharge HC ou d'un boost (qui achètent légitimement).
+  const criterionSample: CriterionSample = {
+    ts: now,
+    uParcWh: pilotRes.energy.uParcWh,
+    eChauffeWh: pilotRes.energy.eChauffeWh,
+    reserveWh: pilotRes.reserve.wh,
+    besoinWh: pilotRes.energy.besoinWh,
+    energyOk: pilotRes.energy.trigger,
+    legacyOk: pilotRes.energy.legacyTrigger,
+    commonOk: pilotRes.energy.commonOk,
+    windowOpen: pilotRes.energy.windowOpen,
+    wantOn: pilotRes.wantOn,
+    relayOn: inputs.relayOn === true,
+    heating: inputs.em50Available && inputs.cumulusPowerW > SHADOW_HEAT_W,
+    cause: decision.reason,
+    gridW: Math.round(inputs.gridPowerW)
+  };
+  next.criterionLog = [...state.criterionLog, criterionSample].slice(-CRITERION_LOG_MAX);
 
   let relayOn = inputs.relayOn;
   let applied = false;

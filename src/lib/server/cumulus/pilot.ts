@@ -81,6 +81,13 @@ export interface PilotStepResult {
     eChauffeWh: number | null;
     besoinWh: number | null;
     trigger: boolean;
+    /** Les voies historiques (export franc / saturation / surplus invisible). */
+    legacyTrigger: boolean;
+    /** Tronc commun (ballon pas plein, maison tranquille, fenêtre, quota, délais). */
+    commonOk: boolean;
+    /** Fenêtre solaire OUVERTE (éphémérides seules — sans seuil APS ni quota).
+     *  Sert au labo : comparer les voies hors quota, mais jamais la nuit. */
+    windowOpen: boolean;
   };
 }
 
@@ -504,7 +511,11 @@ export function pilotStep(
     buyW <= 50 &&
     uParcWh >= besoinTotalWh;
 
-  const trigger = exportFrank || saturationTrigger || invisibleTrigger || energyTrigger;
+  // Verdict des voies HISTORIQUES seules — journalisé pour la validation du
+  // critère énergie (labo) : c'est l'écart entre les deux qui décidera du
+  // retrait des vieux seuils (étape 7 de la spec).
+  const legacyTrigger = exportFrank || saturationTrigger || invisibleTrigger;
+  const trigger = legacyTrigger || energyTrigger;
   const commonOk = tankNotFull && quietHouse && windowOk && quotaOk && delaysOk;
   const allOn = commonOk && trigger;
 
@@ -859,7 +870,10 @@ export function pilotStep(
       uParcWh: uParcWh === null ? null : Math.round(uParcWh),
       eChauffeWh: eChauffeWh === null ? null : Math.round(eChauffeWh),
       besoinWh: besoinTotalWh === null ? null : Math.round(besoinTotalWh),
-      trigger: energyTrigger
+      trigger: energyTrigger,
+      legacyTrigger,
+      commonOk,
+      windowOpen
     }
   };
 }
