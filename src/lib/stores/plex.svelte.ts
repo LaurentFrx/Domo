@@ -24,6 +24,9 @@ export interface UploadItem {
 /** Taille max d'une requête d'upload — marge sous BODY_SIZE_LIMIT (512M). */
 const UPLOAD_BATCH_BYTES = 400 * 1024 * 1024;
 
+/** Échecs de lecture CONSÉCUTIFS avant d'arrêter d'égrener la file (panne générale). */
+const MAX_PLAYBACK_FAILURES = 3;
+
 export interface PlexAlbum {
   key: string;
   title: string;
@@ -599,6 +602,8 @@ class PlayerState {
   /** Libellé du contexte de lecture (« Album — Artiste ») pour le mini-player. */
   context = $state<string | null>(null);
   lastError = $state<string | null>(null);
+  /** Avis transitoire « piste sautée » (la lecture, elle, continue). */
+  skipNotice = $state<string | null>(null);
   /** Feuille « Now Playing » plein écran ouverte ? (UI globale) */
   sheetOpen = $state(false);
   /** Sélecteur de destination dispo ('airplay' WebKit iOS/macOS, 'remote' ailleurs). */
@@ -609,6 +614,9 @@ class PlayerState {
   current = $derived<PlexTrack | null>(this.queue[this.index] ?? null);
 
   private audio: HTMLAudioElement | null = null;
+  /** Échecs de lecture consécutifs (remis à zéro dès que du son sort). */
+  private failStreak = 0;
+  private skipNoticeTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Élément audio paresseux + écouteurs (client uniquement). */
   private ensureAudio(): HTMLAudioElement {
@@ -622,8 +630,12 @@ class PlayerState {
       this.syncMediaSessionState();
     });
     // Du son SORT vraiment : efface un diagnostic d'échec précédent (le
-    // navigateur peut réussir une reprise après une erreur transitoire).
-    a.addEventListener('playing', () => (this.lastError = null));
+    // navigateur peut réussir une reprise après une erreur transitoire) et
+    // referme la série d'échecs consécutifs.
+    a.addEventListener('playing', () => {
+      this.lastError = null;
+      this.failStreak = 0;
+    });
     a.addEventListener('pause', () => {
       this.playing = false;
       this.syncMediaSessionState();
@@ -631,7 +643,7 @@ class PlayerState {
     a.addEventListener('ended', () => this.autoNext());
     a.addEventListener('error', () => {
       this.playing = false;
-      void this.diagnosePlaybackError(a);
+      void this.handlePlaybackError(a);
     });
     this.detectOutputPicker(a);
     this.audio = a;
@@ -808,6 +820,9 @@ class PlayerState {
   clear(): void {
     this.audio?.pause();
     if (this.audio) this.audio.src = '';
+    this.failStreak = 0;
+    this.skipNotice = null;
+    if (this.skipNoticeTimer) clearTimeout(this.skipNoticeTimer);
     this.queue = [];
     this.index = 0;
     this.playing = false;
@@ -842,6 +857,36 @@ class PlayerState {
   }
 
   /**
+   * Une piste refuse de se lire : diagnostic, puis la file CONTINUE — une piste
+   * morte (effacée, abîmée, format inconnu) ne doit pas arrêter toute la
+   * playlist. Garde-fous : session expirée = on s'arrête (sauter n'y changerait
+   * rien, il faut se reconnecter) ; 3 échecs consécutifs = panne générale
+   * (serveur, réseau), on n'égrène pas toute la file en rafale.
+   */
+  private async handlePlaybackError(a: HTMLAudioElement): Promise<void> {
+    const failed = this.current;
+    if (!failed) return; // src vidé par clear() : pas une piste en échec
+    const { auth } = await this.diagnosePlaybackError(a);
+    // Pendant le diagnostic (une requête), l'utilisateur a pu changer de piste
+    // ou vider la file : la décision de sauter ne vaut que pour l'état capturé.
+    if (this.current !== failed) return;
+    if (auth) return;
+    this.failStreak += 1;
+    if (this.failStreak >= MAX_PLAYBACK_FAILURES) return;
+    if (this.index + 1 >= this.queue.length && this.repeat !== 'all') return; // fin de file
+    this.setSkipNotice(`« ${failed.title} » sauté — ${this.lastError ?? 'lecture impossible.'}`);
+    this.lastError = null;
+    this.next();
+  }
+
+  /** Affiche l'avis de saut quelques secondes (la lecture suit son cours). */
+  private setSkipNotice(message: string): void {
+    this.skipNotice = message;
+    if (this.skipNoticeTimer) clearTimeout(this.skipNoticeTimer);
+    this.skipNoticeTimer = setTimeout(() => (this.skipNotice = null), 8_000);
+  }
+
+  /**
    * Pourquoi la lecture a-t-elle échoué ?
    *
    * L'élément `<audio>` ne dit presque rien (`MediaError.code`), et le message
@@ -853,7 +898,7 @@ class PlayerState {
    * REDIRECTION vers /denied, et l'élément audio reçoit une page HTML au lieu
    * d'un fichier — il échoue exactement comme si le morceau n'existait pas.
    */
-  private async diagnosePlaybackError(a: HTMLAudioElement): Promise<void> {
+  private async diagnosePlaybackError(a: HTMLAudioElement): Promise<{ auth: boolean }> {
     const code = a.error?.code ?? 0;
     const byCode: Record<number, string> = {
       1: 'Lecture interrompue.',
@@ -864,7 +909,7 @@ class PlayerState {
     this.lastError = byCode[code] ?? 'Lecture impossible.';
 
     const src = a.currentSrc || a.src;
-    if (!src) return;
+    if (!src) return { auth: false };
     try {
       const res = await fetch(src, {
         headers: { range: 'bytes=0-1' },
@@ -874,6 +919,7 @@ class PlayerState {
       // `opaqueredirect` (status 0) : redirection non suivie = garde d'auth.
       if (res.type === 'opaqueredirect' || res.status === 302 || res.status === 303) {
         this.lastError = 'Session expirée — rechargez l’application pour vous reconnecter.';
+        return { auth: true };
       } else if (res.status === 404) {
         this.lastError = 'Fichier introuvable sur le serveur Plex (déplacé ou supprimé).';
       } else if (res.status === 502 || res.status === 504) {
@@ -888,6 +934,7 @@ class PlayerState {
     } catch {
       this.lastError = 'Serveur injoignable (réseau).';
     }
+    return { auth: false };
   }
 
   // ─── MediaSession (écran verrouillé / centre de contrôle iOS) ─────────────

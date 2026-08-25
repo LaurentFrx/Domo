@@ -179,11 +179,11 @@
       >
       <span class="meta">
         <span class="t">{player.current.title}</span>
-        <!-- L'erreur prend la place de l'artiste : sans ça, un morceau qui ne
-             démarre pas ne dit RIEN ici, et il fallait ouvrir le lecteur pour
-             comprendre pourquoi. -->
-        {#if player.lastError}
-          <span class="err">{player.lastError}</span>
+        <!-- L'erreur (ou l'avis de piste sautée) prend la place de l'artiste :
+             sans ça, un morceau qui ne démarre pas ne dit RIEN ici, et il
+             fallait ouvrir le lecteur pour comprendre pourquoi. -->
+        {#if player.lastError || player.skipNotice}
+          <span class="err">{player.lastError ?? player.skipNotice}</span>
         {:else}
           <span class="a">{player.current.artist}</span>
         {/if}

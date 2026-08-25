@@ -382,8 +382,8 @@
         {lightSummary}
       </button>
 
-      {#if player.lastError}
-        <p class="error">{player.lastError}</p>
+      {#if player.lastError || player.skipNotice}
+        <p class="error">{player.lastError ?? player.skipNotice}</p>
       {/if}
 
       <div class="queue">
