@@ -622,6 +622,11 @@ class PlayerState {
   /** Élément audio paresseux + écouteurs (client uniquement). */
   private ensureAudio(): HTMLAudioElement {
     if (this.audio) return this.audio;
+    // iOS (Audio Session API, WebKit) : déclarer la session « playback », sinon
+    // la PWA plein écran COUPE le son dès qu'on passe sur une autre app, et le
+    // commutateur silence le mute. Sans effet ailleurs (API absente = ignoré).
+    const nav = navigator as Navigator & { audioSession?: { type: string } };
+    if (nav.audioSession) nav.audioSession.type = 'playback';
     const a = new Audio();
     a.preload = 'auto';
     a.addEventListener('timeupdate', () => (this.currentTime = a.currentTime));
