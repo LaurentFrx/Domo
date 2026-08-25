@@ -91,25 +91,6 @@
   </div>
 
   {#if hasData}
-    <!-- Proportion globale HC / HP sur l'année affichée -->
-    <div class="flex flex-col gap-1.5">
-      <div class="flex items-center justify-between text-[12px] font-semibold">
-        <span style="color: var(--color-hc);">Creuses {pctHc} %</span>
-        <span style="color: var(--color-hp);">{pctHp} % Pleines</span>
-      </div>
-      <div class="prop-bar">
-        <div class="prop-hc" style="width: {pctHc}%;"></div>
-        <div class="prop-hp" style="width: {pctHp}%;"></div>
-      </div>
-      <div
-        class="flex justify-between text-[10px] tabular-nums"
-        style="color: var(--color-muted-fg);"
-      >
-        <span>{nf1.format(totalHc)} kWh creuses</span>
-        <span>{nf1.format(totalHp)} kWh pleines</span>
-      </div>
-    </div>
-
     <!-- Barres par mois : hauteur = part HC/HP, largeur = volume (cf. segH/colW) -->
     <div
       class="bars"
@@ -150,6 +131,26 @@
           <span class="col-lbl" class:est class:tick={isTick(i)}>{m.label}</span>
         </svelte:element>
       {/each}
+    </div>
+
+    <!-- Proportion globale, SOUS son graphique : on lit d'abord le détail
+         mois par mois, la synthèse vient ensuite. -->
+    <div class="flex flex-col gap-1.5">
+      <div class="flex items-center justify-between text-[12px] font-semibold">
+        <span style="color: var(--color-hc);">Creuses {pctHc} %</span>
+        <span style="color: var(--color-hp);">{pctHp} % Pleines</span>
+      </div>
+      <div class="prop-bar">
+        <div class="prop-hc" style="width: {pctHc}%;"></div>
+        <div class="prop-hp" style="width: {pctHp}%;"></div>
+      </div>
+      <div
+        class="flex justify-between text-[10px] tabular-nums"
+        style="color: var(--color-muted-fg);"
+      >
+        <span>{nf1.format(totalHc)} kWh creuses</span>
+        <span>{nf1.format(totalHp)} kWh pleines</span>
+      </div>
     </div>
   {:else}
     <p class="py-3 text-[12px]" style="color: var(--color-muted-fg);">

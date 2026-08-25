@@ -355,6 +355,132 @@
     </span>
   </header>
 
+  <!-- ═══ Bilan (année → mois → jour) — en TÊTE de page ═══ -->
+  <section class="flex flex-col gap-3">
+    <div class="flex items-center justify-between gap-3">
+      <!-- Fil d'Ariane : chaque échelon remonte d'un niveau. Pas de feuille
+           modale ici — la page vit dans le Pager, où une modale s'ouvrirait hors
+           écran (will-change:transform crée un containing block). -->
+      <nav
+        class="flex min-w-0 items-center gap-1 text-[11px] font-semibold tracking-[0.08em] uppercase"
+      >
+        <button
+          type="button"
+          class="crumb"
+          class:crumb-current={energyDrill.level === 'year'}
+          onclick={() => energyDrill.reset()}
+          disabled={energyDrill.level === 'year'}
+        >
+          Bilan {selectedYear}
+        </button>
+        {#if energyDrill.month}
+          <span class="crumb-sep">›</span>
+          <button
+            type="button"
+            class="crumb"
+            class:crumb-current={energyDrill.level === 'month'}
+            onclick={() => energyDrill.day && energyDrill.back()}
+            disabled={energyDrill.level === 'month'}
+          >
+            {humanKey(energyDrill.month).replace(` ${selectedYear}`, '')}
+          </button>
+        {/if}
+        {#if energyDrill.day}
+          <span class="crumb-sep">›</span>
+          <span class="crumb crumb-current">{Number(energyDrill.day.slice(8))}</span>
+        {/if}
+      </nav>
+      <!-- Sélecteur d'année : ‹ minYear … année courante › (pas de futur). Il
+           disparaît dès qu'on descend dans un mois — c'est le fil d'Ariane qui
+           pilote alors la navigation. -->
+      {#if energyDrill.level === 'year'}
+        <div
+          class="inline-flex items-center gap-0.5 rounded-xl p-0.5"
+          style="background: var(--color-muted); border: 1px solid var(--color-border);"
+        >
+          <button
+            type="button"
+            onclick={() => (selectedYear = Math.max(minSelectableYear, selectedYear - 1))}
+            disabled={selectedYear <= minSelectableYear}
+            aria-label="Année précédente"
+            class="flex h-8 w-8 items-center justify-center rounded-lg text-[17px] leading-none transition-opacity disabled:opacity-25"
+            style="color: var(--color-muted-fg);"
+          >
+            ‹
+          </button>
+          <span
+            class="min-w-[4ch] text-center text-[13px] font-semibold tabular-nums"
+            style="color: var(--color-fg);"
+          >
+            {selectedYear}
+          </span>
+          <button
+            type="button"
+            onclick={() => (selectedYear = Math.min(curYear, selectedYear + 1))}
+            disabled={selectedYear >= curYear}
+            aria-label="Année suivante"
+            class="flex h-8 w-8 items-center justify-center rounded-lg text-[17px] leading-none transition-opacity disabled:opacity-25"
+            style="color: var(--color-muted-fg);"
+          >
+            ›
+          </button>
+        </div>
+      {:else}
+        <button type="button" class="back-btn" onclick={() => energyDrill.back()}>
+          ← Retour
+        </button>
+      {/if}
+    </div>
+    {#if !energyMonthly.connected && energyMonthly.status !== 'idle'}
+      <p class="text-[11px]" style="color: var(--color-muted-fg);">
+        Relevés mensuels momentanément indisponibles — le tableau montre les derniers chiffres
+        connus.
+      </p>
+    {/if}
+    <!-- Graphe « Saisons » (canevas Design 24/08) : conso par mois, part solaire
+         en jaune, achat réseau en bleu — détail chiffré au tap sur un mois. -->
+    <!-- Pas de cadre : sur iPhone, bordure + padding grignotaient la largeur utile
+         des barres. Les deux graphes vivent à plat sur le fond de page, séparés
+         par un simple filet — ils gagnent tout l'écran. -->
+    <div class="flex flex-col gap-5">
+      {#if energyDrill.loading && viewBuckets.length === 0}
+        <p class="py-6 text-[12px]" style="color: var(--color-muted-fg);">Chargement du détail…</p>
+      {:else if energyDrill.error && viewBuckets.length === 0}
+        <p class="py-6 text-[12px]" style="color: var(--color-muted-fg);">
+          Détail indisponible pour l'instant.
+        </p>
+      {:else}
+        <MonthlyEnergyChart
+          data={viewBuckets}
+          highlight={viewHighlight}
+          scaleMax={viewScale}
+          onOpen={energyDrill.level === 'day' ? undefined : (k) => energyDrill.open(k)}
+        />
+        {#if energyDrill.level === 'day' && !energyDrill.hasCurve}
+          <p class="text-[11px]" style="color: var(--color-muted-fg);">
+            Le détail heure par heure de cette journée n'a pas encore été récupéré chez Enedis — la
+            reprise de l'historique remonte le temps peu à peu.
+          </p>
+        {:else if energyDrill.level === 'day' && !energyDrill.hasPv}
+          <p class="text-[11px]" style="color: var(--color-muted-fg);">
+            Journée antérieure aux panneaux : seul le réseau est mesuré.
+          </p>
+        {/if}
+
+        <!-- Filet de séparation : les deux graphes restent distincts sans qu'on
+             ait besoin de deux cartes. -->
+        <div class="h-px" style="background: var(--color-border);"></div>
+
+        <HpHcSplitCard
+          data={viewBuckets}
+          periode={periodeLabel}
+          scaleMaxKwh={viewScale}
+          onOpen={energyDrill.level === 'day' ? undefined : (k) => energyDrill.open(k)}
+        />
+      {/if}
+    </div>
+  </section>
+
   <!-- ═══ Eau chaude (ECS) — carte unique pilotage + journal, en tête de page ═══ -->
 
   <!-- ═══ Paysage (iPad/desktop) : production + prévisions côte à côte ═══ -->
@@ -729,136 +855,6 @@
       </div>
     </section>
   {/if}
-
-  <!-- ═══ Section 3 : Tableau mensuel ═══ -->
-  <section class="flex flex-col gap-3">
-    <div class="flex items-center justify-between gap-3">
-      <!-- Fil d'Ariane : chaque échelon remonte d'un niveau. Pas de feuille
-           modale ici — la page vit dans le Pager, où une modale s'ouvrirait hors
-           écran (will-change:transform crée un containing block). -->
-      <nav
-        class="flex min-w-0 items-center gap-1 text-[11px] font-semibold tracking-[0.08em] uppercase"
-      >
-        <button
-          type="button"
-          class="crumb"
-          class:crumb-current={energyDrill.level === 'year'}
-          onclick={() => energyDrill.reset()}
-          disabled={energyDrill.level === 'year'}
-        >
-          Bilan {selectedYear}
-        </button>
-        {#if energyDrill.month}
-          <span class="crumb-sep">›</span>
-          <button
-            type="button"
-            class="crumb"
-            class:crumb-current={energyDrill.level === 'month'}
-            onclick={() => energyDrill.day && energyDrill.back()}
-            disabled={energyDrill.level === 'month'}
-          >
-            {humanKey(energyDrill.month).replace(` ${selectedYear}`, '')}
-          </button>
-        {/if}
-        {#if energyDrill.day}
-          <span class="crumb-sep">›</span>
-          <span class="crumb crumb-current">{Number(energyDrill.day.slice(8))}</span>
-        {/if}
-      </nav>
-      <!-- Sélecteur d'année : ‹ minYear … année courante › (pas de futur). Il
-           disparaît dès qu'on descend dans un mois — c'est le fil d'Ariane qui
-           pilote alors la navigation. -->
-      {#if energyDrill.level === 'year'}
-        <div
-          class="inline-flex items-center gap-0.5 rounded-xl p-0.5"
-          style="background: var(--color-muted); border: 1px solid var(--color-border);"
-        >
-          <button
-            type="button"
-            onclick={() => (selectedYear = Math.max(minSelectableYear, selectedYear - 1))}
-            disabled={selectedYear <= minSelectableYear}
-            aria-label="Année précédente"
-            class="flex h-8 w-8 items-center justify-center rounded-lg text-[17px] leading-none transition-opacity disabled:opacity-25"
-            style="color: var(--color-muted-fg);"
-          >
-            ‹
-          </button>
-          <span
-            class="min-w-[4ch] text-center text-[13px] font-semibold tabular-nums"
-            style="color: var(--color-fg);"
-          >
-            {selectedYear}
-          </span>
-          <button
-            type="button"
-            onclick={() => (selectedYear = Math.min(curYear, selectedYear + 1))}
-            disabled={selectedYear >= curYear}
-            aria-label="Année suivante"
-            class="flex h-8 w-8 items-center justify-center rounded-lg text-[17px] leading-none transition-opacity disabled:opacity-25"
-            style="color: var(--color-muted-fg);"
-          >
-            ›
-          </button>
-        </div>
-      {:else}
-        <button type="button" class="back-btn" onclick={() => energyDrill.back()}>
-          ← Retour
-        </button>
-      {/if}
-    </div>
-    {#if !energyMonthly.connected && energyMonthly.status !== 'idle'}
-      <p class="text-[11px]" style="color: var(--color-muted-fg);">
-        Relevés mensuels momentanément indisponibles — le tableau montre les derniers chiffres
-        connus.
-      </p>
-    {/if}
-    <!-- Graphe « Saisons » (canevas Design 24/08) : conso par mois, part solaire
-         en jaune, achat réseau en bleu — détail chiffré au tap sur un mois. -->
-    <!-- UNE seule carte pour les deux graphes : même piste, même grille, mêmes
-         colonnes — la consommation du mois et sa répartition Creuses/Pleines se
-         lisent l'une sous l'autre. Le style en ligne `background: var(--color-card)`
-         est ce qui déclenche le verre plexiglass (mécanisme centralisé app.css). -->
-    <div
-      class="flex flex-col gap-5 rounded-[var(--radius-2xl)] border p-4"
-      style="background: var(--color-card); border-color: var(--color-border);"
-    >
-      {#if energyDrill.loading && viewBuckets.length === 0}
-        <p class="py-6 text-[12px]" style="color: var(--color-muted-fg);">Chargement du détail…</p>
-      {:else if energyDrill.error && viewBuckets.length === 0}
-        <p class="py-6 text-[12px]" style="color: var(--color-muted-fg);">
-          Détail indisponible pour l'instant.
-        </p>
-      {:else}
-        <MonthlyEnergyChart
-          data={viewBuckets}
-          highlight={viewHighlight}
-          scaleMax={viewScale}
-          onOpen={energyDrill.level === 'day' ? undefined : (k) => energyDrill.open(k)}
-        />
-        {#if energyDrill.level === 'day' && !energyDrill.hasCurve}
-          <p class="text-[11px]" style="color: var(--color-muted-fg);">
-            Le détail heure par heure de cette journée n'a pas encore été récupéré chez Enedis — la
-            reprise de l'historique remonte le temps peu à peu.
-          </p>
-        {:else if energyDrill.level === 'day' && !energyDrill.hasPv}
-          <p class="text-[11px]" style="color: var(--color-muted-fg);">
-            Journée antérieure aux panneaux : seul le réseau est mesuré.
-          </p>
-        {/if}
-
-        <!-- Filet de séparation : les deux graphes restent distincts sans qu'on
-             ait besoin de deux cartes. -->
-        <div class="h-px" style="background: var(--color-border);"></div>
-
-        <HpHcSplitCard
-          data={viewBuckets}
-          periode={periodeLabel}
-          scaleMaxKwh={viewScale}
-          onOpen={energyDrill.level === 'day' ? undefined : (k) => energyDrill.open(k)}
-        />
-      {/if}
-    </div>
-  </section>
 
   <!-- ═══ Section 4 : KPIs humanisés ═══ -->
   <section>
