@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { MonthAgg } from '$stores/energyMonthly.svelte';
+  import type { Bucket } from '$stores/energyDrill.svelte';
 
   // Répartition Heures Creuses / Heures Pleines des imports réseau, pour les 12
   // mois de l'année affichée (suit le sélecteur de la page Énergie via `data`).
@@ -11,17 +11,20 @@
   // facturé (tariffs.json) ou ventilation estimée — hachurée + annoncée en clair.
   let {
     data,
-    labels,
-    year,
-    scaleMaxKwh = 0
+    periode,
+    scaleMaxKwh = 0,
+    onOpen
   }: {
-    data: MonthAgg[];
-    labels: string[];
-    year: number;
+    /** Les tranches du niveau courant : 12 mois, les jours d'un mois, ou 24 h. */
+    data: Bucket[];
+    /** Sous-titre : « 2026 », « Août 2026 », « 14 août 2026 ». */
+    periode: string;
     /** Échelle FIXE commune avec le graphe Saisons (plus gros mois de CONSO,
      * toutes années — fourni par l'API) : les hauteurs des deux graphes se
-     * comparent. 0 = repli sur le max de l'année affichée. */
+     * comparent. 0 = repli sur le max des données affichées. */
     scaleMaxKwh?: number;
+    /** Descendre d'un niveau (absent au dernier niveau). */
+    onOpen?: (key: string) => void;
   } = $props();
 
   const nf1 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
@@ -42,7 +45,16 @@
     )
   );
 
-  const monthTotal = (m: MonthAgg) => (m.import_hc_kwh || 0) + (m.import_hp_kwh || 0);
+  const monthTotal = (m: Bucket) => (m.import_hc_kwh || 0) + (m.import_hp_kwh || 0);
+  // Même règle que le graphe du dessus : la décimale apparaît quand l'échelle
+  // descend (une journée, une heure), sinon tout s'affiche « 0 ».
+  const fine = $derived(maxMonth > 0 && maxMonth < 10);
+  const fmtVal = (v: number) => (fine ? nf1.format(v) : nf0.format(v));
+
+  // Même règle de lisibilité que le graphe du dessus (cf. MonthlyEnergyChart).
+  const dense = $derived(data.length > 16);
+  const tickStep = $derived(data.length > 26 ? 5 : data.length > 16 ? 3 : 1);
+  const isTick = (i: number) => i % tickStep === 0 || i === data.length - 1;
   const pct = (part: number, whole: number) => (whole > 0 ? Math.round((100 * part) / whole) : 0);
 
   // Hauteur de segment en px sur l'échelle commune (piste 120 px, comme le graphe
@@ -52,10 +64,10 @@
 
   // Mois dont la VENTILATION est estimée : 'local' (total ET répartition mesure
   // maison) ou 'enedis' (total = compteur Linky, répartition encore estimée).
-  const isEst = (m: MonthAgg) =>
+  const isEst = (m: Bucket) =>
     (m.import_split_source === 'local' || m.import_split_source === 'enedis') && monthTotal(m) > 0;
-  const isEnedis = (m: MonthAgg) => m.import_split_source === 'enedis' && monthTotal(m) > 0;
-  const estLabels = $derived(data.map((m, i) => (isEst(m) ? labels[i] : null)).filter(Boolean));
+  const isEnedis = (m: Bucket) => m.import_split_source === 'enedis' && monthTotal(m) > 0;
+  const estLabels = $derived(data.map((m) => (isEst(m) ? m.label : null)).filter(Boolean));
   const anyEnedis = $derived(data.some(isEnedis));
 </script>
 
@@ -67,7 +79,9 @@
   <div class="flex items-start justify-between gap-3">
     <div class="flex flex-col gap-0.5">
       <span class="text-[14px] font-semibold">Répartition Heures Creuses / Pleines</span>
-      <span class="text-[11px]" style="color: var(--color-muted-fg);">Imports réseau · {year}</span>
+      <span class="text-[11px]" style="color: var(--color-muted-fg);"
+        >Imports réseau · {periode}</span
+      >
     </div>
     {#if hasData}
       <span class="text-[12px] font-semibold tabular-nums" style="color: var(--color-muted-fg);">
@@ -99,16 +113,24 @@
     <!-- Barres par mois : hauteur = part HC/HP, largeur = volume (cf. segH/colW) -->
     <div
       class="bars"
+      class:dense
+      style="--n: {data.length}; --gap: {data.length > 20 ? 2 : 6}px;"
       role="img"
       aria-label="Part Heures Creuses / Pleines par mois — barre d'autant plus large que le mois a consommé"
     >
       {#each data as m, i (i)}
         {@const tot = monthTotal(m)}
         {@const est = isEst(m)}
-        <div
+        {@const canOpen = tot > 0 && !!m.key && !!onOpen}
+        <svelte:element
+          this={canOpen ? 'button' : 'div'}
+          role={canOpen ? 'button' : undefined}
+          tabindex={canOpen ? 0 : undefined}
+          onclick={canOpen ? () => onOpen?.(m.key as string) : undefined}
           class="col"
+          class:clickable={canOpen}
           title={tot > 0
-            ? `${labels[i]} ${year} — Creuses ${nf1.format(m.import_hc_kwh)} kWh (${pct(
+            ? `${m.label} — Creuses ${nf1.format(m.import_hc_kwh)} kWh (${pct(
                 m.import_hc_kwh,
                 tot
               )} %) · Pleines ${nf1.format(m.import_hp_kwh)} kWh (${pct(m.import_hp_kwh, tot)} %)${
@@ -118,15 +140,15 @@
                     ? ' · estimé (mesure maison)'
                     : ''
               }`
-            : `${labels[i]} ${year} — pas de relevé`}
+            : `${m.label} — pas de relevé`}
         >
-          <span class="col-val">{tot > 0 ? nf0.format(tot) : ''}</span>
+          <span class="col-val">{tot >= (fine ? 0.05 : 0.5) ? fmtVal(tot) : ''}</span>
           <div class="track" class:filled={tot > 0}>
             <div class="seg seg-hp" style="height: {segH(m.import_hp_kwh)}px;"></div>
             <div class="seg seg-hc" style="height: {segH(m.import_hc_kwh)}px;"></div>
           </div>
-          <span class="col-lbl" class:est>{labels[i]}</span>
-        </div>
+          <span class="col-lbl" class:est class:tick={isTick(i)}>{m.label}</span>
+        </svelte:element>
       {/each}
     </div>
 
@@ -149,7 +171,7 @@
     </div>
   {:else}
     <p class="py-3 text-[12px]" style="color: var(--color-muted-fg);">
-      Pas de ventilation Heures Creuses / Pleines pour {year}.
+      Pas de ventilation Heures Creuses / Pleines pour {periode.toLowerCase()}.
     </p>
   {/if}
 </section>
@@ -176,13 +198,16 @@
   /* 12 colonnes, alignées sur la base ; gap serré sur iPhone, plus aéré dès iPad. */
   .bars {
     display: grid;
-    grid-template-columns: repeat(12, 1fr);
+    /* Autant de colonnes que de tranches : 12 mois, 28 à 31 jours, ou 24 heures.
+       minmax(0,1fr) est indispensable — sans lui, une colonne au contenu large
+       (l'étiquette « 31 ») force un débordement au lieu de se comprimer. */
+    grid-template-columns: repeat(var(--n, 12), minmax(0, 1fr));
     gap: 2px;
     align-items: end;
   }
   @media (min-width: 640px) {
     .bars {
-      gap: 6px;
+      gap: var(--gap, 6px);
     }
   }
   .col {
@@ -191,6 +216,14 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    color: inherit;
+  }
+  .col.clickable {
+    cursor: pointer;
   }
   .col-val {
     min-height: 9px;
@@ -228,6 +261,25 @@
     font-size: 9px;
     line-height: 1;
     color: var(--color-muted-fg);
+    white-space: nowrap;
+  }
+
+  /* Écran étroit + beaucoup de colonnes : cf. MonthlyEnergyChart. */
+  @media (max-width: 639px) {
+    .bars.dense :global(.col-val) {
+      display: none;
+    }
+    .bars.dense :global(.col-lbl:not(.tick)) {
+      visibility: hidden;
+    }
+    /* Les étiquettes de bord déborderaient de leur colonne (elles sont centrées
+       sur ~12 px de large) : on les ancre au bord du graphe. */
+    .bars.dense :global(.col:first-child .col-lbl) {
+      align-self: flex-start;
+    }
+    .bars.dense :global(.col:last-child .col-lbl) {
+      align-self: flex-end;
+    }
   }
   .dot {
     display: inline-block;
