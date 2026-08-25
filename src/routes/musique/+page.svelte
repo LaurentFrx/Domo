@@ -633,7 +633,9 @@
         </button>
       {/if}
     </h1>
-    {#if plex.status === 'ready'}
+    <!-- Gérer = ajout/suppression de fichiers : réservé à l'administrateur
+         (les routes upload/scan/suppression le refusent de toute façon). -->
+    {#if plex.status === 'ready' && peutToutRegler()}
       {#if manage}
         <button class="pill pill-accent" onclick={() => (manage = false)}>Terminé</button>
       {:else}

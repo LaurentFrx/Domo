@@ -44,12 +44,22 @@ export const RESERVE_ADMIN: readonly Reserve[] = [
     libelle: 'Le bridage de l’onduleur'
   },
 
-  // ── Musique : effacer un fichier est irréversible ─────────────────────
+  // ── Musique : le mode Gérer (le disque de la bibliothèque) ────────────
   {
     methodes: ['DELETE'],
     chemin: '/api/plex/item',
     prefixe: true,
     libelle: 'La suppression d’un morceau'
+  },
+  {
+    methodes: ['POST'],
+    chemin: '/api/plex/upload',
+    libelle: 'L’ajout de musique'
+  },
+  {
+    methodes: ['POST'],
+    chemin: '/api/plex/scan',
+    libelle: 'L’analyse de la bibliothèque'
   },
 
   // ── Accès : la gestion des comptes du foyer ───────────────────────────
