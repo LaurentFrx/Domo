@@ -69,9 +69,11 @@
   const isEnedis = (m: Bucket) => m.import_split_source === 'enedis' && monthTotal(m) > 0;
 </script>
 
-<section
-  class="flex flex-col gap-4 rounded-[var(--radius-2xl)] border p-4"
-  style="background: var(--color-card); border-color: var(--color-border);"
+<!-- Pas d'enveloppe ici : les deux graphes du bilan partagent UNE carte, montée
+     par la page — leurs colonnes s'alignent alors verticalement et se lisent
+     ensemble (un mois, sa consommation au-dessus, sa répartition en dessous). -->
+<div
+  class="flex flex-col gap-4"
   aria-label="Répartition Heures Creuses / Heures Pleines des imports réseau"
 >
   <div class="flex items-start justify-between gap-3">
@@ -154,7 +156,7 @@
       Pas de ventilation Heures Creuses / Pleines pour {periode.toLowerCase()}.
     </p>
   {/if}
-</section>
+</div>
 
 <style>
   .prop-bar {

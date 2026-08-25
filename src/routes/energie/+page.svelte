@@ -814,38 +814,50 @@
     {/if}
     <!-- Graphe « Saisons » (canevas Design 24/08) : conso par mois, part solaire
          en jaune, achat réseau en bleu — détail chiffré au tap sur un mois. -->
-    {#if energyDrill.loading && viewBuckets.length === 0}
-      <p class="py-6 text-[12px]" style="color: var(--color-muted-fg);">Chargement du détail…</p>
-    {:else if energyDrill.error && viewBuckets.length === 0}
-      <p class="py-6 text-[12px]" style="color: var(--color-muted-fg);">
-        Détail indisponible pour l'instant.
-      </p>
-    {:else}
-      <MonthlyEnergyChart
-        data={viewBuckets}
-        highlight={viewHighlight}
-        scaleMax={viewScale}
-        onOpen={energyDrill.level === 'day' ? undefined : (k) => energyDrill.open(k)}
-      />
-      {#if energyDrill.level === 'day' && !energyDrill.hasCurve}
-        <p class="text-[11px]" style="color: var(--color-muted-fg);">
-          Le détail heure par heure de cette journée n'a pas encore été récupéré chez Enedis — la
-          reprise de l'historique remonte le temps peu à peu.
+    <!-- UNE seule carte pour les deux graphes : même piste, même grille, mêmes
+         colonnes — la consommation du mois et sa répartition Creuses/Pleines se
+         lisent l'une sous l'autre. Le style en ligne `background: var(--color-card)`
+         est ce qui déclenche le verre plexiglass (mécanisme centralisé app.css). -->
+    <div
+      class="flex flex-col gap-5 rounded-[var(--radius-2xl)] border p-4"
+      style="background: var(--color-card); border-color: var(--color-border);"
+    >
+      {#if energyDrill.loading && viewBuckets.length === 0}
+        <p class="py-6 text-[12px]" style="color: var(--color-muted-fg);">Chargement du détail…</p>
+      {:else if energyDrill.error && viewBuckets.length === 0}
+        <p class="py-6 text-[12px]" style="color: var(--color-muted-fg);">
+          Détail indisponible pour l'instant.
         </p>
-      {:else if energyDrill.level === 'day' && !energyDrill.hasPv}
-        <p class="text-[11px]" style="color: var(--color-muted-fg);">
-          Journée antérieure aux panneaux : seul le réseau est mesuré.
-        </p>
-      {/if}
-    {/if}
+      {:else}
+        <MonthlyEnergyChart
+          data={viewBuckets}
+          highlight={viewHighlight}
+          scaleMax={viewScale}
+          onOpen={energyDrill.level === 'day' ? undefined : (k) => energyDrill.open(k)}
+        />
+        {#if energyDrill.level === 'day' && !energyDrill.hasCurve}
+          <p class="text-[11px]" style="color: var(--color-muted-fg);">
+            Le détail heure par heure de cette journée n'a pas encore été récupéré chez Enedis — la
+            reprise de l'historique remonte le temps peu à peu.
+          </p>
+        {:else if energyDrill.level === 'day' && !energyDrill.hasPv}
+          <p class="text-[11px]" style="color: var(--color-muted-fg);">
+            Journée antérieure aux panneaux : seul le réseau est mesuré.
+          </p>
+        {/if}
 
-    <!-- Répartition HP/HC des imports réseau (suit l'année sélectionnée). -->
-    <HpHcSplitCard
-      data={viewBuckets}
-      periode={periodeLabel}
-      scaleMaxKwh={viewScale}
-      onOpen={energyDrill.level === 'day' ? undefined : (k) => energyDrill.open(k)}
-    />
+        <!-- Filet de séparation : les deux graphes restent distincts sans qu'on
+             ait besoin de deux cartes. -->
+        <div class="h-px" style="background: var(--color-border);"></div>
+
+        <HpHcSplitCard
+          data={viewBuckets}
+          periode={periodeLabel}
+          scaleMaxKwh={viewScale}
+          onOpen={energyDrill.level === 'day' ? undefined : (k) => energyDrill.open(k)}
+        />
+      {/if}
+    </div>
   </section>
 
   <!-- ═══ Section 4 : KPIs humanisés ═══ -->
