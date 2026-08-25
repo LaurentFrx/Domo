@@ -27,7 +27,9 @@ export const GET: RequestHandler = async ({ params, request }) => {
       headers: range ? { range } : {}
     });
     if (!upstream.ok && upstream.status !== 206) {
-      throw error(502, `Plex stream: HTTP ${upstream.status}`);
+      // Le 404 est RELAYÉ tel quel : c'est lui qui permet au lecteur de dire
+      // « fichier disparu » (et de sauter la piste) plutôt que « Plex en panne ».
+      throw error(upstream.status === 404 ? 404 : 502, `Plex stream: HTTP ${upstream.status}`);
     }
     const headers = new Headers({ 'cache-control': 'no-store' });
     for (const k of PASSTHROUGH) {
