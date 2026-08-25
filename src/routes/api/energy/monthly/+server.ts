@@ -486,9 +486,24 @@ export const GET: RequestHandler = async ({ url }) => {
       const hasHc = typeof hc === 'number' && hc > 0;
       const hasHp = typeof hp === 'number' && hp > 0;
       if (hasHc || hasHp) {
-        months[i].import_hc_kwh = hasHc ? hc : 0;
-        months[i].import_hp_kwh = hasHp ? hp : 0;
-        months[i].import_kwh = months[i].import_hc_kwh + months[i].import_hp_kwh;
+        // ⚠️ Un relevé saisi couvre une PÉRIODE DE FACTURATION, pas un mois
+        // civil : juillet 2025 portait 13,6 kWh quand le compteur en a compté
+        // 91,8 sur les 31 jours (bug visible en prod le 25/08/2026). Le relevé
+        // ne donne donc QUE la répartition Creuses/Pleines — un ratio, appliqué
+        // au total Enedis, qui reste seul maître du volume. Il ne fait le total
+        // que si Enedis n'a rien pour ce mois (avant l'historique Linky).
+        const relHc = hasHc ? hc : 0;
+        const relHp = hasHp ? hp : 0;
+        const relTot = relHc + relHp;
+        if (months[i].import_kwh > 0 && relTot > 0) {
+          const shareHc = relHc / relTot;
+          months[i].import_hc_kwh = months[i].import_kwh * shareHc;
+          months[i].import_hp_kwh = months[i].import_kwh * (1 - shareHc);
+        } else {
+          months[i].import_hc_kwh = relHc;
+          months[i].import_hp_kwh = relHp;
+          months[i].import_kwh = relTot;
+        }
         months[i].import_split_source = 'meter';
       } else if (months[i].import_kwh > 0) {
         noMeter.push(i); // candidat à la ventilation dérivée (cf. ci-dessous)
