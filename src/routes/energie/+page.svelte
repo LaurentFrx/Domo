@@ -371,7 +371,7 @@
           onclick={() => energyDrill.reset()}
           disabled={energyDrill.level === 'year'}
         >
-          Bilan {selectedYear}
+          Bilan
         </button>
         {#if energyDrill.month}
           <span class="crumb-sep">›</span>

@@ -76,19 +76,10 @@
   class="flex flex-col gap-4"
   aria-label="Répartition Heures Creuses / Heures Pleines des imports réseau"
 >
-  <div class="flex items-start justify-between gap-3">
-    <div class="flex flex-col gap-0.5">
-      <span class="text-[14px] font-semibold">Répartition Heures Creuses / Pleines</span>
-      <span class="text-[11px]" style="color: var(--color-muted-fg);"
-        >Imports réseau · {periode}</span
-      >
-    </div>
-    {#if hasData}
-      <span class="text-[12px] font-semibold tabular-nums" style="color: var(--color-muted-fg);">
-        {nf0.format(totalAll)} kWh
-      </span>
-    {/if}
-  </div>
+  <!-- Titre seul : la période est déjà dite par le fil d'Ariane et le sélecteur
+       d'année, et le total de l'import par le chiffre « Réseau EDF » en tête de
+       carte — le répéter ici n'apprenait rien. -->
+  <span class="text-[14px] font-semibold">Répartition Heures Creuses / Pleines</span>
 
   {#if hasData}
     <!-- Barres par mois : hauteur = part HC/HP, largeur = volume (cf. segH/colW) -->
@@ -128,7 +119,6 @@
             <div class="seg seg-hp" style="height: {segH(m.import_hp_kwh)}px;"></div>
             <div class="seg seg-hc" style="height: {segH(m.import_hc_kwh)}px;"></div>
           </div>
-          <span class="col-lbl" class:est class:tick={isTick(i)}>{m.label}</span>
         </svelte:element>
       {/each}
     </div>
@@ -240,34 +230,10 @@
   .seg-hc {
     background: var(--color-hc);
   }
-  .col-lbl {
-    font-size: 9px;
-    line-height: 1;
-    color: var(--color-muted-fg);
-    white-space: nowrap;
-  }
-
   /* Écran étroit + beaucoup de colonnes : cf. MonthlyEnergyChart. */
   @media (max-width: 639px) {
     .bars.dense :global(.col-val) {
       display: none;
     }
-    .bars.dense :global(.col-lbl:not(.tick)) {
-      visibility: hidden;
-    }
-    /* Les étiquettes de bord déborderaient de leur colonne (elles sont centrées
-       sur ~12 px de large) : on les ancre au bord du graphe. */
-    .bars.dense :global(.col:first-child .col-lbl) {
-      align-self: flex-start;
-    }
-    .bars.dense :global(.col:last-child .col-lbl) {
-      align-self: flex-end;
-    }
-  }
-  /* Mois ESTIMÉ : marqué par le SEUL libellé en italique — les hachures sur les
-     barres ont été retirées le 25/08 (détail technique qui abîmait la carte).
-     L'info reste portée par l'italique, l'info-bulle du mois et la légende. */
-  .col-lbl.est {
-    font-style: italic;
   }
 </style>
