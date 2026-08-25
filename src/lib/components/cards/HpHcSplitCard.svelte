@@ -67,8 +67,6 @@
   const isEst = (m: Bucket) =>
     (m.import_split_source === 'local' || m.import_split_source === 'enedis') && monthTotal(m) > 0;
   const isEnedis = (m: Bucket) => m.import_split_source === 'enedis' && monthTotal(m) > 0;
-  const estLabels = $derived(data.map((m) => (isEst(m) ? m.label : null)).filter(Boolean));
-  const anyEnedis = $derived(data.some(isEnedis));
 </script>
 
 <section
@@ -150,24 +148,6 @@
           <span class="col-lbl" class:est class:tick={isTick(i)}>{m.label}</span>
         </svelte:element>
       {/each}
-    </div>
-
-    <!-- Légende -->
-    <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px]">
-      <span class="inline-flex items-center gap-1.5" style="color: var(--color-muted-fg);">
-        <span class="dot" style="background: var(--color-hc);"></span> Heures creuses
-      </span>
-      <span class="inline-flex items-center gap-1.5" style="color: var(--color-muted-fg);">
-        <span class="dot" style="background: var(--color-hp);"></span> Heures pleines
-      </span>
-      {#if estLabels.length > 0}
-        <span style="color: var(--color-muted-fg);">
-          {estLabels.length === 1 ? estLabels[0] : estLabels.join(', ')} :
-          {anyEnedis
-            ? 'total du compteur EDF, répartition Creuses/Pleines estimée'
-            : 'mesuré à la maison, en attente du relevé EDF'}
-        </span>
-      {/if}
     </div>
   {:else}
     <p class="py-3 text-[12px]" style="color: var(--color-muted-fg);">
@@ -281,13 +261,6 @@
       align-self: flex-end;
     }
   }
-  .dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 9999px;
-  }
-
   /* Mois ESTIMÉ : marqué par le SEUL libellé en italique — les hachures sur les
      barres ont été retirées le 25/08 (détail technique qui abîmait la carte).
      L'info reste portée par l'italique, l'info-bulle du mois et la légende. */

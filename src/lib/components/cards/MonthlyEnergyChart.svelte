@@ -192,25 +192,6 @@
     {/each}
   </div>
 
-  <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px]">
-    {#if totalAuto >= 1}
-      <span class="inline-flex items-center gap-1.5" style="color: var(--color-muted-fg);">
-        <span class="dot" style="background: var(--color-solar);"></span> Solaire consommé
-      </span>
-    {/if}
-    <span class="inline-flex items-center gap-1.5" style="color: var(--color-muted-fg);">
-      <span class="dot" style="background: {EDF_BLUE};"></span> Réseau EDF
-    </span>
-    {#if totalEur >= 0.005}
-      <span class="inline-flex items-center gap-1.5" style="color: var(--color-muted-fg);">
-        <span class="dot" style="background: var(--color-success);"></span> Économies du mois
-      </span>
-    {/if}
-    {#if anyEst}
-      <span style="color: var(--color-muted-fg);">~ estimé (avant Domo)</span>
-    {/if}
-  </div>
-
   {#if sel && selected !== null}
     <!-- Le détail chiffré de l'ancien tableau, pour le mois choisi. -->
     <div
@@ -341,13 +322,6 @@
     font-variant-numeric: tabular-nums;
     color: var(--color-success);
   }
-  .dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 9999px;
-  }
-
   /* Le solaire ESTIMÉ (reconstruit des € HA, pré-recorder) n'est plus hachuré
      (retiré le 25/08 : détail technique qui abîmait le graphe) — le tilde sur
      les chiffres et la légende suffisent à ne pas le vendre comme une mesure. */
