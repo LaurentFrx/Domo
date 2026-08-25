@@ -12,11 +12,10 @@
 const POLL_INTERVAL_MS = 5 * 60_000;
 const TIMEOUT_MS = 15_000;
 
-/** Provenance de la ventilation HC/HP d'un mois : `meter` = relevé compteur
- * facturé (saisi dans tariffs.json), `local` = dérivée de la mesure EM-50 (donc
- * estimée), `enedis` = total importé du compteur Linky avec répartition encore
- * estimée, `null` = inconnue. */
-export type SplitSource = 'meter' | 'local' | 'enedis' | null;
+/** Provenance de la ventilation HC/HP d'un mois : `curve` = courbe ½h Enedis
+ * (la mesure), `meter` = relevé compteur saisi, `enedis` = total Linky mais
+ * répartition estimée, `local` = tout estimé, `null` = inconnue. */
+export type SplitSource = 'curve' | 'meter' | 'local' | 'enedis' | null;
 
 export interface MonthAgg {
   production_kwh: number;
@@ -77,6 +76,7 @@ function normMonth(m: Partial<MonthAgg> | undefined): MonthAgg {
     import_hc_kwh: num(m?.import_hc_kwh),
     import_hp_kwh: num(m?.import_hp_kwh),
     import_split_source:
+      m?.import_split_source === 'curve' ||
       m?.import_split_source === 'meter' ||
       m?.import_split_source === 'local' ||
       m?.import_split_source === 'enedis'

@@ -107,7 +107,8 @@ export function defaultPilotState(): PilotState {
     apsAlert: 'none',
     sunWindow: null,
     houseProfile: emptyHouseProfile(),
-    houseAccum: null
+    houseAccum: null,
+    residualW: null
   };
 }
 
@@ -432,6 +433,23 @@ export function pilotStep(
   // manquante ne doit jamais éteindre une fonction sans le dire.
   const nb = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
   const surplusDispoW = nb(inputs.maxAcChargeW) + nb(inputs.sb3ChargeW) + nb(exportW);
+
+  // ── RÉSIDU (C4) : l'échec digéré par la physique, pas par un compteur ──
+  // Une coupure pour achat a mesuré ce qui manquait ; on ne réessaie que quand
+  // ce manque est PROUVÉ revenu — visible dans ce que le parc absorbe (charge
+  // Max AC + charge SB3) ou rend au réseau. La persistance de 3 min
+  // (observationBeforeOnSec) s'applique ENSUITE, comme à tout allumage : un
+  // pic d'un tick ne suffit pas à rallumer.
+  if (pilot.residualW !== null && surplusDispoW >= pilot.residualW) {
+    events.push({
+      ts: now,
+      kind: 'phase',
+      label: 'reprise autorisée',
+      detail: `le surplus manquant est revenu (${Math.round(surplusDispoW)} W mesurés / ${pilot.residualW} W à couvrir)`
+    });
+    pilot.residualW = null;
+  }
+  const residualHold = pilot.residualW !== null;
   const saturationTrigger =
     inputs.maxAcAvailable &&
     inputs.maxAcSocPct !== null &&
@@ -515,7 +533,7 @@ export function pilotStep(
   // critère énergie (labo) : c'est l'écart entre les deux qui décidera du
   // retrait des vieux seuils (étape 7 de la spec).
   const legacyTrigger = exportFrank || saturationTrigger || invisibleTrigger;
-  const trigger = legacyTrigger || energyTrigger;
+  const trigger = (legacyTrigger || energyTrigger) && !residualHold;
   const commonOk = tankNotFull && quietHouse && windowOk && quotaOk && delaysOk;
   const allOn = commonOk && trigger;
 
@@ -665,6 +683,12 @@ export function pilotStep(
   if (observation && !allOn) pilot.wouldOnSinceTs = null;
 
   if (cutCause && wasHeatingPiloted) {
+    // ARMEMENT DU RÉSIDU : la coupure a mesuré le manque — il faudra le revoir
+    // couvert avant toute reprise. Plancher 150 W (= cutBuyW) : un achat plus
+    // petit n'aurait pas coupé.
+    if (cutCause === 'buy' || cutCause === 'hard_buy' || cutCause === 'grace_fail') {
+      pilot.residualW = Math.max(150, buyW);
+    }
     pilot.lastCessionCause = cutCause;
     pilot.lastCessionTs = now;
     pilot.socStartOfHeat = null;
@@ -742,6 +766,9 @@ export function pilotStep(
       return 'attente de la fenêtre solaire (éphémérides)';
     }
     if (!inputs.em50Available) return 'compteur EM-50 muet — aucun allumage possible';
+    if (residualHold) {
+      return `reprise quand le surplus manquant sera revenu (${Math.round(surplusDispoW)} / ${pilot.residualW} W) — dernier essai acheté sur EDF`;
+    }
     if (!trigger) {
       // Le critère ÉNERGIE gouverne : c'est SA raison qu'on affiche quand il
       // sait la donner. Annoncer « la Max AC fait sa réserve (53 %/65 %) »
@@ -834,7 +861,19 @@ export function pilotStep(
         quotaOk,
         `${pilot.solarStartsToday}/${p.solarStartsPerDay} spontanés · ${pilot.resumesToday} reprises`
       ),
-      cond('delays', 'Délais matériel', delaysOk, delaysOk ? 'écoulés' : 'purge en cours')
+      cond('delays', 'Délais matériel', delaysOk, delaysOk ? 'écoulés' : 'purge en cours'),
+      // Rangée CONDITIONNELLE : n'existe que quand un échec reste à digérer —
+      // une ligne toujours verte ne serait que du bruit.
+      ...(residualHold
+        ? [
+            cond(
+              'residu',
+              'Surplus revenu depuis l’échec',
+              false,
+              `${Math.round(surplusDispoW)} W mesurés / ${pilot.residualW} W à couvrir`
+            )
+          ]
+        : [])
     ],
     rescue,
     apsAlert,

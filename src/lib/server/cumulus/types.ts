@@ -328,6 +328,12 @@ export interface PilotState {
   /** Fenêtre solaire du jour (éphémérides), calculée une fois par jour calendaire
    *  et mise en cache (indépendante de l'instant courant — ne dépend que de la date). */
   sunWindow: { forDate: string; startMin: number; endMin: number } | null;
+  /** RÉSIDU (C4 de la spec) — achat mesuré (W) à la dernière coupure pour achat,
+   *  à RE-COUVRIR par un surplus prouvé avant toute reprise solaire (boost
+   *  compris). Décroît avec la PHYSIQUE — le surplus mesuré qui revient —
+   *  jamais avec un minuteur : c'est ce qui brise le cycle coupure-achat →
+   *  reprise gratuite → coupure (27 cycles et 1 723 Wh achetés le 15/08). */
+  residualW: number | null;
   /** Profil horaire APPRIS de la charge maison hors ballon (24 tranches × jours),
    *  base de la réserve du soir en Wh. Cf. cumulus/reserve.ts. */
   houseProfile: HouseHourSample[][];
@@ -425,6 +431,8 @@ export interface CriterionSample {
    *  adversariale du 24/08 (le juge de paix comptait la recharge de nuit). */
   cause: DecisionReason;
   gridW: number; // réseau signé (+ achat / − injection)
+  /** Résidu (C4) actif à ce tick — null quand aucune reprise n'est bloquée. */
+  residualW: number | null;
 }
 /** Évènement de la timeline — un point du journal du jour (transitions du pilote incluses). */
 export type ShadowEventKind = 'phase' | 'heat_start' | 'heat_end' | 'draw' | 'full' | 'appliance';

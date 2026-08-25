@@ -26,6 +26,7 @@ export interface CriterionSample {
   /** Cause de la décision du tick (decide) — 'pilot_solar', 'pilot_hc', 'boost'… */
   cause: string;
   gridW: number;
+  residualW: number | null;
 }
 
 class CumulusLaboState {

@@ -42,13 +42,13 @@ import {
 } from '$lib/server/tariffs';
 import type { RequestHandler } from './$types';
 
-/** D'où vient la ventilation HC/HP d'un mois : relevé compteur facturé (saisi
- * dans tariffs.json), dérivée de la mesure locale EM-50, ou `enedis` = total
- * importé du compteur Linky (enedis_daily) avec répartition HC/HP encore
- * estimée (la courbe ½h n'est pas activée). `null` = pas de ventilation
- * connue. Exposé pour que la carte n'affiche pas une estimation comme un
- * relevé. */
-type SplitSource = 'meter' | 'local' | 'enedis' | null;
+/** D'où vient la ventilation HC/HP d'un mois, du plus fiable au moins fiable :
+ * `curve` = courbe de charge ½h Enedis (la MESURE, ventilée à la minute par le
+ * recorder — canonique) ; `meter` = relevé compteur saisi à la main dans
+ * tariffs.json ; `enedis` = total Linky mais répartition estimée du ratio
+ * EM-50 ; `local` = total ET répartition estimés. `null` = rien de connu.
+ * Exposé pour que la carte n'affiche pas une estimation comme une mesure. */
+type SplitSource = 'curve' | 'meter' | 'local' | 'enedis' | null;
 
 interface MonthAgg {
   production_kwh: number;
@@ -433,6 +433,42 @@ export const GET: RequestHandler = async ({ url }) => {
       /* table enedis_daily absente (base d'avant l'intégration) */
     }
 
+    // ── Ventilation HC/HP RÉELLE (courbe ½h Enedis, câblée le 25/08/2026) ──
+    // enedis_daily.hc_kwh/hp_kwh sont remplis par le recorder depuis la courbe de
+    // charge, découpée à la minute sur les fenêtres HC du régime (les bascules
+    // 00:06/08:06 ne tombent pas sur des bords de demi-heure — le recorder
+    // répartit au prorata). C'est LA mesure : elle prime sur tout, y compris sur
+    // les relevés saisis (qui couvrent des périodes de facturation, pas des mois
+    // civils — d'où l'écart de juin 2026 : 7,8 kWh saisis contre 26,6 mesurés).
+    // Un mois n'est pris que si la courbe couvre ≥ 95 % de ses kWh ; sinon on
+    // laisse la chaîne d'estimation ci-dessous faire son travail.
+    const curveMonths = new Set<number>();
+    try {
+      const rows = db
+        .prepare(
+          'SELECT CAST(substr(date,6,2) AS INTEGER) AS m,' +
+            ' SUM(hc_kwh) AS hc, SUM(hp_kwh) AS hp,' +
+            ' SUM(CASE WHEN hc_kwh IS NULL THEN soutirage_kwh ELSE 0 END) AS missing' +
+            ' FROM enedis_daily WHERE substr(date,1,4) = ? GROUP BY m'
+        )
+        .all(String(year)) as { m: number; hc: number; hp: number; missing: number }[];
+      for (const r of rows) {
+        const i = r.m - 1;
+        const covered = (r.hc || 0) + (r.hp || 0);
+        if (i < 0 || i > 11 || covered <= 0) continue;
+        if (covered / (covered + Math.max(0, r.missing || 0)) < 0.95) continue;
+        // Normalise sur le total du mois (qui peut inclure des jours de repli
+        // mesure-maison) pour que HC + HP == import_kwh, toujours.
+        const k = months[i].import_kwh > 0 ? months[i].import_kwh / covered : 1;
+        months[i].import_hc_kwh = r.hc * k;
+        months[i].import_hp_kwh = r.hp * k;
+        months[i].import_split_source = 'curve';
+        curveMonths.add(i);
+      }
+    } catch {
+      /* colonnes hc_kwh/hp_kwh absentes (base d'avant la courbe ½h) */
+    }
+
     // ── Imports réseau relevés au compteur, ventilés HC / HP (pré-recorder) ──
     // Relevés Linky/EDF (= facturés) → source de vérité. Quand un mois a un relevé,
     // il PRIME sur le recorder (≠ logique des économies) : le recorder ne ventile
@@ -443,6 +479,7 @@ export const GET: RequestHandler = async ({ url }) => {
     const importHp = monthlyImportHpHistory();
     const noMeter: number[] = [];
     for (let i = 0; i < 12; i++) {
+      if (curveMonths.has(i)) continue; // la mesure ½h a déjà tranché
       const key = `${year}-${String(i + 1).padStart(2, '0')}`;
       const hc = importHc[key];
       const hp = importHp[key];

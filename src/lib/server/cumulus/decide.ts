@@ -41,6 +41,10 @@ export interface PilotWant {
    *  batteries, fin de grâce). Non nulle = coupure de PROTECTION : elle ne doit
    *  jamais être différée par l'anti-court-cycle. */
   cutCause?: CessionCause | null;
+  /** RÉSIDU (C4) actif — achat mesuré (W) au dernier échec, pas encore couvert
+   *  par le surplus. Non nul ⇒ AUCUNE reprise solaire, boost compris : c'est le
+   *  boost relancé en boucle par le veto qui a acheté 1 723 Wh le 15/08. */
+  residualW?: number | null;
 }
 
 /** Sous-mode (couleur UI) déduit de la raison + de l'état du relais. */
@@ -204,9 +208,18 @@ export function decide(
     next.chargedAtTempC = T; // consigne réelle apprise du thermostat
     next.boostUntilFull = false;
   } else if (next.boostUntilFull && !next.ballonCharged) {
-    desired = true;
-    reason = 'boost';
-    note = 'chauffe lancée à la demande (jusqu’au plein)';
+    if (pilotWant?.residualW != null) {
+      // Le boost garde son intention (« jusqu'au plein ») mais pas le droit de
+      // se cogner à la même porte : le dernier essai a acheté, on attend que le
+      // surplus manquant soit PROUVÉ revenu (pilot.ts efface le résidu).
+      desired = false;
+      reason = 'pilot_wait';
+      note = `chauffe demandée — reprise quand le surplus manquant (${pilotWant.residualW} W) sera revenu`;
+    } else {
+      desired = true;
+      reason = 'boost';
+      note = 'chauffe lancée à la demande (jusqu’au plein)';
+    }
   } else if (pilotWant) {
     // ── PILOTE V2 : la machine à phases décide (règle zéro achat EDF) ──
     if (pilotWant.wantOn) {

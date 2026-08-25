@@ -174,13 +174,20 @@ async function runTick(apply: boolean): Promise<TickResult> {
     wantOn: pilotRes.wantOn,
     reason: pilotRes.reason === 'wait' ? 'wait' : pilotRes.reason,
     note: pilotRes.view.note,
-    cutCause: pilotRes.cutCause
+    cutCause: pilotRes.cutCause,
+    residualW: pilotRes.pilot.residualW
   };
 
   // ── 3. Décision (protections + overrides par-dessus le pilote) ──
   const decision = decide(inputs, config, state, pilotWant);
   const next = decision.nextState;
   next.pilot = pilotRes.pilot;
+  // ARMEMENT DU RÉSIDU sur VETO (tous modes — boost et manuel compris) : le
+  // veto vit dans decide, après le pilote ; sans cet accroche-là, le boost
+  // gardait ses reprises gratuites (le cycle du 15/08).
+  if (decision.reason === 'grid_veto') {
+    next.pilot.residualW = Math.max(150, Math.round(inputs.gridPowerW));
+  }
   next.pilotView = pilotRes.view;
   // ── LABO : journal du critère énergie (n'influence RIEN) ──
   // Un point par tick : le bilan du critère, le verdict des voies historiques,
@@ -203,7 +210,8 @@ async function runTick(apply: boolean): Promise<TickResult> {
     relayOn: inputs.relayOn === true,
     heating: inputs.em50Available && inputs.cumulusPowerW > SHADOW_HEAT_W,
     cause: decision.reason,
-    gridW: Math.round(inputs.gridPowerW)
+    gridW: Math.round(inputs.gridPowerW),
+    residualW: next.pilot.residualW
   };
   next.criterionLog = [...state.criterionLog, criterionSample].slice(-CRITERION_LOG_MAX);
 

@@ -282,7 +282,8 @@ function normCriterionLog(v: unknown): CriterionSample[] {
         relayOn: boolOr(o.relayOn, false),
         heating: boolOr(o.heating, false),
         cause: typeof o.cause === 'string' ? (o.cause as CriterionSample['cause']) : 'idle',
-        gridW: numOr(o.gridW, 0)
+        gridW: numOr(o.gridW, 0),
+        residualW: wh(o.residualW)
       };
     })
     .slice(-CRITERION_LOG_MAX);
@@ -335,7 +336,8 @@ function defaultPilotStateStore(): PilotState {
     apsAlert: 'none',
     sunWindow: null,
     houseProfile: emptyHouseProfile(),
-    houseAccum: null
+    houseAccum: null,
+    residualW: null
   };
 }
 
@@ -397,6 +399,7 @@ function normPilot(v: unknown): PilotState {
       ? (o.apsAlert as PilotState['apsAlert'])
       : 'none',
     sunWindow: normSunWindow(o.sunWindow),
+    residualW: typeof o.residualW === 'number' && Number.isFinite(o.residualW) ? o.residualW : null,
     houseProfile: normalizeHouseProfile(o.houseProfile),
     houseAccum: normHouseAccum(o.houseAccum)
   };
