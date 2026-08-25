@@ -122,8 +122,8 @@
         >
           <span class="col-val">{tot > 0 ? nf0.format(tot) : ''}</span>
           <div class="track" class:filled={tot > 0}>
-            <div class="seg seg-hp" class:est style="height: {segH(m.import_hp_kwh)}px;"></div>
-            <div class="seg seg-hc" class:est style="height: {segH(m.import_hc_kwh)}px;"></div>
+            <div class="seg seg-hp" style="height: {segH(m.import_hp_kwh)}px;"></div>
+            <div class="seg seg-hc" style="height: {segH(m.import_hc_kwh)}px;"></div>
           </div>
           <span class="col-lbl" class:est>{labels[i]}</span>
         </div>
@@ -139,8 +139,7 @@
         <span class="dot" style="background: var(--color-hp);"></span> Heures pleines
       </span>
       {#if estLabels.length > 0}
-        <span class="inline-flex items-center gap-1.5" style="color: var(--color-muted-fg);">
-          <span class="dot dot-est"></span>
+        <span style="color: var(--color-muted-fg);">
           {estLabels.length === 1 ? estLabels[0] : estLabels.join(', ')} :
           {anyEnedis
             ? 'total du compteur EDF, répartition Creuses/Pleines estimée'
@@ -237,27 +236,10 @@
     border-radius: 9999px;
   }
 
-  /* Mois ESTIMÉ (ventilation dérivée de la mesure maison, relevé EDF pas encore
-     saisi) : hachures diagonales par-dessus la couleur sémantique — la teinte
-     HP/HC reste lisible, seule la texture change. Voile SOMBRE teinté charte
-     (hue 262, jamais noir pur) : --color-hc et --color-hp sont clairs (L 0,82 et
-     0,74) et identiques dans les deux thèmes, une hachure claire s'y noierait. */
-  .seg.est {
-    background-image: repeating-linear-gradient(
-      45deg,
-      transparent 0 3px,
-      oklch(0.32 0.06 262 / 0.34) 3px 6px
-    );
-  }
+  /* Mois ESTIMÉ : marqué par le SEUL libellé en italique — les hachures sur les
+     barres ont été retirées le 25/08 (détail technique qui abîmait la carte).
+     L'info reste portée par l'italique, l'info-bulle du mois et la légende. */
   .col-lbl.est {
     font-style: italic;
-  }
-  .dot-est {
-    background: var(--color-hc);
-    background-image: repeating-linear-gradient(
-      45deg,
-      transparent 0 1.5px,
-      oklch(0.32 0.06 262 / 0.55) 1.5px 3px
-    );
   }
 </style>

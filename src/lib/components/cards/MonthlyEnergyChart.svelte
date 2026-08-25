@@ -142,10 +142,9 @@
           {#if !empty}
             <div
               class="seg"
-              class:est={m.autoconso_estimated}
               style="height: {segH(
                 m.autoconso_kwh
-              )}px; background-color: var(--color-solar); border-radius: 5px 5px 0 0;"
+              )}px; background: var(--color-solar); border-radius: 5px 5px 0 0;"
             ></div>
             <div
               class="seg"
@@ -179,9 +178,7 @@
       </span>
     {/if}
     {#if anyEst}
-      <span class="inline-flex items-center gap-1.5" style="color: var(--color-muted-fg);">
-        <span class="dot dot-est"></span> Rayé : solaire estimé (d'avant Domo)
-      </span>
+      <span style="color: var(--color-muted-fg);">~ estimé (avant Domo)</span>
     {/if}
   </div>
 
@@ -294,23 +291,7 @@
     border-radius: 9999px;
   }
 
-  /* Solaire ESTIMÉ (reconstruit des € HA, pré-recorder) : hachures diagonales
-     par-dessus le jaune — même recette que la carte HC/HP (voile sombre teinté
-     charte hue 262, jamais noir pur) : la couleur reste lisible, la texture dit
-     « estimation ». */
-  .seg.est {
-    background-image: repeating-linear-gradient(
-      45deg,
-      transparent 0 3px,
-      oklch(0.32 0.06 262 / 0.34) 3px 6px
-    );
-  }
-  .dot-est {
-    background: var(--color-solar);
-    background-image: repeating-linear-gradient(
-      45deg,
-      transparent 0 1.5px,
-      oklch(0.32 0.06 262 / 0.55) 1.5px 3px
-    );
-  }
+  /* Le solaire ESTIMÉ (reconstruit des € HA, pré-recorder) n'est plus hachuré
+     (retiré le 25/08 : détail technique qui abîmait le graphe) — le tilde sur
+     les chiffres et la légende suffisent à ne pas le vendre comme une mesure. */
 </style>
