@@ -76,11 +76,6 @@
   class="flex flex-col gap-4"
   aria-label="Répartition Heures Creuses / Heures Pleines des imports réseau"
 >
-  <!-- Titre seul : la période est déjà dite par le fil d'Ariane et le sélecteur
-       d'année, et le total de l'import par le chiffre « Réseau EDF » en tête de
-       carte — le répéter ici n'apprenait rien. -->
-  <span class="text-[14px] font-semibold">Répartition Heures Creuses / Pleines</span>
-
   {#if hasData}
     <!-- Barres par mois : hauteur = part HC/HP, largeur = volume (cf. segH/colW) -->
     <div
@@ -126,9 +121,11 @@
     <!-- Proportion globale, SOUS son graphique : on lit d'abord le détail
          mois par mois, la synthèse vient ensuite. -->
     <div class="flex flex-col gap-1.5">
-      <div class="flex items-center justify-between text-[12px] font-semibold">
-        <span style="color: var(--color-hc);">Creuses {pctHc} %</span>
-        <span style="color: var(--color-hp);">{pctHp} % Pleines</span>
+      <!-- Cette ligne EST le titre du graphe du dessus : elle le nomme et le
+           chiffre d'un coup, dans les couleurs des barres. -->
+      <div class="flex items-center justify-between text-[13px] font-semibold">
+        <span style="color: var(--color-hc);">Heures Creuses {pctHc} %</span>
+        <span style="color: var(--color-hp);">Heures Pleines {pctHp} %</span>
       </div>
       <div class="prop-bar">
         <div class="prop-hc" style="width: {pctHc}%;"></div>
