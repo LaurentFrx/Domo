@@ -14,6 +14,16 @@
  * ne transite JAMAIS ici : tout passe par le proxy authentifié /api/plex/*.
  */
 
+/** Fichier à envoyer + chemin relatif (sous-dossier d'album préservé). */
+export interface UploadItem {
+  file: File;
+  /** Chemin relatif style `Artiste - Album/01 - Titre.flac` ; défaut : nom du fichier. */
+  path?: string;
+}
+
+/** Taille max d'une requête d'upload — marge sous BODY_SIZE_LIMIT (512M). */
+const UPLOAD_BATCH_BYTES = 400 * 1024 * 1024;
+
 export interface PlexAlbum {
   key: string;
   title: string;
@@ -458,26 +468,68 @@ class PlexState {
   // ─── Gestion de la bibliothèque (mode Gérer) ──────────────────────────────
 
   /**
-   * Upload de fichiers audio avec progression (XMLHttpRequest — fetch n'expose
-   * pas la progression d'envoi). Résout avec les noms enregistrés.
+   * Upload de fichiers audio (avec leur chemin relatif : un dossier d'album
+   * arrive entier, pochette comprise) et progression globale. L'envoi est
+   * découpé en lots pour rester sous BODY_SIZE_LIMIT même sur un album 24 bits.
+   * Résout avec les chemins enregistrés et les fichiers ignorés côté serveur.
    */
-  upload(files: File[]): Promise<string[]> {
-    const form = new FormData();
-    for (const f of files) form.append('files', f);
+  async upload(items: UploadItem[]): Promise<{ saved: string[]; skipped: string[] }> {
+    const totalBytes = items.reduce((s, it) => s + it.file.size, 0);
+    const batches: UploadItem[][] = [];
+    let batch: UploadItem[] = [];
+    let batchBytes = 0;
+    for (const it of items) {
+      if (batch.length > 0 && batchBytes + it.file.size > UPLOAD_BATCH_BYTES) {
+        batches.push(batch);
+        batch = [];
+        batchBytes = 0;
+      }
+      batch.push(it);
+      batchBytes += it.file.size;
+    }
+    if (batch.length > 0) batches.push(batch);
+
     this.uploadProgress = 0;
+    let doneBytes = 0;
+    const saved: string[] = [];
+    const skipped: string[] = [];
+    try {
+      for (const b of batches) {
+        const res = await this.uploadBatch(b, (loaded) => {
+          this.uploadProgress = totalBytes > 0 ? Math.min(1, (doneBytes + loaded) / totalBytes) : 1;
+        });
+        saved.push(...res.saved);
+        skipped.push(...res.skipped);
+        doneBytes += b.reduce((s, it) => s + it.file.size, 0);
+      }
+    } finally {
+      this.uploadProgress = null;
+    }
+    // Les nouveautés apparaîtront dans « récents » après le scan.
+    setTimeout(() => void this.reloadQuiet(), 4_000);
+    return { saved, skipped };
+  }
+
+  /** Un lot = une requête (XMLHttpRequest — fetch n'expose pas la progression). */
+  private uploadBatch(
+    items: UploadItem[],
+    onProgress: (loadedBytes: number) => void
+  ): Promise<{ saved: string[]; skipped: string[] }> {
+    const form = new FormData();
+    for (const it of items) {
+      form.append('files', it.file);
+      form.append('paths', it.path ?? it.file.name);
+    }
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/plex/upload');
       xhr.upload.onprogress = (ev) => {
-        if (ev.lengthComputable) this.uploadProgress = ev.loaded / ev.total;
+        if (ev.lengthComputable) onProgress(ev.loaded);
       };
       xhr.onload = () => {
-        this.uploadProgress = null;
         if (xhr.status >= 200 && xhr.status < 300) {
-          const j = JSON.parse(xhr.responseText) as { saved: string[] };
-          // Les nouveautés apparaîtront dans « récents » après le scan.
-          setTimeout(() => void this.reloadQuiet(), 4_000);
-          resolve(j.saved);
+          const j = JSON.parse(xhr.responseText) as { saved: string[]; skipped?: string[] };
+          resolve({ saved: j.saved, skipped: j.skipped ?? [] });
         } else {
           let message = `HTTP ${xhr.status}`;
           try {
@@ -488,10 +540,7 @@ class PlexState {
           reject(new Error(message));
         }
       };
-      xhr.onerror = () => {
-        this.uploadProgress = null;
-        reject(new Error('Envoi interrompu'));
-      };
+      xhr.onerror = () => reject(new Error('Envoi interrompu'));
       xhr.send(form);
     });
   }

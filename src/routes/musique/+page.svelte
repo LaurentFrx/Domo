@@ -462,28 +462,97 @@
     player.play([t], 0, t.album || null);
   }
 
-  // ── Gestion : upload, scan, suppression ─────────────────────────────────
+  // ── Gestion : upload (fichiers OU dossier d'album), scan, suppression ───
   let fileInput = $state<HTMLInputElement | null>(null);
+  let folderInput = $state<HTMLInputElement | null>(null);
   let uploadMsg = $state<string | null>(null);
   let actionError = $state<string | null>(null);
   let scanBusy = $state(false);
+  let dragOver = $state(false);
 
-  async function onFilesChosen(ev: Event) {
+  /** Ce qu'on envoie : audio + pochettes ; le reste (livret PDF…) est écarté ici. */
+  const UPLOADABLE_RE = /\.(mp3|m4a|aac|flac|ogg|oga|opus|wav|aif|aiff|jpe?g|png|webp|gif)$/i;
+
+  /** Envoi commun (sélecteur de fichiers, sélecteur de dossier, glisser-déposer). */
+  async function sendItems(raw: { file: File; path: string }[]) {
+    const items = raw.filter((it) => UPLOADABLE_RE.test(it.file.name));
+    uploadMsg = null;
+    actionError = null;
+    if (items.length === 0) {
+      actionError = 'Aucun fichier audio dans la sélection (mp3, m4a, flac, ogg, wav…).';
+      return;
+    }
+    try {
+      const { saved, skipped } = await plex.upload(items);
+      // Un seul dossier racine dans la sélection = un album : on le nomme.
+      const folders = new Set(
+        items.map((it) => (it.path.includes('/') ? it.path.split('/')[0] : null))
+      );
+      const folder = folders.size === 1 ? [...folders][0] : null;
+      uploadMsg = folder
+        ? `« ${folder} » envoyé (${saved.length} fichiers) — Plex l'analyse, l'album arrive dans « Ajouts récents ».`
+        : saved.length > 1
+          ? `${saved.length} fichiers envoyés — Plex les analyse, ils arrivent dans « Ajouts récents ».`
+          : `« ${saved[0]} » envoyé — Plex l'analyse, il arrive dans « Ajouts récents ».`;
+      const ignores = skipped.length + (raw.length - items.length);
+      if (ignores > 0)
+        uploadMsg += ` ${ignores} fichier${ignores > 1 ? 's' : ''} ignoré${ignores > 1 ? 's' : ''} (ni audio ni pochette).`;
+    } catch (e) {
+      actionError = (e as Error).message;
+    }
+  }
+
+  function onFilesChosen(ev: Event) {
     const input = ev.currentTarget as HTMLInputElement;
     const files = [...(input.files ?? [])];
     input.value = '';
     if (files.length === 0) return;
-    uploadMsg = null;
-    actionError = null;
-    try {
-      const saved = await plex.upload(files);
-      uploadMsg =
-        saved.length > 1
-          ? `${saved.length} fichiers envoyés — Plex les analyse, ils arrivent dans « Ajouts récents ».`
-          : `« ${saved[0]} » envoyé — Plex l'analyse, il arrive dans « Ajouts récents ».`;
-    } catch (e) {
-      actionError = (e as Error).message;
+    void sendItems(files.map((f) => ({ file: f, path: f.webkitRelativePath || f.name })));
+  }
+
+  /** Parcourt récursivement une entrée déposée (dossier d'album inclus). */
+  async function walkEntry(
+    entry: FileSystemEntry,
+    prefix: string,
+    out: { file: File; path: string }[]
+  ): Promise<void> {
+    if (entry.isFile) {
+      const f = await new Promise<File>((res, rej) =>
+        (entry as FileSystemFileEntry).file(res, rej)
+      );
+      out.push({ file: f, path: prefix + entry.name });
+    } else if (entry.isDirectory) {
+      const reader = (entry as FileSystemDirectoryEntry).createReader();
+      // readEntries rend ≤ 100 entrées par appel : boucler jusqu'au vide.
+      for (;;) {
+        const chunk = await new Promise<FileSystemEntry[]>((res, rej) =>
+          reader.readEntries(res, rej)
+        );
+        if (chunk.length === 0) break;
+        for (const e of chunk) await walkEntry(e, `${prefix}${entry.name}/`, out);
+      }
     }
+  }
+
+  function onDrop(ev: DragEvent) {
+    ev.preventDefault();
+    dragOver = false;
+    if (plex.uploadProgress !== null) return;
+    // webkitGetAsEntry doit être appelé AVANT tout await (DataTransfer éphémère).
+    const entries = [...(ev.dataTransfer?.items ?? [])]
+      .map((it) => it.webkitGetAsEntry())
+      .filter((e): e is FileSystemEntry => e !== null);
+    if (entries.length === 0) return;
+    void (async () => {
+      const raw: { file: File; path: string }[] = [];
+      try {
+        for (const e of entries) await walkEntry(e, '', raw);
+      } catch {
+        actionError = 'Lecture du dossier déposé impossible.';
+        return;
+      }
+      await sendItems(raw);
+    })();
   }
 
   async function doScan() {
@@ -655,10 +724,20 @@
     <!-- ─── Prêt ────────────────────────────────────────────────────────── -->
   {:else if view.kind === 'home'}
     {#if manage}
-      <!-- Mode Gérer : ajout de fichiers + suppression -->
+      <!-- Mode Gérer : ajout d'un album (dossier) ou de fichiers + suppression -->
       <div
         class="rounded-[var(--radius-2xl)] border p-6 text-center"
-        style="background: var(--color-card); border-color: var(--color-border); border-style: dashed;"
+        style="background: var(--color-card); border-color: {dragOver
+          ? 'var(--color-accent)'
+          : 'var(--color-border)'}; border-style: dashed;"
+        role="region"
+        aria-label="Zone de dépôt de musique"
+        ondragover={(ev) => {
+          ev.preventDefault();
+          dragOver = true;
+        }}
+        ondragleave={() => (dragOver = false)}
+        ondrop={onDrop}
       >
         <div class="badge badge-cyan" aria-hidden="true">
           <svg
@@ -674,13 +753,21 @@
         </div>
         <p class="font-bold">Ajouter de la musique</p>
         <p class="mt-1 text-sm" style="color: var(--color-muted-fg);">
-          Les fichiers (mp3, m4a, flac…) sont envoyés dans la bibliothèque Plex, puis analysés
-          automatiquement.
+          Un album acheté (Qobuz…) s'ajoute d'un coup : choisissez son dossier ou glissez-le ici —
+          pochette comprise. Plex l'analyse ensuite automatiquement.
         </p>
         <input
           bind:this={fileInput}
           type="file"
           accept=".mp3,.m4a,.aac,.flac,.ogg,.oga,.opus,.wav,.aif,.aiff,audio/*"
+          multiple
+          class="hidden"
+          onchange={onFilesChosen}
+        />
+        <input
+          bind:this={folderInput}
+          type="file"
+          webkitdirectory
           multiple
           class="hidden"
           onchange={onFilesChosen}
@@ -699,18 +786,25 @@
             Envoi… {Math.round(plex.uploadProgress * 100)} %
           </p>
         {:else}
-          <button class="btn-cyan mt-4" onclick={() => fileInput?.click()}>
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-              stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg
-            >
-            Choisir des fichiers
-          </button>
+          <div class="mt-4 flex flex-wrap items-center justify-center gap-3">
+            <button class="btn-cyan" onclick={() => folderInput?.click()}>
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                ><path
+                  d="M4 20h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-8.6l-1.7-2.3A1 1 0 0 0 8.9 4H4a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1Z"
+                /></svg
+              >
+              Ajouter un album
+            </button>
+            <button class="pill" onclick={() => fileInput?.click()}>Des fichiers seuls</button>
+          </div>
         {/if}
         {#if uploadMsg}<p class="mt-3 text-sm" style="color: var(--color-success);">
             {uploadMsg}
