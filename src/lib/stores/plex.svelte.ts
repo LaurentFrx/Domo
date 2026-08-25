@@ -107,8 +107,16 @@ export interface SmartPreset {
   rules: SmartRules;
 }
 
-/** Mix intelligents « une touche » (façon PlexAmp) — lecture immédiate. */
+/** Mix intelligents « une touche » (façon PlexAmp) — lecture immédiate.
+ *  « Jamais écoutés » ouvre le rail (demande Laurent, 25/08). */
 export const SMART_PRESETS: SmartPreset[] = [
+  {
+    id: 'inexplores',
+    label: 'Jamais écoutés',
+    desc: 'Les terres inconnues de la bibliothèque',
+    hue: 350,
+    rules: { neverPlayed: true, sort: 'random', limit: 100 }
+  },
   {
     id: 'mix',
     label: 'Mix aléatoire',
@@ -136,13 +144,6 @@ export const SMART_PRESETS: SmartPreset[] = [
     desc: 'Écoutés autrefois, oubliés depuis 3 mois',
     hue: 152,
     rules: { notPlayedDays: 90, sort: 'random', limit: 50 }
-  },
-  {
-    id: 'inexplores',
-    label: 'Jamais écoutés',
-    desc: 'Les terres inconnues de la bibliothèque',
-    hue: 350,
-    rules: { neverPlayed: true, sort: 'random', limit: 100 }
   }
 ];
 
