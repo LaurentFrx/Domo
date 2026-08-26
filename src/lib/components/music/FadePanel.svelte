@@ -17,7 +17,7 @@
    * enchaînement ; le nivellement s'applique immédiatement à la piste en cours.
    */
   import { preferences } from '$stores/preferences.svelte';
-  import { player } from '$stores/plex.svelte';
+  import { player, RADIO_STATIONS } from '$stores/plex.svelte';
   import { haptic } from '$utils/haptic';
 
   const fadeLabel = $derived(
@@ -94,8 +94,7 @@
     <span class="fp-text">
       <span class="fp-label">DJ automatique</span>
       <span class="fp-sub">
-        La file ne s'arrête plus : quand elle se termine, le DJ enchaîne avec d'autres morceaux de
-        la maison, choisis d'après vos écoutes
+        La file ne s'arrête plus : quand elle se termine, le DJ choisi ci-dessous prend le relais
       </span>
     </span>
     <label class="toggle-pill" aria-label="DJ automatique">
@@ -110,6 +109,30 @@
       <span class="toggle-pill-knob"></span>
     </label>
   </div>
+
+  {#if preferences.musicAutoDj}
+    <!-- Type de DJ : quelle station du serveur programme la suite. Le choix
+         vaut pour les prochaines fournées — ce qui est déjà dans la file y reste. -->
+    <div class="fp-chips" role="radiogroup" aria-label="Type de DJ">
+      {#each RADIO_STATIONS as st (st.id)}
+        <button
+          type="button"
+          class="fp-chip"
+          class:active={preferences.musicDjStation === st.id}
+          role="radio"
+          aria-checked={preferences.musicDjStation === st.id}
+          title={st.desc}
+          onclick={() => {
+            haptic('light');
+            preferences.setMusicDjStation(st.id);
+            player.djSourceChanged();
+          }}
+        >
+          {st.label}
+        </button>
+      {/each}
+    </div>
+  {/if}
 
   {#if player.wirelessOutput}
     <p class="fp-hint">
@@ -161,6 +184,36 @@
     font-size: 12.5px;
     line-height: 1.45;
     color: var(--color-muted-fg);
+  }
+
+  /* ─── Type de DJ (chips, même dessin que le panneau Lumière) ─── */
+  .fp-chips {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: -4px;
+  }
+  .fp-chip {
+    /* Cible tactile ≥ 44 pt (HIG). */
+    min-height: 44px;
+    padding: 7px 10px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    background: var(--color-muted);
+    color: var(--color-fg);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.25;
+    cursor: pointer;
+  }
+  .fp-chip.active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-primary-fg);
+  }
+  .fp-chip:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
   }
 
   /* ─── Curseur ─── */

@@ -19,6 +19,7 @@ type Persisted = {
   musicSmartFades: boolean;
   musicLoudnessLeveling: boolean;
   musicAutoDj: boolean;
+  musicDjStation: number;
 };
 
 const DEFAULTS: Persisted = {
@@ -38,7 +39,11 @@ const DEFAULTS: Persisted = {
   // s'arrête plus, la station Plex prend le relais — désactivable dans la
   // feuille Enchaînements. Sans risque pour le chemin audio (simple ajout
   // de pistes à la file).
-  musicAutoDj: true
+  musicAutoDj: true,
+  // Type de DJ : id de la station PMS qui alimente la continuation
+  // (1 Radio de la maison, 8 Pépites cachées, 2 Voyage dans le temps,
+  // 3 Albums surprise — RADIO_STATIONS dans plex.svelte.ts).
+  musicDjStation: 1
 };
 
 function load(): Persisted {
@@ -69,6 +74,8 @@ class PreferencesState {
   musicLoudnessLeveling = $state(DEFAULTS.musicLoudnessLeveling);
   /** DJ automatique : la station Plex prolonge la file quand elle se termine. */
   musicAutoDj = $state(DEFAULTS.musicAutoDj);
+  /** Type de DJ : station PMS qui programme la suite. */
+  musicDjStation = $state(DEFAULTS.musicDjStation);
 
   hydrate() {
     if (typeof window === 'undefined') return;
@@ -83,6 +90,7 @@ class PreferencesState {
     this.musicSmartFades = p.musicSmartFades;
     this.musicLoudnessLeveling = p.musicLoudnessLeveling;
     this.musicAutoDj = p.musicAutoDj;
+    this.musicDjStation = p.musicDjStation;
     this.applyTheme();
   }
 
@@ -98,7 +106,8 @@ class PreferencesState {
       musicFadeSeconds: this.musicFadeSeconds,
       musicSmartFades: this.musicSmartFades,
       musicLoudnessLeveling: this.musicLoudnessLeveling,
-      musicAutoDj: this.musicAutoDj
+      musicAutoDj: this.musicAutoDj,
+      musicDjStation: this.musicDjStation
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(snap));
@@ -166,6 +175,10 @@ class PreferencesState {
   }
   setMusicAutoDj(enabled: boolean) {
     this.musicAutoDj = enabled;
+    this.persist();
+  }
+  setMusicDjStation(id: number) {
+    this.musicDjStation = id;
     this.persist();
   }
 }

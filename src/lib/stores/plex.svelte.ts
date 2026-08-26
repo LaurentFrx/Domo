@@ -49,8 +49,8 @@ const MIN_SMART_FADE_S = 0.6;
 const DJ_EXTEND_S = 25;
 /** DJ automatique : morceaux ajoutés par fournée. */
 const DJ_BATCH = 20;
-/** Station qui alimente le DJ : « Radio de la maison » (smart shuffle pondéré). */
-const DJ_STATION_ID = 1;
+/** Station de repli du DJ si la préférence pointe un id inconnu. */
+const DJ_STATION_FALLBACK = 1;
 
 export interface PlexAlbum {
   key: string;
@@ -997,10 +997,10 @@ class PlayerState {
 
   /**
    * La file touche à sa fin (dernière piste, pas de répétition) : le DJ
-   * demande la suite à la station « Radio de la maison » du PMS (smart
-   * shuffle pondéré par les écoutes — pas d'analyse sonique sur ce serveur)
-   * et l'ajoute à la file. Déclenché à T−25 s pour que préchargement et
-   * fondu enchaîné s'appliquent aussi au passage vers la sélection du DJ.
+   * demande la suite à la station choisie (réglage « type de DJ » — smart
+   * shuffle du PMS, pas d'analyse sonique sur ce serveur) et l'ajoute à la
+   * file. Déclenché à T−25 s pour que préchargement et fondu enchaîné
+   * s'appliquent aussi au passage vers la sélection du DJ.
    */
   private maybeExtendDj(remaining: number): void {
     if (!preferences.musicAutoDj || this.repeat !== 'off') return;
@@ -1022,16 +1022,29 @@ class PlayerState {
     });
   }
 
-  /** Fournée DJ : pistes de la station, sans doublon avec la file actuelle. */
+  /** Station retenue par le réglage « type de DJ » (repli si id inconnu). */
+  private djStationId(): number {
+    const id = preferences.musicDjStation;
+    return RADIO_STATIONS.some((s) => s.id === id) ? id : DJ_STATION_FALLBACK;
+  }
+
+  /** Le type de DJ vient de changer : un échec précédent ne doit pas retarder
+   *  la première fournée du nouveau DJ. */
+  djSourceChanged(): void {
+    this.djRetryAt = 0;
+  }
+
+  /** Fournée DJ : pistes de la station choisie, sans doublon avec la file. */
   private async fetchDjTracks(): Promise<PlexTrack[] | null> {
     try {
-      const res = await fetch(`/api/plex/station/${DJ_STATION_ID}?limit=${DJ_BATCH * 2}`, {
+      const res = await fetch(`/api/plex/station/${this.djStationId()}?limit=${DJ_BATCH * 2}`, {
         cache: 'no-store'
       });
       if (!res.ok) return null;
       const { tracks } = (await res.json()) as { tracks: PlexTrack[] };
       const known = new Set(this.queue.map((t) => t.key));
-      return tracks.filter((t) => t.part && !known.has(t.key)).slice(0, DJ_BATCH);
+      const fresh = tracks.filter((t) => t.part && !known.has(t.key));
+      return trimDjBatch(fresh, this.djStationId());
     } catch {
       return null;
     }
@@ -1399,6 +1412,26 @@ class PlayerState {
     if (!('mediaSession' in navigator)) return;
     navigator.mediaSession.playbackState = this.playing ? 'playing' : 'paused';
   }
+}
+
+/**
+ * Fournée DJ : DJ_BATCH pistes, SAUF pour « Albums surprise » (station 3) où
+ * couper un album en deux n'a pas de sens — la fournée suivante repartirait
+ * sur d'autres albums et l'album entamé ne finirait jamais. On s'arrête donc
+ * à la fin du dernier album complet ; si le premier album dépasse à lui seul
+ * la fournée, on le garde en entier.
+ */
+function trimDjBatch(fresh: PlexTrack[], stationId: number): PlexTrack[] {
+  let batch = fresh.slice(0, DJ_BATCH);
+  if (stationId !== 3 || fresh.length <= batch.length || batch.length === 0) return batch;
+  const cutKey = fresh[batch.length].albumKey;
+  if (cutKey == null || cutKey !== batch[batch.length - 1].albumKey) return batch; // coupe déjà propre
+  const start = batch.findIndex((t) => t.albumKey === cutKey);
+  if (start > 0) return batch.slice(0, start);
+  // L'album coupé ouvre la fournée : le prendre en entier plutôt que l'amputer.
+  let end = batch.length;
+  while (end < fresh.length && fresh[end].albumKey === cutKey) end++;
+  return fresh.slice(0, end);
 }
 
 /** Une platine du lecteur : l'élément audio + son gain dans le graphe (si capturé). */
