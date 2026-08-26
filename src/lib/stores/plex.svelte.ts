@@ -5,14 +5,27 @@
  *   - `plex`   : état de l'intégration (appairage plex.tv/link), bibliothèque
  *                (récents, albums paginés, artistes, recherche) et gestion
  *                (upload, suppression, scan). Cycle de vie refcounté (acquire).
- *   - `player` : file de lecture + HTMLAudioElement MODULE-LEVEL (jamais monté
+ *   - `player` : file de lecture + platines audio MODULE-LEVEL (jamais montées
  *                dans le DOM) → la musique survit aux swipes du pager et aux
  *                navigations. MediaSession pour l'écran verrouillé iOS.
+ *                Fondus enchaînés : DEUX platines dans un graphe Web Audio
+ *                (GainNode chacune — el.volume est verrouillé sur iOS), durée
+ *                réglable + mode intelligent calé sur l'analyse de sonie du
+ *                PMS (rampes intro/outro via /api/plex/fade).
  *
  * Pas de polling continu : la bibliothèque est statique, on (re)charge à la
  * demande + au retour de visibilité si l'état n'était pas prêt. Le token Plex
  * ne transite JAMAIS ici : tout passe par le proxy authentifié /api/plex/*.
  */
+
+import { preferences } from './preferences.svelte';
+import {
+  equalPowerCurve,
+  introSilenceS,
+  levelFrom,
+  outroLeadS,
+  type TrackFadeInfo
+} from '$utils/fade';
 
 /** Fichier à envoyer + chemin relatif (sous-dossier d'album préservé). */
 export interface UploadItem {
@@ -26,6 +39,11 @@ const UPLOAD_BATCH_BYTES = 400 * 1024 * 1024;
 
 /** Échecs de lecture CONSÉCUTIFS avant d'arrêter d'égrener la file (panne générale). */
 const MAX_PLAYBACK_FAILURES = 3;
+
+/** Préchargement du morceau suivant sur la platine libre (s avant la fin). */
+const PRELOAD_S = 20;
+/** Plancher d'un fondu intelligent (s) — une fin sèche enchaîne vite, sans claquer. */
+const MIN_SMART_FADE_S = 0.6;
 
 export interface PlexAlbum {
   key: string;
@@ -614,24 +632,71 @@ class PlayerState {
 
   current = $derived<PlexTrack | null>(this.queue[this.index] ?? null);
 
-  private audio: HTMLAudioElement | null = null;
+  /**
+   * DEUX platines (façon DJ) : l'active joue la piste courante, l'autre
+   * précharge la suivante puis monte pendant le fondu enchaîné. Tant que le
+   * fondu est désactivé, seule la platine 0 existe — comportement historique.
+   */
+  private decks: Deck[] = [];
+  /** Index de la platine ACTIVE (celle de la piste courante). */
+  private active = 0;
+  /** Graphe Web Audio — SEUL moyen de doser le volume sur iOS (el.volume y est verrouillé). */
+  private ctx: AudioContext | null = null;
+  /** Éléments capturés dans le graphe ? (irréversible pour la session) */
+  private captured = false;
+  /** Fondu en cours : la platine sortante finit de s'éteindre. */
+  private fading = false;
+  /** Clé de la piste préchargée sur la platine libre (null = rien de prêt). */
+  private preloadedKey: string | null = null;
+  /** Analyses de sonie par piste (null mémorisé = piste sans analyse/en échec). */
+  private fadeCache = new Map<string, TrackFadeInfo | null>();
+  private fadeInflight = new Map<string, Promise<TrackFadeInfo | null>>();
   /** Échecs de lecture consécutifs (remis à zéro dès que du son sort). */
   private failStreak = 0;
   private skipNoticeTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** Élément audio paresseux + écouteurs (client uniquement). */
+  /** Élément audio ACTIF paresseux (client uniquement) — init au premier appel. */
   private ensureAudio(): HTMLAudioElement {
-    if (this.audio) return this.audio;
-    // iOS (Audio Session API, WebKit) : déclarer la session « playback », sinon
-    // la PWA plein écran COUPE le son dès qu'on passe sur une autre app, et le
-    // commutateur silence le mute. Sans effet ailleurs (API absente = ignoré).
-    const nav = navigator as Navigator & { audioSession?: { type: string } };
-    if (nav.audioSession) nav.audioSession.type = 'playback';
+    if (this.decks.length === 0) {
+      // iOS (Audio Session API, WebKit) : déclarer la session « playback », sinon
+      // la PWA plein écran COUPE le son dès qu'on passe sur une autre app, et le
+      // commutateur silence le mute. Sans effet ailleurs (API absente = ignoré).
+      const nav = navigator as Navigator & { audioSession?: { type: string } };
+      if (nav.audioSession) nav.audioSession.type = 'playback';
+      this.decks.push(this.createDeck());
+      this.setupMediaSession();
+    }
+    return this.decks[this.active].el;
+  }
+
+  /** La platine libre (préchargement / fondu) — null tant que le graphe n'existe pas. */
+  private otherDeck(): Deck | null {
+    return this.decks[1 - this.active] ?? null;
+  }
+
+  private isActiveEl(a: HTMLAudioElement): boolean {
+    return this.decks[this.active]?.el === a;
+  }
+
+  /** Crée un élément audio + ses écouteurs. Les écouteurs d'état ne parlent que
+   *  pour la platine ACTIVE : pendant un fondu, la sortante joue encore et ses
+   *  événements (pause, ended…) ne doivent pas piloter l'UI. */
+  private createDeck(): Deck {
     const a = new Audio();
     a.preload = 'auto';
-    a.addEventListener('timeupdate', () => (this.currentTime = a.currentTime));
-    a.addEventListener('durationchange', () => (this.duration = a.duration || 0));
+    const deck: Deck = { el: a, gain: null };
+    a.addEventListener('timeupdate', () => {
+      if (!this.isActiveEl(a)) return;
+      this.currentTime = a.currentTime;
+      this.onTick(a);
+    });
+    a.addEventListener('durationchange', () => {
+      if (this.isActiveEl(a)) this.duration = a.duration || 0;
+    });
     a.addEventListener('play', () => {
+      // Assurance : un contexte suspendu rendrait les éléments capturés muets.
+      if (this.ctx?.state === 'suspended') void this.ctx.resume().catch(() => undefined);
+      if (!this.isActiveEl(a)) return;
       this.playing = true;
       this.syncMediaSessionState();
     });
@@ -639,22 +704,264 @@ class PlayerState {
     // navigateur peut réussir une reprise après une erreur transitoire) et
     // referme la série d'échecs consécutifs.
     a.addEventListener('playing', () => {
+      if (!this.isActiveEl(a)) return;
       this.lastError = null;
       this.failStreak = 0;
     });
     a.addEventListener('pause', () => {
+      if (!this.isActiveEl(a)) return;
       this.playing = false;
       this.syncMediaSessionState();
     });
-    a.addEventListener('ended', () => this.autoNext());
+    a.addEventListener('ended', () => {
+      if (this.isActiveEl(a)) this.autoNext();
+      else this.fading = false; // la sortante s'est éteinte : fondu terminé
+    });
     a.addEventListener('error', () => {
-      this.playing = false;
-      void this.handlePlaybackError(a);
+      if (this.isActiveEl(a)) {
+        this.playing = false;
+        void this.handlePlaybackError(a);
+      } else {
+        // Préchargement raté : l'enchaînement retombera sur le chemin classique
+        // (ended → next), qui porte le diagnostic et le saut de piste.
+        this.preloadedKey = null;
+      }
     });
     this.detectOutputPicker(a);
-    this.audio = a;
-    this.setupMediaSession();
-    return a;
+    return deck;
+  }
+
+  // ─── Graphe Web Audio (fondus + nivellement) ──────────────────────────────
+
+  /**
+   * Capture les platines dans un graphe Web Audio (un GainNode chacune).
+   * Appelé sur GESTE utilisateur (autoplay policy iOS), seulement si un fondu
+   * ou le nivellement est demandé, et jamais pendant une sortie AirPlay : une
+   * fois capturé, un élément ne rend plus jamais son signal en direct — le
+   * doute AirPlay+Web Audio se tranche sur appareil, pas ici.
+   */
+  private ensureGraph(): void {
+    if (this.captured || this.wirelessOutput) return;
+    if (preferences.musicFadeSeconds <= 0 && !preferences.musicLoudnessLeveling) return;
+    if (typeof window === 'undefined' || !('AudioContext' in window)) return;
+    this.ensureAudio();
+    try {
+      this.ctx ??= new AudioContext();
+      if (this.decks.length < 2) this.decks.push(this.createDeck());
+      for (const d of this.decks) {
+        if (d.gain) continue;
+        const src = this.ctx.createMediaElementSource(d.el);
+        d.gain = this.ctx.createGain();
+        src.connect(d.gain).connect(this.ctx.destination);
+      }
+      this.captured = true;
+      void this.ctx.resume().catch(() => undefined);
+      // iOS suspend le contexte au gré des interruptions (appel, Siri…) :
+      // on le relance au retour de visibilité si la lecture est censée tourner.
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && this.playing && this.ctx) {
+          void this.ctx.resume().catch(() => undefined);
+        }
+      });
+    } catch {
+      // Graphe indisponible : lecture directe, sans fondu ni nivellement.
+    }
+  }
+
+  /** Facteur de nivellement d'une piste (1 si réglage coupé ou analyse absente du cache). */
+  private levelFor(key: string | null | undefined): number {
+    if (!preferences.musicLoudnessLeveling) return 1;
+    const info = key ? this.fadeCache.get(key) : undefined;
+    return info ? levelFrom(info.gain) : 1;
+  }
+
+  /** Pose immédiatement le gain de la platine à son niveau nominal (hors fondu). */
+  private applyDeckLevel(deck: Deck, key: string | null | undefined): void {
+    if (!deck.gain || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    deck.gain.gain.cancelScheduledValues(now);
+    deck.gain.gain.setTargetAtTime(this.levelFor(key), now, 0.08);
+  }
+
+  /**
+   * Réglages d'enchaînement modifiés PENDANT l'écoute (panneau du lecteur) :
+   * l'interaction est un geste utilisateur — le seul moment où l'on peut créer
+   * le graphe si le fondu/nivellement vient d'être activé — et le nivellement
+   * se ré-applique à la piste en cours sans attendre la suivante.
+   */
+  settingsChanged(): void {
+    this.ensureGraph();
+    const t = this.current;
+    const d = this.decks[this.active];
+    if (!t || !d) return;
+    this.applyDeckLevel(d, t.key);
+    if (preferences.musicLoudnessLeveling || preferences.musicSmartFades) {
+      void this.fadeInfo(t.key).then(() => {
+        if (this.current === t) this.applyDeckLevel(this.decks[this.active], t.key);
+      });
+    }
+  }
+
+  /** Analyse de sonie d'une piste, cachée (une requête par piste et par session). */
+  private fadeInfo(key: string | null | undefined): Promise<TrackFadeInfo | null> {
+    if (!key) return Promise.resolve(null);
+    const hit = this.fadeCache.get(key);
+    if (hit !== undefined) return Promise.resolve(hit);
+    const inflight = this.fadeInflight.get(key);
+    if (inflight) return inflight;
+    const p = fetch(`/api/plex/fade/${key}`, { cache: 'no-store' })
+      .then((r) => (r.ok ? (r.json() as Promise<TrackFadeInfo>) : null))
+      .catch(() => null)
+      .then((info) => {
+        this.fadeCache.set(key, info);
+        this.fadeInflight.delete(key);
+        return info;
+      });
+    this.fadeInflight.set(key, p);
+    return p;
+  }
+
+  // ─── Enchaînements (préchargement + fondu) ────────────────────────────────
+
+  /** La piste qui suivra naturellement — null si fin de file (ou boucle sur soi). */
+  private peekNext(): PlexTrack | null {
+    if (this.repeat === 'one') return null;
+    if (this.index + 1 < this.queue.length) return this.queue[this.index + 1];
+    if (this.repeat === 'all' && this.queue.length > 1) return this.queue[0];
+    return null;
+  }
+
+  /** À chaque timeupdate de la platine active : précharger, puis fondre. */
+  private onTick(a: HTMLAudioElement): void {
+    const dur = a.duration;
+    if (!Number.isFinite(dur) || dur <= 0 || !this.playing) return;
+    const remaining = dur - a.currentTime;
+    const next = this.peekNext();
+    if (!next) return;
+    if (this.captured && !this.fading && remaining <= PRELOAD_S) this.preloadNext(next);
+    if (!this.canCrossfade()) return;
+    const d = this.plannedFadeS(remaining);
+    if (d !== null) this.startCrossfade(d, next);
+  }
+
+  /** Charge la piste suivante sur la platine libre (silencieuse tant que le fondu n'a pas commencé). */
+  private preloadNext(next: PlexTrack): void {
+    const other = this.otherDeck();
+    if (!other || !next.part || this.preloadedKey === next.key) return;
+    this.preloadedKey = next.key;
+    if (other.gain && this.ctx) {
+      other.gain.gain.cancelScheduledValues(this.ctx.currentTime);
+      other.gain.gain.setValueAtTime(0, this.ctx.currentTime);
+    }
+    other.el.src = streamUrl(next.part);
+    other.el.load();
+    if (preferences.musicSmartFades || preferences.musicLoudnessLeveling) {
+      void this.fadeInfo(this.current?.key);
+      void this.fadeInfo(next.key);
+    }
+  }
+
+  private canCrossfade(): boolean {
+    return (
+      this.captured &&
+      !this.fading &&
+      !this.wirelessOutput &&
+      preferences.musicFadeSeconds > 0 &&
+      (this.otherDeck()?.el.paused ?? false)
+    );
+  }
+
+  /**
+   * Durée de fondu à lancer MAINTENANT, ou null si ce n'est pas encore le
+   * moment. Fondu intelligent : la durée suit le fade-out naturel de l'outro
+   * (rampe PMS), bornée par le réglage — une fin sèche n'est pas amputée par
+   * un fondu de 8 s, un long fade-out est couvert en entier.
+   */
+  private plannedFadeS(remaining: number): number | null {
+    let d = preferences.musicFadeSeconds;
+    if (preferences.musicSmartFades) {
+      const info = this.current ? this.fadeCache.get(this.current.key) : undefined;
+      if (info?.endRamp) d = Math.min(Math.max(outroLeadS(info.endRamp), MIN_SMART_FADE_S), d);
+    }
+    if (remaining > d + 0.2) return null;
+    return Math.max(0.3, Math.min(d, remaining));
+  }
+
+  /**
+   * Fondu enchaîné à puissance constante : la platine libre démarre (en
+   * sautant l'éventuel silence d'intro) pendant que l'active s'éteint, et
+   * DEVIENT la piste courante dès le début du fondu (convention PlexAmp).
+   * Renvoie false si la platine libre n'est pas prête (on laissera `ended`
+   * enchaîner classiquement).
+   */
+  private startCrossfade(d: number, next: PlexTrack): boolean {
+    if (this.fading) return false;
+    const out = this.decks[this.active];
+    const inc = this.otherDeck();
+    if (!inc?.gain || !out.gain || !this.ctx) return false;
+    if (this.preloadedKey !== next.key || inc.el.readyState < 2) return false;
+    this.fading = true;
+    this.preloadedKey = null;
+    const now = this.ctx.currentTime;
+    const dur = Math.max(0.05, d);
+    out.gain.gain.cancelScheduledValues(now);
+    out.gain.gain.setValueCurveAtTime(
+      equalPowerCurve('out', this.levelFor(this.current?.key)),
+      now,
+      dur
+    );
+    inc.gain.gain.cancelScheduledValues(now);
+    inc.gain.gain.setValueCurveAtTime(equalPowerCurve('in', this.levelFor(next.key)), now, dur);
+    // Silence de tête de l'entrante : on ne fond pas vers du vide.
+    if (preferences.musicSmartFades) {
+      const info = this.fadeCache.get(next.key);
+      const lead = info?.startRamp ? introSilenceS(info.startRamp) : 0;
+      if (lead > 0.7) {
+        try {
+          inc.el.currentTime = lead - 0.3;
+        } catch {
+          /* flux pas encore seekable : on part de 0 */
+        }
+      }
+    }
+    void inc.el.play().catch(() => undefined);
+    // Bascule d'état : l'entrante est désormais la piste courante.
+    this.active = 1 - this.active;
+    this.index = this.index + 1 < this.queue.length ? this.index + 1 : 0;
+    this.currentTime = inc.el.currentTime;
+    this.duration =
+      Number.isFinite(inc.el.duration) && inc.el.duration > 0
+        ? inc.el.duration
+        : (next.duration ?? 0) / 1000;
+    this.lastError = null;
+    this.syncMediaSessionMetadata(next);
+    // Filet : si la sortante ne déclenche pas `ended` (fondu avant sa vraie fin),
+    // on la coupe nous-mêmes. En arrière-plan iOS ce timer peut arriver en
+    // retard — `ended` fait alors le ménage, les deux chemins sont idempotents.
+    setTimeout(
+      () => {
+        if (!this.isActiveEl(out.el)) out.el.pause();
+        this.fading = false;
+      },
+      (dur + 0.3) * 1000
+    );
+    return true;
+  }
+
+  /** Coupe net un fondu (action manuelle pendant l'enchaînement). */
+  private stopFadeHard(): void {
+    const other = this.otherDeck();
+    if (other) {
+      other.el.pause();
+      if (other.gain && this.ctx) {
+        other.gain.gain.cancelScheduledValues(this.ctx.currentTime);
+        other.gain.gain.setValueAtTime(0, this.ctx.currentTime);
+      }
+    }
+    const act = this.decks[this.active];
+    if (act) this.applyDeckLevel(act, this.current?.key);
+    this.fading = false;
+    this.preloadedKey = null;
   }
 
   // ─── Destination de lecture (AirPlay / Remote Playback) ───────────────────
@@ -709,14 +1016,21 @@ class PlayerState {
     }
     this.index = start;
     this.context = context;
+    this.ensureGraph(); // geste utilisateur : le seul moment sûr pour créer le graphe
     this.load(true);
   }
 
   toggle(): void {
     const a = this.ensureAudio();
     if (!this.current) return;
-    if (a.paused) void a.play().catch(() => undefined);
-    else a.pause();
+    if (a.paused) {
+      this.ensureGraph();
+      if (this.ctx?.state === 'suspended') void this.ctx.resume().catch(() => undefined);
+      void a.play().catch(() => undefined);
+    } else {
+      if (this.fading) this.stopFadeHard();
+      a.pause();
+    }
   }
 
   next(): void {
@@ -777,6 +1091,7 @@ class PlayerState {
   jumpTo(i: number): void {
     if (i < 0 || i >= this.queue.length) return;
     this.index = i;
+    this.ensureGraph();
     this.load(true);
   }
 
@@ -824,8 +1139,12 @@ class PlayerState {
 
   /** Vide la file (croix du mini-player quand lecture terminée). */
   clear(): void {
-    this.audio?.pause();
-    if (this.audio) this.audio.src = '';
+    for (const d of this.decks) {
+      d.el.pause();
+      d.el.src = '';
+    }
+    this.fading = false;
+    this.preloadedKey = null;
     this.failStreak = 0;
     this.skipNotice = null;
     if (this.skipNoticeTimer) clearTimeout(this.skipNoticeTimer);
@@ -846,6 +1165,11 @@ class PlayerState {
         .catch(() => undefined);
       return;
     }
+    // Platine libre déjà prête (fondu manqué en arrière-plan, piste très
+    // courte…) : enchaînement immédiat quasi sans blanc plutôt qu'un
+    // rechargement complet.
+    const next = this.peekNext();
+    if (next && this.captured && this.startCrossfade(0.05, next)) return;
     if (this.index + 1 < this.queue.length || this.repeat === 'all') this.next();
     else this.playing = false;
   }
@@ -854,10 +1178,20 @@ class PlayerState {
     const t = this.current;
     if (!t?.part) return;
     const a = this.ensureAudio();
+    this.stopFadeHard();
     this.lastError = null;
     this.currentTime = 0;
     this.duration = t.duration ? t.duration / 1000 : 0;
     a.src = streamUrl(t.part);
+    if (this.captured) {
+      this.applyDeckLevel(this.decks[this.active], t.key);
+      if (preferences.musicLoudnessLeveling || preferences.musicSmartFades) {
+        // Réchauffe l'analyse (nivellement dès que connue, rampes pour le fondu).
+        void this.fadeInfo(t.key).then(() => {
+          if (this.current === t) this.applyDeckLevel(this.decks[this.active], t.key);
+        });
+      }
+    }
     if (autoplay) void a.play().catch(() => undefined);
     this.syncMediaSessionMetadata(t);
   }
@@ -976,6 +1310,12 @@ class PlayerState {
     if (!('mediaSession' in navigator)) return;
     navigator.mediaSession.playbackState = this.playing ? 'playing' : 'paused';
   }
+}
+
+/** Une platine du lecteur : l'élément audio + son gain dans le graphe (si capturé). */
+interface Deck {
+  el: HTMLAudioElement;
+  gain: GainNode | null;
 }
 
 /** Extensions WebKit (AirPlay) absentes de lib.dom. */

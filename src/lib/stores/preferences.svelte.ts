@@ -15,6 +15,9 @@ type Persisted = {
   theme: Theme;
   autoTheme: boolean;
   productionSmoothHalf: number;
+  musicFadeSeconds: number;
+  musicSmartFades: boolean;
+  musicLoudnessLeveling: boolean;
 };
 
 const DEFAULTS: Persisted = {
@@ -23,7 +26,13 @@ const DEFAULTS: Persisted = {
   animationsEnabled: true,
   theme: 'light',
   autoTheme: false,
-  productionSmoothHalf: 3
+  productionSmoothHalf: 3,
+  // Fondu OPT-IN (0 = désactivé) : tant qu'il est à zéro, le graphe Web Audio
+  // n'est jamais créé et le chemin audio historique reste inchangé — on
+  // n'impose pas un mécanisme non testé sur appareil à toute la maison.
+  musicFadeSeconds: 0,
+  musicSmartFades: true,
+  musicLoudnessLeveling: false
 };
 
 function load(): Persisted {
@@ -46,6 +55,12 @@ class PreferencesState {
   autoTheme = $state(DEFAULTS.autoTheme);
   /** ½-fenêtre de lissage (échantillons ~2 min) de la courbe de production. */
   productionSmoothHalf = $state(DEFAULTS.productionSmoothHalf);
+  /** Durée du fondu enchaîné du lecteur musique (secondes, 0 = désactivé). */
+  musicFadeSeconds = $state(DEFAULTS.musicFadeSeconds);
+  /** Fondu calé sur l'analyse de sonie Plex (fin sèche → enchaînement court). */
+  musicSmartFades = $state(DEFAULTS.musicSmartFades);
+  /** Volume nivelé entre morceaux (gain d'analyse Plex). */
+  musicLoudnessLeveling = $state(DEFAULTS.musicLoudnessLeveling);
 
   hydrate() {
     if (typeof window === 'undefined') return;
@@ -56,6 +71,9 @@ class PreferencesState {
     this.theme = p.theme;
     this.autoTheme = p.autoTheme;
     this.productionSmoothHalf = p.productionSmoothHalf;
+    this.musicFadeSeconds = p.musicFadeSeconds;
+    this.musicSmartFades = p.musicSmartFades;
+    this.musicLoudnessLeveling = p.musicLoudnessLeveling;
     this.applyTheme();
   }
 
@@ -67,7 +85,10 @@ class PreferencesState {
       animationsEnabled: this.animationsEnabled,
       theme: this.theme,
       autoTheme: this.autoTheme,
-      productionSmoothHalf: this.productionSmoothHalf
+      productionSmoothHalf: this.productionSmoothHalf,
+      musicFadeSeconds: this.musicFadeSeconds,
+      musicSmartFades: this.musicSmartFades,
+      musicLoudnessLeveling: this.musicLoudnessLeveling
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(snap));
@@ -119,6 +140,18 @@ class PreferencesState {
   }
   setProductionSmoothHalf(v: number) {
     this.productionSmoothHalf = v;
+    this.persist();
+  }
+  setMusicFadeSeconds(v: number) {
+    this.musicFadeSeconds = Math.max(0, Math.min(12, Math.round(v)));
+    this.persist();
+  }
+  setMusicSmartFades(enabled: boolean) {
+    this.musicSmartFades = enabled;
+    this.persist();
+  }
+  setMusicLoudnessLeveling(enabled: boolean) {
+    this.musicLoudnessLeveling = enabled;
     this.persist();
   }
 }

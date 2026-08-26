@@ -23,6 +23,7 @@
   import AlbumCover from './AlbumCover.svelte';
   import BottomSheet from '$components/ui/BottomSheet.svelte';
   import MusicLightPanel from './MusicLightPanel.svelte';
+  import FadePanel from './FadePanel.svelte';
 
   let scrub = $state<number | null>(null);
   const shown = $derived(scrub ?? player.currentTime);
@@ -41,6 +42,14 @@
   // d'une soirée ne devrait pas obliger à quitter le lecteur pour la page
   // Pièces. Le panneau lui-même est partagé avec la feuille terrasse.
   let lightOpen = $state(false);
+
+  // ── Enchaînements (fondu réglable + fondu intelligent + nivellement) ─────
+  let fadeOpen = $state(false);
+  const fadeSummary = $derived(
+    preferences.musicFadeSeconds <= 0
+      ? 'Fondu : désactivé'
+      : `Fondu : ${preferences.musicFadeSeconds} s${preferences.musicSmartFades ? ' · intelligent' : ''}`
+  );
   // Le store WLED n'est acquis que par /pieces : sans référence propre, le
   // lecteur afficherait un résumé figé (et le panneau, des lignes vides).
   $effect(() => {
@@ -382,6 +391,34 @@
         {lightSummary}
       </button>
 
+      <!-- Enchaînements : fondu réglable + fondu intelligent (analyse Plex). -->
+      <button
+        class="output"
+        class:on={preferences.musicFadeSeconds > 0}
+        onclick={() => {
+          haptic('light');
+          fadeOpen = true;
+        }}
+        aria-haspopup="dialog"
+        aria-label="Régler les enchaînements entre morceaux"
+      >
+        <svg
+          width="17"
+          height="17"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M2 18c5 0 7-12 12-12h8" />
+          <path d="M2 6h8c5 0 7 12 12 12" opacity="0.55" />
+        </svg>
+        {fadeSummary}
+      </button>
+
       {#if player.lastError || player.skipNotice}
         <p class="error">{player.lastError ?? player.skipNotice}</p>
       {/if}
@@ -555,6 +592,11 @@
      (z-80) ; l'imbriquer dans la feuille sombre du lecteur la teindrait. -->
 <BottomSheet open={lightOpen} title="Lumière de la terrasse" onClose={() => (lightOpen = false)}>
   <MusicLightPanel compact />
+</BottomSheet>
+
+<!-- Feuille des enchaînements — même logique de montage que la lumière. -->
+<BottomSheet open={fadeOpen} title="Enchaînements" onClose={() => (fadeOpen = false)}>
+  <FadePanel />
 </BottomSheet>
 
 <style>
