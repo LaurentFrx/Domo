@@ -17,6 +17,8 @@
     player,
     fmtDuration,
     SMART_PRESETS,
+    RADIO_STATIONS,
+    type RadioStation,
     type PlexAlbum,
     type PlexArtist,
     type PlexTrack,
@@ -335,6 +337,25 @@
       actionError = (e as Error).message;
     }
     presetBusy = null;
+  }
+
+  // ── Radios (stations DJ du PMS — smart shuffle serveur) ─────────────────
+  let radioBusy = $state<number | null>(null);
+  async function playRadio(r: RadioStation) {
+    radioBusy = r.id;
+    actionError = null;
+    try {
+      const tracks = await plex.stationTracks(r.id);
+      if (tracks.length === 0) {
+        actionError = `« ${r.label} » : rien à jouer pour l'instant.`;
+      } else {
+        player.shuffle = false; // l'ordre de la station EST la programmation du DJ
+        player.play(tracks, 0, r.label);
+      }
+    } catch (e) {
+      actionError = (e as Error).message;
+    }
+    radioBusy = null;
   }
 
   let builderOpen = $state(false);
@@ -1075,6 +1096,46 @@
               <span class="preset-label">Mix personnalisé</span>
               <span class="preset-desc">Vos règles — à écouter ou enregistrer</span>
             </button>
+          </div>
+
+          <!-- ── Radios : les stations DJ du serveur Plex (smart shuffle
+               pondéré par les écoutes) — mêmes tuiles que les mix, mais la
+               programmation vient du PMS, pas de règles de filtre. -->
+          <p class="section-label">Radios</p>
+          <div class="recents presets">
+            {#each RADIO_STATIONS as r (r.id)}
+              <button
+                class="preset"
+                style="background: linear-gradient(140deg, oklch(0.45 0.13 {r.hue}), oklch(0.27 0.07 {(r.hue +
+                  45) %
+                  360}));"
+                onclick={() => playRadio(r)}
+                disabled={radioBusy !== null}
+              >
+                <span class="preset-play" aria-hidden="true">
+                  {#if radioBusy === r.id}
+                    <span class="preset-wait"></span>
+                  {:else}
+                    <svg
+                      width="15"
+                      height="15"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <circle cx="12" cy="12" r="2" />
+                      <path d="M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4" />
+                      <path d="M19 5a10 10 0 0 1 0 14M5 19A10 10 0 0 1 5 5" />
+                    </svg>
+                  {/if}
+                </span>
+                <span class="preset-label">{r.label}</span>
+                <span class="preset-desc">{r.desc}</span>
+              </button>
+            {/each}
           </div>
 
           <p class="section-label">

@@ -18,6 +18,7 @@ type Persisted = {
   musicFadeSeconds: number;
   musicSmartFades: boolean;
   musicLoudnessLeveling: boolean;
+  musicAutoDj: boolean;
 };
 
 const DEFAULTS: Persisted = {
@@ -32,7 +33,12 @@ const DEFAULTS: Persisted = {
   // n'impose pas un mécanisme non testé sur appareil à toute la maison.
   musicFadeSeconds: 0,
   musicSmartFades: true,
-  musicLoudnessLeveling: false
+  musicLoudnessLeveling: false,
+  // DJ automatique ON par défaut (demande Laurent, 26/08) : la file ne
+  // s'arrête plus, la station Plex prend le relais — désactivable dans la
+  // feuille Enchaînements. Sans risque pour le chemin audio (simple ajout
+  // de pistes à la file).
+  musicAutoDj: true
 };
 
 function load(): Persisted {
@@ -61,6 +67,8 @@ class PreferencesState {
   musicSmartFades = $state(DEFAULTS.musicSmartFades);
   /** Volume nivelé entre morceaux (gain d'analyse Plex). */
   musicLoudnessLeveling = $state(DEFAULTS.musicLoudnessLeveling);
+  /** DJ automatique : la station Plex prolonge la file quand elle se termine. */
+  musicAutoDj = $state(DEFAULTS.musicAutoDj);
 
   hydrate() {
     if (typeof window === 'undefined') return;
@@ -74,6 +82,7 @@ class PreferencesState {
     this.musicFadeSeconds = p.musicFadeSeconds;
     this.musicSmartFades = p.musicSmartFades;
     this.musicLoudnessLeveling = p.musicLoudnessLeveling;
+    this.musicAutoDj = p.musicAutoDj;
     this.applyTheme();
   }
 
@@ -88,7 +97,8 @@ class PreferencesState {
       productionSmoothHalf: this.productionSmoothHalf,
       musicFadeSeconds: this.musicFadeSeconds,
       musicSmartFades: this.musicSmartFades,
-      musicLoudnessLeveling: this.musicLoudnessLeveling
+      musicLoudnessLeveling: this.musicLoudnessLeveling,
+      musicAutoDj: this.musicAutoDj
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(snap));
@@ -152,6 +162,10 @@ class PreferencesState {
   }
   setMusicLoudnessLeveling(enabled: boolean) {
     this.musicLoudnessLeveling = enabled;
+    this.persist();
+  }
+  setMusicAutoDj(enabled: boolean) {
+    this.musicAutoDj = enabled;
     this.persist();
   }
 }

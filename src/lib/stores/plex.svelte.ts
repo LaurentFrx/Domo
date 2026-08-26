@@ -44,6 +44,13 @@ const MAX_PLAYBACK_FAILURES = 3;
 const PRELOAD_S = 20;
 /** Plancher d'un fondu intelligent (s) — une fin sèche enchaîne vite, sans claquer. */
 const MIN_SMART_FADE_S = 0.6;
+/** DJ automatique : la suite est demandée quand la DERNIÈRE piste entre dans
+ *  cette fenêtre (s avant la fin) — assez tôt pour précharger et fondre. */
+const DJ_EXTEND_S = 25;
+/** DJ automatique : morceaux ajoutés par fournée. */
+const DJ_BATCH = 20;
+/** Station qui alimente le DJ : « Radio de la maison » (smart shuffle pondéré). */
+const DJ_STATION_ID = 1;
 
 export interface PlexAlbum {
   key: string;
@@ -163,6 +170,28 @@ export const SMART_PRESETS: SmartPreset[] = [
     hue: 152,
     rules: { notPlayedDays: 90, sort: 'random', limit: 50 }
   }
+];
+
+/** Une station radio du PMS (les « DJ » de PlexAmp) — ids canoniques Plex,
+ *  vérifiés présents sur ce serveur via le hub `music.stations`. */
+export interface RadioStation {
+  id: number;
+  label: string;
+  desc: string;
+  /** Teinte OKLCH de la tuile (accents lumineux de la charte). */
+  hue: number;
+}
+
+export const RADIO_STATIONS: RadioStation[] = [
+  {
+    id: 1,
+    label: 'Radio de la maison',
+    desc: 'Toute la bibliothèque, guidée par vos écoutes',
+    hue: 262
+  },
+  { id: 8, label: 'Pépites cachées', desc: 'Les titres profonds, loin des tubes', hue: 20 },
+  { id: 2, label: 'Voyage dans le temps', desc: 'D’époque en époque, sans prévenir', hue: 120 },
+  { id: 3, label: 'Albums surprise', desc: 'Des albums entiers, au hasard', hue: 230 }
 ];
 
 /** URL proxy d'une pochette (null → pas d'image, l'UI met un dégradé). */
@@ -389,6 +418,14 @@ class PlexState {
   /** Pistes d'un mix intelligent SANS créer de playlist (presets, aperçu). */
   async smartTracks(rules: SmartRules): Promise<PlexTrack[]> {
     const { tracks } = await this.post<{ tracks: PlexTrack[] }>('/api/plex/smart', { rules });
+    return tracks;
+  }
+
+  /** Pistes d'une station radio Plex (tuiles « Radios » — smart shuffle serveur). */
+  async stationTracks(id: number, limit = 100): Promise<PlexTrack[]> {
+    const { tracks } = await this.api<{ tracks: PlexTrack[] }>(
+      `/api/plex/station/${id}?limit=${limit}`
+    );
     return tracks;
   }
 
@@ -831,13 +868,16 @@ class PlayerState {
     return null;
   }
 
-  /** À chaque timeupdate de la platine active : précharger, puis fondre. */
+  /** À chaque timeupdate de la platine active : DJ, précharger, puis fondre. */
   private onTick(a: HTMLAudioElement): void {
     const dur = a.duration;
     if (!Number.isFinite(dur) || dur <= 0 || !this.playing) return;
     const remaining = dur - a.currentTime;
     const next = this.peekNext();
-    if (!next) return;
+    if (!next) {
+      this.maybeExtendDj(remaining);
+      return;
+    }
     if (this.captured && !this.fading && remaining <= PRELOAD_S) this.preloadNext(next);
     if (!this.canCrossfade()) return;
     const d = this.plannedFadeS(remaining);
@@ -946,6 +986,55 @@ class PlayerState {
       (dur + 0.3) * 1000
     );
     return true;
+  }
+
+  // ─── DJ automatique (continuation de file, façon Auto Play PlexAmp) ───────
+
+  /** Continuation DJ en cours de récupération (une seule à la fois). */
+  private djInflight = false;
+  /** Prochain essai DJ autorisé (timestamp ms) — pas de martèlement en panne. */
+  private djRetryAt = 0;
+
+  /**
+   * La file touche à sa fin (dernière piste, pas de répétition) : le DJ
+   * demande la suite à la station « Radio de la maison » du PMS (smart
+   * shuffle pondéré par les écoutes — pas d'analyse sonique sur ce serveur)
+   * et l'ajoute à la file. Déclenché à T−25 s pour que préchargement et
+   * fondu enchaîné s'appliquent aussi au passage vers la sélection du DJ.
+   */
+  private maybeExtendDj(remaining: number): void {
+    if (!preferences.musicAutoDj || this.repeat !== 'off') return;
+    if (remaining > DJ_EXTEND_S) return;
+    if (this.djInflight || Date.now() < this.djRetryAt) return;
+    this.djInflight = true;
+    void this.fetchDjTracks().then((fresh) => {
+      this.djInflight = false;
+      if (!fresh || fresh.length === 0) {
+        this.djRetryAt = Date.now() + 60_000;
+        return;
+      }
+      if (!preferences.musicAutoDj || this.queue.length === 0) return; // coupé/vidé entre-temps
+      const lastIndex = this.queue.length - 1;
+      this.queue = [...this.queue, ...fresh];
+      // La piste s'est finie pendant la requête : on relance sur la suite du DJ.
+      const a = this.decks[this.active]?.el;
+      if (!this.playing && a?.ended && this.index === lastIndex) this.next();
+    });
+  }
+
+  /** Fournée DJ : pistes de la station, sans doublon avec la file actuelle. */
+  private async fetchDjTracks(): Promise<PlexTrack[] | null> {
+    try {
+      const res = await fetch(`/api/plex/station/${DJ_STATION_ID}?limit=${DJ_BATCH * 2}`, {
+        cache: 'no-store'
+      });
+      if (!res.ok) return null;
+      const { tracks } = (await res.json()) as { tracks: PlexTrack[] };
+      const known = new Set(this.queue.map((t) => t.key));
+      return tracks.filter((t) => t.part && !known.has(t.key)).slice(0, DJ_BATCH);
+    } catch {
+      return null;
+    }
   }
 
   /** Coupe net un fondu (action manuelle pendant l'enchaînement). */

@@ -45,11 +45,13 @@
 
   // ── Enchaînements (fondu réglable + fondu intelligent + nivellement) ─────
   let fadeOpen = $state(false);
-  const fadeSummary = $derived(
-    preferences.musicFadeSeconds <= 0
-      ? 'Fondu : désactivé'
-      : `Fondu : ${preferences.musicFadeSeconds} s${preferences.musicSmartFades ? ' · intelligent' : ''}`
-  );
+  const fadeSummary = $derived.by(() => {
+    const fade =
+      preferences.musicFadeSeconds <= 0
+        ? 'Fondu : désactivé'
+        : `Fondu : ${preferences.musicFadeSeconds} s${preferences.musicSmartFades ? ' · intelligent' : ''}`;
+    return preferences.musicAutoDj ? `${fade} · DJ` : fade;
+  });
   // Le store WLED n'est acquis que par /pieces : sans référence propre, le
   // lecteur afficherait un résumé figé (et le panneau, des lignes vides).
   $effect(() => {
@@ -394,7 +396,7 @@
       <!-- Enchaînements : fondu réglable + fondu intelligent (analyse Plex). -->
       <button
         class="output"
-        class:on={preferences.musicFadeSeconds > 0}
+        class:on={preferences.musicFadeSeconds > 0 || preferences.musicAutoDj}
         onclick={() => {
           haptic('light');
           fadeOpen = true;

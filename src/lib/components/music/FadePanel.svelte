@@ -3,13 +3,15 @@
    * Réglage des enchaînements du lecteur — feuille ouverte depuis le Now
    * Playing (c'est là qu'on écoute, comme le panneau Lumière).
    *
-   * Trois réglages, façon PlexAmp :
+   * Quatre réglages, façon PlexAmp :
    *   - durée du fondu enchaîné (0 = enchaînement sec, comportement historique) ;
    *   - fondu INTELLIGENT : la durée réelle se cale sur l'analyse de sonie du
    *     PMS — fin en fade-out → fondu ample, fin sèche → enchaînement court,
    *     silence d'intro sauté ;
    *   - volume nivelé : gain d'analyse appliqué à chaque piste, un album 2024
-   *     ne hurle plus après un vinyle 70's.
+   *     ne hurle plus après un vinyle 70's ;
+   *   - DJ automatique (Auto Play PlexAmp) : quand la file se termine, la
+   *     station « Radio de la maison » du PMS prend le relais.
    *
    * Les changements sont persistés (preferences) et pris en compte au prochain
    * enchaînement ; le nivellement s'applique immédiatement à la piste en cours.
@@ -82,6 +84,27 @@
           haptic('light');
           preferences.setMusicLoudnessLeveling((e.currentTarget as HTMLInputElement).checked);
           player.settingsChanged();
+        }}
+      />
+      <span class="toggle-pill-knob"></span>
+    </label>
+  </div>
+
+  <div class="fp-row">
+    <span class="fp-text">
+      <span class="fp-label">DJ automatique</span>
+      <span class="fp-sub">
+        La file ne s'arrête plus : quand elle se termine, le DJ enchaîne avec d'autres morceaux de
+        la maison, choisis d'après vos écoutes
+      </span>
+    </span>
+    <label class="toggle-pill" aria-label="DJ automatique">
+      <input
+        type="checkbox"
+        checked={preferences.musicAutoDj}
+        onchange={(e) => {
+          haptic('light');
+          preferences.setMusicAutoDj((e.currentTarget as HTMLInputElement).checked);
         }}
       />
       <span class="toggle-pill-knob"></span>
