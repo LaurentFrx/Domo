@@ -10,8 +10,9 @@
    *     silence d'intro sauté ;
    *   - volume nivelé : gain d'analyse appliqué à chaque piste, un album 2024
    *     ne hurle plus après un vinyle 70's ;
-   *   - DJ automatique (Auto Play PlexAmp) : quand la file se termine, la
-   *     station « Radio de la maison » du PMS prend le relais.
+   *   - DJ automatique (Auto Play PlexAmp) : quand la file se termine, le DJ
+   *     choisi prend le relais — Guest DJ contextuel (Twofer/Contempo/Groupie)
+   *     ou station du PMS.
    *
    * Les changements sont persistés (preferences) et pris en compte au prochain
    * enchaînement ; le nivellement s'applique immédiatement à la piste en cours.
@@ -23,6 +24,41 @@
   const fadeLabel = $derived(
     preferences.musicFadeSeconds <= 0 ? 'Désactivé' : `${preferences.musicFadeSeconds} s`
   );
+
+  /** Guest DJ façon PlexAmp — les trois que le serveur sait servir (les DJ à
+   *  similarité sonore, Stretch/Gemini/Freeze, demandent l'analyse sonique que
+   *  le PMS du Raspberry Pi ne produit pas ; PlexAmp les grise aussi). */
+  const GUEST_DJS = [
+    {
+      id: 'twofer',
+      label: 'DJ Twofer',
+      desc: 'Insère un autre titre du même artiste après chaque titre'
+    },
+    {
+      id: 'contempo',
+      label: 'DJ Contempo',
+      desc: 'Prolonge l’ambiance avec des titres de la même époque'
+    },
+    {
+      id: 'groupie',
+      label: 'DJ Groupie',
+      desc: 'Continue d’ajouter des titres du même artiste dans la file'
+    }
+  ];
+
+  function pickDj(id: string) {
+    haptic('light');
+    preferences.setMusicDj(id);
+    player.djSourceChanged();
+  }
+
+  /** Description du DJ sélectionné (légende sous les pastilles). */
+  const djDesc = $derived.by(() => {
+    const guest = GUEST_DJS.find((d) => d.id === preferences.musicDj);
+    if (guest) return guest.desc;
+    const st = RADIO_STATIONS.find((s) => `station:${s.id}` === preferences.musicDj);
+    return st ? st.desc : RADIO_STATIONS[0].desc;
+  });
 </script>
 
 <div class="fp">
@@ -111,26 +147,44 @@
   </div>
 
   {#if preferences.musicAutoDj}
-    <!-- Type de DJ : quelle station du serveur programme la suite. Le choix
-         vaut pour les prochaines fournées — ce qui est déjà dans la file y reste. -->
-    <div class="fp-chips" role="radiogroup" aria-label="Type de DJ">
-      {#each RADIO_STATIONS as st (st.id)}
-        <button
-          type="button"
-          class="fp-chip"
-          class:active={preferences.musicDjStation === st.id}
-          role="radio"
-          aria-checked={preferences.musicDjStation === st.id}
-          title={st.desc}
-          onclick={() => {
-            haptic('light');
-            preferences.setMusicDjStation(st.id);
-            player.djSourceChanged();
-          }}
-        >
-          {st.label}
-        </button>
-      {/each}
+    <!-- Type de DJ : Guest DJ (contextuels, façon PlexAmp) ou station du
+         serveur. Le choix vaut pour la suite — ce qui est déjà dans la file y reste. -->
+    <div role="radiogroup" aria-label="Type de DJ" class="fp-dj">
+      <span class="fp-group">DJ invités</span>
+      <div class="fp-chips fp-chips-3">
+        {#each GUEST_DJS as dj (dj.id)}
+          <button
+            type="button"
+            class="fp-chip"
+            class:active={preferences.musicDj === dj.id}
+            role="radio"
+            aria-checked={preferences.musicDj === dj.id}
+            onclick={() => pickDj(dj.id)}
+          >
+            {dj.label}
+          </button>
+        {/each}
+      </div>
+      <span class="fp-group">Stations</span>
+      <div class="fp-chips">
+        {#each RADIO_STATIONS as st (st.id)}
+          <button
+            type="button"
+            class="fp-chip"
+            class:active={preferences.musicDj === `station:${st.id}`}
+            role="radio"
+            aria-checked={preferences.musicDj === `station:${st.id}`}
+            onclick={() => pickDj(`station:${st.id}`)}
+          >
+            {st.label}
+          </button>
+        {/each}
+      </div>
+      <p class="fp-hint">{djDesc}</p>
+      <p class="fp-hint fp-dim">
+        Comme dans PlexAmp, les DJ à similarité sonore (Stretch, Gemini, Freeze) restent
+        indisponibles : ils demandent l'analyse sonique, que le serveur ne peut pas produire.
+      </p>
     </div>
   {/if}
 
@@ -187,11 +241,29 @@
   }
 
   /* ─── Type de DJ (chips, même dessin que le panneau Lumière) ─── */
+  .fp-dj {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: -4px;
+  }
+  .fp-group {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted-fg);
+  }
+  .fp-dim {
+    opacity: 0.75;
+  }
   .fp-chips {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px;
-    margin-top: -4px;
+  }
+  .fp-chips-3 {
+    grid-template-columns: 1fr 1fr 1fr;
   }
   .fp-chip {
     /* Cible tactile ≥ 44 pt (HIG). */

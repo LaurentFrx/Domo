@@ -19,7 +19,7 @@ type Persisted = {
   musicSmartFades: boolean;
   musicLoudnessLeveling: boolean;
   musicAutoDj: boolean;
-  musicDjStation: number;
+  musicDj: string;
 };
 
 const DEFAULTS: Persisted = {
@@ -40,10 +40,9 @@ const DEFAULTS: Persisted = {
   // feuille Enchaînements. Sans risque pour le chemin audio (simple ajout
   // de pistes à la file).
   musicAutoDj: true,
-  // Type de DJ : id de la station PMS qui alimente la continuation
-  // (1 Radio de la maison, 8 Pépites cachées, 2 Voyage dans le temps,
-  // 3 Albums surprise — RADIO_STATIONS dans plex.svelte.ts).
-  musicDjStation: 1
+  // Type de DJ : 'twofer' | 'contempo' | 'groupie' (Guest DJ façon PlexAmp)
+  // ou 'station:<id>' (stations PMS — RADIO_STATIONS dans plex.svelte.ts).
+  musicDj: 'station:1'
 };
 
 function load(): Persisted {
@@ -51,7 +50,12 @@ function load(): Persisted {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULTS };
-    const parsed = JSON.parse(raw) as Partial<Persisted>;
+    const parsed = JSON.parse(raw) as Partial<Persisted> & { musicDjStation?: number };
+    // Migration (26→27/08) : l'ancien réglage numérique musicDjStation
+    // devient la forme 'station:<id>' du sélecteur de type de DJ.
+    if (parsed.musicDj === undefined && typeof parsed.musicDjStation === 'number') {
+      parsed.musicDj = `station:${parsed.musicDjStation}`;
+    }
     return { ...DEFAULTS, ...parsed };
   } catch {
     return { ...DEFAULTS };
@@ -74,8 +78,8 @@ class PreferencesState {
   musicLoudnessLeveling = $state(DEFAULTS.musicLoudnessLeveling);
   /** DJ automatique : la station Plex prolonge la file quand elle se termine. */
   musicAutoDj = $state(DEFAULTS.musicAutoDj);
-  /** Type de DJ : station PMS qui programme la suite. */
-  musicDjStation = $state(DEFAULTS.musicDjStation);
+  /** Type de DJ : Guest DJ ('twofer'…) ou station PMS ('station:<id>'). */
+  musicDj = $state(DEFAULTS.musicDj);
 
   hydrate() {
     if (typeof window === 'undefined') return;
@@ -90,7 +94,7 @@ class PreferencesState {
     this.musicSmartFades = p.musicSmartFades;
     this.musicLoudnessLeveling = p.musicLoudnessLeveling;
     this.musicAutoDj = p.musicAutoDj;
-    this.musicDjStation = p.musicDjStation;
+    this.musicDj = p.musicDj;
     this.applyTheme();
   }
 
@@ -107,7 +111,7 @@ class PreferencesState {
       musicSmartFades: this.musicSmartFades,
       musicLoudnessLeveling: this.musicLoudnessLeveling,
       musicAutoDj: this.musicAutoDj,
-      musicDjStation: this.musicDjStation
+      musicDj: this.musicDj
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(snap));
@@ -177,8 +181,8 @@ class PreferencesState {
     this.musicAutoDj = enabled;
     this.persist();
   }
-  setMusicDjStation(id: number) {
-    this.musicDjStation = id;
+  setMusicDj(id: string) {
+    this.musicDj = id;
     this.persist();
   }
 }

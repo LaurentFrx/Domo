@@ -20,7 +20,9 @@ export interface RawMeta {
   grandparentTitle?: string;
   originalTitle?: string;
   parentRatingKey?: string | number;
+  grandparentRatingKey?: string | number;
   year?: number;
+  parentYear?: number;
   thumb?: string;
   parentThumb?: string;
   grandparentThumb?: string;
@@ -69,6 +71,10 @@ export interface TrackJson {
   artist: string;
   album: string;
   albumKey: string | null;
+  /** Clé de l'ARTISTE d'album (grandparent) — les DJ « même artiste ». */
+  artistKey: string | null;
+  /** Année de l'album (parentYear) — le DJ « même époque ». */
+  year: number | null;
   thumb: string | null;
   /** Chemin de la partie média (/library/parts/…/file.ext) pour le stream. */
   part: string | null;
@@ -140,6 +146,8 @@ export function mapTrack(md: RawMeta): TrackJson {
     artist: md.originalTitle ?? md.grandparentTitle ?? '',
     album: md.parentTitle ?? '',
     albumKey: md.parentRatingKey != null ? String(md.parentRatingKey) : null,
+    artistKey: md.grandparentRatingKey != null ? String(md.grandparentRatingKey) : null,
+    year: md.parentYear ?? null,
     thumb: md.thumb ?? md.parentThumb ?? md.grandparentThumb ?? null,
     part: md.Media?.[0]?.Part?.[0]?.key ?? null,
     codec: md.Media?.[0]?.audioCodec ?? null,

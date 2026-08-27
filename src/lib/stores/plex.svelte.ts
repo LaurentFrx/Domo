@@ -79,6 +79,10 @@ export interface PlexTrack {
   artist: string;
   album: string;
   albumKey: string | null;
+  /** Clé de l'ARTISTE d'album — les DJ « même artiste ». */
+  artistKey: string | null;
+  /** Année de l'album — le DJ « même époque ». */
+  year: number | null;
   thumb: string | null;
   part: string | null;
   codec: string | null;
@@ -975,6 +979,7 @@ class PlayerState {
         : (next.duration ?? 0) / 1000;
     this.lastError = null;
     this.syncMediaSessionMetadata(next);
+    this.maybeTwofer();
     // Filet : si la sortante ne déclenche pas `ended` (fondu avant sa vraie fin),
     // on la coupe nous-mêmes. En arrière-plan iOS ce timer peut arriver en
     // retard — `ended` fait alors le ménage, les deux chemins sont idempotents.
@@ -1022,9 +1027,9 @@ class PlayerState {
     });
   }
 
-  /** Station retenue par le réglage « type de DJ » (repli si id inconnu). */
-  private djStationId(): number {
-    const id = preferences.musicDjStation;
+  /** Station derrière un réglage 'station:<id>' (repli si id inconnu). */
+  private static stationIdFrom(mode: string): number {
+    const id = Number(mode.split(':')[1]);
     return RADIO_STATIONS.some((s) => s.id === id) ? id : DJ_STATION_FALLBACK;
   }
 
@@ -1034,20 +1039,111 @@ class PlayerState {
     this.djRetryAt = 0;
   }
 
-  /** Fournée DJ : pistes de la station choisie, sans doublon avec la file. */
+  /**
+   * Fournée DJ selon le type choisi. Groupie et Contempo (Guest DJ façon
+   * PlexAmp) partent de la DERNIÈRE piste de la file ; artiste épuisé, époque
+   * inconnue ou mode d'insertion (Twofer) → la « Radio de la maison » assure
+   * la continuité. Toujours dédoublonné contre la file.
+   */
   private async fetchDjTracks(): Promise<PlexTrack[] | null> {
     try {
-      const res = await fetch(`/api/plex/station/${this.djStationId()}?limit=${DJ_BATCH * 2}`, {
-        cache: 'no-store'
-      });
-      if (!res.ok) return null;
-      const { tracks } = (await res.json()) as { tracks: PlexTrack[] };
+      const mode = preferences.musicDj;
       const known = new Set(this.queue.map((t) => t.key));
-      const fresh = tracks.filter((t) => t.part && !known.has(t.key));
-      return trimDjBatch(fresh, this.djStationId());
+      if (mode === 'groupie') return await this.groupieDjTracks(known);
+      if (mode === 'contempo') return await this.contempoDjTracks(known);
+      return await this.stationDjTracks(known, PlayerState.stationIdFrom(mode));
     } catch {
       return null;
     }
+  }
+
+  private async stationDjTracks(known: Set<string>, stationId: number): Promise<PlexTrack[]> {
+    const res = await fetch(`/api/plex/station/${stationId}?limit=${DJ_BATCH * 2}`, {
+      cache: 'no-store'
+    });
+    if (!res.ok) return [];
+    const { tracks } = (await res.json()) as { tracks: PlexTrack[] };
+    const fresh = tracks.filter((t) => t.part && !known.has(t.key));
+    return trimDjBatch(fresh, stationId);
+  }
+
+  /** DJ Groupie : la file continue avec l'artiste de la dernière piste. */
+  private async groupieDjTracks(known: Set<string>): Promise<PlexTrack[]> {
+    const artistKey = this.queue[this.queue.length - 1]?.artistKey;
+    if (!artistKey) return this.stationDjTracks(known, DJ_STATION_FALLBACK);
+    const res = await fetch(`/api/plex/artist-tracks/${artistKey}?limit=${DJ_BATCH * 3}`, {
+      cache: 'no-store'
+    });
+    if (!res.ok) return [];
+    const { tracks } = (await res.json()) as { tracks: PlexTrack[] };
+    const fresh = tracks.filter((t) => t.part && !known.has(t.key));
+    // Artiste épuisé : la maison reprend l'antenne plutôt que le silence.
+    if (fresh.length === 0) return this.stationDjTracks(known, DJ_STATION_FALLBACK);
+    return fresh.slice(0, DJ_BATCH);
+  }
+
+  /** DJ Contempo : la file continue dans la même époque (± 5 ans d'album). */
+  private async contempoDjTracks(known: Set<string>): Promise<PlexTrack[]> {
+    const year = this.queue[this.queue.length - 1]?.year;
+    if (!year) return this.stationDjTracks(known, DJ_STATION_FALLBACK);
+    const res = await fetch('/api/plex/smart', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({
+        rules: { yearFrom: year - 5, yearTo: year + 5, sort: 'random', limit: DJ_BATCH * 3 }
+      })
+    });
+    if (!res.ok) return [];
+    const { tracks } = (await res.json()) as { tracks: PlexTrack[] };
+    const fresh = tracks.filter((t) => t.part && !known.has(t.key));
+    if (fresh.length === 0) return this.stationDjTracks(known, DJ_STATION_FALLBACK);
+    return fresh.slice(0, DJ_BATCH);
+  }
+
+  // ─── DJ Twofer (insertion : un compagnon du même artiste après chaque titre) ─
+
+  /** Clés des compagnons insérés par Twofer — un compagnon n'en reçoit pas. */
+  private companionKeys = new Set<string>();
+  private twoferInflight = false;
+
+  /**
+   * DJ Twofer, réplique du Guest DJ PlexAmp : quand un titre démarre, un
+   * autre titre du même artiste est inséré juste après lui. Les compagnons
+   * n'en reçoivent pas (sinon on ne quitterait jamais l'artiste) et une place
+   * déjà tenue par un compagnon n'est pas doublée (répétition de file).
+   */
+  private maybeTwofer(): void {
+    if (!preferences.musicAutoDj || preferences.musicDj !== 'twofer') return;
+    const t = this.current;
+    if (!t?.artistKey || this.companionKeys.has(t.key) || this.twoferInflight) return;
+    const nextInQueue = this.queue[this.index + 1];
+    if (nextInQueue && this.companionKeys.has(nextInQueue.key)) return;
+    this.twoferInflight = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/plex/artist-tracks/${t.artistKey}?limit=10`, {
+          cache: 'no-store'
+        });
+        if (!res.ok) return;
+        const { tracks } = (await res.json()) as { tracks: PlexTrack[] };
+        const known = new Set(this.queue.map((q) => q.key));
+        const pick = tracks.find((c) => c.part && !known.has(c.key));
+        // L'utilisateur a pu changer de piste pendant la requête : on n'insère
+        // que si le titre à accompagner est toujours le courant.
+        if (!pick || this.current !== t) return;
+        this.companionKeys.add(pick.key);
+        this.queue = [
+          ...this.queue.slice(0, this.index + 1),
+          pick,
+          ...this.queue.slice(this.index + 1)
+        ];
+      } catch {
+        /* pas de compagnon cette fois — la lecture suit son cours */
+      } finally {
+        this.twoferInflight = false;
+      }
+    })();
   }
 
   /** Coupe net un fondu (action manuelle pendant l'enchaînement). */
@@ -1118,6 +1214,7 @@ class PlayerState {
     }
     this.index = start;
     this.context = context;
+    this.companionKeys.clear(); // nouvelle file : les compagnons Twofer repartent de zéro
     this.ensureGraph(); // geste utilisateur : le seul moment sûr pour créer le graphe
     this.load(true);
   }
@@ -1247,6 +1344,7 @@ class PlayerState {
     }
     this.fading = false;
     this.preloadedKey = null;
+    this.companionKeys.clear();
     this.failStreak = 0;
     this.skipNotice = null;
     if (this.skipNoticeTimer) clearTimeout(this.skipNoticeTimer);
@@ -1296,6 +1394,7 @@ class PlayerState {
     }
     if (autoplay) void a.play().catch(() => undefined);
     this.syncMediaSessionMetadata(t);
+    this.maybeTwofer();
   }
 
   /**
