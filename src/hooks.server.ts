@@ -129,7 +129,11 @@ export const handle: Handle = async ({ event, resolve }) => {
   if (
     (event.request.method === 'GET' || event.request.method === 'HEAD') &&
     pathname.startsWith('/api/plex/stream/') &&
-    verifyStreamToken(pathname.slice('/api/plex/stream'.length), event.url.searchParams.get('st'))
+    verifyStreamToken(
+      pathname.slice('/api/plex/stream'.length),
+      event.url.searchParams.get('st'),
+      event.url.searchParams.get('k')
+    )
   ) {
     // Sans cookie de session = un APPAREIL est venu chercher le flux lui-même
     // (enceinte AirPlay) : trace de diagnostic, avec son identité déclarée.

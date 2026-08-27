@@ -27,20 +27,33 @@ function key(): string | null {
   return k || null;
 }
 
-function hmac(part: string, exp: number, k: string): string {
-  return createHmac('sha256', k).update(`stream|${part}|${exp}`).digest('hex').slice(0, 32);
+function hmac(part: string, ratingKey: string, exp: number, k: string): string {
+  return createHmac('sha256', k)
+    .update(`stream|${part}|${ratingKey}|${exp}`)
+    .digest('hex')
+    .slice(0, 32);
 }
 
-/** `/library/parts/…/file.flac` → même chemin suffixé `?st=<exp>.<sig>`. */
-export function signStreamPart(part: string): string {
+/**
+ * `/library/parts/…/file.flac` → même chemin suffixé `?st=<exp>.<sig>&k=<rk>`.
+ * Le ratingKey est SIGNÉ lui aussi : il sert au transcodage MP3 pour les
+ * récepteurs AirPlay (qui ne décodent pas le FLAC progressif) — non falsifiable.
+ */
+export function signStreamPart(part: string, ratingKey: string | null): string {
   const k = key();
   if (!k) return part; // pas de secret configuré : URL nue (auth cookie seule)
+  const rk = ratingKey ?? '';
   const exp = Math.floor(Date.now() / 1000) + TTL_S;
-  return `${part}?st=${exp}.${hmac(part, exp, k)}`;
+  const suffix = rk ? `&k=${rk}` : '';
+  return `${part}?st=${exp}.${hmac(part, rk, exp, k)}${suffix}`;
 }
 
-/** Vérifie `?st=` pour un chemin de part (avec son / de tête). */
-export function verifyStreamToken(part: string, token: string | null): boolean {
+/** Vérifie `?st=` pour un chemin de part (avec son / de tête) + son `k`. */
+export function verifyStreamToken(
+  part: string,
+  token: string | null,
+  ratingKey: string | null
+): boolean {
   const k = key();
   if (!k || !token) return false;
   const dot = token.indexOf('.');
@@ -48,6 +61,6 @@ export function verifyStreamToken(part: string, token: string | null): boolean {
   const exp = Number(token.slice(0, dot));
   if (!Number.isFinite(exp) || exp < Date.now() / 1000) return false;
   const given = Buffer.from(token.slice(dot + 1));
-  const want = Buffer.from(hmac(part, exp, k));
+  const want = Buffer.from(hmac(part, ratingKey ?? '', exp, k));
   return given.length === want.length && timingSafeEqual(given, want);
 }

@@ -158,6 +158,22 @@ export async function pmsFetch(
   return res;
 }
 
+/**
+ * Identité + token en PARAMÈTRES D'URL — le transcodeur universel du PMS les
+ * exige dans la query (les mêmes valeurs en en-têtes rendent 400, constaté le
+ * 27/08 en bisectant). Server-side uniquement : ces URL ne quittent pas le VPS.
+ */
+export async function pmsQueryIdentity(): Promise<Record<string, string>> {
+  const { clientId, token } = await loadAuth();
+  if (!token) throw new PlexError(401, 'Domo n’est pas appairé à Plex');
+  return {
+    'X-Plex-Token': token,
+    'X-Plex-Client-Identifier': clientId,
+    'X-Plex-Platform': 'Chrome',
+    'X-Plex-Product': 'Domo'
+  };
+}
+
 // ─── Section musicale ────────────────────────────────────────────────────────
 
 export interface MusicSection {

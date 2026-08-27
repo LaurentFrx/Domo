@@ -151,7 +151,9 @@ export function mapTrack(md: RawMeta): TrackJson {
     year: md.parentYear ?? null,
     thumb: md.thumb ?? md.parentThumb ?? md.grandparentThumb ?? null,
     // Signée : une enceinte AirPlay vient chercher le flux SANS cookie.
-    part: md.Media?.[0]?.Part?.[0]?.key ? signStreamPart(md.Media[0].Part[0].key!) : null,
+    part: md.Media?.[0]?.Part?.[0]?.key
+      ? signStreamPart(md.Media[0].Part[0].key!, md.ratingKey != null ? String(md.ratingKey) : null)
+      : null,
     codec: md.Media?.[0]?.audioCodec ?? null,
     bitrate: md.Media?.[0]?.bitrate ?? null,
     size: md.Media?.[0]?.Part?.[0]?.size ?? null,

@@ -8,16 +8,40 @@
  * le PMS et on restitue status + en-têtes de contenu tels quels, corps streamé.
  */
 import { error } from '@sveltejs/kit';
-import { pmsFetch } from '$lib/server/plex';
+import { pmsFetch, pmsQueryIdentity } from '$lib/server/plex';
 import { plexHttp } from '$lib/server/plex-map';
+import { SESSION_COOKIE_NAME } from '$lib/server/auth';
 import type { RequestHandler } from './$types';
 
 const PART_RE = /^library\/parts\/\d+\/\d+\/file(\.[A-Za-z0-9]+)?$/;
 const PASSTHROUGH = ['content-type', 'content-length', 'content-range', 'accept-ranges'];
 
-export const GET: RequestHandler = async ({ params, request }) => {
+/**
+ * Formats que la pile AVFoundation d'un récepteur AirPlay ne lit PAS en
+ * progressif. Constaté avec la chaîne CEOL sur un FLAC : le récepteur vient
+ * chercher le fichier (4 requêtes en 1,5 s, journal [stream]) puis le
+ * recrache — session AirPlay parfaite, piste « vide ». WebKit sur l'iPhone a
+ * son propre décodeur FLAC ; AppleCoreMedia côté récepteur, non.
+ */
+const RECEIVER_TRANSCODE_RE = /\.(flac|ogg|opus|wma)$/i;
+
+export const GET: RequestHandler = async ({ params, request, url, cookies }) => {
   const part = params.part;
   if (!PART_RE.test(part)) throw error(400, 'Chemin de flux non autorisé');
+
+  // Pas de cookie de session = un récepteur AirPlay venu avec l'URL signée
+  // (le hook a déjà vérifié la signature, `k` compris) : les formats qu'il ne
+  // sait pas décoder partent en transcodage MP3 côté PMS. L'utilisateur sur
+  // l'app (cookie) garde toujours la lecture directe, FLAC compris.
+  const rk = url.searchParams.get('k');
+  if (
+    !cookies.get(SESSION_COOKIE_NAME) &&
+    rk &&
+    /^\d+$/.test(rk) &&
+    RECEIVER_TRANSCODE_RE.test(part)
+  ) {
+    return transcodeForReceiver(rk);
+  }
 
   const range = request.headers.get('range');
   try {
@@ -41,3 +65,45 @@ export const GET: RequestHandler = async ({ params, request }) => {
     plexHttp(e);
   }
 };
+
+/**
+ * Transcodage universel du PMS → MP3 320 progressif, le format que tout
+ * récepteur AirPlay sait lire. Particularités du transcodeur (bisectées) :
+ * token ET identité exigés dans la QUERY, `hasMDE=1` obligatoire. Session
+ * STABLE par piste : les rafales de reprises du récepteur remplacent leur
+ * session côté PMS au lieu d'en empiler. Les en-têtes Range du récepteur
+ * sont ignorés (flux non seekable, comme une webradio) — AVFoundation s'en
+ * accommode ; le seek AirPlay sur un FLAC transcodé reste sans effet.
+ */
+async function transcodeForReceiver(ratingKey: string): Promise<Response> {
+  try {
+    const qs = new URLSearchParams({
+      hasMDE: '1',
+      path: `/library/metadata/${ratingKey}`,
+      mediaIndex: '0',
+      partIndex: '0',
+      protocol: 'http',
+      audioCodec: 'mp3',
+      musicBitrate: '320',
+      directPlay: '0',
+      directStream: '0',
+      session: `airplay-${ratingKey}`,
+      ...(await pmsQueryIdentity())
+    });
+    const upstream = await pmsFetch(`/music/:/transcode/universal/start.mp3?${qs}`, {
+      timeoutMs: 0
+    });
+    if (!upstream.ok) throw error(502, `Plex transcode: HTTP ${upstream.status}`);
+    console.log(`[stream] transcodage MP3 pour récepteur AirPlay (piste ${ratingKey})`);
+    return new Response(upstream.body, {
+      status: 200,
+      headers: {
+        'content-type': upstream.headers.get('content-type') ?? 'audio/mpeg',
+        'cache-control': 'no-store',
+        'accept-ranges': 'none'
+      }
+    });
+  } catch (e) {
+    plexHttp(e);
+  }
+}
