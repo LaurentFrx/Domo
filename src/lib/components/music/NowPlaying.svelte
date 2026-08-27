@@ -359,7 +359,11 @@
             <path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1" />
             <path d="m12 15 5 6H7z" />
           </svg>
-          {player.wirelessOutput ? 'Lecture sur un autre appareil' : 'Sortie audio'}
+          {player.outputArmed
+            ? 'Toucher encore pour choisir l’enceinte'
+            : player.wirelessOutput
+              ? 'Lecture sur un autre appareil'
+              : 'Sortie audio'}
         </button>
       {/if}
 
@@ -599,44 +603,6 @@
 <!-- Feuille des enchaînements — même logique de montage que la lumière. -->
 <BottomSheet open={fadeOpen} title="Enchaînements" onClose={() => (fadeOpen = false)}>
   <FadePanel />
-</BottomSheet>
-
-<!-- Feuille « Sortie audio », ouverte quand le fondu était actif : le lecteur
-     vient de repasser en lecture directe (l'AirPlay ciblé par élément est
-     incompatible avec le graphe du fondu), et le sélecteur ne doit s'ouvrir
-     qu'au geste SUIVANT, sur un élément chargé et en lecture. -->
-<BottomSheet
-  open={player.outputSheetOpen}
-  title="Sortie audio"
-  onClose={() => (player.outputSheetOpen = false)}
->
-  <div class="out-sheet">
-    <p class="out-hint">
-      Le fondu enchaîné mixe le son dans l'application ; l'envoi AirPlay direct ne sait pas
-      transporter ce mixage. Deux façons d'écouter sur une enceinte :
-    </p>
-    <button
-      class="out-pick"
-      onclick={() => {
-        haptic('light');
-        player.outputSheetOpen = false;
-        player.showNativePicker();
-      }}
-    >
-      <span class="out-pick-label">Choisir l'enceinte ici</span>
-      <span class="out-pick-sub">
-        Les morceaux s'enchaîneront sans fondu pendant l'écoute AirPlay ; le fondu revient tout seul
-        au retour sur cet appareil.
-      </span>
-    </button>
-    <div class="out-alt">
-      <span class="out-pick-label">Ou garder le fondu : Centre de contrôle</span>
-      <span class="out-pick-sub">
-        Balayer depuis le coin supérieur droit → carte audio → votre enceinte. Tout le son de l'app
-        y est envoyé, fondu compris.
-      </span>
-    </div>
-  </div>
 </BottomSheet>
 
 <style>
@@ -1199,53 +1165,5 @@
     font-size: 11.5px;
     text-align: center;
     margin: 8px 0 0;
-  }
-
-  /* ─── Feuille « Sortie audio » (fondu actif) ─── */
-  .out-sheet {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-  .out-hint {
-    font-size: 12.5px;
-    line-height: 1.45;
-    color: var(--color-muted-fg);
-  }
-  .out-pick,
-  .out-alt {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 12px 14px;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--color-border);
-    text-align: left;
-  }
-  .out-pick {
-    background: var(--color-primary);
-    border-color: var(--color-primary);
-    cursor: pointer;
-  }
-  .out-pick .out-pick-label,
-  .out-pick .out-pick-sub {
-    color: var(--color-primary-fg);
-  }
-  .out-alt {
-    background: var(--color-muted);
-  }
-  .out-pick-label {
-    font-size: 13.5px;
-    font-weight: 700;
-    color: var(--color-fg);
-  }
-  .out-pick-sub {
-    font-size: 12px;
-    line-height: 1.4;
-    color: var(--color-muted-fg);
-  }
-  .out-pick:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 2px;
   }
 </style>

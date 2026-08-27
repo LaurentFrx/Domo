@@ -796,6 +796,7 @@ class PlayerState {
         src.connect(d.gain).connect(this.ctx.destination);
       }
       this.captured = true;
+      this.outputArmed = false; // fondu repris : le bouton redevient « Sortie audio »
       void this.ctx.resume().catch(() => undefined);
       // iOS suspend le contexte au gré des interruptions (appel, Siri…) :
       // on le relance au retour de visibilité si la lecture est censée tourner.
@@ -1239,8 +1240,9 @@ class PlayerState {
     }
   }
 
-  /** Feuille « Sortie audio » ouverte (fondu actif : deux chemins possibles). */
-  outputSheetOpen = $state(false);
+  /** Armé : la lecture directe est en place, la PROCHAINE pression du bouton
+   *  « Sortie audio » ouvre le sélecteur (le libellé du bouton l'annonce). */
+  outputArmed = $state(false);
 
   /**
    * Bouton « Sortie audio ».
@@ -1253,26 +1255,27 @@ class PlayerState {
    *    l'élément est encore vide (readyState 0) au moment du choix : la
    *    sélection n'engage même plus la chaîne.
    *
-   * D'où la séquence en DEUX gestes quand le fondu est actif : ce premier
-   * tap bascule en lecture directe (élément neuf, jamais capturé, qui charge
-   * et joue pendant que la feuille s'affiche) ; le second tap — « Choisir
-   * l'enceinte » dans la feuille — ouvre le sélecteur sur un élément chaud
-   * et en lecture, le cas exact qui fonctionne. La feuille explique aussi la
-   * voie Centre de contrôle (routage SYSTÈME : tout l'audio de l'app y passe,
-   * graphe compris — le fondu y survit).
+   * D'où la séquence en DEUX gestes quand le fondu est actif, sans encart
+   * (l'encart explicatif a déplu — option (a) validée par Laurent) : ce
+   * premier tap bascule en lecture directe (élément neuf, jamais capturé,
+   * qui charge et joue), le bouton devient « Toucher encore pour choisir
+   * l'enceinte » ; le tap suivant retombe ici avec `captured` false et ouvre
+   * le sélecteur sur un élément chaud et en lecture — le cas qui fonctionne.
+   * Le fondu se recrée au prochain geste de lecture une fois revenu en local.
    */
   pickOutput(): void {
     this.ensureAudio();
     if (this.captured) {
       this.rebuildDirect(); // geste utilisateur : play() du nouvel élément autorisé
-      this.outputSheetOpen = true;
+      this.outputArmed = true;
       return;
     }
+    this.outputArmed = false;
     this.showNativePicker();
   }
 
   /** Sélecteur natif de destination, sur l'élément actif (non capturé). */
-  showNativePicker(): void {
+  private showNativePicker(): void {
     const a = this.decks[this.active]?.el;
     if (!a) return;
     const w = a as WebKitAudio;
@@ -1478,6 +1481,7 @@ class PlayerState {
     this.preloadedKey = null;
     this.companionKeys.clear();
     this.djAnchorKey = null;
+    this.outputArmed = false;
     this.failStreak = 0;
     this.skipNotice = null;
     if (this.skipNoticeTimer) clearTimeout(this.skipNoticeTimer);
