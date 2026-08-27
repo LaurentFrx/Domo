@@ -1,5 +1,6 @@
 import { error, redirect, type Handle, type HandleServerError } from '@sveltejs/kit';
 import { SESSION_COOKIE_NAME, verifySessionCookie } from '$lib/server/auth';
+import { verifyStreamToken } from '$lib/server/stream-sign';
 import { findUserById } from '$lib/server/users-store';
 import { authParJeton, refusPour } from '$lib/server/access';
 import { projeter } from '$lib/server/demo/projections';
@@ -116,6 +117,27 @@ export const handle: Handle = async ({ event, resolve }) => {
   }
 
   if (isAsset(pathname) || isPublic(pathname)) {
+    return withApiCacheControl(pathname, await resolve(event));
+  }
+
+  // Flux audio à URL SIGNÉE : en AirPlay « external playback », c'est
+  // l'enceinte qui vient chercher le flux, sans cookie (vécu CEOL 27/08 :
+  // session AirPlay complète mais piste « vide » — sa requête prenait le 303).
+  // Étroit à dessein (leçon de l'audit isAsset) : GET/HEAD seulement, préfixe
+  // exact du flux, signature HMAC à durée limitée vérifiée à temps constant —
+  // rien d'autre ne sort de la garde.
+  if (
+    (event.request.method === 'GET' || event.request.method === 'HEAD') &&
+    pathname.startsWith('/api/plex/stream/') &&
+    verifyStreamToken(pathname.slice('/api/plex/stream'.length), event.url.searchParams.get('st'))
+  ) {
+    // Sans cookie de session = un APPAREIL est venu chercher le flux lui-même
+    // (enceinte AirPlay) : trace de diagnostic, avec son identité déclarée.
+    if (!event.cookies.get(SESSION_COOKIE_NAME)) {
+      console.log(
+        `[stream] flux signé servi sans session — UA: ${event.request.headers.get('user-agent') ?? '?'}`
+      );
+    }
     return withApiCacheControl(pathname, await resolve(event));
   }
 

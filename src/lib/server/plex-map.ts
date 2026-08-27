@@ -4,6 +4,7 @@
  */
 import { error } from '@sveltejs/kit';
 import { PlexError } from './plex';
+import { signStreamPart } from './stream-sign';
 
 /** À utiliser dans les catch des routes : convertit PlexError, relaie le reste. */
 export function plexHttp(e: unknown): never {
@@ -149,7 +150,8 @@ export function mapTrack(md: RawMeta): TrackJson {
     artistKey: md.grandparentRatingKey != null ? String(md.grandparentRatingKey) : null,
     year: md.parentYear ?? null,
     thumb: md.thumb ?? md.parentThumb ?? md.grandparentThumb ?? null,
-    part: md.Media?.[0]?.Part?.[0]?.key ?? null,
+    // Signée : une enceinte AirPlay vient chercher le flux SANS cookie.
+    part: md.Media?.[0]?.Part?.[0]?.key ? signStreamPart(md.Media[0].Part[0].key!) : null,
     codec: md.Media?.[0]?.audioCodec ?? null,
     bitrate: md.Media?.[0]?.bitrate ?? null,
     size: md.Media?.[0]?.Part?.[0]?.size ?? null,
