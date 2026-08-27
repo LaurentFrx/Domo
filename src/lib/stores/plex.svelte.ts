@@ -1537,6 +1537,11 @@ class PlayerState {
     this.currentTime = 0;
     this.duration = t.duration ? t.duration / 1000 : 0;
     a.src = streamUrl(t.part);
+    // Élément à cible AirPlay : le swap de src seul laisse parfois la lecture
+    // distante morte (constaté : tap dans la file pendant une sortie CEOL,
+    // silence, AUCUNE requête du récepteur au journal). load() explicite
+    // relance le pipeline média.
+    if (this.wirelessOutput) a.load();
     if (this.captured) {
       this.applyDeckLevel(this.decks[this.active], t.key);
       if (preferences.musicLoudnessLeveling || preferences.musicSmartFades) {
@@ -1546,9 +1551,32 @@ class PlayerState {
         });
       }
     }
-    if (autoplay) void a.play().catch(() => undefined);
+    if (autoplay) this.playWithRetry(a);
     this.syncMediaSessionMetadata(t);
     this.maybeCompanionDj();
+  }
+
+  /**
+   * play() avec filet : pendant qu'un changement de src se propage — surtout
+   * sur un élément dont la cible AirPlay doit se rétablir — le play() immédiat
+   * peut être rejeté. On réessaie quand l'élément se dit prêt, et si même ça
+   * échoue on le DIT (l'échec muet a coûté un après-midi de diagnostic).
+   */
+  private playWithRetry(a: HTMLAudioElement): void {
+    void a.play().catch(() => {
+      a.addEventListener(
+        'canplay',
+        () => {
+          if (!this.isActiveEl(a)) return;
+          void a.play().catch(() => {
+            if (this.isActiveEl(a)) {
+              this.lastError = 'La lecture n’a pas redémarré — appuyer sur Lecture.';
+            }
+          });
+        },
+        { once: true }
+      );
+    });
   }
 
   /**
