@@ -11,8 +11,8 @@
    *   - volume nivelé : gain d'analyse appliqué à chaque piste, un album 2024
    *     ne hurle plus après un vinyle 70's ;
    *   - DJ automatique (Auto Play PlexAmp) : quand la file se termine, le DJ
-   *     choisi prend le relais — Guest DJ contextuel (Twofer/Contempo/Groupie)
-   *     ou station du PMS.
+   *     choisi prend le relais — Guest DJ contextuel (Twofer/Contempo/Groupie,
+   *     et Stretch/Gemini/Freeze sur l'analyse sonique maison) ou station PMS.
    *
    * Les changements sont persistés (preferences) et pris en compte au prochain
    * enchaînement ; le nivellement s'applique immédiatement à la piste en cours.
@@ -25,26 +25,57 @@
     preferences.musicFadeSeconds <= 0 ? 'Désactivé' : `${preferences.musicFadeSeconds} s`
   );
 
-  /** Guest DJ façon PlexAmp — les trois que le serveur sait servir (les DJ à
-   *  similarité sonore, Stretch/Gemini/Freeze, demandent l'analyse sonique que
-   *  le PMS du Raspberry Pi ne produit pas ; PlexAmp les grise aussi). */
+  /** Guest DJ façon PlexAmp. Les trois DJ soniques (Stretch/Gemini/Freeze)
+   *  s'appuient sur l'ANALYSE MAISON (data/sonic.db, embeddings
+   *  discogs-effnet calculés sur le VPS) — celle que Plex refuse de produire
+   *  sur ARM ; ils restent grisés tant qu'elle n'a rien indexé. */
   const GUEST_DJS = [
     {
       id: 'twofer',
       label: 'DJ Twofer',
-      desc: 'Insère un autre titre du même artiste après chaque titre'
+      desc: 'Insère un autre titre du même artiste après chaque titre',
+      sonic: false
     },
     {
       id: 'contempo',
       label: 'DJ Contempo',
-      desc: 'Prolonge l’ambiance avec des titres de la même époque'
+      desc: 'Prolonge l’ambiance avec des titres de la même époque',
+      sonic: false
     },
     {
       id: 'groupie',
       label: 'DJ Groupie',
-      desc: 'Continue d’ajouter des titres du même artiste dans la file'
+      desc: 'Continue d’ajouter des titres du même artiste dans la file',
+      sonic: false
+    },
+    {
+      id: 'stretch',
+      label: 'DJ Stretch',
+      desc: 'Prolonge la file avec des morceaux soniquement proches, en dérivant peu à peu',
+      sonic: true
+    },
+    {
+      id: 'gemini',
+      label: 'DJ Gemini',
+      desc: 'Insère après chaque titre son jumeau sonique',
+      sonic: true
+    },
+    {
+      id: 'freeze',
+      label: 'DJ Freeze',
+      desc: 'Reste dans l’ambiance du point de départ, sans dériver',
+      sonic: true
     }
   ];
+
+  /** Pistes indexées par l'analyse sonique maison (null = pas encore su). */
+  let sonicAnalyzed = $state<number | null>(null);
+  $effect(() => {
+    void fetch('/api/plex/sonic/status', { cache: 'no-store' })
+      .then((r) => (r.ok ? (r.json() as Promise<{ analyzed: number }>) : null))
+      .then((s) => (sonicAnalyzed = s?.analyzed ?? 0))
+      .catch(() => (sonicAnalyzed = 0));
+  });
 
   function pickDj(id: string) {
     haptic('light');
@@ -159,6 +190,7 @@
             class:active={preferences.musicDj === dj.id}
             role="radio"
             aria-checked={preferences.musicDj === dj.id}
+            disabled={dj.sonic && !sonicAnalyzed}
             onclick={() => pickDj(dj.id)}
           >
             {dj.label}
@@ -181,10 +213,17 @@
         {/each}
       </div>
       <p class="fp-hint">{djDesc}</p>
-      <p class="fp-hint fp-dim">
-        Comme dans PlexAmp, les DJ à similarité sonore (Stretch, Gemini, Freeze) restent
-        indisponibles : ils demandent l'analyse sonique, que le serveur ne peut pas produire.
-      </p>
+      {#if sonicAnalyzed !== null}
+        <p class="fp-hint fp-dim">
+          {#if sonicAnalyzed > 0}
+            Analyse sonique maison : {sonicAnalyzed} morceaux indexés — les DJ Stretch, Gemini et Freeze
+            s'appuient dessus.
+          {:else}
+            Les DJ soniques (Stretch, Gemini, Freeze) s'activeront dès que l'analyse sonique maison
+            aura indexé la bibliothèque.
+          {/if}
+        </p>
+      {/if}
     </div>
   {/if}
 

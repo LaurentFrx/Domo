@@ -979,7 +979,7 @@ class PlayerState {
         : (next.duration ?? 0) / 1000;
     this.lastError = null;
     this.syncMediaSessionMetadata(next);
-    this.maybeTwofer();
+    this.maybeCompanionDj();
     // Filet : si la sortante ne déclenche pas `ended` (fondu avant sa vraie fin),
     // on la coupe nous-mêmes. En arrière-plan iOS ce timer peut arriver en
     // retard — `ended` fait alors le ménage, les deux chemins sont idempotents.
@@ -1040,10 +1040,11 @@ class PlayerState {
   }
 
   /**
-   * Fournée DJ selon le type choisi. Groupie et Contempo (Guest DJ façon
-   * PlexAmp) partent de la DERNIÈRE piste de la file ; artiste épuisé, époque
-   * inconnue ou mode d'insertion (Twofer) → la « Radio de la maison » assure
-   * la continuité. Toujours dédoublonné contre la file.
+   * Fournée DJ selon le type choisi. Les DJ contextuels (Guest DJ façon
+   * PlexAmp) partent de la DERNIÈRE piste de la file — sauf Freeze, ancré sur
+   * la fin de la file TELLE QUE L'UTILISATEUR l'a faite (pas de dérive).
+   * Matière épuisée, piste non analysée ou mode d'insertion (Twofer/Gemini) →
+   * la « Radio de la maison » assure la continuité. Toujours dédoublonné.
    */
   private async fetchDjTracks(): Promise<PlexTrack[] | null> {
     try {
@@ -1051,10 +1052,41 @@ class PlayerState {
       const known = new Set(this.queue.map((t) => t.key));
       if (mode === 'groupie') return await this.groupieDjTracks(known);
       if (mode === 'contempo') return await this.contempoDjTracks(known);
+      if (mode === 'stretch') {
+        return await this.sonicDjTracks(this.queue[this.queue.length - 1]?.key, known);
+      }
+      if (mode === 'freeze') {
+        // L'ancre se fige au premier passage du DJ et survit à ses fournées.
+        this.djAnchorKey ??= this.queue[this.queue.length - 1]?.key ?? null;
+        return await this.sonicDjTracks(this.djAnchorKey, known);
+      }
       return await this.stationDjTracks(known, PlayerState.stationIdFrom(mode));
     } catch {
       return null;
     }
+  }
+
+  /** Ancre du DJ Freeze (dernière piste posée par l'utilisateur, pas par un DJ). */
+  private djAnchorKey: string | null = null;
+
+  /** Continuation sonique (Stretch/Freeze) : les voisins du morceau graine. */
+  private async sonicDjTracks(
+    seedKey: string | null | undefined,
+    known: Set<string>
+  ): Promise<PlexTrack[]> {
+    if (!seedKey) return this.stationDjTracks(known, DJ_STATION_FALLBACK);
+    const res = await fetch('/api/plex/sonic/similar', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({ key: seedKey, limit: DJ_BATCH, exclude: [...known] })
+    });
+    // 404 = piste non analysée ou analyse absente : la maison reprend l'antenne.
+    if (!res.ok) return this.stationDjTracks(known, DJ_STATION_FALLBACK);
+    const { tracks } = (await res.json()) as { tracks: PlexTrack[] };
+    const fresh = tracks.filter((t) => t.part && !known.has(t.key));
+    if (fresh.length === 0) return this.stationDjTracks(known, DJ_STATION_FALLBACK);
+    return fresh;
   }
 
   private async stationDjTracks(known: Set<string>, stationId: number): Promise<PlexTrack[]> {
@@ -1101,34 +1133,32 @@ class PlayerState {
     return fresh.slice(0, DJ_BATCH);
   }
 
-  // ─── DJ Twofer (insertion : un compagnon du même artiste après chaque titre) ─
+  // ─── DJ d'insertion (Twofer : même artiste · Gemini : jumeau sonique) ─────
 
-  /** Clés des compagnons insérés par Twofer — un compagnon n'en reçoit pas. */
+  /** Clés des compagnons insérés — un compagnon n'en reçoit pas à son tour. */
   private companionKeys = new Set<string>();
-  private twoferInflight = false;
+  private companionInflight = false;
 
   /**
-   * DJ Twofer, réplique du Guest DJ PlexAmp : quand un titre démarre, un
-   * autre titre du même artiste est inséré juste après lui. Les compagnons
-   * n'en reçoivent pas (sinon on ne quitterait jamais l'artiste) et une place
+   * Twofer et Gemini, répliques des Guest DJ PlexAmp : quand un titre démarre,
+   * un compagnon est inséré juste après lui — un autre titre du même artiste
+   * (Twofer) ou le plus proche voisin sonique (Gemini). Les compagnons n'en
+   * reçoivent pas (sinon on ne quitterait jamais le voisinage) et une place
    * déjà tenue par un compagnon n'est pas doublée (répétition de file).
    */
-  private maybeTwofer(): void {
-    if (!preferences.musicAutoDj || preferences.musicDj !== 'twofer') return;
+  private maybeCompanionDj(): void {
+    const mode = preferences.musicDj;
+    if (!preferences.musicAutoDj || (mode !== 'twofer' && mode !== 'gemini')) return;
     const t = this.current;
-    if (!t?.artistKey || this.companionKeys.has(t.key) || this.twoferInflight) return;
+    if (!t || this.companionKeys.has(t.key) || this.companionInflight) return;
+    if (mode === 'twofer' && !t.artistKey) return;
     const nextInQueue = this.queue[this.index + 1];
     if (nextInQueue && this.companionKeys.has(nextInQueue.key)) return;
-    this.twoferInflight = true;
+    this.companionInflight = true;
     void (async () => {
       try {
-        const res = await fetch(`/api/plex/artist-tracks/${t.artistKey}?limit=10`, {
-          cache: 'no-store'
-        });
-        if (!res.ok) return;
-        const { tracks } = (await res.json()) as { tracks: PlexTrack[] };
         const known = new Set(this.queue.map((q) => q.key));
-        const pick = tracks.find((c) => c.part && !known.has(c.key));
+        const pick = await this.fetchCompanion(mode, t, known);
         // L'utilisateur a pu changer de piste pendant la requête : on n'insère
         // que si le titre à accompagner est toujours le courant.
         if (!pick || this.current !== t) return;
@@ -1141,9 +1171,29 @@ class PlayerState {
       } catch {
         /* pas de compagnon cette fois — la lecture suit son cours */
       } finally {
-        this.twoferInflight = false;
+        this.companionInflight = false;
       }
     })();
+  }
+
+  /** Le compagnon d'un titre : même artiste (Twofer) ou voisin sonique (Gemini). */
+  private async fetchCompanion(
+    mode: 'twofer' | 'gemini',
+    t: PlexTrack,
+    known: Set<string>
+  ): Promise<PlexTrack | null> {
+    const res =
+      mode === 'twofer'
+        ? await fetch(`/api/plex/artist-tracks/${t.artistKey}?limit=10`, { cache: 'no-store' })
+        : await fetch('/api/plex/sonic/similar', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            cache: 'no-store',
+            body: JSON.stringify({ key: t.key, limit: 5, exclude: [...known] })
+          });
+    if (!res.ok) return null; // Gemini : piste non analysée → pas de compagnon
+    const { tracks } = (await res.json()) as { tracks: PlexTrack[] };
+    return tracks.find((c) => c.part && !known.has(c.key)) ?? null;
   }
 
   /** Coupe net un fondu (action manuelle pendant l'enchaînement). */
@@ -1214,7 +1264,8 @@ class PlayerState {
     }
     this.index = start;
     this.context = context;
-    this.companionKeys.clear(); // nouvelle file : les compagnons Twofer repartent de zéro
+    this.companionKeys.clear(); // nouvelle file : les compagnons repartent de zéro
+    this.djAnchorKey = null;
     this.ensureGraph(); // geste utilisateur : le seul moment sûr pour créer le graphe
     this.load(true);
   }
@@ -1269,6 +1320,7 @@ class PlayerState {
       return;
     }
     this.queue = [...this.queue, ...playable];
+    this.djAnchorKey = null; // la fin de file redevient un choix utilisateur
   }
 
   /** Insère des pistes JUSTE APRÈS la piste courante (« Lire ensuite »). */
@@ -1345,6 +1397,7 @@ class PlayerState {
     this.fading = false;
     this.preloadedKey = null;
     this.companionKeys.clear();
+    this.djAnchorKey = null;
     this.failStreak = 0;
     this.skipNotice = null;
     if (this.skipNoticeTimer) clearTimeout(this.skipNoticeTimer);
@@ -1394,7 +1447,7 @@ class PlayerState {
     }
     if (autoplay) void a.play().catch(() => undefined);
     this.syncMediaSessionMetadata(t);
-    this.maybeTwofer();
+    this.maybeCompanionDj();
   }
 
   /**
