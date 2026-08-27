@@ -7,6 +7,7 @@
  * l'élément <audio> de Safari/iOS fait du seek. On relaie l'en-tête Range vers
  * le PMS et on restitue status + en-têtes de contenu tels quels, corps streamé.
  */
+import { randomUUID } from 'node:crypto';
 import { error } from '@sveltejs/kit';
 import { pmsFetch, pmsQueryIdentity } from '$lib/server/plex';
 import { plexHttp } from '$lib/server/plex-map';
@@ -70,8 +71,11 @@ export const GET: RequestHandler = async ({ params, request, url, cookies }) => 
  * Transcodage universel du PMS → MP3 320 progressif, le format que tout
  * récepteur AirPlay sait lire. Particularités du transcodeur (bisectées) :
  * token ET identité exigés dans la QUERY, `hasMDE=1` obligatoire. Session
- * STABLE par piste : les rafales de reprises du récepteur remplacent leur
- * session côté PMS au lieu d'en empiler. Les en-têtes Range du récepteur
+ * UNIQUE PAR REQUÊTE : avec une session stable par piste, deux récepteurs qui
+ * se relaient (CEOL → Apple TV → CEOL) tuaient mutuellement leur transcodage —
+ * paires de requêtes à 1 s d'écart dans le journal, « son une fraction de
+ * seconde puis plus rien » côté enceinte. Chaque connexion a désormais son
+ * transcodeur ; le PMS moissonne celui dont la connexion se ferme. Les Range
  * sont ignorés (flux non seekable, comme une webradio) — AVFoundation s'en
  * accommode ; le seek AirPlay sur un FLAC transcodé reste sans effet.
  */
@@ -87,7 +91,7 @@ async function transcodeForReceiver(ratingKey: string): Promise<Response> {
       musicBitrate: '320',
       directPlay: '0',
       directStream: '0',
-      session: `airplay-${ratingKey}`,
+      session: `airplay-${ratingKey}-${randomUUID().slice(0, 8)}`,
       ...(await pmsQueryIdentity())
     });
     const upstream = await pmsFetch(`/music/:/transcode/universal/start.mp3?${qs}`, {
