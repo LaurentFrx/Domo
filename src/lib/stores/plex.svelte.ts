@@ -1225,24 +1225,85 @@ class PlayerState {
     if (typeof w.webkitShowPlaybackTargetPicker === 'function') {
       this.outputPicker = 'airplay';
       a.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', () => {
+        if (!this.isActiveEl(a)) return; // platine remplacée : événement périmé
         this.wirelessOutput = !!(a as WebKitAudio).webkitCurrentPlaybackTargetIsWireless;
+        // Routage engagé depuis le Centre de contrôle (sans passer par notre
+        // bouton) alors que le graphe capture les éléments → mêmes symptômes,
+        // même remède : rebasculer en lecture directe.
+        if (this.wirelessOutput && this.captured) this.rebuildDirect();
       });
     } else if (a.remote && typeof a.remote.prompt === 'function') {
       this.outputPicker = 'remote';
-      a.remote.addEventListener('connect', () => (this.wirelessOutput = true));
-      a.remote.addEventListener('disconnect', () => (this.wirelessOutput = false));
+      a.remote.addEventListener('connect', () => {
+        if (!this.isActiveEl(a)) return;
+        this.wirelessOutput = true;
+        if (this.captured) this.rebuildDirect();
+      });
+      a.remote.addEventListener('disconnect', () => {
+        if (this.isActiveEl(a)) this.wirelessOutput = false;
+      });
     }
   }
 
   /** Ouvre le sélecteur natif de destination (bouton « Sortie audio »). */
   pickOutput(): void {
-    const a = this.ensureAudio();
+    this.ensureAudio();
+    // PIÈGE VÉCU (chaîne CEOL, 27/08) : un élément capturé par le graphe Web
+    // Audio envoie du SILENCE en AirPlay — la chaîne s'allume, affiche le
+    // titre (métadonnées transmises), mais le flux audio part dans le graphe
+    // local. La capture est irréversible PAR ÉLÉMENT : on reconstruit donc
+    // des platines neuves non capturées AVANT d'ouvrir le sélecteur, et la
+    // lecture continue en direct (sans fondu) pendant la sortie sans fil.
+    if (this.captured) this.rebuildDirect();
+    const a = this.decks[this.active].el;
     const w = a as WebKitAudio;
     if (typeof w.webkitShowPlaybackTargetPicker === 'function') {
       w.webkitShowPlaybackTargetPicker();
     } else {
       a.remote?.prompt().catch(() => undefined);
     }
+  }
+
+  /**
+   * Abandonne le graphe Web Audio et repart sur UNE platine neuve, jamais
+   * capturée — lecture directe compatible AirPlay. La position et l'état de
+   * lecture sont restaurés (petite re-mise en mémoire tampon au passage).
+   * Le fondu se recréera au prochain geste une fois la sortie locale revenue
+   * (ensureGraph refuse de capturer tant que wirelessOutput est actif).
+   */
+  private rebuildDirect(): void {
+    if (!this.captured) return;
+    const oldEl = this.decks[this.active]?.el ?? null;
+    const pos = oldEl?.currentTime ?? this.currentTime;
+    const wasPlaying = !!oldEl && !oldEl.paused;
+    this.fading = false;
+    this.preloadedKey = null;
+    for (const d of this.decks) {
+      d.el.pause();
+      d.el.src = '';
+    }
+    void this.ctx?.close().catch(() => undefined);
+    this.ctx = null;
+    this.captured = false;
+    this.decks = [this.createDeck()];
+    this.active = 0;
+    const t = this.current;
+    if (!t?.part) return;
+    const a = this.decks[0].el;
+    a.src = streamUrl(t.part);
+    try {
+      a.currentTime = pos; // position de départ honorée même avant les métadonnées
+    } catch {
+      /* le filet loadedmetadata ci-dessous rattrape */
+    }
+    a.addEventListener(
+      'loadedmetadata',
+      () => {
+        if (Math.abs(a.currentTime - pos) > 2) a.currentTime = pos;
+      },
+      { once: true }
+    );
+    if (wasPlaying) void a.play().catch(() => undefined);
   }
 
   /** Lance une file de lecture (album, résultats…) à partir de `startIndex`. */
