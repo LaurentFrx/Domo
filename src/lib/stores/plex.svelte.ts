@@ -1227,17 +1227,11 @@ class PlayerState {
       a.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', () => {
         if (!this.isActiveEl(a)) return; // platine remplacée : événement périmé
         this.wirelessOutput = !!(a as WebKitAudio).webkitCurrentPlaybackTargetIsWireless;
-        // Routage engagé depuis le Centre de contrôle (sans passer par notre
-        // bouton) alors que le graphe capture les éléments → mêmes symptômes,
-        // même remède : rebasculer en lecture directe.
-        if (this.wirelessOutput && this.captured) this.rebuildDirect();
       });
     } else if (a.remote && typeof a.remote.prompt === 'function') {
       this.outputPicker = 'remote';
       a.remote.addEventListener('connect', () => {
-        if (!this.isActiveEl(a)) return;
-        this.wirelessOutput = true;
-        if (this.captured) this.rebuildDirect();
+        if (this.isActiveEl(a)) this.wirelessOutput = true;
       });
       a.remote.addEventListener('disconnect', () => {
         if (this.isActiveEl(a)) this.wirelessOutput = false;
@@ -1245,17 +1239,42 @@ class PlayerState {
     }
   }
 
-  /** Ouvre le sélecteur natif de destination (bouton « Sortie audio »). */
+  /** Feuille « Sortie audio » ouverte (fondu actif : deux chemins possibles). */
+  outputSheetOpen = $state(false);
+
+  /**
+   * Bouton « Sortie audio ».
+   *
+   * PIÈGE VÉCU (chaîne CEOL, 27/08, deux échecs instructifs) :
+   * 1. Élément CAPTURÉ par le graphe Web Audio + sélecteur AirPlay → la
+   *    session s'établit (chaîne allumée, titre affiché) mais le son part
+   *    dans le graphe local : silence.
+   * 2. Reconstruire l'élément PUIS ouvrir le sélecteur dans le même geste →
+   *    l'élément est encore vide (readyState 0) au moment du choix : la
+   *    sélection n'engage même plus la chaîne.
+   *
+   * D'où la séquence en DEUX gestes quand le fondu est actif : ce premier
+   * tap bascule en lecture directe (élément neuf, jamais capturé, qui charge
+   * et joue pendant que la feuille s'affiche) ; le second tap — « Choisir
+   * l'enceinte » dans la feuille — ouvre le sélecteur sur un élément chaud
+   * et en lecture, le cas exact qui fonctionne. La feuille explique aussi la
+   * voie Centre de contrôle (routage SYSTÈME : tout l'audio de l'app y passe,
+   * graphe compris — le fondu y survit).
+   */
   pickOutput(): void {
     this.ensureAudio();
-    // PIÈGE VÉCU (chaîne CEOL, 27/08) : un élément capturé par le graphe Web
-    // Audio envoie du SILENCE en AirPlay — la chaîne s'allume, affiche le
-    // titre (métadonnées transmises), mais le flux audio part dans le graphe
-    // local. La capture est irréversible PAR ÉLÉMENT : on reconstruit donc
-    // des platines neuves non capturées AVANT d'ouvrir le sélecteur, et la
-    // lecture continue en direct (sans fondu) pendant la sortie sans fil.
-    if (this.captured) this.rebuildDirect();
-    const a = this.decks[this.active].el;
+    if (this.captured) {
+      this.rebuildDirect(); // geste utilisateur : play() du nouvel élément autorisé
+      this.outputSheetOpen = true;
+      return;
+    }
+    this.showNativePicker();
+  }
+
+  /** Sélecteur natif de destination, sur l'élément actif (non capturé). */
+  showNativePicker(): void {
+    const a = this.decks[this.active]?.el;
+    if (!a) return;
     const w = a as WebKitAudio;
     if (typeof w.webkitShowPlaybackTargetPicker === 'function') {
       w.webkitShowPlaybackTargetPicker();
