@@ -875,6 +875,16 @@ class PlayerState {
 
   /** À chaque timeupdate de la platine active : DJ, précharger, puis fondre. */
   private onTick(a: HTMLAudioElement): void {
+    // Filet de détection AirPlay : l'événement wireless-changed peut manquer
+    // (routage depuis le Centre de contrôle) — on lit le drapeau WebKit à
+    // chaque tick, et sortie sans fil + graphe capturé = bascule directe
+    // immédiate (sinon : enceinte allumée, mixage muet — vécu sur la CEOL).
+    const wireless = !!(a as WebKitAudio).webkitCurrentPlaybackTargetIsWireless;
+    if (wireless !== this.wirelessOutput) this.wirelessOutput = wireless;
+    if (wireless && this.captured) {
+      this.rebuildDirect();
+      return;
+    }
     const dur = a.duration;
     if (!Number.isFinite(dur) || dur <= 0 || !this.playing) return;
     const remaining = dur - a.currentTime;
@@ -1228,6 +1238,13 @@ class PlayerState {
       a.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', () => {
         if (!this.isActiveEl(a)) return; // platine remplacée : événement périmé
         this.wirelessOutput = !!(a as WebKitAudio).webkitCurrentPlaybackTargetIsWireless;
+        // AirPlay engagé (Centre de contrôle compris) alors que le graphe
+        // capture les éléments : TEST 1 CEOL du 27/08 — iOS « remote »
+        // l'élément média vers l'enceinte (elle affiche AirPlay) mais le
+        // mixage Web Audio ne suit JAMAIS la route → silence. Règle : sortie
+        // sans fil ⇒ lecture directe, automatiquement. Sans danger pour le
+        // sélecteur en deux gestes : lui n'opère que sur graphe déjà défait.
+        if (this.wirelessOutput && this.captured) this.rebuildDirect();
       });
     } else if (a.remote && typeof a.remote.prompt === 'function') {
       this.outputPicker = 'remote';
