@@ -50,7 +50,26 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['client/**/*.{js,css,ico,png,svg,woff,woff2}'],
+        // webp inclus : la bannière de l'Accueil (header-accueil.webp, 132 Ko) et
+        // le fond du Sankey (lueur-verte.webp) étaient les SEULS visuels du
+        // premier écran hors precache — retéléchargés après chaque déploiement.
+        globPatterns: ['client/**/*.{js,css,ico,png,svg,webp,woff,woff2}'],
+        // Sous-ensembles Inter jamais téléchargés par les pages (unicode-range,
+        // UI 100 % française) : seul le precache les payait (~170 Ko).
+        globIgnores: ['**/inter-cyrillic*', '**/inter-greek*', '**/inter-vietnamese*'],
+        // Écarte le chunk three.js (828 Ko, page /maison seule) du precache : il
+        // se charge au premier passage sur /maison et reste ensuite dans le
+        // cache HTTP (immutable, 1 an). Le premier lancement PWA ne télécharge
+        // plus ~1 Mo de 3D en concurrence avec les premières données.
+        // Via manifestTransforms (et pas maximumFileSizeToCacheInBytes : le
+        // plugin convertit l'avertissement « fichier trop gros » en ÉCHEC de
+        // build — le nom du chunk étant hashé, impossible de le globIgnorer).
+        manifestTransforms: [
+          async (entries) => ({
+            manifest: entries.filter((e) => e.size <= 600_000),
+            warnings: []
+          })
+        ],
         // Greffe le handler Web Push (push + notificationclick) sur le SW généré,
         // SANS modifier la stratégie de cache. Le fichier est servi en statique.
         importScripts: ['/push-sw.js'],

@@ -151,18 +151,45 @@ class DaikinState {
     return `${unitId}:${field}`;
   }
 
+  private visibilityHandler: (() => void) | null = null;
+
   // ─── Connexion / polling du cache bridge ──────────────────────────────
+  // Visibility-aware (contrat commun des stores, cf. apsystems) : arrière-plan →
+  // poll suspendu ; retour au premier plan → refetch immédiat. daikin et airzone
+  // étaient les deux seuls polleurs sans ce comportement : le snapshot restait
+  // affiché jusqu'à 30 s après la réouverture de l'app.
   connect() {
     if (typeof window === 'undefined') return;
-    if (this.intervalId !== null) return;
+    if (this.visibilityHandler !== null) return; // idempotent
+    this.visibilityHandler = () => {
+      if (document.visibilityState === 'visible') {
+        this.poll();
+        this.startPolling();
+      } else {
+        this.stopPolling();
+      }
+    };
+    document.addEventListener('visibilitychange', this.visibilityHandler);
     this.poll();
-    this.intervalId = setInterval(() => this.poll(), POLL_INTERVAL_MS);
+    this.startPolling();
   }
 
-  disconnect() {
+  private startPolling() {
+    this.intervalId ??= setInterval(() => this.poll(), POLL_INTERVAL_MS);
+  }
+
+  private stopPolling() {
     if (this.intervalId !== null) {
       clearInterval(this.intervalId);
       this.intervalId = null;
+    }
+  }
+
+  disconnect() {
+    this.stopPolling();
+    if (this.visibilityHandler !== null && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
     }
     // Annule les envois de consigne en attente (débounce) — sinon un timer
     // d'une session précédente pourrait tirer après reconnexion.

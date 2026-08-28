@@ -191,17 +191,43 @@ class AirzoneState {
     return master?.availableModes ?? ['stop', 'cooling', 'heating', 'fan', 'dry'];
   });
 
+  private visibilityHandler: (() => void) | null = null;
+
+  // Visibility-aware (contrat commun des stores, cf. apsystems) : arrière-plan →
+  // poll suspendu ; retour au premier plan → refetch immédiat (avant : snapshot
+  // affiché jusqu'à 30 s après la réouverture de l'app).
   connect() {
     if (typeof window === 'undefined') return;
-    if (this.intervalId !== null) return;
+    if (this.visibilityHandler !== null) return; // idempotent
+    this.visibilityHandler = () => {
+      if (document.visibilityState === 'visible') {
+        this.poll();
+        this.startPolling();
+      } else {
+        this.stopPolling();
+      }
+    };
+    document.addEventListener('visibilitychange', this.visibilityHandler);
     this.poll();
-    this.intervalId = setInterval(() => this.poll(), POLL_INTERVAL_MS);
+    this.startPolling();
   }
 
-  disconnect() {
+  private startPolling() {
+    this.intervalId ??= setInterval(() => this.poll(), POLL_INTERVAL_MS);
+  }
+
+  private stopPolling() {
     if (this.intervalId !== null) {
       clearInterval(this.intervalId);
       this.intervalId = null;
+    }
+  }
+
+  disconnect() {
+    this.stopPolling();
+    if (this.visibilityHandler !== null && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
     }
     this.reconcileTimers.forEach((t) => clearTimeout(t));
     this.reconcileTimers = [];
