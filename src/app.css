@@ -33,7 +33,7 @@
 
   /* ─── Surfaces light (canvas lavande plus teinté + cartes "verre") ─── */
   /* Canvas un cran plus soutenu pour que les cartes ressortent vraiment ;
-     la carte est near-white TRANSLUCIDE → le backdrop-filter global la dépolit. */
+     la carte est near-white TRANSLUCIDE → le fond d'ambiance transparaît. */
   --color-bg: oklch(0.912 0.05 212);
   --color-fg: oklch(0.165 0.024 286);
   /* Cartes light — calé au GlassTuner (80 % opacité). */
@@ -175,12 +175,6 @@
   --breakpoint-xl: 1280px;
 }
 
-:root {
-  /* Verre : flou d'arrière-plan + saturation (ravive le vert OVNI derrière).
-     Défini ici (avant le bloc dark) pour que l'override dark gagne. */
-  --glass-blur: blur(0px) saturate(170%);
-}
-
 /* ════════════════════════════════════════════════════════════════════════ */
 /*   Dark mode (opt-in via data-theme="dark" sur <html>)                    */
 /*   La sidebar ne change PAS — uniquement contenu                          */
@@ -201,7 +195,6 @@
   --color-muted-fg: oklch(0.74 0.035 286);
   --color-border: oklch(0.52 0.06 286);
   --color-border-strong: oklch(0.62 0.055 286);
-  --glass-blur: blur(0px) saturate(165%) brightness(1.08);
 
   --color-topbar: oklch(0.195 0.036 286);
   --color-topbar-border: oklch(0.31 0.038 286);
@@ -373,35 +366,20 @@ label[for] {
 
 /* ════════════════════════════════════════════════════════════════════════ */
 /*   Glassmorphism global (iOS-first)                                        */
-/*   Toute carte écrite `background: var(--color-card)` (translucide via les  */
-/*   tokens) reçoit le flou d'arrière-plan → vrai verre dépoli, partout, sans */
-/*   toucher chaque composant. `saturate` ravive le vert OVNI derrière.      */
+/*   Toute carte écrite `background: var(--color-card)` fait son verre par    */
+/*   translucidité (tokens en alpha) + relief plexiglass dirigé (box-shadow). */
+/*   PAS de backdrop-filter par carte (28/08/2026) : c'était blur(0px) +      */
+/*   saturate — aucun flou réel, seulement le fond ravivé au travers. Or      */
+/*   .app-ambient est position:fixed : à chaque frame de scroll, WebKit       */
+/*   ré-échantillonnait le fond POUR CHAQUE carte (iPad + iPhone paysage —    */
+/*   le portrait le coupait déjà, sans différence visible constatée).         */
+/*   Les feuilles/overlays gardent leurs VRAIS flous (BottomSheet, MenuSheet, */
+/*   PullToRefresh…) : peu d'éléments, hors de ce mécanisme.                  */
 /* ════════════════════════════════════════════════════════════════════════ */
 /* Relief « OVNI » sur toutes les cartes : ombre/arête de verre par défaut
    (une box-shadow inline éventuelle, verte elle aussi, reste prioritaire). */
 [style*='background: var(--color-card)'] {
   box-shadow: var(--shadow-md);
-}
-
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  [style*='background: var(--color-card)'] {
-    -webkit-backdrop-filter: var(--glass-blur);
-    backdrop-filter: var(--glass-blur);
-  }
-}
-
-/* ── Perf mobile (≤767px) : PAS de backdrop-filter ──────────────────────────
-   Sur petit écran, du décor ANIMÉ défile en permanence derrière le verre
-   (ParticleField canvas + ConcentricRings rotatifs + lueurs). Avec
-   backdrop-filter, le GPU ré-échantillonne ce fond animé À CHAQUE FRAME et pour
-   CHAQUE carte → recompositing continu → iPhone qui chauffe / batterie qui fond.
-   On le coupe sur mobile : la translucidité (--color-card) ET le relief dirigé
-   (box-shadow plexiglass) restent → l'aspect verre est préservé, sans le coût. */
-@media (max-width: 767px) {
-  [style*='background: var(--color-card)'] {
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
 }
 
 /* « Réduire la transparence » (iOS/macOS) : cartes opaques, aucun flou. */
@@ -414,16 +392,12 @@ label[for] {
     --color-card: oklch(0.275 0.045 286);
     --color-card-hover: oklch(0.31 0.048 286);
   }
-  [style*='background: var(--color-card)'] {
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
 }
 
 /* ════════════════════════════════════════════════════════════════════════ */
 /*   Calque d'ambiance global — halos verts/indigo diffus derrière TOUT le   */
-/*   contenu. Donne de la « matière » au backdrop-filter sur toutes les      */
-/*   pages (flouter un fond uni ne montre rien) + couleur + profondeur.      */
+/*   contenu. Donne de la « matière » à la translucidité des cartes sur      */
+/*   toutes les pages (du verre sur fond uni ne montre rien) + profondeur.   */
 /* ════════════════════════════════════════════════════════════════════════ */
 .app-ambient {
   position: fixed;
