@@ -16,6 +16,7 @@
  */
 
 import type { PlexTrack } from '$stores/plex.svelte';
+import { wled } from '$stores/wled.svelte';
 import { musicStyleDef, WLED_MUSIC_STYLES, type WledMusicStyle } from '$lib/wled/music-styles';
 
 export { WLED_MUSIC_STYLES };
@@ -35,6 +36,9 @@ interface LiveEvent {
   analyzing?: boolean;
   level?: number;
   peak?: number;
+  /** État réel du module (json/state), poussé par le serveur après chaque
+   *  rendu/écriture — relayé au store wled (vérité unique partout). */
+  module?: unknown;
 }
 
 class WledMusicStore {
@@ -116,6 +120,7 @@ class WledMusicStore {
       if (typeof e.analyzing === 'boolean') this.analyzing = e.analyzing;
       if (typeof e.level === 'number') this.liveLevel = e.level;
       if (typeof e.peak === 'number') this.livePeak = e.peak;
+      if (e.module) wled.applyLive(e.module);
     };
     // EventSource se reconnecte tout seul sur erreur réseau — rien à faire.
   }

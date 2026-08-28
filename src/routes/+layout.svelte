@@ -81,11 +81,12 @@
   $effect(() => {
     wledMusic.sync(player.current, player.playing, player.currentTime);
   });
-  // L'état du mode (activé/style) vit AU SERVEUR : l'appareil qui joue doit y
-  // être abonné même sans la carte à l'écran, sinon il ne sait pas qu'il doit
-  // battre. (La carte, elle, s'abonne pour l'affichage — refcounté.)
+  // Le canal temps réel lumière/musique est ouvert EN PERMANENCE (suspendu en
+  // arrière-plan par le store) : il porte l'état du mode ET l'état réel du
+  // module — c'est lui qui rend tuile, feuille et bouton Lumière véridiques
+  // partout, sans dépendre de la page ouverte. L'ancien abonnement conditionné
+  // à « une piste joue » laissait le lecteur avec des segments jamais chargés.
   $effect(() => {
-    if (!player.current) return;
     wledMusic.openLive();
     return () => wledMusic.closeLive();
   });

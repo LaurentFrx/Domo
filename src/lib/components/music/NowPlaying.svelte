@@ -18,11 +18,10 @@
   import { wled } from '$stores/wled.svelte';
   import { wledMusic } from '$stores/wledMusic.svelte';
   import { WLED_MUSIC_STYLES } from '$lib/wled/music-styles';
-  import { acquire } from '$stores/refcount';
+  import { openWledSheet } from '$components/cards/wled-sheet-state.svelte';
   import { haptic } from '$utils/haptic';
   import AlbumCover from './AlbumCover.svelte';
   import BottomSheet from '$components/ui/BottomSheet.svelte';
-  import MusicLightPanel from './MusicLightPanel.svelte';
   import FadePanel from './FadePanel.svelte';
 
   let scrub = $state<number | null>(null);
@@ -38,10 +37,12 @@
   const eqOn = $derived(player.playing && preferences.animationsEnabled);
 
   // ── Lumière qui accompagne la musique ────────────────────────────────────
-  // Le réglage vit ICI parce que c'est ici qu'on écoute : régler la lumière
-  // d'une soirée ne devrait pas obliger à quitter le lecteur pour la page
-  // Pièces. Le panneau lui-même est partagé avec la feuille terrasse.
-  let lightOpen = $state(false);
+  // Le bouton ouvre LA feuille Terrasse (montée au layout, au-dessus du
+  // lecteur) : UNE SEULE interface de réglage lumière, identique depuis le
+  // lecteur et depuis /pieces. L'ancien panneau réduit propre au lecteur
+  // créait deux surfaces divergentes pour le même réglage (bilan du 28/08).
+  // Son résumé est véridique sans rien acquérir : mode + segments arrivent
+  // par le SSE permanent du layout.
 
   // ── Enchaînements (fondu réglable + fondu intelligent + nivellement) ─────
   let fadeOpen = $state(false);
@@ -52,14 +53,6 @@
         : `Fondu : ${preferences.musicFadeSeconds} s${preferences.musicSmartFades ? ' · intelligent' : ''}`;
     return preferences.musicAutoDj ? `${fade} · DJ` : fade;
   });
-  // Le store WLED n'est acquis que par /pieces : sans référence propre, le
-  // lecteur afficherait un résumé figé (et le panneau, des lignes vides).
-  $effect(() => {
-    if (!lightOpen) return;
-    const release = acquire(wled);
-    return release;
-  });
-
   /** Résumé d'une ligne pour le bouton (« Store : Cascade »). */
   function styleLabel(key: string | null): string {
     if (key === null) return 'aucun';
@@ -374,7 +367,7 @@
         class:on={wledMusic.enabled}
         onclick={() => {
           haptic('light');
-          lightOpen = true;
+          openWledSheet();
         }}
         aria-haspopup="dialog"
         aria-label="Régler les effets lumineux de la terrasse"
@@ -592,13 +585,6 @@
     {/if}
   </div>
 {/if}
-
-<!-- Feuille des effets lumineux. HORS du `{#if player.current}` : elle porte
-     le verre Yeldra et son propre overlay (z-100), au-dessus du lecteur
-     (z-80) ; l'imbriquer dans la feuille sombre du lecteur la teindrait. -->
-<BottomSheet open={lightOpen} title="Lumière de la terrasse" onClose={() => (lightOpen = false)}>
-  <MusicLightPanel compact />
-</BottomSheet>
 
 <!-- Feuille des enchaînements — même logique de montage que la lumière. -->
 <BottomSheet open={fadeOpen} title="Enchaînements" onClose={() => (fadeOpen = false)}>

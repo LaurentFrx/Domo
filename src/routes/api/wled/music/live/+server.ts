@@ -10,6 +10,7 @@ import type { RequestHandler } from './$types';
 import { isAuthenticated } from '$lib/server/auth';
 import { musicModeState, subscribeLive, type LiveEvent } from '$lib/server/wled/music-mode';
 import { beatStatus, isAnalyzing } from '$lib/server/wled/sound-streamer';
+import { moduleGet } from '$lib/server/wled/module-client';
 
 export const GET: RequestHandler = async ({ cookies }) => {
   if (!isAuthenticated(cookies)) return new Response('Unauthorized', { status: 401 });
@@ -35,6 +36,14 @@ export const GET: RequestHandler = async ({ cookies }) => {
         level: 0,
         peak: 0
       });
+      // Instantané MODULE à la connexion : un appareil qui n'a jamais ouvert
+      // /pieces (donc jamais pollé) doit quand même savoir à quoi ressemble le
+      // ruban — c'est lui qui rend le bouton Lumière du lecteur véridique.
+      void moduleGet('state')
+        .then(({ data }) => {
+          if (data && typeof data === 'object') send({ module: data });
+        })
+        .catch(() => undefined); // module injoignable : le poll/les rendus recaleront
       unsub = subscribeLive(send);
       ka = setInterval(() => {
         try {

@@ -17,7 +17,7 @@
 import { json, error } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { wledGet, wledPostState } from '$lib/server/wled-mock';
-import { noteModuleOn } from '$lib/server/wled/music-mode';
+import { broadcastModuleSnapshot, noteModuleOn } from '$lib/server/wled/music-mode';
 import type { RequestHandler } from './$types';
 
 const TIMEOUT_MS = 8_000;
@@ -110,6 +110,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
   if (!base) {
     const res = wledPostState(body);
     if (onFlag !== null) noteModuleOn(onFlag, { postsState });
+    broadcastModuleSnapshot(); // les AUTRES appareils voient l'écriture
     return json(res, { headers: MOCK_HEADERS });
   }
 
@@ -130,5 +131,6 @@ export const POST: RequestHandler = async ({ params, request }) => {
   if (!upstream.ok) throw error(502, `WLED: HTTP ${upstream.status}`);
   const data = await upstream.json().catch(() => ({ success: true }));
   if (onFlag !== null) noteModuleOn(onFlag, { postsState }); // le module a APPLIQUÉ l'état
+  broadcastModuleSnapshot(); // les AUTRES appareils voient l'écriture
   return json(data, { headers: LIVE_HEADERS });
 };

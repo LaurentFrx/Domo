@@ -380,6 +380,24 @@ class WledStore {
     }
   }
 
+  /**
+   * État POUSSÉ par le SSE musique (rendus serveur, écritures des autres
+   * appareils, snapshot de connexion). C'est le canal qui rend toutes les
+   * surfaces véridiques SANS dépendre du poll de /pieces — le défaut
+   * structurel du 28/08 : le mode musique repeignait le module côté serveur
+   * et aucun client n'en savait rien. Mêmes gardes que le poll : ignoré
+   * pendant un drag et si une commande locale vient de partir (l'écho
+   * SSE de NOTRE écriture arrive après notre reflet optimiste — l'appliquer
+   * est correct, mais pas par-dessus un geste plus frais).
+   */
+  applyLive(state: unknown): void {
+    if (!state || typeof state !== 'object') return;
+    if (this.#busy() || this.#sending) return;
+    this.#applyState(state as Record<string, unknown>);
+    this.connected = true;
+    this.lastUpdate = new Date();
+  }
+
   #applyInfo(info: Record<string, unknown>): void {
     if (typeof info.name === 'string' && info.name) this.name = info.name;
     const leds = info.leds as Record<string, unknown> | undefined;

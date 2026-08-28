@@ -62,6 +62,14 @@ export interface LiveEvent {
   analyzing?: boolean;
   level?: number;
   peak?: number;
+  /**
+   * État RÉEL du module (json/state brut), poussé après chaque rendu serveur
+   * et chaque écriture du proxy. C'est LA réponse au défaut structurel du
+   * 28/08 : les rendus musique s'appliquaient au module sans que les stores
+   * clients l'apprennent — tuile, feuille et bouton Lumière montraient l'état
+   * d'avant (au mieux le poll 5 s de /pieces, RIEN ailleurs).
+   */
+  module?: unknown;
 }
 
 /** Ne garde que les entrées interprétables (style connu, ou null). */
@@ -126,6 +134,26 @@ export function broadcastLive(e: LiveEvent): void {
       /* abonné mort — retiré par son cancel() */
     }
   }
+}
+
+/**
+ * Relit l'état du module et le POUSSE à tous les abonnés. Appelé après chaque
+ * rendu/repli serveur et chaque écriture du proxy — throttlé : deux demandes
+ * dans la même seconde ne relisent qu'une fois (rafales de rendus).
+ * Sans abonné, ne coûte rien.
+ */
+let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+export function broadcastModuleSnapshot(): void {
+  if (listeners.size === 0 || snapshotTimer) return;
+  snapshotTimer = setTimeout(() => {
+    snapshotTimer = null;
+    void moduleGet('state')
+      .then(({ data }) => {
+        if (data && typeof data === 'object') broadcastLive({ module: data });
+      })
+      .catch(() => undefined); // module injoignable : le prochain signal réessaiera
+  }, 250);
+  snapshotTimer.unref?.();
 }
 
 // ─── État ────────────────────────────────────────────────────────
@@ -321,6 +349,7 @@ export function applyRender(playing: boolean, opts: RenderOpts = {}): Promise<vo
       `[wled/mode] rendu appliqué : ${rendered.join(' · ')} paused=${paused} ` +
         `on=${moduleOn} powerOn=${opts.powerOn === true}`
     );
+    broadcastModuleSnapshot(); // les clients voient le rendu, pas l'état d'avant
   };
   renderChain = renderChain.then(run).catch((e) => {
     console.error('[wled/mode] rendu échoué:', (e as Error).message);
@@ -385,6 +414,7 @@ export function applyStaticFallback(onlyIds?: number[]): Promise<void> {
         onlyIds ? ` — lignes ${segs.map((s) => s.n ?? s.id).join(', ')}` : ''
       }`
     );
+    broadcastModuleSnapshot();
   };
   renderChain = renderChain.then(run).catch((e) => {
     console.error('[wled/mode] repli statique échoué:', (e as Error).message);
