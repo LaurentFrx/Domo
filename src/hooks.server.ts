@@ -82,6 +82,46 @@ function withApiCacheControl(pathname: string, response: Response): Response {
   return response;
 }
 
+/**
+ * Recopie les `modulepreload` de l'en-tête HTTP Link dans le <head> du HTML.
+ *
+ * Hors prerender, SvelteKit n'émet ses modulepreload QUE dans l'en-tête Link
+ * (`add_link_tag` est un no-op en SSR runtime) : le HTML n'en contient AUCUN.
+ * Or la prise en charge du Link `rel=modulepreload` par WebKit iOS — la cible
+ * primaire — est douteuse : sans balises, le premier chargement à froid
+ * découvre le graphe d'imports niveau par niveau (~8 allers-retours en
+ * cascade). Les hrefs du header sont RELATIFS à la page (`./_app/…`, calculés
+ * par SvelteKit selon la profondeur) : injectés tels quels, ils se résolvent
+ * comme le header. Un navigateur qui honore les deux déduplique par URL —
+ * la double annonce est sans coût. Le header est conservé.
+ */
+async function withInlineModulepreloads(response: Response): Promise<Response> {
+  try {
+    const link = response.headers.get('link');
+    if (!link || !link.includes('modulepreload')) return response;
+    const ct = response.headers.get('content-type') ?? '';
+    if (!ct.includes('text/html')) return response;
+    const hrefs = [...link.matchAll(/<([^>]+)>;\s*rel="modulepreload"/g)].map((m) => m[1]);
+    if (hrefs.length === 0) return response;
+    let html = await response.text();
+    const idx = html.indexOf('</head>');
+    if (idx !== -1) {
+      const tags = hrefs.map((h) => `<link rel="modulepreload" href="${h}">`).join('');
+      html = html.slice(0, idx) + tags + html.slice(idx);
+    }
+    const headers = new Headers(response.headers);
+    headers.delete('content-length');
+    return new Response(html, { status: response.status, headers });
+  } catch {
+    return response; // le corps n'a pas été consommé sur les chemins d'échec précoces
+  }
+}
+
+/** Finitions communes de sortie (cache API + modulepreload inline). */
+async function finish(pathname: string, response: Response): Promise<Response> {
+  return withInlineModulepreloads(withApiCacheControl(pathname, response));
+}
+
 export const handle: Handle = async ({ event, resolve }) => {
   const { pathname } = event.url;
 
@@ -90,7 +130,7 @@ export const handle: Handle = async ({ event, resolve }) => {
   // vivent dans $lib/server/access — six blocs identiques vivaient ici, et
   // c'est dans l'un d'eux qu'une faille s'était logée.
   if (authParJeton(pathname, event.request.headers.has('authorization'))) {
-    return withApiCacheControl(pathname, await resolve(event));
+    return finish(pathname, await resolve(event));
   }
 
   // Anti-CSRF explicite (défense en profondeur, en plus du checkOrigin SvelteKit) :
@@ -117,7 +157,7 @@ export const handle: Handle = async ({ event, resolve }) => {
   }
 
   if (isAsset(pathname) || isPublic(pathname)) {
-    return withApiCacheControl(pathname, await resolve(event));
+    return finish(pathname, await resolve(event));
   }
 
   // Flux audio à URL SIGNÉE : en AirPlay « external playback », c'est
@@ -142,7 +182,7 @@ export const handle: Handle = async ({ event, resolve }) => {
         `[stream] flux signé servi sans session — UA: ${event.request.headers.get('user-agent') ?? '?'}`
       );
     }
-    return withApiCacheControl(pathname, await resolve(event));
+    return finish(pathname, await resolve(event));
   }
 
   // Contrôle de session + résolution d'identité. Le refus reste EXACTEMENT le
@@ -225,7 +265,7 @@ export const handle: Handle = async ({ event, resolve }) => {
   // (Le contrôle anti-CSRF a été remonté avant le laissez-passer assets/public —
   // voir plus haut. Un seul point de vérification, pour toutes les routes.)
 
-  return withApiCacheControl(pathname, await resolve(event));
+  return finish(pathname, await resolve(event));
 };
 
 /**
