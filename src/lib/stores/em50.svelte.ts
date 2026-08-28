@@ -180,7 +180,14 @@ class Em50State {
     }
   }
 
+  // Anti-doublon : le boost est posé par chaque instance de l'Accueil (le Pager
+  // la remonte au boot) et le retour de visibilité tire aussi — sans garde,
+  // plusieurs fetchs identiques partaient à quelques ms d'écart.
+  #polling = false;
+
   async poll() {
+    if (this.#polling) return;
+    this.#polling = true;
     try {
       const res = await fetch('/api/em50/status', { signal: AbortSignal.timeout(TIMEOUT_MS) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -205,6 +212,8 @@ class Em50State {
       this.#ok = false;
       this.status = 'error';
       this.lastError = e instanceof Error ? e.message : 'erreur inconnue';
+    } finally {
+      this.#polling = false;
     }
   }
 }

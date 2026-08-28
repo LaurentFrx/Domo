@@ -166,7 +166,14 @@ class ApsystemsState {
     }
   }
 
+  // Anti-doublon : le boost est posé par chaque instance de l'Accueil (le Pager
+  // la remonte au boot) et le retour de visibilité tire aussi — sans garde,
+  // plusieurs fetchs identiques partaient à quelques ms d'écart.
+  #polling = false;
+
   async poll() {
+    if (this.#polling) return;
+    this.#polling = true;
     try {
       const res = await fetch('/api/apsystems/status', {
         signal: AbortSignal.timeout(TIMEOUT_MS)
@@ -188,6 +195,8 @@ class ApsystemsState {
       // on garde le dernier état connu ; on signale juste l'erreur
       this.status = 'error';
       this.lastError = e instanceof Error ? e.message : 'erreur inconnue';
+    } finally {
+      this.#polling = false;
     }
   }
 }

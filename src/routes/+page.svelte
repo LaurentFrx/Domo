@@ -1,4 +1,14 @@
+<script lang="ts" module>
+  // La cascade d'entrée (.stagger-enter) ne doit jouer qu'UNE fois par
+  // chargement : le layout détruit la page hydratée pour la remonter dans le
+  // Pager (cf. +layout.svelte) — sans ce verrou, les cartes déjà apparues
+  // disparaissaient toutes puis rejouaient la cascade (~0,85 s) à chaque
+  // lancement. État de MODULE : il survit au remontage, pas au rechargement.
+  let staggerPlayed = false;
+</script>
+
 <script lang="ts">
+  import { browser } from '$app/environment';
   import FlowDiagram from '$components/charts/FlowDiagram.svelte';
   import SavingsCard from '$components/cards/SavingsCard.svelte';
   import { anker } from '$stores/anker.svelte';
@@ -16,6 +26,12 @@
   import { Tween } from 'svelte/motion';
   import { cubicOut } from 'svelte/easing';
   import { onMount, onDestroy } from 'svelte';
+
+  // SSR : toujours la cascade (le HTML doit l'embarquer pour qu'elle démarre au
+  // premier paint, avant l'hydratation). Client : seule la PREMIÈRE instance la
+  // garde ; le remontage par le Pager reprend le contenu déjà visible tel quel.
+  const staggerEnter = !browser || !staggerPlayed;
+  if (browser) staggerPlayed = true;
 
   // ─── Sources : mesures réelles uniquement ────────────────────────────
   // Tout en watts, signed (+ import / − export).
@@ -516,7 +532,8 @@
 <div class="relative overflow-x-clip">
   <!-- gap/padding plus serrés sur mobile (condensation iPhone vertical) ; généreux dès sm. -->
   <div
-    class="stagger-enter relative flex flex-col gap-3.5 pb-3 sm:gap-5 sm:pb-4"
+    class="relative flex flex-col gap-3.5 pb-3 sm:gap-5 sm:pb-4"
+    class:stagger-enter={staggerEnter}
     style="z-index: 1;"
   >
     <!-- ═══ En-tête : bannière aurore « dôme OVNI » ═══ -->

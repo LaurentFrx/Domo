@@ -45,8 +45,18 @@
     }
   });
   const curIdx = $derived(navItems.findIndex((n) => n.href === currentHref));
+  // Voisines DIFFÉRÉES à l'accalmie : le Pager se monte juste après l'hydratation —
+  // monter [prev, next] à cet instant construisait leur DOM et démarrait leurs
+  // pollings (climat = 5 stores) en concurrence avec les premières données de la
+  // page visible. Le geste 2 doigts arrive des secondes plus tard : on ne monte
+  // les voisines qu'à l'idle (chunks déjà préchargés par preloadCode), et au pire
+  // au tout début du geste (onStart les arme en synchrone).
+  let neighborsReady = $state(false);
   const windowItems = $derived(
-    [navItems[curIdx - 1], navItems[curIdx], navItems[curIdx + 1]].filter(Boolean)
+    (neighborsReady
+      ? [navItems[curIdx - 1], navItems[curIdx], navItems[curIdx + 1]]
+      : [navItems[curIdx]]
+    ).filter(Boolean)
   );
 
   // Publie l'href central → TabBar/Sidebar/titre (page.url ne suit PAS le pushState).
@@ -165,6 +175,12 @@
       locked = false;
       return;
     }
+    // Geste avant l'idle (rare : < ~1 s après l'ouverture) : monter les
+    // voisines MAINTENANT, en synchrone, pour que le rail ait ses cellules.
+    if (!neighborsReady) {
+      neighborsReady = true;
+      flushSync();
+    }
     // INTERRUPTIBILITÉ : on coupe un ressort en cours et on reprend la main sur p.
     if (mode === 'spring') {
       cancelAnimationFrame(raf);
@@ -236,6 +252,13 @@
   onMount(() => {
     measureW();
     applyTransform();
+    // Armement des voisines à l'accalmie (cf. windowItems). requestIdleCallback
+    // n'existe pas sur WebKit iOS → repli setTimeout court.
+    const armNeighbors = () => (neighborsReady = true);
+    const hasRic = 'requestIdleCallback' in window;
+    const idleId = hasRic
+      ? window.requestIdleCallback(armNeighbors, { timeout: 1500 })
+      : (window.setTimeout(armNeighbors, 800) as unknown as number);
     const onResize = () => {
       measureW();
       applyTransform();
@@ -262,6 +285,8 @@
     });
     return () => {
       pagerNav.current = null; // pager démonté (sous-route) → repli routeur pour la TabBar
+      if (hasRic) window.cancelIdleCallback(idleId);
+      else clearTimeout(idleId);
       cancelAnimationFrame(raf);
       window.removeEventListener('touchstart', onStart);
       window.removeEventListener('touchmove', onMove, true);
