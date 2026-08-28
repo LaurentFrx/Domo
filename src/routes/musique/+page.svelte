@@ -63,7 +63,9 @@
   }
   let view = $state<View>({ kind: 'home' });
   let navStack = $state<StackEntry[]>([]);
-  let tab = $state<'albums' | 'artistes' | 'playlists'>('albums');
+  // Playlists à l'ouverture : mix, radios et DJ sont ce qu'on lance le plus
+  // souvent — la grille d'albums se cherche, une écoute se déclenche.
+  let tab = $state<'albums' | 'artistes' | 'playlists'>('playlists');
   let manage = $state(false);
 
   /**
