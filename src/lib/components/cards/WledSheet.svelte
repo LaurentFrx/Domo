@@ -117,11 +117,37 @@
 
   /** Un réglage manuel reprend la main sur le suivi musique. */
   function manual(): void {
+    if (wledMusic.enabled) released = true;
     wledMusic.releaseControl();
   }
+
+  /** Le suivi musique vient d'être coupé par UN GESTE D'ICI — l'avis reste
+   *  affiché tant qu'on n'a pas repris (ou fermé la feuille). Leçon du 28/08 :
+   *  la coupure silencieuse faisait croire que « rien ne fonctionne » — on
+   *  relançait le suivi, on retouchait une ambiance, il retombait sans un mot. */
+  let released = $state(false);
+  $effect(() => {
+    if (wledMusic.enabled) released = false; // repris (ici ou ailleurs)
+    if (!open) released = false;
+  });
 </script>
 
 <BottomSheet {open} title="Terrasse" {onClose}>
+  {#if released && !wledMusic.enabled}
+    <div class="music-released" role="status">
+      <span>Suivi musique coupé — ce réglage manuel a repris la main.</span>
+      <button
+        type="button"
+        class="music-resume"
+        onclick={() => {
+          haptic('light');
+          wledMusic.setEnabled(true);
+        }}
+      >
+        Reprendre
+      </button>
+    </div>
+  {/if}
   {#if wled.segments.length === 0}
     <p class="py-4 text-center text-[13px]" style="color: var(--color-muted-fg);">
       {wled.connected ? 'Aucun segment configuré.' : 'Connexion au module LED…'}
@@ -782,5 +808,36 @@
 
   .dimmed {
     opacity: 0.45;
+  }
+
+  /* ─── Avis « le manuel a repris la main sur le suivi musique » ─── */
+  .music-released {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding: 9px 12px;
+    border-radius: var(--radius-lg);
+    border: 1px solid oklch(0.62 0.19 27 / 0.4);
+    background: oklch(0.62 0.19 27 / 0.1);
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: var(--color-fg);
+  }
+  .music-released span {
+    flex: 1;
+    min-width: 0;
+  }
+  .music-resume {
+    flex-shrink: 0;
+    min-height: 34px;
+    padding: 5px 12px;
+    border-radius: 9999px;
+    border: none;
+    background: var(--color-primary);
+    color: var(--color-primary-fg);
+    font-size: 12.5px;
+    font-weight: 700;
+    cursor: pointer;
   }
 </style>
