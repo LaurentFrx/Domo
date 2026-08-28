@@ -119,6 +119,51 @@ function foldBaseline(months: MonthAgg[], year: number): void {
 const shareCache = new Map<string, { at: number; shares: Map<number, number> }>();
 const SHARE_TTL_MS = 10 * 60_000;
 
+/** Cache des intégrales pv_samples (production/surplus par mois UTC).
+ *
+ * pv_samples est APPEND-ONLY (~2 500 lignes/jour) : un mois révolu ne change
+ * plus jamais. Or l'intégrale annuelle (window function sur toute la table de
+ * l'année) coûtait ~0,5 s par appel — et better-sqlite3 étant synchrone dans
+ * l'unique process Node, TOUT le serveur gelait à chaque poll de la page
+ * Énergie (5 min), pour recalculer des mois immuables. Ici : les mois clos
+ * sont intégrés UNE fois par vie du process (`upTo` = début du mois courant
+ * UTC, invalide le gel au changement de mois), seul le mois courant est
+ * réintégré à chaque appel, sur sa propre fenêtre (≤ 31 j de lignes).
+ * Un backfill qui réécrirait des mois passés exige un restart du service. */
+const pvCache = new Map<number, { upTo: number; prod: number[]; surp: number[] }>();
+
+/** Part « mois courant » de l'intégrale (recalculée, elle) : TTL court — fin de
+ * mois, sa fenêtre atteint ~145 ms ; le poll est à 5 min et plusieurs clients
+ * la partagent, 60 s de fraîcheur suffisent à un tableau mensuel. */
+const pvLiveCache = new Map<number, { at: number; rows: ReturnType<typeof pvIntegrateRange> }>();
+const PV_LIVE_TTL_MS = 60_000;
+
+/** Intégrale trapèze production/surplus par mois UTC sur [a, b) (epoch s) —
+ * même requête que l'historique : gap plafonné 600 s, MAX(0,·) sur l'export
+ * (colonne ajoutée après coup : NULL anciens + 3 valeurs legacy à −12 W). */
+function pvIntegrateRange(
+  db: Database.Database,
+  a: number,
+  b: number
+): { m: number; production_kwh: number; surplus_kwh: number }[] {
+  if (b <= a) return [];
+  return db
+    .prepare(
+      'WITH d AS (' +
+        " SELECT CAST(strftime('%m', ts, 'unixepoch') AS INTEGER) AS m," +
+        '  ts - LAG(ts) OVER (ORDER BY ts) AS dt,' +
+        '  (production_w + LAG(production_w) OVER (ORDER BY ts))/2.0 AS avg_prod,' +
+        '  (MAX(0.0,COALESCE(grid_export_w,0))' +
+        '   + MAX(0.0,COALESCE(LAG(grid_export_w) OVER (ORDER BY ts),0)))/2.0 AS avg_exp' +
+        '  FROM pv_samples WHERE ts >= ? AND ts < ?' +
+        ') SELECT m,' +
+        ' COALESCE(SUM(CASE WHEN dt>0 AND dt<=600 THEN avg_prod*dt/3600.0 END),0)/1000.0 AS production_kwh,' +
+        ' COALESCE(SUM(CASE WHEN dt>0 AND dt<=600 THEN avg_exp*dt/3600.0 END),0)/1000.0 AS surplus_kwh' +
+        ' FROM d WHERE m IS NOT NULL GROUP BY m'
+    )
+    .all(a, b) as { m: number; production_kwh: number; surplus_kwh: number }[];
+}
+
 /**
  * Taille de bucket d'intégration (s) alignée sur les frontières HC du régime, et
  * son décalage. But : qu'aucun bucket ne CHEVAUCHE une bascule HP/HC — sinon son
@@ -176,8 +221,11 @@ function localHcShare(db: Database.Database, year: number, wanted: number[]): Ma
   // toutes les 5 min. Un ratio HP/HC bouge de quelques dixièmes de point par
   // jour : le recalculer à chaque appel ne rapporte rien.
   const key = `${year}:${wanted.join(',')}`;
+  // Année révolue : les échantillons ne bougent plus, le ratio est FIGÉ — pas de
+  // TTL, le scan (~0,3 s, synchrone donc bloquant) ne se paie qu'une fois.
+  const frozen = year < Number(parisDate(new Date()).slice(0, 4));
   const hit = shareCache.get(key);
-  if (hit && Date.now() - hit.at < SHARE_TTL_MS) return hit.shares;
+  if (hit && (frozen || Date.now() - hit.at < SHARE_TTL_MS)) return hit.shares;
 
   const { sizeS, offsetS } = bucketing(new Date(Date.UTC(year, 6, 1)));
   const first = Math.min(...wanted);
@@ -302,26 +350,50 @@ export const GET: RequestHandler = async ({ url }) => {
       .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pv_samples'")
       .get();
     if (hasPv) {
-      const rows = db
-        .prepare(
-          'WITH d AS (' +
-            " SELECT CAST(strftime('%m', ts, 'unixepoch') AS INTEGER) AS m," +
-            '  ts - LAG(ts) OVER (ORDER BY ts) AS dt,' +
-            '  (production_w + LAG(production_w) OVER (ORDER BY ts))/2.0 AS avg_prod,' +
-            '  (MAX(0.0,COALESCE(grid_export_w,0))' +
-            '   + MAX(0.0,COALESCE(LAG(grid_export_w) OVER (ORDER BY ts),0)))/2.0 AS avg_exp' +
-            '  FROM pv_samples WHERE ts >= ? AND ts < ?' +
-            ') SELECT m,' +
-            ' COALESCE(SUM(CASE WHEN dt>0 AND dt<=600 THEN avg_prod*dt/3600.0 END),0)/1000.0 AS production_kwh,' +
-            ' COALESCE(SUM(CASE WHEN dt>0 AND dt<=600 THEN avg_exp*dt/3600.0 END),0)/1000.0 AS surplus_kwh' +
-            ' FROM d WHERE m IS NOT NULL GROUP BY m'
-        )
-        .all(yStart, yEnd) as { m: number; production_kwh: number; surplus_kwh: number }[];
-      for (const r of rows) {
-        const i = r.m - 1;
-        if (i >= 0 && i < 12) {
-          months[i].production_kwh = Math.max(0, r.production_kwh);
-          months[i].surplus_kwh = Math.max(0, r.surplus_kwh);
+      // Borne de gel : début du mois courant UTC (le groupage est par mois UTC,
+      // cf. en-tête). Année passée → tout gelé ; année future → rien.
+      const monthStartUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) / 1000;
+      const frozenUpTo = Math.max(yStart, Math.min(yEnd, monthStartUtc));
+      let cached = pvCache.get(year);
+      if (!cached || cached.upTo !== frozenUpTo) {
+        const prod = new Array<number>(12).fill(0);
+        const surp = new Array<number>(12).fill(0);
+        for (const r of pvIntegrateRange(db, yStart, frozenUpTo)) {
+          const i = r.m - 1;
+          if (i >= 0 && i < 12) {
+            prod[i] = Math.max(0, r.production_kwh);
+            surp[i] = Math.max(0, r.surplus_kwh);
+          }
+        }
+        cached = { upTo: frozenUpTo, prod, surp };
+        pvCache.set(year, cached);
+      }
+      for (let i = 0; i < 12; i++) {
+        months[i].production_kwh = cached.prod[i];
+        months[i].surplus_kwh = cached.surp[i];
+      }
+      // Mois courant : réintégré à chaque appel sur SA fenêtre seule. Départ à
+      // −610 s (> plafond de gap 600 s) pour retrouver l'intervalle qui
+      // chevauche la borne — il appartient au mois de l'échantillon POSTÉRIEUR,
+      // exactement comme dans la requête annuelle d'origine ; les lignes du mois
+      // précédent ré-embarquées par cette marge sont écartées (m < mois borne).
+      // Cas frozenUpTo === yStart (janvier, année future) : pas de marge — elle
+      // franchirait la frontière d'année et compterait décembre N−1 dans
+      // décembre N (l'original ignorait aussi l'intervalle inter-années).
+      if (frozenUpTo < yEnd) {
+        const liveStart = frozenUpTo === yStart ? yStart : frozenUpTo - 610;
+        const boundaryMonth = new Date(frozenUpTo * 1000).getUTCMonth();
+        let live = pvLiveCache.get(year);
+        if (!live || Date.now() - live.at >= PV_LIVE_TTL_MS) {
+          live = { at: Date.now(), rows: pvIntegrateRange(db, liveStart, yEnd) };
+          pvLiveCache.set(year, live);
+        }
+        for (const r of live.rows) {
+          const i = r.m - 1;
+          if (i >= boundaryMonth && i < 12) {
+            months[i].production_kwh = Math.max(0, r.production_kwh);
+            months[i].surplus_kwh = Math.max(0, r.surplus_kwh);
+          }
         }
       }
     }

@@ -14,5 +14,17 @@ import { readCumulusConfig } from '$lib/server/cumulus/config';
 
 export const GET: RequestHandler = async () => {
   const [state, config] = await Promise.all([readCumulusState(), readCumulusConfig()]);
-  return json({ state, config });
+  // Deux journaux SERVEUR ne sortent pas : `criterionLog` (validation du critère
+  // énergie, ~166 Ko, lu par /api/cumulus/criterion pour le labo) et `pilot`
+  // (état interne V2 brut, ~20 Ko — l'UI ne lit que sa projection `pilotView`).
+  // Les renvoyer faisait peser 213 Ko sérialisés + parsés par poll de 20 s,
+  // pour des champs que le client n'a JAMAIS lus. ~27 Ko après ablation.
+  let uiState: unknown = state;
+  if (state && typeof state === 'object') {
+    const { criterionLog, pilot, ...rest } = state;
+    void criterionLog;
+    void pilot;
+    uiState = rest;
+  }
+  return json({ state: uiState, config });
 };

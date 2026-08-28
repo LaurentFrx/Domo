@@ -30,7 +30,17 @@ interface LifetimePayload {
 
 const empty: LifetimePayload = { available: false, apsKwh: 0, ankerKwh: 0, totalKwh: 0 };
 
+// Cache mémoire : MAX() sans index = full-scan de pv_samples (~25 ms aujourd'hui,
+// croissance linéaire), SYNCHRONE dans l'unique process Node. Un cumul lifetime
+// bouge de quelques Wh par minute : 5 min de fraîcheur suffisent largement
+// (le store client polle à 10 min).
+const TTL_MS = 5 * 60_000;
+let cache: { at: number; payload: LifetimePayload } | null = null;
+
 export const GET: RequestHandler = async () => {
+  if (cache && Date.now() - cache.at < TTL_MS) {
+    return json(cache.payload, { headers: { 'cache-control': 'no-store' } });
+  }
   const path = env.RECORDER_DB_PATH;
   if (!path) return json({ ...empty, error: 'RECORDER_DB_PATH non configurée' }, { status: 503 });
 
@@ -57,10 +67,9 @@ export const GET: RequestHandler = async () => {
     const apsKwh = typeof row.aps === 'number' && row.aps > 0 ? row.aps : 0;
     const ankerKwh = typeof row.anker === 'number' && row.anker > 0 ? row.anker : 0;
     const totalKwh = apsKwh + ankerKwh;
-    return json(
-      { available: totalKwh > 0, apsKwh, ankerKwh, totalKwh },
-      { headers: { 'cache-control': 'no-store' } }
-    );
+    const payload: LifetimePayload = { available: totalKwh > 0, apsKwh, ankerKwh, totalKwh };
+    cache = { at: Date.now(), payload };
+    return json(payload, { headers: { 'cache-control': 'no-store' } });
   } catch (e) {
     return json({ ...empty, error: e instanceof Error ? e.message : 'db' }, { status: 503 });
   } finally {
