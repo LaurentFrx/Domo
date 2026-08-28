@@ -977,7 +977,17 @@
           </div>
         {/if}
 
+        <!-- Playlists en tête : c'est l'onglet des mix, radios et DJ, celui
+             qu'on ouvre le plus souvent (demande Laurent, 28/08). -->
         <div class="seg" role="tablist" aria-label="Bibliothèque">
+          <button
+            role="tab"
+            aria-selected={tab === 'playlists'}
+            class:on={tab === 'playlists'}
+            onclick={() => (tab = 'playlists')}
+          >
+            Playlists
+          </button>
           <button
             role="tab"
             aria-selected={tab === 'albums'}
@@ -993,14 +1003,6 @@
             onclick={() => (tab = 'artistes')}
           >
             Artistes
-          </button>
-          <button
-            role="tab"
-            aria-selected={tab === 'playlists'}
-            class:on={tab === 'playlists'}
-            onclick={() => (tab = 'playlists')}
-          >
-            Playlists
           </button>
         </div>
 
