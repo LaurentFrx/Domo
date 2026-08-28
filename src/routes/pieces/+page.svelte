@@ -295,34 +295,43 @@
       />
     {/if}
 
-    <!-- ═══ Store-banne — commande dédiée, à part des volets roulants ═══ -->
-    {#if storeShutter}
-      <div class="store-wrap">
-        <StoreCard shutter={storeShutter} />
-      </div>
-    {/if}
+    <!-- Dès l'iPad, le store-banne (largeur bornée à 340) et la ligne des
+         commandes rapides se partagent la ligne : seul, le store laissait 500 px
+         de vide à sa droite. `contents` = sur iPhone, ce groupe n'existe pas. -->
+    <div class="pad:grid pad:grid-cols-[340px_minmax(0,1fr)] pad:items-start pad:gap-3 contents">
+      <!-- ═══ Store-banne — commande dédiée, à part des volets roulants ═══ -->
+      {#if storeShutter}
+        <div class="store-wrap">
+          <StoreCard shutter={storeShutter} />
+        </div>
+      {/if}
 
-    <!-- ═══ Vue condensée — Ligne 1 : Bureau / Chargeur / Atelier / Spot / Portail ═══ -->
-    <!-- Toutes les commandes « un appui, un état » sur une seule ligne : elles se
+      <!-- ═══ Vue condensée — Ligne 1 : Bureau / Chargeur / Atelier / Spot / Portail ═══ -->
+      <!-- Toutes les commandes « un appui, un état » sur une seule ligne : elles se
          lisent d'un coup d'œil. Les deux lumières (Atelier, Spot terrasse) sont
          côte à côte. Les libellés sont déjà tronqués proprement dans les tuiles
          (`truncate`), ce qui tient sur un iPhone étroit. -->
-    {#if quickTiles > 0}
-      <div
-        class="grid gap-2.5 sm:gap-3"
-        style="grid-template-columns: repeat({quickTiles}, minmax(0, 1fr));"
-      >
-        {#if bureauSwitch}<SwitchTile sw={bureauSwitch} />{/if}
-        {#if chargeurSwitch}<SwitchTile sw={chargeurSwitch} />{/if}
-        {#if atelierDevice}<ZigbeeGenericTile device={atelierDevice} />{/if}
-        {#if terraceSpot}<SwitchTile sw={terraceSpot} />{/if}
-        {#if portailDevice}<ZigbeeGenericTile device={portailDevice} />{/if}
-      </div>
-    {/if}
+      {#if quickTiles > 0}
+        <!-- Une ligne de N tuiles sur iPhone ; 2 colonnes dès l'iPad, où la tuile
+             passe en format horizontal (icône + libellé + état) et a besoin de
+             ~240 px pour ne pas tronquer « Chargeur Lau ». `min-w-0` : sans lui
+             l'item déborde de sa colonne (min-width auto = min-content). -->
+        <div
+          class="pad:grid-cols-2 grid min-w-0 grid-cols-[repeat(var(--qt),minmax(0,1fr))] gap-2.5 sm:gap-3"
+          style="--qt: {quickTiles};"
+        >
+          {#if bureauSwitch}<SwitchTile sw={bureauSwitch} />{/if}
+          {#if chargeurSwitch}<SwitchTile sw={chargeurSwitch} />{/if}
+          {#if atelierDevice}<ZigbeeGenericTile device={atelierDevice} />{/if}
+          {#if terraceSpot}<SwitchTile sw={terraceSpot} />{/if}
+          {#if portailDevice}<ZigbeeGenericTile device={portailDevice} />{/if}
+        </div>
+      {/if}
+    </div>
 
     <!-- ═══ Reste : sèche-serviette (iPad), autres switches/lumières Zigbee ═══ -->
     {#if restSwitches.length > 0 || restOthers.length > 0}
-      <div class="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3 xl:grid-cols-4">
+      <div class="pad:grid-cols-3 grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
         {#each restSwitches as sw (sw.nodeId)}
           {#if sw.nodeId === 1}
             <!-- Sèche-serviette : doublon avec la carte « Salle de bain » (/climat) +
@@ -342,7 +351,7 @@
 
     <!-- ═══ Prises / capteurs Zigbee (hors imprimante) — pleine largeur sur iPhone ═══ -->
     {#if flatZigbeePlugs.length + flatZigbeeSensors.length > 0}
-      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <div class="pad:grid-cols-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {#each flatZigbeePlugs as device (device.ieee)}
           <ZigbeePlugTile {device} />
         {/each}
@@ -353,18 +362,22 @@
     {/if}
   {/if}
 
-  <!-- ═══ Terrasse — le ruban LEDS (WLED, QuinLed Dig-Uno). Indépendant de
-       Matter, la carte reste donc HORS du bloc conditionnel ci-dessus (toujours
-       visible). Le spot, lui, est monté sur la ligne des commandes rapides. ═══ -->
-  <WledCard />
+  <!-- Terrasse et imprimante se partagent la ligne dès l'iPad : deux cartes que
+       l'on CONSULTE, aucune des deux n'a besoin de 1 100 px. -->
+  <div class="pad:grid pad:grid-cols-2 pad:items-start pad:gap-3 contents">
+    <!-- ═══ Terrasse — le ruban LEDS (WLED, QuinLed Dig-Uno). Indépendant de
+         Matter, la carte reste donc HORS du bloc conditionnel ci-dessus (toujours
+         visible). Le spot, lui, est monté sur la ligne des commandes rapides. ═══ -->
+    <WledCard />
 
-  <!-- ═══ Imprimante — descendue sous l'éclairage terrasse : on la consulte
-       (niveaux d'encre), on ne la commande pas au quotidien. Elle sort du bloc
-       conditionnel Matter au passage, ce qui est CORRECT : c'est une prise Zigbee,
-       elle n'a jamais eu de raison de disparaître quand le hub Matter décroche. ═══ -->
-  {#if printerPlug}
-    <PrinterTile plug={printerPlug} />
-  {/if}
+    <!-- ═══ Imprimante — descendue sous l'éclairage terrasse : on la consulte
+         (niveaux d'encre), on ne la commande pas au quotidien. Elle sort du bloc
+         conditionnel Matter au passage, ce qui est CORRECT : c'est une prise Zigbee,
+         elle n'a jamais eu de raison de disparaître quand le hub Matter décroche. ═══ -->
+    {#if printerPlug}
+      <PrinterTile plug={printerPlug} />
+    {/if}
+  </div>
 
   <!-- ═══ Appareils Apple « Localiser » (findmy-bridge → MQTT) — bas de page ═══ -->
   <FindMyCard />

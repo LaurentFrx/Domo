@@ -76,11 +76,31 @@ Toutes les cartes = **verre transparent à bords arrondis, éclairé par une sou
 - **Sombre** : halos verts/indigo diffus (profondeur + matière pour le verre).
 - **Clair** : **fond de page = dégradé linéaire vert→bleu**. Comme les cartes claires sont neutres (~80 %), le dégradé n'apparaît **que dans les zones vides**, **pas à travers les cartes**.
 
-## 6. Responsive — iPhone-first, **ne pas oublier l'iPad paysage**
+## 6. Responsive — iPhone-first, avec un variant dédié à l'iPad (`pad:`)
 
 - Mobile : colonne unique + TabBar.
-- `sm` : rail sidebar 72 px ; `lg` (≥1024 px = **iPad paysage**) : sidebar 280 px.
-- **iPad paysage** : passer en **2 colonnes** (`lg:grid-cols-2`) — déjà fait sur Accueil (Sankey ‖ stats) et Énergie (graphes côte à côte). Toujours traiter ce cas.
+- `sm` : rail sidebar 72 px ; `lg` (≥1024 px) : sidebar 280 px.
+- **`pad:` = l'iPad, dans les DEUX orientations, jamais un iPhone.** Défini dans `src/app.css` :
+  `@custom-variant pad (@media (min-width: 768px) and (min-height: 600px))`.
+  Pourquoi la hauteur : un iPhone **couché** fait 852–932 px de large — `sm:` et `md:` s'y
+  allument aussi, la largeur seule ne peut donc pas désigner l'iPad. La hauteur tranche
+  sans ambiguïté (iPhone paysage ≤ 440 px de haut, iPad paysage ≥ 744). Effet de bord
+  voulu : Split View / Slide Over étroits repassent en mise en page iPhone.
+- **Règle de choix du breakpoint** :
+  - `pad:` — tout ce qui gagne à être **côte à côte dès l'iPad portrait** : cartes compactes,
+    tuiles, listes (Accueil, /pieces, /climat, détail album de /musique).
+  - `lg:` — ce qui a besoin de la **pleine largeur en portrait** et ne se dédouble qu'en
+    paysage : les **graphes temporels** de /energie (une courbe 24 h sur 350 px perd sa
+    résolution). Un graphe ne se met pas en 2 colonnes juste parce que la place existe.
+  - Une page-**formulaire** (/planning, l'espace `/menu`) se **borne** (`pad:max-w-3xl`,
+    `.ios-list` = 44 rem) au lieu de s'étirer : une consigne en français sur 1 100 px ne se lit pas.
+- **Réorganiser sans toucher à l'iPhone** : garder l'**ordre du DOM** (= l'ordre iPhone) et
+  ne déplacer que par le **placement de grille** (`pad:col-start-2 pad:row-start-3`…), ou
+  grouper deux blocs voisins dans un wrapper `class="contents pad:grid pad:grid-cols-2"` —
+  `display: contents` fait disparaître le wrapper du flux mobile. Jamais de duplication
+  `hidden lg:block` / `lg:hidden` (deux montages du même composant).
+  Piège : un item de grille a `min-width: auto` → il **déborde** de sa colonne si son
+  min-content est plus large. Ajouter `min-w-0`.
 - `overflow-x-clip` sur les pages à effets débordants (lueurs, anneaux).
 
 ## 7. Rafraîchissement des données (stores `src/lib/stores/*.svelte.ts`)
@@ -167,7 +187,7 @@ Depuis le 03/08/2026, la barre de navigation ne porte plus que le geste quotidie
 2. **Lumière en haut-gauche, ombre verte en bas-droite** — partout.
 3. **Jamais** noir/blanc purs.
 4. Tout effet animé = **gated** (Animations + reduced-motion) **et** pausé en arrière-plan.
-5. **iOS-first**, mais vérifier **iPad paysage**.
+5. **iOS-first**, mais vérifier l'**iPad dans les deux orientations** (§6, variant `pad:`) — et vérifier pour de vrai : `pnpm dev` dans `domo-dev` + capture headless à 834×1194 / 1194×834 / 393×852.
 6. **Centraliser dans `app.css`** : un seul réglage de token se propage à toute l'app.
 7. **Boutons « façon iOS »** (§10) : l'enfoncement + le haptique de confirmation + l'anti-sélection sont **centralisés** (`+layout.svelte` + `app.css`) — ne pas les recâbler ni les casser par composant. Marquer `data-no-haptic` / `.selectable` au besoin.
 8. **Le kit `.ios-*` (§11 bis) ne sort pas de `/menu`** — et réciproquement, aucune carte en verre n'entre dans le menu sans être aplatie par `html[data-surface='ios']`. Deux langages, une frontière nette : le pilotage Yeldra d'un côté, les Réglages iOS de l'autre.

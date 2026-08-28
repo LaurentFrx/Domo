@@ -845,7 +845,7 @@
       >
         Conso électroménager · {appliancePlugs.length + matterPlugs.length}
       </h2>
-      <div class="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
+      <div class="pad:grid-cols-3 grid grid-cols-2 gap-3 xl:grid-cols-4">
         {#each appliancePlugs as device (device.ieee)}
           <ApplianceCard {device} />
         {/each}
@@ -864,7 +864,9 @@
     >
       Impact ce mois ({months[currentMonthIdx]})
     </h2>
-    <div class="grid grid-cols-2 gap-3">
+    <!-- Deux cartes seulement : sur iPad, les laisser filer sur 1 100 px donnait
+         deux pavés vides autour d'un chiffre. Bornées à la largeur d'une paire. -->
+    <div class="pad:max-w-[36rem] grid grid-cols-2 gap-3">
       <KpiCard
         label="Équivalent VE"
         value={evKmEquiv.toFixed(0)}

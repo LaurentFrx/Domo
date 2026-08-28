@@ -207,7 +207,10 @@
   </div>
 {/snippet}
 
-<div class="flex flex-col gap-6 py-4">
+<!-- Page-formulaire (le prolongement de « Chauffage salle de bain » du menu ☰) :
+     bornée dès l'iPad à la largeur d'une colonne de lecture, comme les rubriques
+     du menu — étalée sur 1 100 px, une phrase de consigne devient illisible. -->
+<div class="pad:mx-auto pad:w-full pad:max-w-3xl flex flex-col gap-6 py-4">
   <!-- En-tête -->
   <div class="flex flex-col gap-1">
     <!-- Écran d'usage FAMILIAL (Isabelle) : volontairement hors de l'espace /menu,
@@ -314,7 +317,7 @@
   <!-- Les jours -->
   <section class="flex flex-col gap-3">
     {#if planning.data.abEnabled}
-      <div class="grid gap-3 lg:grid-cols-2">
+      <div class="grid gap-3">
         {@render weekBlock('A', 'Semaine A', 'var(--color-primary)')}
         {@render weekBlock('B', 'Semaine B', 'var(--color-consumption)')}
       </div>

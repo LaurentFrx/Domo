@@ -1210,7 +1210,7 @@
     {#if albumLoading}
       <p class="text-center text-sm" style="color: var(--color-muted-fg);">Chargement…</p>
     {:else if albumDetail}
-      <div class="lg:grid lg:grid-cols-2 lg:items-start lg:gap-6">
+      <div class="pad:grid pad:grid-cols-2 pad:items-start pad:gap-6">
         <div class="flex flex-col gap-4">
           <div
             class="hero rounded-[var(--radius-2xl)] border p-4"
@@ -1307,7 +1307,7 @@
         </div>
 
         <div
-          class="mt-4 rounded-[var(--radius-2xl)] border lg:mt-0"
+          class="pad:mt-0 mt-4 rounded-[var(--radius-2xl)] border"
           style="background: var(--color-card); border-color: var(--color-border);"
         >
           {#each albumDetail.tracks as t, i (t.key)}
@@ -1359,7 +1359,7 @@
       <p class="text-center text-sm" style="color: var(--color-muted-fg);">Chargement…</p>
     {:else if playlistDetail}
       {@const pl = playlistDetail.playlist}
-      <div class="lg:grid lg:grid-cols-2 lg:items-start lg:gap-6">
+      <div class="pad:grid pad:grid-cols-2 pad:items-start pad:gap-6">
         <div class="flex flex-col gap-4">
           <div
             class="hero rounded-[var(--radius-2xl)] border p-4"
@@ -1427,7 +1427,7 @@
         </div>
 
         <div
-          class="mt-4 rounded-[var(--radius-2xl)] border lg:mt-0"
+          class="pad:mt-0 mt-4 rounded-[var(--radius-2xl)] border"
           style="background: var(--color-card); border-color: var(--color-border);"
         >
           {#if playlistDetail.tracks.length === 0}

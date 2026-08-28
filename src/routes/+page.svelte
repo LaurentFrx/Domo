@@ -530,9 +530,13 @@
 </script>
 
 <div class="relative overflow-x-clip">
-  <!-- gap/padding plus serrés sur mobile (condensation iPhone vertical) ; généreux dès sm. -->
+  <!-- gap/padding plus serrés sur mobile (condensation iPhone vertical) ; généreux dès sm.
+       Dès l'iPad (`pad:`, les DEUX orientations) la pile devient une GRILLE 2 colonnes
+       où chaque carte est placée explicitement — l'ordre du DOM (= l'ordre iPhone)
+       reste donc intact, et l'accueil tient d'un seul écran au lieu de dérouler
+       1 200 px. Cf. `@custom-variant pad` dans src/app.css. -->
   <div
-    class="relative flex flex-col gap-3.5 pb-3 sm:gap-5 sm:pb-4"
+    class="pad:grid pad:grid-cols-2 pad:grid-rows-[auto_auto_min-content_1fr] pad:items-start relative flex flex-col gap-3.5 pb-3 sm:gap-5 sm:pb-4"
     class:stagger-enter={staggerEnter}
     style="z-index: 1;"
   >
@@ -541,11 +545,10 @@
       src="/header-accueil.webp?v=4"
       alt=""
       aria-hidden="true"
-      class="-mb-3.5 h-[52px] w-full rounded-[var(--radius-2xl)] object-cover object-bottom sm:-mb-5 sm:h-[84px]"
+      class="pad:col-span-2 -mb-3.5 h-[52px] w-full rounded-[var(--radius-2xl)] object-cover object-bottom sm:-mb-5 sm:h-[84px]"
     />
 
-    <!-- Carte Batterie définie en snippet → rendue à 2 endroits : au-dessus du
-         Sankey sur mobile, dans la colonne stats droite dès lg. -->
+    <!-- Carte Batterie (snippet : rendue UNE fois, la grille la place). -->
     {#snippet batteryCard()}
       <!-- ═══ Batterie — SOC parc + 3 barres par pack (SB3-1 / SB3-2 / Max AC) ═══ -->
       <div
@@ -746,57 +749,50 @@
       </div>
     {/snippet}
 
-    <!-- ═══ Économies solaires — carte héro en première position ═══ -->
-    <SavingsCard />
+    <!-- ═══ Économies solaires — carte héro, pleine largeur (les 4 médailles ont
+         besoin de la largeur ; en demi-colonne elles deviennent illisibles) ═══ -->
+    <div class="pad:col-span-2"><SavingsCard /></div>
 
-    <!-- Batterie EN PREMIER sur mobile (au-dessus du Sankey) ; masquée dès lg. -->
-    <div class="lg:hidden">{@render batteryCard()}</div>
+    <!-- Batterie : 2ᵉ sur iPhone (au-dessus du Sankey) ; sur iPad, en HAUT de la
+         colonne de droite — l'ordre du DOM ne bouge pas, seul le placement change. -->
+    <div class="pad:col-start-2 pad:row-start-3">{@render batteryCard()}</div>
 
-    <!-- ═══ Paysage (iPad/desktop) : Sankey | stats côte à côte ; mobile : empilé ═══ -->
-    <!-- items-stretch : la colonne stats remplit la hauteur du Sankey carré (sinon
-         un grand vide à droite sur desktop). -->
-    <div class="grid gap-3.5 sm:gap-5 lg:grid-cols-2 lg:items-stretch">
-      <!-- Colonne gauche : bilan apports / usages (Sankey) + détail par batterie -->
-      <div class="flex flex-col gap-3.5 sm:gap-4">
-        <FlowDiagram
-          pvSudW={pvSudA}
-          pvOuestW={pvOuestA}
-          homePowerW={homeA}
-          batteryChargeW={batChargeA}
-          batteryDischargeW={batDischargeA}
-          batterySoc={socA}
-          gridPowerW={gridA}
-          {cumulusW}
-          {homeConfidence}
-          batteries={batteryOnline ? batteryDetail : []}
-        />
-        {#if sourcesMuettes.length}
-          <!-- Un nœud absent du schéma ne veut rien dire tout seul : sans cette
+    <!-- Sankey : colonne de gauche sur iPad, sur 2 rangées (il est carré, donc
+         deux fois plus haut que la batterie et le bilan qui lui font face). -->
+    <div class="pad:col-start-1 pad:row-span-2 pad:row-start-3 flex flex-col gap-3.5 sm:gap-4">
+      <FlowDiagram
+        pvSudW={pvSudA}
+        pvOuestW={pvOuestA}
+        homePowerW={homeA}
+        batteryChargeW={batChargeA}
+        batteryDischargeW={batDischargeA}
+        batterySoc={socA}
+        gridPowerW={gridA}
+        {cumulusW}
+        {homeConfidence}
+        batteries={batteryOnline ? batteryDetail : []}
+      />
+      {#if sourcesMuettes.length}
+        <!-- Un nœud absent du schéma ne veut rien dire tout seul : sans cette
                ligne, retirer les fausses valeurs remplacerait un mensonge par un
                silence. Phrase courte, en français, sans nom de matériel. -->
-          <p
-            class="px-1 text-[13px] leading-snug"
-            style="color: var(--color-text-muted)"
-            role="status"
-          >
-            {sourcesMuettes.join(' · ')} — le schéma n'affiche que ce qui est réellement mesuré.
-          </p>
-        {/if}
-        <!-- Énergie du jour : SOUS la carte apports/usages (mobile ET desktop). -->
-        {@render flowsCard()}
-      </div>
-
-      <!-- Colonne stats ──────────────────────────────────────────────────────
-           Les KPI « depuis l'installation » (production totale, équivalent VE) ont
-           rejoint le menu ☰ → « Bilan & installation » : un cumul de plusieurs
-           années ne bouge pas d'un jour à l'autre, il n'a rien à faire sur l'écran
-           qu'on ouvre dix fois par jour. Reste ici ce qui change en direct. -->
-      <div class="flex flex-col gap-4">
-        <!-- Batterie : colonne droite dès lg (sur mobile elle passe au-dessus du
-             Sankey, cf. snippet batteryCard rendu plus haut). -->
-        <div class="hidden lg:block">{@render batteryCard()}</div>
-      </div>
+        <p
+          class="px-1 text-[13px] leading-snug"
+          style="color: var(--color-text-muted)"
+          role="status"
+        >
+          {sourcesMuettes.join(' · ')} — le schéma n'affiche que ce qui est réellement mesuré.
+        </p>
+      {/if}
     </div>
+
+    <!-- Énergie du jour : SOUS la carte apports/usages sur iPhone ; sur iPad elle
+         passe sous la batterie, à droite du Sankey — c'est elle qui comblait le
+         grand vide de la colonne de droite.
+         (Les KPI « depuis l'installation » ont rejoint le menu ☰ → « Bilan &
+         installation » : un cumul de plusieurs années n'a rien à faire sur
+         l'écran qu'on ouvre dix fois par jour.) -->
+    <div class="pad:col-start-2 pad:row-start-4">{@render flowsCard()}</div>
   </div>
 </div>
 

@@ -182,6 +182,17 @@
 
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
+/* ─── Variant `pad:` — l'iPad, dans les DEUX orientations, jamais un iPhone ──
+   `sm:` (640) et `md:` (768) s'allument aussi sur un iPhone COUCHÉ (852–932 px
+   de large) : on ne peut pas viser l'iPad par la largeur seule. La hauteur
+   tranche — un iPhone paysage ne dépasse pas 440 px de haut, un iPad portrait
+   en fait 1024+ et un iPad paysage 744+.
+   → `pad:` = « au moins la surface d'un iPad », c'est-à-dire aussi le desktop.
+   Split View / Slide Over (largeur ≤ 507) repassent volontairement en mise en
+   page iPhone. `lg:` (1024) reste ce qu'il était : l'iPad PAYSAGE et au-delà,
+   pour ce qui a besoin de la pleine largeur (graphes temporels). */
+@custom-variant pad (@media (min-width: 768px) and (min-height: 600px));
+
 [data-theme='dark'] {
   /* Moins « noir » : canvas remonté ; cartes nettement plus claires (l'élévation
      se lit par la clarté de surface, pas par l'obscurité) + translucides (verre). */

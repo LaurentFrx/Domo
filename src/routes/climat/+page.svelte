@@ -787,29 +787,33 @@
     </div>
   </section>
 
-  <!-- ═══ Salle de bain (sèche-serviette) — sous les chambres ═══ -->
-  <section>
-    <div class="grid grid-cols-1 sm:grid-cols-2">
-      <ThermostatCard />
-    </div>
-  </section>
-
-  <!-- ═══ Thermomètres Zigbee (déplacés depuis /pieces) ═══ -->
-  {#if thermoSensors.length > 0}
+  <!-- Dès l'iPad, la salle de bain et les thermomètres se partagent la ligne :
+       chacune tenait une ligne entière pour une carte large de 350 px. -->
+  <div class="pad:grid pad:grid-cols-2 pad:items-start pad:gap-3 contents">
+    <!-- ═══ Salle de bain (sèche-serviette) — sous les chambres ═══ -->
     <section>
-      <div class="grid grid-cols-3 gap-2">
-        {#each thermoSensors as device (device.ieee)}
-          <ZigbeeSensorTile
-            {device}
-            name={thermoDisplayName(device.friendlyName)}
-            compact
-            onActivate={() =>
-              openTempHistory(device.friendlyName, thermoDisplayName(device.friendlyName))}
-          />
-        {/each}
+      <div class="pad:grid-cols-1 grid grid-cols-1 sm:grid-cols-2">
+        <ThermostatCard />
       </div>
     </section>
-  {/if}
+
+    <!-- ═══ Thermomètres Zigbee (déplacés depuis /pieces) ═══ -->
+    {#if thermoSensors.length > 0}
+      <section>
+        <div class="thermo-grid grid grid-cols-3 gap-2">
+          {#each thermoSensors as device (device.ieee)}
+            <ZigbeeSensorTile
+              {device}
+              name={thermoDisplayName(device.friendlyName)}
+              compact
+              onActivate={() =>
+                openTempHistory(device.friendlyName, thermoDisplayName(device.friendlyName))}
+            />
+          {/each}
+        </div>
+      </section>
+    {/if}
+  </div>
 
   <!-- ═══ Icône météo SVG (charte) — 5 conditions ═══ -->
   {#snippet weatherIcon(cond: string, size: number)}
@@ -882,11 +886,11 @@
 
   <!-- ═══ Météo + prévisions — carte unique (refonte lisible non-initié) ═══ -->
   <section
-    class="flex flex-col gap-2.5 rounded-[var(--radius-2xl)] border p-3 lg:flex-row lg:gap-0"
+    class="pad:flex-row pad:gap-0 flex flex-col gap-2.5 rounded-[var(--radius-2xl)] border p-3"
     style="background: var(--color-card); border-color: var(--color-border);"
   >
     <!-- ── Maintenant (compact : icône + temp à gauche, lieu à droite) ── -->
-    <div class="flex flex-col gap-2 lg:flex-1 lg:pr-6">
+    <div class="pad:flex-1 pad:pr-6 flex flex-col gap-2">
       <div class="flex items-start justify-between gap-2">
         <div class="flex items-center gap-3">
           {@render weatherIcon(weather.condition, 44)}
@@ -1001,7 +1005,7 @@
     </div>
 
     <!-- ── Prévisions 3 jours (sans trait de séparation) ── -->
-    <div class="lg:flex-1 lg:pl-6">
+    <div class="pad:flex-1 pad:pl-6">
       <span
         class="text-[10px] font-semibold tracking-[0.04em] uppercase"
         style="color: var(--color-muted-fg);"
@@ -1046,6 +1050,19 @@
 </div>
 
 <style>
+  /* iPad PORTRAIT : les 3 thermomètres tiennent la moitié droite, à côté de la
+     salle de bain — à 115 px de large, « Terrasse Ouest » se faisait tronquer
+     (la tuile grossit sa police dès `sm`). Ils s'empilent donc sur une colonne,
+     ce qui reste plus court que la carte d'en face. En PAYSAGE (≥1024) la
+     demi-largeur vaut 500 px : les 3 colonnes reviennent.
+     Media query écrite en clair plutôt qu'en variantes Tailwind empilées : ici
+     l'ordre de cascade entre `pad:` et `lg:` doit être sans ambiguïté. */
+  @media (min-width: 768px) and (min-height: 600px) and (max-width: 1023px) {
+    .thermo-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
   /* Température cliquable → pop-up historique 4 h (reset bouton, alignement hérité). */
   .temp-link {
     appearance: none;
