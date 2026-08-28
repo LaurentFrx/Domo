@@ -83,6 +83,11 @@
     </label>
   </div>
 
+  {#if wledMusic.enabled && wledMusic.beatError}
+    <!-- Un suivi qui ne suit pas doit le DIRE (leçon du 28/08 : battements
+         refusés en silence pendant des heures, ruban figé, zéro indice). -->
+    <p class="mlp-error">La lumière ne reçoit pas la musique : {wledMusic.beatError}</p>
+  {/if}
   {#if !wledMusic.enabled}
     <p class="mlp-hint">
       Le ruban de la terrasse suivra le morceau en cours, quel que soit l'appareil qui le joue.
@@ -180,6 +185,12 @@
     font-size: 12.5px;
     line-height: 1.45;
     color: var(--color-muted-fg);
+  }
+  .mlp-error {
+    font-size: 12.5px;
+    line-height: 1.45;
+    font-weight: 600;
+    color: oklch(0.62 0.19 27);
   }
 
   /* ─── Onglets de ligne ─── */

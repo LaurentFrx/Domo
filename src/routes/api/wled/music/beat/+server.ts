@@ -20,13 +20,19 @@ export const POST: RequestHandler = async ({ request }) => {
 
   const { key, part, positionMs, playing } = body;
   if (typeof key !== 'string' || !key) throw error(400, 'key manquante');
-  if (typeof part !== 'string' || !PART_RE.test(part)) throw error(400, 'part invalide');
+  // Le part du client porte la signature de flux (`?st=…&k=…`, pour AirPlay)
+  // depuis 839f77d — RÉGRESSION VÉCUE : le regex la refusait, chaque battement
+  // partait en 400 silencieux et tout le suivi lumineux était mort. On valide
+  // et on transmet le CHEMIN seul : l'analyse serveur s'authentifie par token,
+  // la signature ne lui sert à rien.
+  const partPath = typeof part === 'string' ? part.split('?')[0] : '';
+  if (!PART_RE.test(partPath)) throw error(400, 'part invalide');
   if (typeof positionMs !== 'number' || !Number.isFinite(positionMs) || positionMs < 0)
     throw error(400, 'positionMs invalide');
 
   const st = await updateBeat({
     key,
-    part,
+    part: partPath,
     positionMs: Math.round(positionMs),
     playing: playing === true
   });

@@ -54,6 +54,10 @@ class WledMusicStore {
   playing = $state(false);
   /** Piste suivie par le serveur (peut venir d'un autre appareil). */
   trackKey = $state<string | null>(null);
+  /** Dernier battement REFUSÉ par le serveur (message) — null si tout va bien.
+   *  Leçon du 28/08 : les battements partaient en 400 pendant des heures sans
+   *  qu'aucun écran ne le dise ; « la lumière ne suit pas » restait inexpliqué. */
+  beatError = $state<string | null>(null);
 
   /** Niveau sonore temps réel (0-1) et pic — CHAMPS NON RÉACTIFS : lus par la
    *  boucle rAF de l'aperçu (12,5 Hz entrant, 60 fps sortant), un $state ici
@@ -248,7 +252,23 @@ class WledMusicStore {
         positionMs: Math.round(currentTimeS * 1000),
         playing
       })
-    }).catch(() => undefined); // heartbeat perdu : le suivant recalera
+    })
+      .then(async (r) => {
+        // Un battement REFUSÉ (4xx/5xx) n'est plus avalé : sans lui, la
+        // lumière ne suivra jamais et l'utilisateur doit pouvoir le VOIR.
+        if (r.ok) {
+          this.beatError = null;
+          return;
+        }
+        let msg = `battement refusé (HTTP ${r.status})`;
+        try {
+          msg = ((await r.json()) as { message?: string }).message ?? msg;
+        } catch {
+          /* corps non JSON */
+        }
+        this.beatError = msg;
+      })
+      .catch(() => undefined); // réseau : heartbeat perdu, le suivant recalera
   }
 
   /**
