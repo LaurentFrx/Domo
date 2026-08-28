@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { updated } from '$app/state';
   import { haptic } from '$utils/haptic';
+  import { player } from '$stores/plex.svelte';
 
   // Tirer-pour-rafraîchir (iOS-first). Les pages Domo défilent au niveau de la
   // fenêtre (pas de conteneur interne) → on écoute les touch sur window. Geste
@@ -69,6 +71,19 @@
     if (pull > 3 && e.cancelable) e.preventDefault();
   }
 
+  /** Refetch de TOUS les stores actifs, sans recharger la page.
+   *
+   * Même chemin que le retour de visibilité : chaque store visibility-aware
+   * refait un poll immédiat sur cet événement (et zigbee rouvre son SSE) —
+   * l'app étant réellement visible, tous les handlers prennent la branche
+   * « visible ». L'ancien `location.reload()` payait un aller-retour SSR +
+   * re-téléchargement du JS + réhydratation + remontage du pager (le HTML n'est
+   * jamais en cache SW) et COUPAIT LA MUSIQUE, pour des données que les stores
+   * savent déjà rafraîchir en ~200 ms. */
+  function refreshStores() {
+    document.dispatchEvent(new Event('visibilitychange'));
+  }
+
   function onTouchEnd() {
     if (!armed) return;
     armed = false;
@@ -76,9 +91,19 @@
       refreshing = true;
       pull = THRESHOLD;
       haptic('success');
-      // Court délai pour laisser voir le spinner, puis vrai refresh (re-mount
-      // des pages → reconnexion des stores → données fraîches).
-      setTimeout(() => location.reload(), 380);
+      // Nouvelle version déployée et personne n'écoute : le geste est le moment
+      // idéal pour recharger le code (même garde musique que le layout).
+      if (updated.current && !player.current) {
+        setTimeout(() => location.reload(), 380);
+        return;
+      }
+      refreshStores();
+      // Le spinner tourne le temps que les fetchs reviennent (~150-500 ms) ;
+      // les cartes se mettent à jour d'elles-mêmes via les stores.
+      setTimeout(() => {
+        refreshing = false;
+        pull = 0;
+      }, 700);
     } else {
       pull = 0;
     }
