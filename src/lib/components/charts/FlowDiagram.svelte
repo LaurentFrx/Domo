@@ -50,6 +50,12 @@
     batteries?: { label: string; soc: number; chargeW: number; dischargeW: number }[];
   }
 
+  // Préférence Animations (Réglages) : gate des fourmis lumineuses ci-dessous —
+  // stroke-dashoffset est une propriété de PEINTURE (non compositable), son
+  // animation repeint le SVG à chaque frame ; couper les animations doit
+  // vraiment l'arrêter (règle du design system, comme ConcentricRings).
+  import { preferences } from '$stores/preferences.svelte';
+
   // Le Sankey utilise les puissances du bilan AC (+ le SoC pour l'état repos).
   let {
     pvSudW,
@@ -373,7 +379,7 @@
         <!-- Rubans proportionnels -->
         {#each [...layout.left, ...layout.right] as l (l.key)}
           <path d={l.ribbon} fill={l.color} fill-opacity="0.4" />
-          {#if !reducedMotion}
+          {#if !reducedMotion && preferences.animationsEnabled}
             <path
               class="flow-core"
               d={l.core}
