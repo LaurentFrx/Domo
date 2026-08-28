@@ -89,11 +89,33 @@ Toutes les cartes = **verre transparent à bords arrondis, éclairé par une sou
 - **Règle de choix du breakpoint** :
   - `pad:` — tout ce qui gagne à être **côte à côte dès l'iPad portrait** : cartes compactes,
     tuiles, listes (Accueil, /pieces, /climat, détail album de /musique).
-  - `lg:` — ce qui a besoin de la **pleine largeur en portrait** et ne se dédouble qu'en
+  - `lg:` / media query explicite — ce qui a besoin de la **pleine largeur en portrait** et ne se dédouble qu'en
     paysage : les **graphes temporels** de /energie (une courbe 24 h sur 350 px perd sa
     résolution). Un graphe ne se met pas en 2 colonnes juste parce que la place existe.
   - Une page-**formulaire** (/planning, l'espace `/menu`) se **borne** (`pad:max-w-3xl`,
     `.ios-list` = 44 rem) au lieu de s'étirer : une consigne en français sur 1 100 px ne se lit pas.
+- **`desk:` = un vrai poste de travail** (`min-width: 1280px` **et** `pointer: fine`).
+  La **sidebar large de 280 px est réservée à la souris** : sur iPad elle prenait 23 % de la
+  dalle pour cinq entrées de navigation, au détriment d'un contenu qui manquait de place.
+  L'iPad garde donc le **rail de 72 px** dans les deux orientations, quelle que soit sa
+  largeur — un iPad Pro 12,9" en paysage fait 1366 px, autant qu'un laptop : seul
+  `pointer: coarse` les distingue.
+- **Zéro demi-ligne vide en paysage.** Trois sections successives qui ne portent qu'une
+  carte chacune, ce sont trois lignes à moitié vides. Les regrouper en **une grille
+  commune** : wrapper `contents pad:grid pad:grid-cols-2`, puis `pad:contents` sur les
+  `<section>` **et** sur leurs grilles internes — les cartes deviennent alors les cases de
+  la grille commune sans qu'on touche à leur markup (utile quand une carte est verrouillée,
+  cf. Séjour dans `/climat`). Les bandeaux d'alerte reprennent `pad:col-span-2`.
+- **Hauteurs inégales** : `items-stretch` plutôt qu'un trou — la carte courte s'étire et
+  répartit son contenu (`justify-content: space-between` sur son corps). Un espace _dans_
+  une carte se lit comme du souffle, un espace _entre_ les cartes comme un oubli.
+- **Une carte carrée impose sa hauteur** : le Sankey de l'accueil en colonne de 520 px
+  faisait face à 300 px de cartes. En paysage il tient une colonne large et les trois
+  cartes de lecture se rangent à sa droite sur deux rangées (grille 3 colonnes ≥ 1120 px).
+- **`pad:` et `lg:` peuvent matcher en même temps** : quand une règle doit changer entre
+  portrait et paysage, l'écrire en **media query explicite** dans le `<style>` de la page
+  plutôt qu'en variantes empilées — l'ordre de cascade entre variantes Tailwind n'est pas
+  une évidence à la lecture.
 - **Réorganiser sans toucher à l'iPhone** : garder l'**ordre du DOM** (= l'ordre iPhone) et
   ne déplacer que par le **placement de grille** (`pad:col-start-2 pad:row-start-3`…), ou
   grouper deux blocs voisins dans un wrapper `class="contents pad:grid pad:grid-cols-2"` —

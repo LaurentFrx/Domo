@@ -836,56 +836,78 @@
        APS ont rejoint le menu ☰ → « Automatismes énergie » : ce sont des réglages
        de fond, pas de la lecture quotidienne. -->
 
-  <!-- ═══ Section 2 : Conso électroménager (Frigo, Lave-linge…) ═══ -->
-  {#if appliancePlugs.length > 0 || matterPlugs.length > 0}
-    <section class="flex flex-col gap-3">
+  <!-- En PAYSAGE, l'électroménager et le bilan du mois se partagent la ligne :
+       cinq tuiles sur trois colonnes laissaient une case vide, et les deux
+       compteurs du mois une demi-largeur. Côte à côte, les deux blocs font la
+       même hauteur (2 rangées de tuiles ‖ 2 compteurs empilés). -->
+  <div class="energie-bas contents">
+    <!-- ═══ Section 2 : Conso électroménager (Frigo, Lave-linge…) ═══ -->
+    {#if appliancePlugs.length > 0 || matterPlugs.length > 0}
+      <section class="flex flex-col gap-3">
+        <h2
+          class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+          style="color: var(--color-muted-fg);"
+        >
+          Conso électroménager · {appliancePlugs.length + matterPlugs.length}
+        </h2>
+        <div class="pad:grid-cols-3 grid grid-cols-2 gap-3 xl:grid-cols-3">
+          {#each appliancePlugs as device (device.ieee)}
+            <ApplianceCard {device} />
+          {/each}
+          {#each matterPlugs as p (p.nodeId)}
+            <ApplianceCard name={p.name} power={p.powerW ?? 0} />
+          {/each}
+        </div>
+      </section>
+    {/if}
+
+    <!-- ═══ Section 4 : KPIs humanisés ═══ -->
+    <section>
       <h2
-        class="text-[11px] font-semibold tracking-[0.08em] uppercase"
+        class="mb-3 text-[14px] font-semibold tracking-[0.04em] uppercase"
         style="color: var(--color-muted-fg);"
       >
-        Conso électroménager · {appliancePlugs.length + matterPlugs.length}
+        Impact ce mois ({months[currentMonthIdx]})
       </h2>
-      <div class="pad:grid-cols-3 grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {#each appliancePlugs as device (device.ieee)}
-          <ApplianceCard {device} />
-        {/each}
-        {#each matterPlugs as p (p.nodeId)}
-          <ApplianceCard name={p.name} power={p.powerW ?? 0} />
-        {/each}
+      <!-- Deux cartes seulement : à plat sur 1 100 px, c'étaient deux pavés vides
+           autour d'un chiffre. Bornées en portrait, empilées en paysage. -->
+      <div class="kpi-grid pad:max-w-[36rem] grid grid-cols-2 gap-3">
+        <KpiCard
+          label="Équivalent VE"
+          value={evKmEquiv.toFixed(0)}
+          unit="km"
+          trend="en voiture électrique"
+          domain="solar"
+        />
+        <KpiCard
+          label="Autosuffisance"
+          value={autonomyPct.toString()}
+          unit="%"
+          trend="part autoconsommée"
+          domain="hc"
+        />
       </div>
     </section>
-  {/if}
-
-  <!-- ═══ Section 4 : KPIs humanisés ═══ -->
-  <section>
-    <h2
-      class="mb-3 text-[14px] font-semibold tracking-[0.04em] uppercase"
-      style="color: var(--color-muted-fg);"
-    >
-      Impact ce mois ({months[currentMonthIdx]})
-    </h2>
-    <!-- Deux cartes seulement : sur iPad, les laisser filer sur 1 100 px donnait
-         deux pavés vides autour d'un chiffre. Bornées à la largeur d'une paire. -->
-    <div class="pad:max-w-[36rem] grid grid-cols-2 gap-3">
-      <KpiCard
-        label="Équivalent VE"
-        value={evKmEquiv.toFixed(0)}
-        unit="km"
-        trend="en voiture électrique"
-        domain="solar"
-      />
-      <KpiCard
-        label="Autosuffisance"
-        value={autonomyPct.toString()}
-        unit="%"
-        trend="part autoconsommée"
-        domain="hc"
-      />
-    </div>
-  </section>
+  </div>
 </div>
 
 <style>
+  /* ═══ PAYSAGE (iPad et desktop) : électroménager ‖ bilan du mois ═══
+     Seuil à 1120 px, comme sur l'accueil : en dessous, les tuiles deviendraient
+     trop étroites pour leur titre. */
+  @media (min-width: 1120px) and (min-height: 600px) {
+    .energie-bas {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    .kpi-grid {
+      grid-template-columns: 1fr;
+      max-width: none;
+    }
+  }
+
   /* Fil d'Ariane : les échelons franchissables sont des boutons discrets, celui
      où l'on se trouve est inerte et en teinte pleine. */
   .crumb {

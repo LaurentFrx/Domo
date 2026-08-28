@@ -236,570 +236,581 @@
 </script>
 
 <div class="flex flex-col gap-6 py-4">
-  <!-- ═══ Daikin Séjour + Salle de bain — cartes instrument ═══ -->
-  <!-- iPhone portrait : 1 carte/ligne (confort) ; écran large : 2 colonnes. -->
-  <section>
-    <!-- Bandeaux d'état de la clim — HORS de l'article verrouillé, au-dessus de
+  <!-- Dès l'iPad, TOUTES les cartes de température vivent dans UNE grille à deux
+       colonnes : Séjour ‖ Parents, Amis ‖ Bureau, Salle de bain ‖ thermomètres.
+       Découpées en trois sections successives, chacune posait sa propre ligne —
+       le Séjour laissait 450 px de vide à sa droite, la salle de bain autant.
+       `pad:contents` fait disparaître sections et grilles internes du flux : les
+       cartes deviennent directement les cases de la grille commune, sans qu'on
+       touche à leur markup (la carte Séjour est verrouillée). -->
+  <div class="pad:grid pad:grid-cols-2 pad:items-stretch pad:gap-3 contents">
+    <!-- ═══ Daikin Séjour + Salle de bain — cartes instrument ═══ -->
+    <!-- iPhone portrait : 1 carte/ligne (confort) ; écran large : 2 colonnes. -->
+    <section class="pad:contents">
+      <!-- Bandeaux d'état de la clim — HORS de l'article verrouillé, au-dessus de
          la grille. Réutilisent .az-offline-banner (classe existante, Airzone). -->
-    {#if daikin.everPolled && !daikin.hasRealData}
-      <div class="az-offline-banner" role="status">
-        <strong>Climatisation du séjour indisponible</strong>
-        <span>Impossible de la joindre pour l'instant. La reprise est automatique.</span>
-      </div>
-    {:else if dkOffline}
-      <div class="az-offline-banner" role="status">
-        <strong>Climatisation du séjour hors ligne</strong>
-        <span>
-          Elle ne répond plus : les valeurs affichées datent, et les boutons n'auront pas d'effet.
-        </span>
-      </div>
-    {/if}
-    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <!-- ╔═══════════════════════════════════════════════════════════════════╗
+      {#if daikin.everPolled && !daikin.hasRealData}
+        <div class="az-offline-banner pad:col-span-2" role="status">
+          <strong>Climatisation du séjour indisponible</strong>
+          <span>Impossible de la joindre pour l'instant. La reprise est automatique.</span>
+        </div>
+      {:else if dkOffline}
+        <div class="az-offline-banner pad:col-span-2" role="status">
+          <strong>Climatisation du séjour hors ligne</strong>
+          <span>
+            Elle ne répond plus : les valeurs affichées datent, et les boutons n'auront pas d'effet.
+          </span>
+        </div>
+      {/if}
+      <div class="pad:contents grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <!-- ╔═══════════════════════════════════════════════════════════════════╗
            ║ 🔒 CARTE SÉJOUR (Daikin) — VERROUILLÉE (validée par Laurent 2026-06-20). ║
            ║ NE PAS modifier ce markup ni le CSS associé (.dk-*, .gbtn, .mi, .dk-bar) ║
            ║ ni le rendu de ClimateDial pour le Séjour, SAUF demande EXPLICITE de    ║
            ║ Laurent. Cf. mémoire « domo_climat_sejour_card_locked ».                ║
            ╚═══════════════════════════════════════════════════════════════════╝ -->
-      {#each daikin.units as unit (unit.id)}
-        {@const thermo = thermoForUnit(unit)}
-        {@const thermoKey = DAIKIN_UNIT_THERMO[unit.id] ?? thermo?.friendlyName ?? null}
-        {@const indoorT =
-          typeof thermo?.state.temperature === 'number'
-            ? (thermo.state.temperature as number)
-            : null}
-        {@const indoorH =
-          typeof thermo?.state.humidity === 'number' ? (thermo.state.humidity as number) : null}
-        {@const tgt = currentTarget(unit)}
-        {@const consigne = tgt ?? unit.targetHeating}
-        {@const TGT_MIN = 16}
-        {@const TGT_MAX = 30}
-        {@const live = unit.online && !dkOffline}
-        {@const active = live && unit.onOff && unit.operationMode !== 'off'}
-        {@const outdoorAvg = outdoorAvgFor(unit)}
-        {@const dHeat = unit.operationMode === 'heating'}
-        {@const dCool = unit.operationMode === 'cooling'}
-        {@const dAccent = dHeat
-          ? 'var(--color-hp)'
-          : dCool
-            ? 'var(--color-consumption)'
-            : 'var(--color-muted-fg)'}
-        <article
-          class="dk-card relative isolate flex flex-col gap-2 overflow-hidden rounded-[var(--radius-2xl)] p-2.5"
-        >
-          <!-- Aura d'arrière-plan : flamme (chaud) / flocon (froid) ; s'anime quand
+        {#each daikin.units as unit (unit.id)}
+          {@const thermo = thermoForUnit(unit)}
+          {@const thermoKey = DAIKIN_UNIT_THERMO[unit.id] ?? thermo?.friendlyName ?? null}
+          {@const indoorT =
+            typeof thermo?.state.temperature === 'number'
+              ? (thermo.state.temperature as number)
+              : null}
+          {@const indoorH =
+            typeof thermo?.state.humidity === 'number' ? (thermo.state.humidity as number) : null}
+          {@const tgt = currentTarget(unit)}
+          {@const consigne = tgt ?? unit.targetHeating}
+          {@const TGT_MIN = 16}
+          {@const TGT_MAX = 30}
+          {@const live = unit.online && !dkOffline}
+          {@const active = live && unit.onOff && unit.operationMode !== 'off'}
+          {@const outdoorAvg = outdoorAvgFor(unit)}
+          {@const dHeat = unit.operationMode === 'heating'}
+          {@const dCool = unit.operationMode === 'cooling'}
+          {@const dAccent = dHeat
+            ? 'var(--color-hp)'
+            : dCool
+              ? 'var(--color-consumption)'
+              : 'var(--color-muted-fg)'}
+          <article
+            class="dk-card relative isolate flex flex-col gap-2 overflow-hidden rounded-[var(--radius-2xl)] p-2.5"
+          >
+            <!-- Aura d'arrière-plan : flamme (chaud) / flocon (froid) ; s'anime quand
                l'unité est en marche, fantôme quand éteinte. Sans froid si mode off. -->
-          <ClimateAura
-            heat={dHeat}
-            cool={dCool}
-            on={unit.onOff}
-            demand={unit.onOff && (dHeat || dCool)}
-            animate={animOn}
-            color={unit.onOff ? dAccent : 'var(--color-muted-fg)'}
-            leftPct={27}
-          />
-          <!-- Haut, une ligne : nom · humidité + extérieur · toggle -->
-          <header class="flex items-center justify-between gap-2">
-            <div class="flex min-w-0 items-center gap-1.5">
-              <span
-                class="h-2 w-2 shrink-0 rounded-full"
-                style:background-color={live ? '#4ade80' : '#f0606a'}
-                title={live ? 'En ligne' : 'Ne répond plus'}
-                aria-hidden="true"
-              ></span>
-              <span class="dk-name truncate">{daikinLabel(unit)}</span>
-            </div>
-            <div class="flex shrink-0 items-center gap-2.5">
-              <span class="dk-stat c">
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
+            <ClimateAura
+              heat={dHeat}
+              cool={dCool}
+              on={unit.onOff}
+              demand={unit.onOff && (dHeat || dCool)}
+              animate={animOn}
+              color={unit.onOff ? dAccent : 'var(--color-muted-fg)'}
+              leftPct={27}
+            />
+            <!-- Haut, une ligne : nom · humidité + extérieur · toggle -->
+            <header class="flex items-center justify-between gap-2">
+              <div class="flex min-w-0 items-center gap-1.5">
+                <span
+                  class="h-2 w-2 shrink-0 rounded-full"
+                  style:background-color={live ? '#4ade80' : '#f0606a'}
+                  title={live ? 'En ligne' : 'Ne répond plus'}
                   aria-hidden="true"
+                ></span>
+                <span class="dk-name truncate">{daikinLabel(unit)}</span>
+              </div>
+              <div class="flex shrink-0 items-center gap-2.5">
+                <span class="dk-stat c">
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 2.5C12 2.5 6 9.5 6 14a6 6 0 0 0 12 0C18 9.5 12 2.5 12 2.5Z" />
+                  </svg>
+                  {indoorH !== null ? `${Math.round(indoorH)}%` : '—'}
+                </span>
+                <span
+                  class="dk-stat o dk-out"
+                  title="Extérieur — moyenne Terrasse Ouest · Daikin · prévision AROME"
                 >
-                  <path d="M12 2.5C12 2.5 6 9.5 6 14a6 6 0 0 0 12 0C18 9.5 12 2.5 12 2.5Z" />
-                </svg>
-                {indoorH !== null ? `${Math.round(indoorH)}%` : '—'}
-              </span>
-              <span
-                class="dk-stat o dk-out"
-                title="Extérieur — moyenne Terrasse Ouest · Daikin · prévision AROME"
-              >
-                <svg
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  aria-hidden="true"
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="4" />
+                    <path
+                      d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+                    />
+                  </svg>
+                  {outdoorAvg !== null ? outdoorAvg.toFixed(1) : '—'}°
+                </span>
+                <button
+                  type="button"
+                  data-no-haptic
+                  class="toggle-track shrink-0"
+                  class:toggle-on={unit.onOff}
+                  role="switch"
+                  aria-checked={unit.onOff}
+                  aria-label="Allumer / éteindre {daikinLabel(unit)}"
+                  onclick={() => tapOnOff(unit)}
+                  disabled={!live}
                 >
-                  <circle cx="12" cy="12" r="4" />
-                  <path
-                    d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
-                  />
-                </svg>
-                {outdoorAvg !== null ? outdoorAvg.toFixed(1) : '—'}°
-              </span>
+                  <span class="toggle-knob"></span>
+                </button>
+              </div>
+            </header>
+
+            <!-- Cadran (mesure) · oscillations à gauche · Chaud/Froid à droite -->
+            <div class="flex items-center justify-between gap-1">
+              <div class="flex flex-col gap-1.5">
+                <button
+                  type="button"
+                  class="gbtn osc"
+                  class:gbtn-dim={!(active && unit.swingHorizontal === 'swing')}
+                  onclick={() =>
+                    tapSwingH(unit.id, unit.swingHorizontal === 'swing' ? 'off' : 'swing')}
+                  disabled={!active}
+                  aria-pressed={unit.swingHorizontal === 'swing'}
+                  aria-label="Oscillation horizontale"
+                  title="Oscillation horizontale"
+                >
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <polyline points="17 1 21 5 17 9" />
+                    <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+                    <polyline points="7 23 3 19 7 15" />
+                    <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="gbtn osc"
+                  class:gbtn-dim={!(active && unit.swingVertical === 'swing')}
+                  onclick={() =>
+                    tapSwingV(unit.id, unit.swingVertical === 'swing' ? 'off' : 'swing')}
+                  disabled={!active}
+                  aria-pressed={unit.swingVertical === 'swing'}
+                  aria-label="Oscillation verticale"
+                  title="Oscillation verticale"
+                >
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <polyline points="1 17 5 21 9 17" />
+                    <path d="M11 3H9a4 4 0 0 0-4 4v14" />
+                    <polyline points="23 7 19 3 15 7" />
+                    <path d="M13 21h2a4 4 0 0 0 4-4V3" />
+                  </svg>
+                </button>
+              </div>
+
+              <ClimateDial
+                value={indoorT}
+                target={consigne}
+                min={TGT_MIN}
+                max={TGT_MAX}
+                mode={unit.operationMode}
+                on={unit.onOff}
+                onActivate={thermoKey
+                  ? () => openTempHistory(thermoKey, daikinLabel(unit))
+                  : undefined}
+              />
+
+              <!-- Bascule verticale Chaud (haut) / Froid (bas) — APPUI LONG pour
+                 changer (commande importante : on évite la bascule accidentelle). -->
               <button
                 type="button"
                 data-no-haptic
-                class="toggle-track shrink-0"
-                class:toggle-on={unit.onOff}
-                role="switch"
-                aria-checked={unit.onOff}
-                aria-label="Allumer / éteindre {daikinLabel(unit)}"
-                onclick={() => tapOnOff(unit)}
+                class="mode-toggle"
+                class:mt-heat={dHeat}
+                class:mt-cool={dCool}
+                class:mt-holding={holdUnitId === unit.id}
+                style="--hold: {MODE_HOLD_MS}ms;"
                 disabled={!live}
+                aria-label={`Mode ${dCool ? 'Froid' : 'Chaud'} — appui long pour changer`}
+                title="Appui long pour changer chaud / froid"
+                onpointerdown={() => startModeHold(unit)}
+                onpointerup={cancelModeHold}
+                onpointerleave={cancelModeHold}
+                onpointercancel={cancelModeHold}
+                oncontextmenu={(e) => e.preventDefault()}
               >
-                <span class="toggle-knob"></span>
+                <span class="mt-fill" aria-hidden="true"></span>
+                <span class="mt-knob" aria-hidden="true"></span>
+                <span class="mt-icon mt-top" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                    <path
+                      d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+                    />
+                  </svg>
+                </span>
+                <span class="mt-icon mt-bot" aria-hidden="true">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <line x1="2" x2="22" y1="12" y2="12" />
+                    <line x1="12" x2="12" y1="2" y2="22" />
+                    <path d="m20 16-4-4 4-4" />
+                    <path d="m4 8 4 4-4 4" />
+                    <path d="m16 4-4 4-4-4" />
+                    <path d="m8 20 4-4 4 4" />
+                  </svg>
+                </span>
               </button>
             </div>
-          </header>
 
-          <!-- Cadran (mesure) · oscillations à gauche · Chaud/Froid à droite -->
-          <div class="flex items-center justify-between gap-1">
+            <!-- Barre consigne (métal) : − / valeur / + (débouncé) -->
+            <div class="dk-bar">
+              <button
+                type="button"
+                data-no-haptic
+                class="gbtn"
+                class:gbtn-dim={!active}
+                onclick={() => stepTarget(unit, -1)}
+                disabled={!active}
+                aria-label="Baisser la consigne"
+              >
+                −
+              </button>
+              <div class="dk-tgt" class:dk-tgt-off={!active}>
+                <b>{consigne % 1 ? consigne.toFixed(1) : consigne.toFixed(0)}<i>°</i></b>
+                <span>Consigne</span>
+              </div>
+              <button
+                type="button"
+                data-no-haptic
+                class="gbtn"
+                class:gbtn-dim={!active}
+                onclick={() => stepTarget(unit, 1)}
+                disabled={!active}
+                aria-label="Monter la consigne"
+              >
+                +
+              </button>
+            </div>
+
+            <!-- Ventilation : Auto / Quiet / 1-5 (comportement inchangé) -->
             <div class="flex flex-col gap-1.5">
-              <button
-                type="button"
-                class="gbtn osc"
-                class:gbtn-dim={!(active && unit.swingHorizontal === 'swing')}
-                onclick={() =>
-                  tapSwingH(unit.id, unit.swingHorizontal === 'swing' ? 'off' : 'swing')}
-                disabled={!active}
-                aria-pressed={unit.swingHorizontal === 'swing'}
-                aria-label="Oscillation horizontale"
-                title="Oscillation horizontale"
-              >
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <polyline points="17 1 21 5 17 9" />
-                  <path d="M3 11V9a4 4 0 0 1 4-4h14" />
-                  <polyline points="7 23 3 19 7 15" />
-                  <path d="M21 13v2a4 4 0 0 1-4 4H3" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                class="gbtn osc"
-                class:gbtn-dim={!(active && unit.swingVertical === 'swing')}
-                onclick={() => tapSwingV(unit.id, unit.swingVertical === 'swing' ? 'off' : 'swing')}
-                disabled={!active}
-                aria-pressed={unit.swingVertical === 'swing'}
-                aria-label="Oscillation verticale"
-                title="Oscillation verticale"
-              >
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <polyline points="1 17 5 21 9 17" />
-                  <path d="M11 3H9a4 4 0 0 0-4 4v14" />
-                  <polyline points="23 7 19 3 15 7" />
-                  <path d="M13 21h2a4 4 0 0 0 4-4V3" />
-                </svg>
-              </button>
+              <div class="flex gap-1">
+                {#each fanSpeeds as sp (sp.id)}
+                  {@const isActive = unit.fanSpeed === sp.id}
+                  <button
+                    type="button"
+                    onclick={() => tapFanSpeed(unit.id, sp.id)}
+                    disabled={!active}
+                    class="fan-seg"
+                    class:fan-seg-active={isActive}
+                    aria-pressed={isActive}
+                  >
+                    {sp.label}
+                  </button>
+                {/each}
+              </div>
             </div>
+          </article>
+        {/each}
+      </div>
+    </section>
 
-            <ClimateDial
-              value={indoorT}
-              target={consigne}
-              min={TGT_MIN}
-              max={TGT_MAX}
-              mode={unit.operationMode}
-              on={unit.onOff}
-              onActivate={thermoKey
-                ? () => openTempHistory(thermoKey, daikinLabel(unit))
-                : undefined}
+    <!-- ═══ Climatisation gainable Airzone (3 zones) ═══ -->
+    <section class="pad:contents flex flex-col gap-3">
+      {#if azOffline}
+        <!-- Panne RENDUE VISIBLE : tant que le boîtier Airzone ne répond pas, les
+           cartes affichent un dernier état figé et les commandes échouent. -->
+        <div class="az-offline-banner pad:col-span-2" role="status" aria-live="polite">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            aria-hidden="true"
+          >
+            <path
+              d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"
             />
-
-            <!-- Bascule verticale Chaud (haut) / Froid (bas) — APPUI LONG pour
-                 changer (commande importante : on évite la bascule accidentelle). -->
-            <button
-              type="button"
-              data-no-haptic
-              class="mode-toggle"
-              class:mt-heat={dHeat}
-              class:mt-cool={dCool}
-              class:mt-holding={holdUnitId === unit.id}
-              style="--hold: {MODE_HOLD_MS}ms;"
-              disabled={!live}
-              aria-label={`Mode ${dCool ? 'Froid' : 'Chaud'} — appui long pour changer`}
-              title="Appui long pour changer chaud / froid"
-              onpointerdown={() => startModeHold(unit)}
-              onpointerup={cancelModeHold}
-              onpointerleave={cancelModeHold}
-              onpointercancel={cancelModeHold}
-              oncontextmenu={(e) => e.preventDefault()}
-            >
-              <span class="mt-fill" aria-hidden="true"></span>
-              <span class="mt-knob" aria-hidden="true"></span>
-              <span class="mt-icon mt-top" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                  <path
-                    d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
-                  />
-                </svg>
-              </span>
-              <span class="mt-icon mt-bot" aria-hidden="true">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
+            <line x1="12" x2="12" y1="9" y2="13" />
+            <line x1="12" x2="12.01" y1="17" y2="17" />
+          </svg>
+          <div class="azob-text">
+            <strong>Climatisation Airzone hors ligne</strong>
+            <span>
+              Le boîtier ne répond plus — données figées{azStaleText ? ` (${azStaleText})` : ''},
+              les commandes ne s'appliqueront pas. Vérifiez son alimentation et son réseau&nbsp;; la
+              reprise est automatique au retour.
+            </span>
+          </div>
+        </div>
+      {:else if airzone.commandError}
+        <!-- La phrase existait déjà, rédigée en français dans le store, et n'était
+           affichée NULLE PART : on appuyait sur +/−, l'optimiste tenait 7 s, le
+           re-poll défaisait tout, sans un mot. Le {:else if} évite d'empiler deux
+           bandeaux quand le boîtier est franchement hors ligne. -->
+        <div class="az-offline-banner pad:col-span-2" role="status" aria-live="polite">
+          <div class="azob-text">
+            <strong>Commande non appliquée</strong>
+            <span>{airzone.commandError}</span>
+          </div>
+        </div>
+      {/if}
+      <div class="pad:contents grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {#each airzone.zones as zone (zone.id)}
+          {@const heat = airzone.systemMode === 'heating'}
+          {@const cool = airzone.systemMode === 'cooling'}
+          {@const accent = heat
+            ? 'var(--color-hp)'
+            : cool
+              ? 'var(--color-consumption)'
+              : 'var(--color-muted-fg)'}
+          {@const iconColor = !zone.on ? 'var(--color-muted-fg)' : accent}
+          <!-- Fond « instrument verre sombre » repris de la carte Séjour (.dk-card) :
+             dégradé sombre + bordure bleu pâle + ombre profonde + texte clair. -->
+          <article
+            class="az-zone dk-card relative flex flex-col gap-2.5 overflow-hidden rounded-[var(--radius-2xl)] p-4"
+            class:az-offline={azOffline}
+          >
+            <!-- Icône de fond = fonction qui s'activera à l'allumage (flocon = froid,
+               flamme = chaud) selon le mode système piloté par Parents ; grise en
+               transparence quand la pièce est éteinte, colorée quand elle fonctionne. -->
+            {#if cool || heat}
+              <svg
+                class="az-zone-bg"
+                class:az-spin={cool && zone.demand && animOn}
+                class:az-flame={heat && zone.demand && animOn}
+                viewBox="0 0 24 24"
+                fill={heat ? 'currentColor' : 'none'}
+                stroke={heat ? 'none' : 'currentColor'}
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                style="color: {iconColor}; opacity: {zone.on ? 0.5 : 0.12};"
+                aria-hidden="true"
+              >
+                {#if cool}
                   <line x1="2" x2="22" y1="12" y2="12" />
                   <line x1="12" x2="12" y1="2" y2="22" />
                   <path d="m20 16-4-4 4-4" />
                   <path d="m4 8 4 4-4 4" />
                   <path d="m16 4-4 4-4-4" />
                   <path d="m8 20 4-4 4 4" />
-                </svg>
-              </span>
-            </button>
-          </div>
-
-          <!-- Barre consigne (métal) : − / valeur / + (débouncé) -->
-          <div class="dk-bar">
-            <button
-              type="button"
-              data-no-haptic
-              class="gbtn"
-              class:gbtn-dim={!active}
-              onclick={() => stepTarget(unit, -1)}
-              disabled={!active}
-              aria-label="Baisser la consigne"
-            >
-              −
-            </button>
-            <div class="dk-tgt" class:dk-tgt-off={!active}>
-              <b>{consigne % 1 ? consigne.toFixed(1) : consigne.toFixed(0)}<i>°</i></b>
-              <span>Consigne</span>
-            </div>
-            <button
-              type="button"
-              data-no-haptic
-              class="gbtn"
-              class:gbtn-dim={!active}
-              onclick={() => stepTarget(unit, 1)}
-              disabled={!active}
-              aria-label="Monter la consigne"
-            >
-              +
-            </button>
-          </div>
-
-          <!-- Ventilation : Auto / Quiet / 1-5 (comportement inchangé) -->
-          <div class="flex flex-col gap-1.5">
-            <div class="flex gap-1">
-              {#each fanSpeeds as sp (sp.id)}
-                {@const isActive = unit.fanSpeed === sp.id}
-                <button
-                  type="button"
-                  onclick={() => tapFanSpeed(unit.id, sp.id)}
-                  disabled={!active}
-                  class="fan-seg"
-                  class:fan-seg-active={isActive}
-                  aria-pressed={isActive}
-                >
-                  {sp.label}
-                </button>
-              {/each}
-            </div>
-          </div>
-        </article>
-      {/each}
-    </div>
-  </section>
-
-  <!-- ═══ Climatisation gainable Airzone (3 zones) ═══ -->
-  <section class="flex flex-col gap-3">
-    {#if azOffline}
-      <!-- Panne RENDUE VISIBLE : tant que le boîtier Airzone ne répond pas, les
-           cartes affichent un dernier état figé et les commandes échouent. -->
-      <div class="az-offline-banner" role="status" aria-live="polite">
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          aria-hidden="true"
-        >
-          <path
-            d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"
-          />
-          <line x1="12" x2="12" y1="9" y2="13" />
-          <line x1="12" x2="12.01" y1="17" y2="17" />
-        </svg>
-        <div class="azob-text">
-          <strong>Climatisation Airzone hors ligne</strong>
-          <span>
-            Le boîtier ne répond plus — données figées{azStaleText ? ` (${azStaleText})` : ''}, les
-            commandes ne s'appliqueront pas. Vérifiez son alimentation et son réseau&nbsp;; la
-            reprise est automatique au retour.
-          </span>
-        </div>
-      </div>
-    {:else if airzone.commandError}
-      <!-- La phrase existait déjà, rédigée en français dans le store, et n'était
-           affichée NULLE PART : on appuyait sur +/−, l'optimiste tenait 7 s, le
-           re-poll défaisait tout, sans un mot. Le {:else if} évite d'empiler deux
-           bandeaux quand le boîtier est franchement hors ligne. -->
-      <div class="az-offline-banner" role="status" aria-live="polite">
-        <div class="azob-text">
-          <strong>Commande non appliquée</strong>
-          <span>{airzone.commandError}</span>
-        </div>
-      </div>
-    {/if}
-    <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-      {#each airzone.zones as zone (zone.id)}
-        {@const heat = airzone.systemMode === 'heating'}
-        {@const cool = airzone.systemMode === 'cooling'}
-        {@const accent = heat
-          ? 'var(--color-hp)'
-          : cool
-            ? 'var(--color-consumption)'
-            : 'var(--color-muted-fg)'}
-        {@const iconColor = !zone.on ? 'var(--color-muted-fg)' : accent}
-        <!-- Fond « instrument verre sombre » repris de la carte Séjour (.dk-card) :
-             dégradé sombre + bordure bleu pâle + ombre profonde + texte clair. -->
-        <article
-          class="az-zone dk-card relative flex flex-col gap-2.5 overflow-hidden rounded-[var(--radius-2xl)] p-4"
-          class:az-offline={azOffline}
-        >
-          <!-- Icône de fond = fonction qui s'activera à l'allumage (flocon = froid,
-               flamme = chaud) selon le mode système piloté par Parents ; grise en
-               transparence quand la pièce est éteinte, colorée quand elle fonctionne. -->
-          {#if cool || heat}
-            <svg
-              class="az-zone-bg"
-              class:az-spin={cool && zone.demand && animOn}
-              class:az-flame={heat && zone.demand && animOn}
-              viewBox="0 0 24 24"
-              fill={heat ? 'currentColor' : 'none'}
-              stroke={heat ? 'none' : 'currentColor'}
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              style="color: {iconColor}; opacity: {zone.on ? 0.5 : 0.12};"
-              aria-hidden="true"
-            >
-              {#if cool}
-                <line x1="2" x2="22" y1="12" y2="12" />
-                <line x1="12" x2="12" y1="2" y2="22" />
-                <path d="m20 16-4-4 4-4" />
-                <path d="m4 8 4 4-4 4" />
-                <path d="m16 4-4 4-4-4" />
-                <path d="m8 20 4-4 4 4" />
-              {:else}
-                <path
-                  d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
-                />
-              {/if}
-            </svg>
-          {/if}
-
-          <!-- Contenu au-dessus de l'icône -->
-          <div class="relative z-[1] flex flex-col gap-2.5">
-            <div class="flex items-center justify-between gap-2">
-              <div class="flex min-w-0 items-center gap-2">
-                <span
-                  class="h-2 w-2 shrink-0 rounded-full"
-                  style:background-color={airzone.connected ? '#4ade80' : '#f0606a'}
-                  title={airzone.connected ? 'Système en ligne' : 'Système hors ligne'}
-                  aria-hidden="true"
-                ></span>
-                <span class="text-[14px] font-semibold" style="color: #eef5ff;">
-                  {zone.name}
-                </span>
-              </div>
-              <div class="flex shrink-0 items-center gap-2">
-                {#if zone.isMaster}
-                  <!-- Chaud / Froid : mode GLOBAL, piloté par la zone maître (Parents) -->
-                  <div class="az-mode" role="group" aria-label="Mode Chaud / Froid">
-                    <button
-                      type="button"
-                      data-no-haptic
-                      class="az-mode-btn warm"
-                      class:on={airzone.systemMode === 'heating'}
-                      disabled={azOffline}
-                      aria-label="Chaud"
-                      aria-pressed={airzone.systemMode === 'heating'}
-                      title="Chaud"
-                      onclick={() => {
-                        if (airzone.systemMode === 'heating') return;
-                        haptic('medium');
-                        airzone.setMode('heating');
-                      }}
-                    >
-                      <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
-                        <path
-                          d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
-                        />
-                      </svg>
-                    </button>
-                    <button
-                      type="button"
-                      data-no-haptic
-                      class="az-mode-btn"
-                      class:on={airzone.systemMode === 'cooling'}
-                      disabled={azOffline}
-                      aria-label="Froid"
-                      aria-pressed={airzone.systemMode === 'cooling'}
-                      title="Froid"
-                      onclick={() => {
-                        if (airzone.systemMode === 'cooling') return;
-                        haptic('medium');
-                        airzone.setMode('cooling');
-                      }}
-                    >
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        aria-hidden="true"
-                      >
-                        <line x1="2" x2="22" y1="12" y2="12" />
-                        <line x1="12" x2="12" y1="2" y2="22" />
-                        <path d="m20 16-4-4 4-4" />
-                        <path d="m4 8 4 4-4 4" />
-                        <path d="m16 4-4 4-4-4" />
-                        <path d="m8 20 4-4 4 4" />
-                      </svg>
-                    </button>
-                  </div>
+                {:else}
+                  <path
+                    d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+                  />
                 {/if}
-                <button
-                  type="button"
-                  data-no-haptic
-                  class="toggle-track shrink-0"
-                  class:toggle-on={zone.on}
-                  role="switch"
-                  aria-checked={zone.on}
-                  disabled={azOffline}
-                  aria-label="Allumer / éteindre {zone.name}"
-                  onclick={() => {
-                    haptic('medium');
-                    airzone.setOn(zone.id, !zone.on);
-                  }}
-                >
-                  <span class="toggle-knob"></span>
-                </button>
-              </div>
-            </div>
+              </svg>
+            {/if}
 
-            <!-- Température réelle + consigne sur la MÊME ligne (présentation Séjour) -->
-            <div class="relative z-[1] flex flex-wrap items-center justify-between gap-2">
-              <div class="flex items-baseline gap-2">
-                {#if zone.roomTemp !== null}
+            <!-- Contenu au-dessus de l'icône -->
+            <div class="az-body relative z-[1] flex flex-col gap-2.5">
+              <div class="flex items-center justify-between gap-2">
+                <div class="flex min-w-0 items-center gap-2">
+                  <span
+                    class="h-2 w-2 shrink-0 rounded-full"
+                    style:background-color={airzone.connected ? '#4ade80' : '#f0606a'}
+                    title={airzone.connected ? 'Système en ligne' : 'Système hors ligne'}
+                    aria-hidden="true"
+                  ></span>
+                  <span class="text-[14px] font-semibold" style="color: #eef5ff;">
+                    {zone.name}
+                  </span>
+                </div>
+                <div class="flex shrink-0 items-center gap-2">
+                  {#if zone.isMaster}
+                    <!-- Chaud / Froid : mode GLOBAL, piloté par la zone maître (Parents) -->
+                    <div class="az-mode" role="group" aria-label="Mode Chaud / Froid">
+                      <button
+                        type="button"
+                        data-no-haptic
+                        class="az-mode-btn warm"
+                        class:on={airzone.systemMode === 'heating'}
+                        disabled={azOffline}
+                        aria-label="Chaud"
+                        aria-pressed={airzone.systemMode === 'heating'}
+                        title="Chaud"
+                        onclick={() => {
+                          if (airzone.systemMode === 'heating') return;
+                          haptic('medium');
+                          airzone.setMode('heating');
+                        }}
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          stroke="none"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        data-no-haptic
+                        class="az-mode-btn"
+                        class:on={airzone.systemMode === 'cooling'}
+                        disabled={azOffline}
+                        aria-label="Froid"
+                        aria-pressed={airzone.systemMode === 'cooling'}
+                        title="Froid"
+                        onclick={() => {
+                          if (airzone.systemMode === 'cooling') return;
+                          haptic('medium');
+                          airzone.setMode('cooling');
+                        }}
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          aria-hidden="true"
+                        >
+                          <line x1="2" x2="22" y1="12" y2="12" />
+                          <line x1="12" x2="12" y1="2" y2="22" />
+                          <path d="m20 16-4-4 4-4" />
+                          <path d="m4 8 4 4-4 4" />
+                          <path d="m16 4-4 4-4-4" />
+                          <path d="m8 20 4-4 4 4" />
+                        </svg>
+                      </button>
+                    </div>
+                  {/if}
                   <button
                     type="button"
-                    class="temp-link flex items-baseline gap-0.5"
-                    aria-label={`Historique 4 h — ${zone.name}`}
-                    onclick={() => openTempHistory(`airzone:${zone.id}`, zone.name)}
+                    data-no-haptic
+                    class="toggle-track shrink-0"
+                    class:toggle-on={zone.on}
+                    role="switch"
+                    aria-checked={zone.on}
+                    disabled={azOffline}
+                    aria-label="Allumer / éteindre {zone.name}"
+                    onclick={() => {
+                      haptic('medium');
+                      airzone.setOn(zone.id, !zone.on);
+                    }}
                   >
-                    <span
-                      class="text-[32px] leading-none font-bold tabular-nums"
-                      style="color: #eaf3ff; letter-spacing: -0.02em;"
-                    >
-                      {zone.roomTemp.toFixed(1)}
-                    </span>
-                    <span class="text-[14px] font-medium" style="color: #9ec2d8;">°C</span>
+                    <span class="toggle-knob"></span>
                   </button>
-                {:else}
-                  <div class="flex items-baseline gap-0.5">
-                    <span
-                      class="text-[32px] leading-none font-bold tabular-nums"
-                      style="color: #eaf3ff; letter-spacing: -0.02em;">—</span
-                    >
-                    <span class="text-[14px] font-medium" style="color: #9ec2d8;">°C</span>
-                  </div>
-                {/if}
-                {#if zone.humidity !== null}
-                  <span class="text-[13px] tabular-nums" style="color: #7fdcff;">
-                    {Math.round(zone.humidity)}%
-                  </span>
-                {/if}
+                </div>
               </div>
 
-              <div class="dk-bar">
-                <button
-                  type="button"
-                  data-no-haptic
-                  class="gbtn"
-                  class:gbtn-dim={!zone.on || azOffline}
-                  disabled={!zone.on || azOffline}
-                  aria-label="Baisser la consigne {zone.name}"
-                  onclick={() => {
-                    haptic('light');
-                    airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) - (zone.tempStep ?? 0.5));
-                  }}>−</button
-                >
-                <div class="dk-tgt" class:dk-tgt-off={!zone.on}>
-                  <b
-                    >{zone.setpoint !== null
-                      ? zone.setpoint % 1
-                        ? zone.setpoint.toFixed(1)
-                        : zone.setpoint.toFixed(0)
-                      : '—'}<i>°</i></b
-                  >
-                  <span>Consigne</span>
+              <!-- Température réelle + consigne sur la MÊME ligne (présentation Séjour) -->
+              <div class="relative z-[1] flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-baseline gap-2">
+                  {#if zone.roomTemp !== null}
+                    <button
+                      type="button"
+                      class="temp-link flex items-baseline gap-0.5"
+                      aria-label={`Historique 4 h — ${zone.name}`}
+                      onclick={() => openTempHistory(`airzone:${zone.id}`, zone.name)}
+                    >
+                      <span
+                        class="text-[32px] leading-none font-bold tabular-nums"
+                        style="color: #eaf3ff; letter-spacing: -0.02em;"
+                      >
+                        {zone.roomTemp.toFixed(1)}
+                      </span>
+                      <span class="text-[14px] font-medium" style="color: #9ec2d8;">°C</span>
+                    </button>
+                  {:else}
+                    <div class="flex items-baseline gap-0.5">
+                      <span
+                        class="text-[32px] leading-none font-bold tabular-nums"
+                        style="color: #eaf3ff; letter-spacing: -0.02em;">—</span
+                      >
+                      <span class="text-[14px] font-medium" style="color: #9ec2d8;">°C</span>
+                    </div>
+                  {/if}
+                  {#if zone.humidity !== null}
+                    <span class="text-[13px] tabular-nums" style="color: #7fdcff;">
+                      {Math.round(zone.humidity)}%
+                    </span>
+                  {/if}
                 </div>
-                <button
-                  type="button"
-                  data-no-haptic
-                  class="gbtn"
-                  class:gbtn-dim={!zone.on || azOffline}
-                  disabled={!zone.on || azOffline}
-                  aria-label="Monter la consigne {zone.name}"
-                  onclick={() => {
-                    haptic('light');
-                    airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) + (zone.tempStep ?? 0.5));
-                  }}>+</button
-                >
+
+                <div class="dk-bar">
+                  <button
+                    type="button"
+                    data-no-haptic
+                    class="gbtn"
+                    class:gbtn-dim={!zone.on || azOffline}
+                    disabled={!zone.on || azOffline}
+                    aria-label="Baisser la consigne {zone.name}"
+                    onclick={() => {
+                      haptic('light');
+                      airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) - (zone.tempStep ?? 0.5));
+                    }}>−</button
+                  >
+                  <div class="dk-tgt" class:dk-tgt-off={!zone.on}>
+                    <b
+                      >{zone.setpoint !== null
+                        ? zone.setpoint % 1
+                          ? zone.setpoint.toFixed(1)
+                          : zone.setpoint.toFixed(0)
+                        : '—'}<i>°</i></b
+                    >
+                    <span>Consigne</span>
+                  </div>
+                  <button
+                    type="button"
+                    data-no-haptic
+                    class="gbtn"
+                    class:gbtn-dim={!zone.on || azOffline}
+                    disabled={!zone.on || azOffline}
+                    aria-label="Monter la consigne {zone.name}"
+                    onclick={() => {
+                      haptic('light');
+                      airzone.setSetpoint(zone.id, (zone.setpoint ?? 24) + (zone.tempStep ?? 0.5));
+                    }}>+</button
+                  >
+                </div>
               </div>
             </div>
-          </div>
-        </article>
-      {/each}
-    </div>
-  </section>
+          </article>
+        {/each}
+      </div>
+    </section>
 
-  <!-- Dès l'iPad, la salle de bain et les thermomètres se partagent la ligne :
-       chacune tenait une ligne entière pour une carte large de 350 px. -->
-  <div class="pad:grid pad:grid-cols-2 pad:items-start pad:gap-3 contents">
     <!-- ═══ Salle de bain (sèche-serviette) — sous les chambres ═══ -->
-    <section>
-      <div class="pad:grid-cols-1 grid grid-cols-1 sm:grid-cols-2">
+    <section class="pad:contents">
+      <div class="pad:contents grid grid-cols-1 gap-3 sm:grid-cols-2">
         <ThermostatCard />
       </div>
     </section>
 
-    <!-- ═══ Thermomètres Zigbee (déplacés depuis /pieces) ═══ -->
+    <!-- ═══ Thermomètres Zigbee — dernière case de la grille commune ═══ -->
     {#if thermoSensors.length > 0}
-      <section>
+      <section class="pad:contents">
         <div class="thermo-grid grid grid-cols-3 gap-2">
           {#each thermoSensors as device (device.ieee)}
             <ZigbeeSensorTile
@@ -1057,9 +1068,22 @@
      demi-largeur vaut 500 px : les 3 colonnes reviennent.
      Media query écrite en clair plutôt qu'en variantes Tailwind empilées : ici
      l'ordre de cascade entre `pad:` et `lg:` doit être sans ambiguïté. */
-  @media (min-width: 768px) and (min-height: 600px) and (max-width: 1023px) {
+  /* Dans la grille commune, une carte de zone fait face à la carte Séjour, deux
+     fois plus haute : elle est étirée pour ne pas laisser de trou, et son
+     contenu se répartit alors sur toute la hauteur au lieu de se tasser en haut
+     (l'aura flocon/flamme occupe le centre). N'affecte que `.az-zone` — la carte
+     Séjour, verrouillée, n'a pas cette classe. */
+  @media (min-width: 768px) and (min-height: 600px) {
+    .az-body {
+      flex: 1;
+      justify-content: space-between;
+    }
+  }
+
+  @media (min-width: 768px) and (min-height: 600px) {
     .thermo-grid {
       grid-template-columns: 1fr;
+      align-content: space-between;
     }
   }
 

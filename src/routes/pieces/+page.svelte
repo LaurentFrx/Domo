@@ -295,13 +295,16 @@
       />
     {/if}
 
-    <!-- Dès l'iPad, le store-banne (largeur bornée à 340) et la ligne des
-         commandes rapides se partagent la ligne : seul, le store laissait 500 px
-         de vide à sa droite. `contents` = sur iPhone, ce groupe n'existe pas. -->
+    <!-- Dès l'iPad : le store-banne (image + 2 boutons, borné à 340 px) tient la
+         colonne de gauche sur TOUTE la hauteur du bloc, et les commandes —
+         raccourcis, sèche-serviette, prises et capteurs — s'empilent à sa droite.
+         Avant, chacune de ces trois listes posait sa propre ligne pleine largeur :
+         le store laissait 500 px de vide à sa droite, le sèche-serviette 700.
+         `contents` = sur iPhone, ce groupe n'existe pas. -->
     <div class="pad:grid pad:grid-cols-[340px_minmax(0,1fr)] pad:items-start pad:gap-3 contents">
       <!-- ═══ Store-banne — commande dédiée, à part des volets roulants ═══ -->
       {#if storeShutter}
-        <div class="store-wrap">
+        <div class="store-wrap pad:row-span-3">
           <StoreCard shutter={storeShutter} />
         </div>
       {/if}
@@ -327,39 +330,39 @@
           {#if portailDevice}<ZigbeeGenericTile device={portailDevice} />{/if}
         </div>
       {/if}
-    </div>
 
-    <!-- ═══ Reste : sèche-serviette (iPad), autres switches/lumières Zigbee ═══ -->
-    {#if restSwitches.length > 0 || restOthers.length > 0}
-      <div class="pad:grid-cols-3 grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
-        {#each restSwitches as sw (sw.nodeId)}
-          {#if sw.nodeId === 1}
-            <!-- Sèche-serviette : doublon avec la carte « Salle de bain » (/climat) +
-                 piloté par le daemon → masqué sur iPhone, gardé sur iPad/desktop. -->
-            <div class="hidden sm:block">
+      <!-- ═══ Reste : sèche-serviette (iPad), autres switches/lumières Zigbee ═══ -->
+      {#if restSwitches.length > 0 || restOthers.length > 0}
+        <div class="pad:grid-cols-2 grid min-w-0 grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-3">
+          {#each restSwitches as sw (sw.nodeId)}
+            {#if sw.nodeId === 1}
+              <!-- Sèche-serviette : doublon avec la carte « Salle de bain » (/climat) +
+                   piloté par le daemon → masqué sur iPhone, gardé sur iPad/desktop. -->
+              <div class="hidden sm:block">
+                <SwitchTile {sw} />
+              </div>
+            {:else}
               <SwitchTile {sw} />
-            </div>
-          {:else}
-            <SwitchTile {sw} />
-          {/if}
-        {/each}
-        {#each restOthers as device (device.ieee)}
-          <ZigbeeGenericTile {device} />
-        {/each}
-      </div>
-    {/if}
+            {/if}
+          {/each}
+          {#each restOthers as device (device.ieee)}
+            <ZigbeeGenericTile {device} />
+          {/each}
+        </div>
+      {/if}
 
-    <!-- ═══ Prises / capteurs Zigbee (hors imprimante) — pleine largeur sur iPhone ═══ -->
-    {#if flatZigbeePlugs.length + flatZigbeeSensors.length > 0}
-      <div class="pad:grid-cols-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {#each flatZigbeePlugs as device (device.ieee)}
-          <ZigbeePlugTile {device} />
-        {/each}
-        {#each flatZigbeeSensors as device (device.ieee)}
-          <ZigbeeSensorTile {device} />
-        {/each}
-      </div>
-    {/if}
+      <!-- ═══ Prises / capteurs Zigbee (hors imprimante) ═══ -->
+      {#if flatZigbeePlugs.length + flatZigbeeSensors.length > 0}
+        <div class="pad:grid-cols-2 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {#each flatZigbeePlugs as device (device.ieee)}
+            <ZigbeePlugTile {device} />
+          {/each}
+          {#each flatZigbeeSensors as device (device.ieee)}
+            <ZigbeeSensorTile {device} />
+          {/each}
+        </div>
+      {/if}
+    </div>
   {/if}
 
   <!-- Terrasse et imprimante se partagent la ligne dès l'iPad : deux cartes que

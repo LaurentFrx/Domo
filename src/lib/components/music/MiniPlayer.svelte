@@ -264,8 +264,9 @@
       bottom: 16px;
     }
   }
-  /* ≥ lg (iPad paysage / desktop) : sidebar pleine 280px. */
-  @media (min-width: 1024px) {
+  /* Desktop À LA SOURIS : la sidebar passe à 280 px (cf. variant `desk` dans
+     app.css) — l'iPad, tactile, garde le rail quelle que soit sa largeur. */
+  @media (min-width: 1280px) and (pointer: fine) {
     .mini {
       left: calc(280px + 20px);
     }

@@ -193,6 +193,14 @@
    pour ce qui a besoin de la pleine largeur (graphes temporels). */
 @custom-variant pad (@media (min-width: 768px) and (min-height: 600px));
 
+/* ─── Variant `desk:` — un vrai poste de travail, jamais une tablette ────────
+   La sidebar large (280 px de libellés) n'a de sens qu'à la souris : un iPad
+   Pro 12,9" en paysage fait 1366 px de large, autant qu'un laptop, et la
+   largeur seule le classerait « desktop ». `pointer: fine` tranche — sur iPad
+   le pointeur est grossier (le doigt), et la navigation reste le rail de 72 px
+   qui rend 208 px de dalle au contenu. */
+@custom-variant desk (@media (min-width: 1280px) and (pointer: fine));
+
 [data-theme='dark'] {
   /* Moins « noir » : canvas remonté ; cartes nettement plus claires (l'élévation
      se lit par la clarté de surface, pas par l'obscurité) + translucides (verre). */

@@ -1151,8 +1151,10 @@
               ajouter un album depuis sa fiche.
             </p>
           {:else}
+            <!-- Deux colonnes de rangées dès l'iPad : une playlist n'a pas besoin
+                 de 1 000 px pour dire « 12 titres · 48 min ». -->
             <div
-              class="rounded-[var(--radius-2xl)] border"
+              class="pl-list rounded-[var(--radius-2xl)] border"
               style="background: var(--color-card); border-color: var(--color-border);"
             >
               {#each plex.playlists as pl (pl.key)}
@@ -2155,6 +2157,25 @@
   .row + .more,
   .row-btn + .row-btn {
     border-top: 1px solid oklch(0.52 0.06 286 / 0.25);
+  }
+  /* Liste des playlists sur deux colonnes dès l'iPad. Les séparateurs sont
+     reposés en conséquence : trait horizontal à partir de la 3ᵉ rangée (les deux
+     premières forment la première ligne), trait vertical sur la colonne de
+     droite. Le `.row + .row` ci-dessus, pensé pour une pile, est neutralisé. */
+  @media (min-width: 768px) and (min-height: 600px) {
+    .pl-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+    .pl-list > :global(.row) {
+      border-top: 0;
+    }
+    .pl-list > :global(.row:nth-child(n + 3)) {
+      border-top: 1px solid oklch(0.52 0.06 286 / 0.25);
+    }
+    .pl-list > :global(.row:nth-child(even)) {
+      border-left: 1px solid oklch(0.52 0.06 286 / 0.25);
+    }
   }
   .row-btn {
     width: 100%;

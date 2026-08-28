@@ -536,7 +536,7 @@
        reste donc intact, et l'accueil tient d'un seul écran au lieu de dérouler
        1 200 px. Cf. `@custom-variant pad` dans src/app.css. -->
   <div
-    class="pad:grid pad:grid-cols-2 pad:grid-rows-[auto_auto_min-content_1fr] pad:items-start relative flex flex-col gap-3.5 pb-3 sm:gap-5 sm:pb-4"
+    class="home-grid relative flex flex-col gap-3.5 pb-3 sm:gap-5 sm:pb-4"
     class:stagger-enter={staggerEnter}
     style="z-index: 1;"
   >
@@ -545,7 +545,7 @@
       src="/header-accueil.webp?v=4"
       alt=""
       aria-hidden="true"
-      class="pad:col-span-2 -mb-3.5 h-[52px] w-full rounded-[var(--radius-2xl)] object-cover object-bottom sm:-mb-5 sm:h-[84px]"
+      class="home-banner -mb-3.5 h-[52px] w-full rounded-[var(--radius-2xl)] object-cover object-bottom sm:-mb-5 sm:h-[84px]"
     />
 
     <!-- Carte Batterie (snippet : rendue UNE fois, la grille la place). -->
@@ -751,15 +751,15 @@
 
     <!-- ═══ Économies solaires — carte héro, pleine largeur (les 4 médailles ont
          besoin de la largeur ; en demi-colonne elles deviennent illisibles) ═══ -->
-    <div class="pad:col-span-2"><SavingsCard /></div>
+    <div class="home-savings"><SavingsCard /></div>
 
     <!-- Batterie : 2ᵉ sur iPhone (au-dessus du Sankey) ; sur iPad, en HAUT de la
          colonne de droite — l'ordre du DOM ne bouge pas, seul le placement change. -->
-    <div class="pad:col-start-2 pad:row-start-3">{@render batteryCard()}</div>
+    <div class="home-bat">{@render batteryCard()}</div>
 
     <!-- Sankey : colonne de gauche sur iPad, sur 2 rangées (il est carré, donc
          deux fois plus haut que la batterie et le bilan qui lui font face). -->
-    <div class="pad:col-start-1 pad:row-span-2 pad:row-start-3 flex flex-col gap-3.5 sm:gap-4">
+    <div class="home-sankey flex flex-col gap-3.5 sm:gap-4">
       <FlowDiagram
         pvSudW={pvSudA}
         pvOuestW={pvOuestA}
@@ -792,11 +792,73 @@
          (Les KPI « depuis l'installation » ont rejoint le menu ☰ → « Bilan &
          installation » : un cumul de plusieurs années n'a rien à faire sur
          l'écran qu'on ouvre dix fois par jour.) -->
-    <div class="pad:col-start-2 pad:row-start-4">{@render flowsCard()}</div>
+    <div class="home-flows">{@render flowsCard()}</div>
   </div>
 </div>
 
 <style>
+  /* ═══ Mise en page iPad ══════════════════════════════════════════════════
+     iPhone : pile simple (le `flex flex-col` du markup). Dès l'iPad, la pile
+     devient une grille et chaque carte est placée à la main — l'ordre du DOM
+     reste donc celui de l'iPhone, seul le placement change.
+
+     PORTRAIT (2 colonnes) : Économies en tête, puis le Sankey à gauche face à
+     la batterie et au bilan du jour.
+
+     PAYSAGE (3 colonnes) : le Sankey est CARRÉ — plus sa colonne est large,
+     plus il est haut. En deux colonnes il imposait 520 px de hauteur à deux
+     cartes qui en font 300 à elles deux : 220 px de vide. Il tient donc la
+     colonne large, et les trois cartes de lecture se rangent à sa droite sur
+     deux rangées, ce qui ramène l'écart sous 30 px. */
+  @media (min-width: 768px) and (min-height: 600px) {
+    .home-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto min-content 1fr;
+      align-items: start;
+    }
+    .home-banner,
+    .home-savings {
+      grid-column: 1 / -1;
+    }
+    .home-sankey {
+      grid-column: 1;
+      grid-row: 3 / span 2;
+    }
+    .home-bat {
+      grid-column: 2;
+      grid-row: 3;
+    }
+    .home-flows {
+      grid-column: 2;
+      grid-row: 4;
+    }
+  }
+  /* Seuil à 1120 px et non 1024 : sur un iPad 9 en paysage (1024), trois
+     colonnes réduiraient les barres de SoC à 40 px. */
+  @media (min-width: 1120px) and (min-height: 600px) {
+    .home-grid {
+      grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-rows: auto auto auto;
+    }
+    .home-savings {
+      grid-column: 2 / -1;
+      grid-row: 2;
+    }
+    .home-sankey {
+      grid-column: 1;
+      grid-row: 2 / span 2;
+    }
+    .home-bat {
+      grid-column: 2;
+      grid-row: 3;
+    }
+    .home-flows {
+      grid-column: 3;
+      grid-row: 3;
+    }
+  }
+
   /* ═══ Carte Batterie : le flux porte l'état (le NIVEAU est dans les 3 barres) ═══ */
   .bat-flow {
     color: var(--color-muted-fg);

@@ -294,7 +294,7 @@
   <main
     id="main"
     tabindex="-1"
-    class="safe-top min-h-screen sm:pl-[72px] lg:pl-[280px]"
+    class="safe-top desk:pl-[280px] min-h-screen sm:pl-[72px]"
     class:has-mini={!!player.current}
     style="padding-bottom: calc(60px + env(safe-area-inset-bottom) + var(--mini-h, 0px));"
   >
