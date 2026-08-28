@@ -64,9 +64,20 @@ export default defineConfig({
         // Via manifestTransforms (et pas maximumFileSizeToCacheInBytes : le
         // plugin convertit l'avertissement « fichier trop gros » en ÉCHEC de
         // build — le nom du chunk étant hashé, impossible de le globIgnorer).
+        // ⚠️ Fournir manifestTransforms REMPLACE la transformation interne de
+        // @vite-pwa/sveltekit (posée seulement `if (!config.manifestTransforms)`)
+        // qui retire le préfixe `client/` des URL. Sans cette réplique, le SW
+        // précachait /client/… → 404 → install en échec → PWA FIGÉE sur
+        // l'ancien SW (régression attrapée en headless le 28/08, même piège que
+        // navigateFallback le 08/08).
         manifestTransforms: [
           async (entries) => ({
-            manifest: entries.filter((e) => e.size <= 600_000),
+            manifest: entries
+              .filter((e) => e.size <= 600_000)
+              .map((e) => {
+                if (e.url.startsWith('client/')) e.url = e.url.slice(7);
+                return e;
+              }),
             warnings: []
           })
         ],
