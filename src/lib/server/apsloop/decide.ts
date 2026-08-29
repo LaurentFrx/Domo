@@ -69,10 +69,24 @@ export function decideAps(
     return apply(hi, 'failsafe', 'compteur EM-50 muet — plafond rendu au maximum');
   }
 
-  // ── 2. Onduleur endormi (nuit) : on rend le plafond pour le lever du jour. ──
+  // ── 2. Onduleur endormi (nuit) : RIEN À ÉCRIRE. ──
+  // Ce cas rendait le plafond au maximum — c'est-à-dire qu'il ENVOYAIT une
+  // consigne à un appareil éteint. Le pont ne pouvait pas la confirmer, deux
+  // ticks suffisaient à faire compter deux échecs, et la protection se coupait
+  // elle-même (12/08/2026 21h23, puis 17 jours d'injection non bridée).
+  // Ne rien écrire est aussi le comportement SÛR : le plafond est un bail de
+  // 600 s côté pont, il retombe de lui-même au maximum si personne ne le
+  // réaffirme — l'onduleur retrouve donc sa pleine puissance au réveil, sans
+  // qu'on ait à le lui dire. Et il n'y a rien à brider sur un onduleur à 0 W.
   if (!inputs.apsAvailable) {
     st.exportSinceTs = null;
-    return apply(hi, 'night', 'onduleur endormi — plafond rendu au maximum pour demain');
+    return {
+      mode: 'night',
+      writeW: null,
+      targetW: hi,
+      reason: 'onduleur endormi — rien à écrire (le bail rend le plafond au maximum)',
+      nextState: st
+    };
   }
 
   const exportW = Math.max(0, -inputs.gridW);
@@ -141,4 +155,49 @@ export function decideAps(
     reason: `injection ${Math.round(exportW)} W tolérée — plafond maintenu`,
     nextState: st
   };
+}
+
+/** Lecture du pont réduite à ce dont le réarmement a besoin. */
+export interface ApsRearmRead {
+  available: boolean;
+  writeEnabled: boolean;
+  powerW: number;
+}
+
+export interface ApsRearmVerdict {
+  rearm: boolean;
+  /** Motif du refus, à journaliser tel quel (null quand on réarme). */
+  note: string | null;
+}
+
+/**
+ * Faut-il rallumer la protection après un arrêt de sécurité ?
+ *
+ * La consigne « aucune réinjection » n'a pas de pause : un garde-fou qui s'est
+ * coupé doit revenir dès que les conditions sont saines. Mais pas n'importe
+ * comment — on exige un onduleur JOIGNABLE, OUVERT à l'écriture et ÉVEILLÉ
+ * (il produit) : réarmer sur un onduleur endormi rejouerait la panne d'origine.
+ * Le quota journalier borne le va-et-vient si le pont refuse vraiment.
+ *
+ * Pur : l'appelant fournit l'horloge et la lecture du pont.
+ */
+export function shouldRearmAps(
+  st: { autoDisabledReason: string | null; autoDisabledTs: number | null; rearmCount: number },
+  now: number,
+  aps: ApsRearmRead | null,
+  opts: { delayMs: number; maxPerDay: number }
+): ApsRearmVerdict {
+  const raison = st.autoDisabledReason;
+  if (!raison) return { rearm: false, note: null }; // arrêt manuel : jamais contourné
+  if (st.autoDisabledTs === null)
+    return { rearm: false, note: `${raison} — réarmement automatique programmé` };
+  if (now - st.autoDisabledTs < opts.delayMs)
+    return { rearm: false, note: `${raison} — réarmement dans quelques minutes` };
+  if (st.rearmCount >= opts.maxPerDay)
+    return { rearm: false, note: `${raison} — réarmements du jour épuisés` };
+  if (!aps || !aps.available || !aps.writeEnabled)
+    return { rearm: false, note: `${raison} — onduleur injoignable` };
+  if (aps.powerW <= 0)
+    return { rearm: false, note: `${raison} — onduleur endormi, réarmement différé` };
+  return { rearm: true, note: null };
 }

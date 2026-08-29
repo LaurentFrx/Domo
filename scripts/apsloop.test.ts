@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decideAps } from '../src/lib/server/apsloop/decide.ts';
+import { decideAps, shouldRearmAps } from '../src/lib/server/apsloop/decide.ts';
 import {
   defaultApsLoopConfig,
   defaultApsLoopState,
@@ -47,14 +47,19 @@ test('compteur EM-50 muet → plafond rendu au MAXIMUM (jamais de bridage aveugl
   assert.equal(d.writeW, 960);
 });
 
-test('onduleur endormi (nuit) → plafond rendu au maximum pour le lendemain', () => {
+// Ce test affirmait « endormi → on écrit 960 W ». C'est ce comportement qui a
+// éteint la protection le 12/08/2026 : l'écriture partait vers un onduleur
+// coupé, n'était jamais confirmée, et deux ticks suffisaient à la désarmer.
+// Le plafond est un bail de 600 s côté pont : il retombe seul au maximum.
+test('onduleur endormi (nuit) → on n’écrit RIEN, le bail rend le plafond seul', () => {
   const d = decideAps(
     inp({ apsAvailable: false, apsW: 0, apsMaxW: 200 }),
     cfg,
     st({ lastCmdW: 200 })
   );
   assert.equal(d.mode, 'night');
-  assert.equal(d.writeW, 960);
+  assert.equal(d.writeW, null);
+  assert.equal(d.targetW, 960, 'la cible reste le maximum — c’est l’écriture qui est inutile');
 });
 
 test('SOUTIRAGE EDF → plafond au maximum, jamais de bridage pendant un import', () => {
@@ -159,4 +164,102 @@ test('la cible reste TOUJOURS dans les bornes de l’appareil', () => {
       assert.ok(d.writeW <= 960, `${d.writeW} > max`);
     }
   }
+});
+
+// ─── Régression 12/08/2026 : la protection s'est éteinte toute seule ────────
+// L'onduleur EZ1 se coupe quand il ne produit plus. Le tick lui écrivait quand
+// même « plafond au maximum », le pont ne pouvait pas confirmer, deux ticks
+// suffisaient à compter deux échecs → auto-désactivation, puis 17 jours
+// d'injection non bridée. ENDORMI ≠ REFUS.
+
+test('onduleur endormi : AUCUNE écriture (sinon deux échecs = protection coupée)', () => {
+  const d = decideAps(inp({ apsAvailable: false, apsW: 0, gridW: -900 }), cfg, st());
+  assert.equal(d.mode, 'night');
+  assert.equal(d.writeW, null, 'écrire sur un onduleur éteint = un échec de confirmation garanti');
+});
+
+test('onduleur endormi : le compte d’injection est remis à zéro', () => {
+  const s = st({ exportSinceTs: T0 - 600_000 });
+  const d = decideAps(inp({ apsAvailable: false, apsW: 0, gridW: -900 }), cfg, s);
+  assert.equal(d.nextState.exportSinceTs, null);
+});
+
+test('onduleur réveillé : le bridage repart normalement', () => {
+  const s = st({ exportSinceTs: T0 - 120_000 });
+  const d = decideAps(inp({ apsAvailable: true, apsW: 800, gridW: -900 }), cfg, s);
+  assert.ok(d.writeW !== null && d.writeW < 960, 'injection soutenue → plafond abaissé');
+});
+
+// ─── Réarmement automatique (consigne : aucune réinjection, jamais de pause) ─
+
+const REARM = { delayMs: 15 * 60_000, maxPerDay: 4 };
+const awake = { available: true, writeEnabled: true, powerW: 400 };
+const down = (o: Partial<typeof awake> = {}) => ({ ...awake, ...o });
+
+test('arrêt MANUEL : jamais contourné', () => {
+  const v = shouldRearmAps(
+    { autoDisabledReason: null, autoDisabledTs: T0, rearmCount: 0 },
+    T0 + 3_600_000,
+    awake,
+    REARM
+  );
+  assert.equal(v.rearm, false);
+});
+
+test('arrêt de sécurité : pas de réarmement avant le délai', () => {
+  const v = shouldRearmAps(
+    { autoDisabledReason: 'plafond non appliqué 2×', autoDisabledTs: T0, rearmCount: 0 },
+    T0 + 60_000,
+    awake,
+    REARM
+  );
+  assert.equal(v.rearm, false);
+});
+
+test('arrêt de sécurité : réarmement une fois le délai passé et l’onduleur éveillé', () => {
+  const v = shouldRearmAps(
+    { autoDisabledReason: 'plafond non appliqué 2×', autoDisabledTs: T0, rearmCount: 0 },
+    T0 + 16 * 60_000,
+    awake,
+    REARM
+  );
+  assert.equal(v.rearm, true);
+});
+
+test('on ne réarme PAS sur un onduleur endormi (ce serait rejouer la panne)', () => {
+  for (const aps of [
+    down({ powerW: 0 }),
+    down({ available: false }),
+    down({ writeEnabled: false }),
+    null
+  ]) {
+    const v = shouldRearmAps(
+      { autoDisabledReason: 'plafond non appliqué 2×', autoDisabledTs: T0, rearmCount: 0 },
+      T0 + 16 * 60_000,
+      aps,
+      REARM
+    );
+    assert.equal(v.rearm, false, `réarmé à tort sur ${JSON.stringify(aps)}`);
+  }
+});
+
+test('quota journalier : on cesse d’insister après 4 réarmements', () => {
+  const v = shouldRearmAps(
+    { autoDisabledReason: 'plafond non appliqué 2×', autoDisabledTs: T0, rearmCount: 4 },
+    T0 + 16 * 60_000,
+    awake,
+    REARM
+  );
+  assert.equal(v.rearm, false);
+});
+
+test('état sans horloge d’arrêt (ancienne version) : daté d’abord, réarmé ensuite', () => {
+  const v = shouldRearmAps(
+    { autoDisabledReason: 'plafond non appliqué 2×', autoDisabledTs: null, rearmCount: 0 },
+    T0,
+    awake,
+    REARM
+  );
+  assert.equal(v.rearm, false);
+  assert.match(v.note ?? '', /programmé/);
 });

@@ -18,7 +18,7 @@ import { readJsonSafe, writeJsonAtomic, withFileLock } from '$lib/server/atomic-
 import { sendPush } from '$lib/server/monitor/push';
 import { parisDate } from '$lib/server/tariffs';
 import { collectSb3Inputs } from './inputs';
-import { decide, feedforwardTarget } from './decide';
+import { decide, feedforwardTarget, shouldRearmSb3 } from './decide';
 import {
   defaultSb3LoopConfig,
   defaultSb3LoopState,
@@ -380,6 +380,26 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
     }
 
     if (!state.enabled) {
+      // Un arrêt de sécurité ne peut pas être définitif : la consigne « aucune
+      // réinjection » ne s'interrompt pas. Le 29/08/2026, la boucle s'est coupée
+      // à 11h43 sur deux consignes non confirmées et est restée éteinte jusqu'au
+      // soir — parc bloqué à 0 W de sortie, batteries pleines, tout le solaire
+      // parti sur le réseau. Elle se réarme donc d'elle-même quand le cloud
+      // redevient sain, avec un quota journalier. EXCEPTION : une faute de
+      // schéma (canary) ne se répare pas toute seule, elle attend un humain.
+      const rearm = tryAutoRearm(state, now);
+      if (rearm.rearmed) {
+        void sendPush({
+          title: '↻ Boucle SB3 réarmée',
+          body: `Le cloud Anker répond de nouveau — la consigne de sortie suit à nouveau la maison (${state.rearmCount}/${REARM_MAX_PER_DAY} aujourd'hui). Arrêt précédent : ${rearm.previousReason}.`,
+          tag: 'sb3loop-rearmed',
+          severity: 'info',
+          url: '/menu/energie'
+        });
+      }
+    }
+
+    if (!state.enabled) {
       // Boucle à l'arrêt : tant qu'un créneau porte encore une consigne de la
       // boucle, on le rend au plan statique avant de sortir.
       const restore = await restoreStaticPlan(state, cfg, now);
@@ -505,6 +525,43 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
     return result(state, d.mode, d.reason, d.houseLoadW, d.targetW, writtenW, confirmedW);
   });
 }
+
+/** Délai minimal avant qu'un arrêt de sécurité se réarme tout seul. */
+const REARM_DELAY_MS = 15 * 60_000;
+/** Réarmements automatiques autorisés par journée (Paris). */
+const REARM_MAX_PER_DAY = 4;
+
+/**
+ * Réarmement automatique après un arrêt de sécurité (décision dans decide.ts,
+ * `shouldRearmSb3` — pure et testée). Ici : horloge, quota du jour, remise à
+ * zéro des compteurs d'échec.
+ */
+function tryAutoRearm(
+  state: Sb3LoopState,
+  now: number
+): { rearmed: boolean; previousReason: string } {
+  const reason = state.autoDisabledReason ?? '';
+  if (state.autoDisabledReason && state.autoDisabledTs === null) state.autoDisabledTs = now;
+  const day = parisDay(now);
+  if (state.rearmDayParis !== day) {
+    state.rearmDayParis = day;
+    state.rearmCount = 0;
+  }
+  if (!shouldRearmSb3(state, now, { delayMs: REARM_DELAY_MS, maxPerDay: REARM_MAX_PER_DAY }))
+    return { rearmed: false, previousReason: reason };
+
+  state.enabled = true;
+  state.autoDisabledReason = null;
+  state.autoDisabledTs = null;
+  state.confirmFailCount = 0;
+  state.transportFailCount = 0;
+  state.restoreAttempts = 0;
+  state.rearmCount += 1;
+  return { rearmed: true, previousReason: reason };
+}
+
+const PARIS_DAY_FMT = new Intl.DateTimeFormat('fr-CA', { timeZone: 'Europe/Paris' });
+const parisDay = (ts: number) => PARIS_DAY_FMT.format(new Date(ts));
 
 const PARIS_HOUR_FMT = new Intl.DateTimeFormat('fr-FR', {
   timeZone: 'Europe/Paris',

@@ -343,3 +343,30 @@ export function decide(
     };
   }
 }
+
+/**
+ * Faut-il rallumer la boucle après un arrêt de sécurité ?
+ *
+ * Même principe que pour le bridage de l'onduleur : la consigne « aucune
+ * réinjection » ne s'interrompt pas, un arrêt de sécurité ne peut donc pas être
+ * définitif. Le 29/08/2026 la boucle s'est coupée à 11h43 sur deux consignes non
+ * confirmées et n'est jamais revenue : parc figé à 0 W de sortie, batteries
+ * pleines, tout le solaire parti sur le réseau jusqu'au soir.
+ *
+ * On ne relance pas à l'aveugle : c'est le tick suivant qui vérifiera le cloud
+ * et re-coupera de lui-même si la panne dure (deux consignes non prises). Le
+ * quota journalier borne ce va-et-vient. EXCEPTION : une faute de schéma
+ * (canary) ne se répare pas toute seule — elle attend une vérification humaine.
+ */
+export function shouldRearmSb3(
+  st: { autoDisabledReason: string | null; autoDisabledTs: number | null; rearmCount: number },
+  now: number,
+  opts: { delayMs: number; maxPerDay: number }
+): boolean {
+  const raison = st.autoDisabledReason;
+  if (!raison) return false; // arrêt manuel : jamais contourné
+  if (raison.startsWith('canary')) return false;
+  if (st.autoDisabledTs === null) return false;
+  if (now - st.autoDisabledTs < opts.delayMs) return false;
+  return st.rearmCount < opts.maxPerDay;
+}

@@ -175,6 +175,11 @@ export interface Sb3LoopState {
   /** Raison d'une auto-désactivation (écritures non prises, canary…). */
   autoDisabledReason: string | null;
   autoDisabledTs: number | null;
+  /** Journée (Paris) du dernier réarmement automatique, et compteur du jour :
+   *  un arrêt de sécurité se rallume seul (consigne « aucune réinjection »),
+   *  mais pas indéfiniment — quatre fois par jour, puis on laisse la main. */
+  rearmDayParis: string | null;
+  rearmCount: number;
   /** Corrections COMMANDÉES mais pas encore visibles au compteur (prédicteur de
    *  Smith) : {ts, deltaW}. Sans elles la boucle compte deux fois la même
    *  correction et entre en cycle limite (docs/regulation-energie.md §3-4). */
@@ -213,6 +218,8 @@ export function defaultSb3LoopState(): Sb3LoopState {
     enabled: false, // JAMAIS actif par défaut — activation explicite (tuile)
     autoDisabledReason: null,
     autoDisabledTs: null,
+    rearmDayParis: null,
+    rearmCount: 0,
     enVol: [],
     ffHoldUntilTs: null,
     transportFailCount: 0,

@@ -15,8 +15,12 @@ export const POST: RequestHandler = async ({ request }) => {
     throw error(400, 'JSON invalide');
   }
   const b = (body ?? {}) as { enabled?: unknown; observationMode?: unknown };
-  if (typeof b.observationMode === 'boolean') await setApsLoopObservation(b.observationMode);
+  // `enabled` D'ABORD : l'ordre inverse rendait un réarmement en un seul appel
+  // impossible — setApsLoopEnabled() repassait la boucle en observation juste
+  // après qu'on l'en avait sortie, et la protection revenait sans commander.
+  // (Le retour forcé en observation a été retiré depuis, l'ordre reste le bon.)
   if (typeof b.enabled === 'boolean') await setApsLoopEnabled(b.enabled);
+  if (typeof b.observationMode === 'boolean') await setApsLoopObservation(b.observationMode);
   if (typeof b.enabled !== 'boolean' && typeof b.observationMode !== 'boolean')
     throw error(400, '{ enabled?: boolean, observationMode?: boolean } requis');
   const s = await readApsLoop();

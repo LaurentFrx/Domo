@@ -4,16 +4,32 @@
  * Sécurités structurelles :
  *  - DÉSACTIVÉE par défaut, et en OBSERVATION à la première activation : elle
  *    journalise le plafond qu'elle AURAIT écrit sans rien commander. Passage au
- *    réel explicite, et retour forcé en observation après un arrêt de sécurité.
+ *    réel explicite.
  *  - à l'arrêt (désactivation) elle REND le plafond au maximum : jamais d'onduleur
  *    laissé bridé par une boucle qui ne tourne plus.
  *  - deux échecs d'écriture consécutifs → auto-désactivation + restauration.
  *  - toute la logique de décision est dans decide.ts (pure, testée).
+ *
+ * CONSIGNE PERMANENTE : aucune réinjection sur le réseau. Ce garde-fou n'a donc
+ * pas le droit de s'éteindre définitivement — trois défauts constatés le
+ * 29/08/2026, après 17 jours d'injection non bridée :
+ *  1. l'onduleur EZ1 s'éteint la nuit ; le renouvellement du bail partait quand
+ *     même, ne recevait pas de confirmation et comptait un échec. ENDORMI ≠
+ *     REFUS : on n'écrit plus quand le pont annonce l'onduleur indisponible
+ *     (même famille de piège que « bornée ≠ refusée » sur la boucle SB3).
+ *  2. un arrêt de sécurité était DÉFINITIF — la protection est restée éteinte du
+ *     12/08 21h23 au 29/08, sans que rien ne la rallume. Elle se réarme
+ *     maintenant d'elle-même dès que l'onduleur est de nouveau joignable ET
+ *     producteur, avec un quota journalier pour ne pas boucler sur une panne.
+ *  3. le réarmement forçait le mode OBSERVATION : la protection revenait, mais
+ *     ne commandait plus rien. Une protection qui regarde ne protège pas.
+ *  4. et rien n'était notifié (contrairement à la boucle SB3).
  */
 import path from 'node:path';
 import { env } from '$env/dynamic/private';
 import { readJsonSafe, writeJsonAtomic, withFileLock } from '$lib/server/atomic-store';
-import { decideAps } from './decide';
+import { decideAps, shouldRearmAps } from './decide';
+import { sendPush } from '$lib/server/monitor/push';
 import {
   defaultApsLoopConfig,
   defaultApsLoopState,
@@ -30,6 +46,14 @@ const LOG_MAX = 40;
 const CONFIRM_FAIL_MAX = 2;
 /** Période de renouvellement du bail de plafond (bail du pont : 600 s). */
 const KEEPALIVE_MS = 120_000;
+/** Délai minimal avant qu'un arrêt de sécurité se réarme tout seul. */
+const REARM_DELAY_MS = 15 * 60_000;
+/** Réarmements automatiques autorisés par journée (Paris). Au-delà, la panne
+ *  est réelle et durable : on cesse d'insister, mais on le DIT. */
+const REARM_MAX_PER_DAY = 4;
+
+const PARIS_DAY_FMT = new Intl.DateTimeFormat('fr-CA', { timeZone: 'Europe/Paris' });
+const parisDay = (ts: number) => PARIS_DAY_FMT.format(new Date(ts));
 
 export interface ApsLogEntry {
   ts: number;
@@ -64,6 +88,11 @@ export interface ApsLoopStore {
   observationMode: boolean;
   lastObs: ApsObservation | null;
   autoDisabledReason: string | null;
+  /** Quand la sécurité a coupé — sert à dater le réarmement automatique. */
+  autoDisabledTs: number | null;
+  /** Journée (Paris) du dernier réarmement automatique, et compteur du jour. */
+  rearmDayParis: string | null;
+  rearmCount: number;
   confirmFailCount: number;
   lastTickTs: number | null;
   lastWriteTs: number | null;
@@ -78,6 +107,9 @@ function defaultStore(): ApsLoopStore {
     observationMode: true,
     lastObs: null,
     autoDisabledReason: null,
+    autoDisabledTs: null,
+    rearmDayParis: null,
+    rearmCount: 0,
     confirmFailCount: 0,
     lastTickTs: null,
     lastWriteTs: null,
@@ -98,6 +130,9 @@ function normalize(raw: unknown): ApsLoopStore {
     observationMode: typeof o.observationMode === 'boolean' ? o.observationMode : d.observationMode,
     lastObs: o.lastObs && typeof o.lastObs === 'object' ? (o.lastObs as ApsObservation) : d.lastObs,
     autoDisabledReason: typeof o.autoDisabledReason === 'string' ? o.autoDisabledReason : null,
+    autoDisabledTs: n(o.autoDisabledTs, null),
+    rearmDayParis: typeof o.rearmDayParis === 'string' ? o.rearmDayParis : null,
+    rearmCount: (n(o.rearmCount, 0) as number) ?? 0,
     confirmFailCount: (n(o.confirmFailCount, 0) as number) ?? 0,
     lastTickTs: n(o.lastTickTs, null),
     lastWriteTs: n(o.lastWriteTs, null),
@@ -127,12 +162,15 @@ export async function setApsLoopEnabled(enabled: boolean): Promise<ApsLoopStore>
     const s = await readApsLoop();
     s.enabled = enabled;
     if (enabled) {
-      // Reprise après un DÉCLENCHEMENT DE SÉCURITÉ : on repasse d'office en
-      // observation. Une panne qu'on n'a pas expliquée ne doit pas se remettre à
-      // commander du matériel d'un simple appui. Un arrêt manuel, lui, rend à
-      // Laurent le mode qu'il avait choisi.
-      if (s.autoDisabledReason) s.observationMode = true;
+      // Le retour forcé en OBSERVATION après un arrêt de sécurité a été RETIRÉ
+      // (29/08/2026). L'intention était prudente — ne pas laisser une panne
+      // inexpliquée reprendre la main sur du matériel — mais le résultat était
+      // une protection anti-injection rallumée qui ne bridait plus rien, alors
+      // que la consigne « aucune réinjection » ne souffre pas d'exception. On
+      // rallume donc pour de bon ; ce sont les gardes du tick (onduleur
+      // indisponible, quota de réarmements) qui tiennent le risque.
       s.autoDisabledReason = null;
+      s.autoDisabledTs = null;
       s.confirmFailCount = 0;
     } else {
       await restoreMax().catch(() => {});
@@ -230,6 +268,52 @@ async function restoreMax(): Promise<void> {
   await writeMax(hi);
 }
 
+/**
+ * Réarmement automatique après un arrêt de sécurité (décision dans decide.ts,
+ * `shouldRearmAps` — pure et testée). Ici on ne fait que le tenir : horloge,
+ * quota du jour, lecture du pont, journal et notification.
+ */
+async function tryAutoRearm(
+  s: ApsLoopStore,
+  now: number
+): Promise<{ rearmed: boolean; note?: string }> {
+  if (!s.autoDisabledReason) return { rearmed: false }; // arrêt voulu par Laurent
+  if (s.autoDisabledTs === null) {
+    // État écrit par une version antérieure : on date l'arrêt maintenant plutôt
+    // que de le laisser sans horloge — le réarmement partira du prochain tick.
+    s.autoDisabledTs = now;
+  }
+  const day = parisDay(now);
+  if (s.rearmDayParis !== day) {
+    s.rearmDayParis = day;
+    s.rearmCount = 0;
+  }
+  // La lecture du pont ne sert qu'à ça : inutile de la faire tant que le délai
+  // n'est pas écoulé (un tick toutes les 20 s, la nuit dure douze heures).
+  const attendu = s.autoDisabledTs !== null && now - s.autoDisabledTs >= REARM_DELAY_MS;
+  const aps = attendu && s.rearmCount < REARM_MAX_PER_DAY ? await readAps() : null;
+  const v = shouldRearmAps(s, now, aps, {
+    delayMs: REARM_DELAY_MS,
+    maxPerDay: REARM_MAX_PER_DAY
+  });
+  if (!v.rearm) return { rearmed: false, note: v.note ?? undefined };
+
+  const raison = s.autoDisabledReason;
+  s.enabled = true;
+  s.autoDisabledReason = null;
+  s.autoDisabledTs = null;
+  s.confirmFailCount = 0;
+  s.rearmCount += 1;
+  void sendPush({
+    title: '↻ Anti-injection onduleur réarmé',
+    body: `L'onduleur répond de nouveau (${Math.round(aps?.powerW ?? 0)} W) — le bridage reprend (${s.rearmCount}/${REARM_MAX_PER_DAY} aujourd'hui). Arrêt précédent : ${raison}.`,
+    tag: 'apsloop-rearmed',
+    severity: 'info',
+    url: '/menu/energie'
+  });
+  return { rearmed: true };
+}
+
 export interface ApsTickResult {
   ran: boolean;
   mode: string;
@@ -244,13 +328,18 @@ export async function apsTick(): Promise<ApsTickResult> {
     s.lastTickTs = now;
 
     if (!s.enabled) {
-      await writeJsonAtomic(STATE_FILE, s);
-      return {
-        ran: false,
-        mode: 'off',
-        writtenW: null,
-        reason: s.autoDisabledReason ?? 'boucle désactivée'
-      };
+      const rearm = await tryAutoRearm(s, now);
+      if (!rearm.rearmed) {
+        await writeJsonAtomic(STATE_FILE, s);
+        return {
+          ran: false,
+          mode: 'off',
+          writtenW: null,
+          reason: rearm.note ?? s.autoDisabledReason ?? 'boucle désactivée'
+        };
+      }
+      // Réarmée : on enchaîne sur un tick normal, sans attendre 20 s de plus —
+      // chaque tick manqué est de l'énergie qui part sur le réseau.
     }
 
     const [aps, grid] = await Promise.all([readAps(), readGrid()]);
@@ -297,6 +386,22 @@ export async function apsTick(): Promise<ApsTickResult> {
     )
       writeW = s.lastCmdW;
 
+    // ENDORMI ≠ REFUS. L'EZ1 s'éteint quand il ne produit plus : le pont le
+    // signale `available: false`. Écrire un plafond dans ce vide ne peut pas
+    // être confirmé — et c'est exactement ce qui a désarmé la protection le
+    // 12/08 à 21h23, sur un onduleur simplement couché pour la nuit. Il n'y a
+    // de toute façon rien à brider sur un onduleur qui produit 0 W.
+    if (writeW !== null && !inputs.apsAvailable) {
+      s.lastObs.ts = now;
+      await writeJsonAtomic(STATE_FILE, s);
+      return {
+        ran: true,
+        mode: 'hold',
+        writtenW: null,
+        reason: 'onduleur endormi — rien à brider'
+      };
+    }
+
     let confirmedW: number | null = null;
     if (writeW !== null && !s.observationMode) {
       const w = await writeMax(writeW);
@@ -310,7 +415,17 @@ export async function apsTick(): Promise<ApsTickResult> {
         if (s.confirmFailCount >= CONFIRM_FAIL_MAX) {
           s.enabled = false;
           s.autoDisabledReason = `plafond non appliqué ${s.confirmFailCount}× (demandé ${writeW} W)`;
+          s.autoDisabledTs = now;
           await restoreMax().catch(() => {});
+          // La boucle SB3 notifiait ses arrêts, pas celle-ci : elle s'est
+          // éteinte le 12/08 et personne ne l'a su pendant 17 jours.
+          void sendPush({
+            title: '🛑 Anti-injection onduleur désactivé',
+            body: `Le plafond demandé (${writeW} W) n'a pas été appliqué ${s.confirmFailCount}× de suite. Plafond rendu au maximum — la production part sur le réseau. Réarmement automatique dès que l'onduleur répond de nouveau.`,
+            tag: 'apsloop-disabled',
+            severity: 'critical',
+            url: '/menu/energie'
+          });
         }
       }
     }

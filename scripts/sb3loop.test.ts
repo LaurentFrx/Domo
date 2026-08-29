@@ -10,7 +10,12 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, feedforwardTarget, usableWh } from '../src/lib/server/sb3loop/decide.ts';
+import {
+  decide,
+  feedforwardTarget,
+  usableWh,
+  shouldRearmSb3
+} from '../src/lib/server/sb3loop/decide.ts';
 import {
   defaultSb3LoopConfig,
   defaultSb3LoopState,
@@ -682,4 +687,60 @@ test('HOLD : expiré → la baisse redevient normale', () => {
     st({ lastCmdW: 2000, ffHoldUntilTs: NOW - 1_000 })
   );
   assert.ok((d.writeW ?? 2000) < 2000, 'hold expiré : on baisse');
+});
+
+// ─── Régression 29/08/2026 : arrêt de sécurité devenu définitif ─────────────
+// La boucle s'est coupée à 11h43 sur deux consignes non confirmées et n'est
+// jamais revenue : parc figé à 0 W de sortie, batteries pleines, tout le
+// solaire parti sur le réseau jusqu'au soir. La consigne « aucune réinjection »
+// ne connaît pas de pause : un arrêt de sécurité doit se rallumer seul.
+
+const SB3_REARM = { delayMs: 15 * 60_000, maxPerDay: 4 };
+const TR = 1_800_000_000_000;
+
+test('arrêt MANUEL : jamais contourné', () => {
+  assert.equal(
+    shouldRearmSb3(
+      { autoDisabledReason: null, autoDisabledTs: TR, rearmCount: 0 },
+      TR + 3_600_000,
+      SB3_REARM
+    ),
+    false
+  );
+});
+
+test('consignes non prises : réarmement une fois le délai passé', () => {
+  const st = {
+    autoDisabledReason: 'consigne non prise 2× (écrit 0 W, confirmé —)',
+    autoDisabledTs: TR,
+    rearmCount: 0
+  };
+  assert.equal(shouldRearmSb3(st, TR + 60_000, SB3_REARM), false, 'trop tôt');
+  assert.equal(shouldRearmSb3(st, TR + 16 * 60_000, SB3_REARM), true);
+});
+
+test('faute de schéma (canary) : PAS de réarmement automatique', () => {
+  assert.equal(
+    shouldRearmSb3(
+      {
+        autoDisabledReason: 'canary schéma : sb3_current_preset_w absent',
+        autoDisabledTs: TR,
+        rearmCount: 0
+      },
+      TR + 24 * 3_600_000,
+      SB3_REARM
+    ),
+    false
+  );
+});
+
+test('quota journalier : on cesse d’insister après 4 réarmements', () => {
+  assert.equal(
+    shouldRearmSb3(
+      { autoDisabledReason: 'consigne non prise 2×', autoDisabledTs: TR, rearmCount: 4 },
+      TR + 16 * 60_000,
+      SB3_REARM
+    ),
+    false
+  );
 });
