@@ -59,12 +59,25 @@
     return (pool.length ? pool : segs).reduce((a, b) => (b.len > a.len ? b : a));
   });
 
+  /**
+   * Instantané musique VU PAR LA LIGNE PEINTE — pas l'état global.
+   *
+   * La tuile peignait la ligne dominante mais annonçait « Musique » dès que le
+   * MODE était actif : avec la table en blanc chaud et le store qui danse, le
+   * bandeau mentait sur la ligne qu'il montrait (constat de l'audit du 28/08 —
+   * « les affichages ne reflètent pas la réalité »). `enabled` vaut désormais
+   * « CETTE ligne suit la musique ».
+   */
   const music = $derived({
-    enabled: wledMusic.enabled,
+    enabled: wledMusic.enabled && dominant !== null && wledMusic.lineStyle(dominant.id) !== null,
     analyzing: wledMusic.analyzing,
     trackKey: wledMusic.trackKey,
     playing: wledMusic.playing
   });
+  /** Combien de lignes suivent la musique (légende « 1 ruban sur 2 »). */
+  const musicLines = $derived(
+    wledMusic.enabled ? wled.segments.filter((s) => wledMusic.lineStyle(s.id) !== null).length : 0
+  );
 
   // Réduction de mouvement SYSTÈME, en état réactif : le MODÈLE en dépend —
   // sans mouvement il ne doit pas fabriquer la version bouclée du dégradé
@@ -168,10 +181,18 @@
     // écrit en toutes lettres serait la troisième fois. On ne garde ici que ce
     // qu'aucune autre partie de la tuile ne porte : l'effet en cours, et le
     // nombre de lignes restées éteintes alors que le reste éclaire.
+    // Deux rubans, un seul sur la musique : le dire, plutôt que laisser croire
+    // que toute la terrasse danse (ou qu'aucune ne le fait).
+    const partial =
+      musicLines > 0 && musicLines < wled.segments.length
+        ? `Musique · ${musicLines} ruban${musicLines > 1 ? 's' : ''} sur ${wled.segments.length}`
+        : '';
     const label = !wled.on
       ? ''
       : lit
-        ? [stateLabel({ on: true, fxName, whiteOnly, music }), lines].filter(Boolean).join(' · ')
+        ? [partial || stateLabel({ on: true, fxName, whiteOnly, music }), lines]
+            .filter(Boolean)
+            .join(' · ')
         : lines;
 
     return {
@@ -320,8 +341,16 @@
     return () => document.removeEventListener('visibilitychange', onVis);
   });
 
+  // La lueur ne respire que si LA LIGNE PEINTE danse vraiment (et pas parce
+  // qu'un style global réactif traîne) — sinon l'écran et le ruban racontent
+  // deux histoires différentes.
   const pulsing = $derived(
-    model.lit && wledMusic.reactive && wledMusic.playing && preferences.animationsEnabled && !hidden
+    model.lit &&
+      dominant !== null &&
+      wledMusic.reactiveFor(dominant.id) &&
+      wledMusic.playing &&
+      preferences.animationsEnabled &&
+      !hidden
   );
 
   let tileEl = $state<HTMLDivElement | null>(null);

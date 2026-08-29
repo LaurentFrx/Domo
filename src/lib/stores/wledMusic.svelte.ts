@@ -77,9 +77,23 @@ class WledMusicStore {
   get styleDef(): WledMusicStyle {
     return musicStyleDef(this.style);
   }
-  /** Le style courant est-il piloté par le spectre ? */
+  /** Le style GLOBAL est-il piloté par le spectre ? (défaut des lignes sans réglage) */
   get reactive(): boolean {
     return this.enabled && this.styleDef.fx !== null;
+  }
+
+  /**
+   * CETTE ligne danse-t-elle vraiment sur le spectre ?
+   *
+   * `reactive` seul lit le style GLOBAL : avec un store en « Cascade » et un
+   * style global « Ambiance », l'écran restait figé pendant que le ruban
+   * dansait — et l'inverse (constat de l'audit du 28/08). Toute animation
+   * liée à une ligne doit passer par ici.
+   */
+  reactiveFor(segId: number): boolean {
+    if (!this.enabled) return false;
+    const key = this.lineStyle(segId);
+    return key !== null && musicStyleDef(key).fx !== null;
   }
 
   /** Ouvre (refcount) le flux temps réel. Fermé quand l'onglet est masqué. */
@@ -189,6 +203,18 @@ class WledMusicStore {
     for (const [k, v] of Object.entries(this.lines)) if (!(k in next)) next[k] = v;
     next[String(segId)] = key;
     this.lines = next; // optimiste
+    this.#lastBeatAt = 0;
+    this.#postMode({ lines: next });
+  }
+
+  /**
+   * Remplace le réglage par ligne EN ENTIER. La piste B écrit TOUJOURS une
+   * valeur explicite pour chaque ligne (un style, ou `null` = ne suit pas) :
+   * sans ça, activer la musique sur un seul ruban la mettait sur les deux —
+   * une ligne « sans réglage » héritait du style global (constaté en test).
+   */
+  setLines(next: Record<string, string | null>): void {
+    this.lines = next; // optimiste, le SSE confirme
     this.#lastBeatAt = 0;
     this.#postMode({ lines: next });
   }

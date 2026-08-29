@@ -1,29 +1,42 @@
 <script lang="ts">
   /**
-   * Feuille de réglages de l'éclairage terrasse (ouverte depuis WledTile).
+   * Feuille de réglages de l'éclairage terrasse — piste B « Deux rubans »
+   * (canevas Design adopté par Laurent le 29/08/2026).
    *
-   * La tuile porte l'essentiel au quotidien (allumé/éteint + luminosité) ; TOUT
-   * le reste vit ici, avec la place de respirer. Structure : ce qui est vrai en
-   * permanence en haut (la barre de lumière + luminosité + interrupteur), puis
-   * UNE décision à la fois via un seul niveau d'onglets — l'ancien empilement
-   * scènes / styles / accordéon / sous-onglets faisait deux niveaux imbriqués.
+   * PRINCIPE : ce qui organise l'écran, c'est L'OBJET PHYSIQUE. Une carte par
+   * ligne de ruban, portant TOUT son état — son interrupteur, sa luminosité
+   * (glissé à même son ruban, peint de sa vraie couleur) et UNE ligne qui dit
+   * ce qu'elle fait. Toucher cette ligne ouvre le choix de sa source.
    *
-   * Le mode Musique est un état SERVEUR partagé (SSE /api/wled/music/live) : la
-   * bascule, les styles et la légende reflètent le ruban réel, jamais un flag
-   * local à l'appareil.
+   * Pourquoi ça remplace les 5 onglets d'avant : le désordre ne venait pas du
+   * nombre d'onglets mais de TROIS façons concurrentes de désigner une ligne
+   * (la portée, l'onglet Lignes, les styles musicaux par ligne). Ici il n'en
+   * reste qu'une : la carte.
    *
-   * BottomSheet ne rend ses enfants que lorsqu'elle est ouverte : l'aperçu
-   * animé (et sa boucle rAF) ne vit donc que le temps de la feuille.
+   * EXCLUSIVITÉ PAR CONSTRUCTION : les sources d'une ligne (ambiance, ma
+   * couleur, un effet, sur la musique) sont un choix unique. Choisir une
+   * ambiance pour la table retire la table de la musique — et ne touche pas
+   * au store, qui continue de danser. Plus besoin d'expliquer une préséance :
+   * elle se voit. (Avant, tout réglage manuel coupait la musique PARTOUT, en
+   * silence — c'était la plainte principale.)
+   *
+   * VÉRITÉ : tout est lu sur l'état réel du module, poussé en temps réel par
+   * le SSE (cf. wled.applyLive) — aucune surface n'affiche un état supposé.
    */
   import BottomSheet from '$components/ui/BottomSheet.svelte';
   import WledColorPicker from './WledColorPicker.svelte';
-  import WledPreview from './WledPreview.svelte';
-  import MusicLightPanel from '$components/music/MusicLightPanel.svelte';
-  import { wled, WLED_AMBIANCES, type WledSegment } from '$stores/wled.svelte';
+  import {
+    wled,
+    lineLabel,
+    previewColor,
+    WLED_AMBIANCES,
+    type WledSegment
+  } from '$stores/wled.svelte';
+  import { averageOfStops, paintStops, stopsToCss, vividTint } from '$lib/wled/preview-model';
   import { wledMusic } from '$stores/wledMusic.svelte';
-  import { preferences } from '$stores/preferences.svelte';
   import { acquire } from '$stores/refcount';
   import { haptic } from '$utils/haptic';
+  import { WLED_MUSIC_STYLES } from '$lib/wled/music-styles';
 
   interface Props {
     open: boolean;
@@ -31,13 +44,9 @@
   }
   let { open, onClose }: Props = $props();
 
-  // La feuille vit au LAYOUT (elle échappe au rail du Pager — cf.
-  // wled-sheet-state) : elle ne peut plus compter sur /pieces pour le polling
-  // wled ni sur WledCard pour le SSE musique — tous deux meurent si /pieces
-  // sort de la fenêtre du Pager (retour arrière sous la modale) alors que la
-  // feuille, globale, reste ouverte sur un état figé sans le savoir. Tant
-  // qu'elle est ouverte, elle tient donc ses PROPRES références ; le refcount
-  // fait qu'aucun doublon n'existe quand /pieces est montée en même temps.
+  // La feuille vit au LAYOUT (elle échappe au rail du Pager) : tant qu'elle
+  // est ouverte, elle tient ses PROPRES références au store et au flux temps
+  // réel — le refcount évite tout doublon avec /pieces ou le lecteur.
   $effect(() => {
     if (!open) return;
     const release = acquire(wled);
@@ -48,46 +57,34 @@
     };
   });
 
-  type Tab = 'ambiances' | 'musique' | 'couleur' | 'effet' | 'lignes';
-  let tab = $state<Tab>('ambiances');
-  let selectedId = $state(0);
-  let showAllFx = $state(false);
+  /** Ligne dont on choisit la source (null = vue principale). */
+  let chooserId = $state<number | null>(null);
+  /** Sous-panneau déplié dans le choix de source (une chose à la fois). */
+  let expanded = $state<'none' | 'couleur' | 'effet'>('none');
   let fxQuery = $state('');
+  let showAllFx = $state(false);
 
-  const isTogether = $derived(wled.scope === 'together');
-  /** Segment ciblé par Couleur / Effet : l'unique en Ensemble, la ligne
-   *  sélectionnée (tap sur sa barre dans l'aperçu) en Par ligne. */
-  const target = $derived(
-    isTogether
-      ? (wled.segments[0] ?? null)
-      : (wled.segments.find((s) => s.id === selectedId) ?? wled.segments[0] ?? null)
-  );
-
+  // La feuille se ferme, ou la ligne disparaît (bascule Ensemble/Par ligne) :
+  // on ne reste jamais sur un écran de réglage orphelin.
   $effect(() => {
-    if (!isTogether && wled.segments.length && !wled.segments.some((s) => s.id === selectedId)) {
-      selectedId = wled.segments[0].id;
+    if (!open) {
+      chooserId = null;
+      expanded = 'none';
     }
   });
-
-  // L'onglet Lignes n'existe que si le découpage a un sens sur ce module.
-  const tabs = $derived<{ key: Tab; label: string }[]>([
-    { key: 'ambiances', label: 'Ambiances' },
-    { key: 'musique', label: 'Musique' },
-    { key: 'couleur', label: 'Couleur' },
-    { key: 'effet', label: 'Effet' },
-    ...(wled.canSplit || !isTogether ? [{ key: 'lignes' as Tab, label: 'Lignes' }] : [])
-  ]);
-  // Le module peut perdre sa 2ᵉ ligne pendant que la feuille est ouverte :
-  // l'onglet disparaîtrait en laissant un panneau vide.
   $effect(() => {
-    if (!tabs.some((t) => t.key === tab)) tab = 'ambiances';
+    if (chooserId !== null && !wled.segments.some((s) => s.id === chooserId)) chooserId = null;
   });
 
+  const segs = $derived(wled.segments);
+  const ids = $derived(segs.map((s) => s.id));
+  const chooser = $derived(segs.find((s) => s.id === chooserId) ?? null);
   const briPct = $derived(Math.round((wled.bri / 255) * 100));
-  const ctlDisabled = $derived(!wled.on);
   const effLoaded = $derived(wled.effects.length > 0);
+  /** « Les lier » = un seul segment pilote tout le ruban. */
+  const linked = $derived(segs.length <= 1);
 
-  // ─── Effets curés (terrasse) : libellés FR → premier nom WLED présent ───
+  // ─── Effets curés (mêmes libellés FR qu'avant : la liste est calée) ───────
   const CURATED_FX: { label: string; names: string[] }[] = [
     { label: 'Fixe', names: ['Solid'] },
     { label: 'Respiration', names: ['Breathe'] },
@@ -114,648 +111,1091 @@
       .map((name, i) => ({ name, i }))
       .filter((e) => !q || e.name.toLowerCase().includes(q));
   });
-
-  /** Un réglage manuel reprend la main sur le suivi musique. */
-  function manual(): void {
-    if (wledMusic.enabled) released = true;
-    wledMusic.releaseControl();
+  /** Libellé FR d'un effet quand il en a un, sinon son nom firmware. */
+  function fxLabel(idx: number): string {
+    const raw = wled.effects[idx];
+    if (!raw) return 'Effet';
+    return CURATED_FX.find((c) => c.names.includes(raw))?.label ?? raw;
   }
 
-  /** Le suivi musique vient d'être coupé par UN GESTE D'ICI — l'avis reste
-   *  affiché tant qu'on n'a pas repris (ou fermé la feuille). Leçon du 28/08 :
-   *  la coupure silencieuse faisait croire que « rien ne fonctionne » — on
-   *  relançait le suivi, on retouchait une ambiance, il retombait sans un mot. */
-  let released = $state(false);
-  $effect(() => {
-    if (wledMusic.enabled) released = false; // repris (ici ou ailleurs)
-    if (!open) released = false;
-  });
+  // Ambiances proposées : « Éteint » est retiré de la grille — chaque carte a
+  // son propre interrupteur, une ambiance qui éteint serait un piège.
+  const ambiances = $derived(WLED_AMBIANCES.filter((a) => !a.off));
+
+  // ─── Ce que fait une ligne, LU sur son état réel ─────────────────────────
+
+  interface LineSource {
+    kind: 'musique' | 'ambiance' | 'effet' | 'couleur';
+    /** Ce que la carte affiche en gros (« Blanc chaud », « Sur la musique — Cascade »). */
+    label: string;
+    /** La précision en dessous, en mots simples. */
+    sub: string;
+    /** Pastille : couleur réelle de la ligne (null = pastille « musique »). */
+    swatch: string | null;
+  }
+
+  function styleLabel(key: string | null): string {
+    if (key === null) return '—';
+    return WLED_MUSIC_STYLES.find((s) => s.key === key)?.label ?? key;
+  }
+
+  /**
+   * Les couleurs que la ligne SORT vraiment — pas sa couleur de base.
+   *
+   * Piège vécu au premier rendu : « Coucher de soleil » peignait un ruban NOIR.
+   * Ces ambiances-là ont une couleur de base nulle et tirent leurs couleurs de
+   * leur PALETTE ; c'est le firmware qui les publie (`/json/palx`, chargées
+   * dans `wled.paletteColors`). Même toolkit que la tuile de /pieces, pour que
+   * les deux surfaces peignent le même ruban.
+   */
+  function segStops(s: WledSegment) {
+    const fxName = wled.effects[s.fx] ?? 'Solid';
+    const palName = wled.palettes[s.pal] ?? 'Default';
+    return paintStops({
+      fxName,
+      palName,
+      palIndex: s.pal,
+      palettes: wled.paletteColors,
+      c1: previewColor(s.col, s.white),
+      c2: s.col2,
+      c3: s.col3
+    });
+  }
+
+  /** Peinture du ruban : le dégradé réel de la palette, sinon la teinte vive. */
+  function segPaint(s: WledSegment): string {
+    const stops = segStops(s);
+    if (stops) return `linear-gradient(90deg, ${stopsToCss(stops)})`;
+    const [r, g, b] = vividTint(previewColor(s.col, s.white));
+    return `rgb(${r} ${g} ${b})`;
+  }
+
+  /** Couleur MOYENNE de la ligne (pastille, lueur) — jamais un noir trompeur. */
+  function segCss(s: WledSegment): string {
+    const stops = segStops(s);
+    const [r, g, b] = vividTint(stops ? averageOfStops(stops) : previewColor(s.col, s.white));
+    return `rgb(${r} ${g} ${b})`;
+  }
+
+  /**
+   * Encre lisible SUR le ruban peint : un ruban jaune pâle avalait le
+   * pourcentage écrit en blanc (constaté au premier rendu). On choisit
+   * l'encre d'après la luminance réelle de la couleur, jamais par défaut.
+   */
+  function inkOn(s: WledSegment): string {
+    const stops = segStops(s);
+    const [r, g, b] = vividTint(stops ? averageOfStops(stops) : previewColor(s.col, s.white));
+    const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+    return lum > 0.55 ? 'oklch(0.22 0.03 286)' : 'oklch(0.99 0 0)';
+  }
+
+  /** Ce que dit la pastille d'état, sans mentir sur la source. */
+  function badgeLabel(kind: LineSource['kind']): string {
+    return kind === 'musique'
+      ? 'Musique'
+      : kind === 'effet'
+        ? 'Effet'
+        : kind === 'couleur'
+          ? 'Couleur'
+          : 'Ambiance';
+  }
+
+  /** Un canal proche ? (tolérance : le module arrondit, les palettes dérivent) */
+  function near(a: number, b: number, tol = 12): boolean {
+    return Math.abs(a - b) <= tol;
+  }
+
+  /**
+   * La source d'une ligne, DÉDUITE de son état module (jamais d'un souvenir
+   * local). L'ordre compte : la musique d'abord (elle pilote réellement le
+   * rendu), puis les ambiances connues, puis l'effet, puis la couleur libre.
+   */
+  function lineSource(s: WledSegment): LineSource {
+    const mstyle = wledMusic.enabled ? wledMusic.lineStyle(s.id) : null;
+    if (mstyle !== null) {
+      const sub = wledMusic.analyzing
+        ? 'Analyse du morceau en cours…'
+        : wledMusic.playing
+          ? 'Danse sur la musique en cours'
+          : 'En attente d’une lecture';
+      return {
+        kind: 'musique',
+        label: `Sur la musique — ${styleLabel(mstyle)}`,
+        sub,
+        swatch: null
+      };
+    }
+    const fxName = wled.effects[s.fx] ?? 'Solid';
+    const amb = ambiances.find((a) => {
+      const names = Array.isArray(a.fx) ? a.fx : a.fx ? [a.fx] : [];
+      if (names.length && !names.includes(fxName)) return false;
+      if (a.col && !a.col.every((c, i) => near(c, s.col[i]))) return false;
+      if (a.white !== undefined && !near(a.white, s.white, 20)) return false;
+      return true;
+    });
+    if (amb) {
+      return {
+        kind: 'ambiance',
+        label: amb.label,
+        sub:
+          fxName === 'Solid' ? 'Lumière fixe — ne suit pas la musique' : 'Ne suit pas la musique',
+        swatch: segCss(s)
+      };
+    }
+    if (fxName !== 'Solid') {
+      return {
+        kind: 'effet',
+        label: fxLabel(s.fx),
+        sub: wled.audioFx.has(s.fx)
+          ? 'Effet sonore posé à la main — sombre sans musique'
+          : 'Effet — ne suit pas la musique',
+        swatch: segCss(s)
+      };
+    }
+    return { kind: 'couleur', label: 'Ma couleur', sub: 'Lumière fixe', swatch: segCss(s) };
+  }
+
+  // ─── Choisir une source : l'exclusivité est appliquée ICI ────────────────
+
+  /**
+   * Une ligne prend une source MANUELLE : elle quitte la musique — elle
+   * SEULE. Si plus aucune ligne ne suit, le mode musique se coupe pour de
+   * bon (sinon le serveur garderait un mode actif sans objet).
+   */
+  function leaveMusic(segId: number): void {
+    if (!wledMusic.enabled) return;
+    const next: Record<string, string | null> = {};
+    for (const id of ids) next[String(id)] = id === segId ? null : wledMusic.lineStyle(id);
+    wledMusic.setLines(next);
+    // Plus personne ne suit : on coupe le mode pour de bon, sinon le serveur
+    // garde un mode actif sans objet (et le ruban un effet sonore orphelin).
+    if (!ids.some((id) => next[String(id)] !== null)) wledMusic.setEnabled(false);
+  }
+
+  function pickAmbiance(segId: number, key: string): void {
+    haptic('medium');
+    leaveMusic(segId);
+    void (linked ? wled.applyAmbiance(key) : wled.applyAmbianceTo(segId, key));
+    chooserId = null;
+  }
+
+  /**
+   * Ce ruban suit la musique — LUI SEUL. Chaque ligne reçoit une valeur
+   * explicite : mode coupé jusque-là ⇒ les autres ne suivent pas (`null`),
+   * sinon elles gardent exactement ce qu'elles faisaient.
+   */
+  function pickMusic(segId: number, styleKey: string): void {
+    haptic('medium');
+    const wasEnabled = wledMusic.enabled;
+    const next: Record<string, string | null> = {};
+    for (const id of ids) {
+      next[String(id)] = id === segId ? styleKey : wasEnabled ? wledMusic.lineStyle(id) : null;
+    }
+    wledMusic.setLines(next);
+    if (!wasEnabled) wledMusic.setEnabled(true);
+    chooserId = null;
+  }
+
+  function openChooser(segId: number): void {
+    haptic('light');
+    expanded = 'none';
+    showAllFx = false;
+    fxQuery = '';
+    chooserId = segId;
+  }
+
+  // ─── Luminosité d'une ligne : glissé à même son ruban ────────────────────
+  // Horizontal, comme la tuile de /pieces (et comme le montre l'étude citée
+  // au canevas : l'horizontal bat le vertical à tout âge sur ce geste).
+
+  let dragId: number | null = null;
+
+  function briFromEvent(ev: PointerEvent, el: HTMLElement): number {
+    const r = el.getBoundingClientRect();
+    const ratio = r.width > 0 ? (ev.clientX - r.left) / r.width : 0;
+    return Math.max(0, Math.min(255, Math.round(ratio * 255)));
+  }
+
+  function rubanDown(ev: PointerEvent, s: WledSegment): void {
+    const el = ev.currentTarget as HTMLElement;
+    el.setPointerCapture(ev.pointerId);
+    dragId = s.id;
+    void wled.setSegBri(s.id, briFromEvent(ev, el));
+  }
+  function rubanMove(ev: PointerEvent, s: WledSegment): void {
+    if (dragId !== s.id) return;
+    void wled.setSegBri(s.id, briFromEvent(ev, ev.currentTarget as HTMLElement));
+  }
+  function rubanUp(ev: PointerEvent): void {
+    if (dragId === null) return;
+    dragId = null;
+    haptic('light');
+    (ev.currentTarget as HTMLElement).releasePointerCapture?.(ev.pointerId);
+  }
+  /** Clavier / VoiceOver : le ruban reste un vrai curseur. */
+  function rubanKey(ev: KeyboardEvent, s: WledSegment): void {
+    const step = ev.shiftKey ? 26 : 8;
+    let v: number | null = null;
+    if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') v = s.bri + step;
+    else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') v = s.bri - step;
+    else if (ev.key === 'Home') v = 0;
+    else if (ev.key === 'End') v = 255;
+    if (v === null) return;
+    ev.preventDefault();
+    void wled.setSegBri(s.id, Math.max(0, Math.min(255, v)));
+  }
 </script>
 
-<BottomSheet {open} title="Terrasse" {onClose}>
-  {#if released && !wledMusic.enabled}
-    <div class="music-released" role="status">
-      <span>Suivi musique coupé — ce réglage manuel a repris la main.</span>
-      <button
-        type="button"
-        class="music-resume"
-        onclick={() => {
-          haptic('light');
-          wledMusic.setEnabled(true);
-        }}
-      >
-        Reprendre
-      </button>
-    </div>
-  {/if}
-  {#if wled.segments.length === 0}
-    <p class="py-4 text-center text-[13px]" style="color: var(--color-muted-fg);">
-      {wled.connected ? 'Aucun segment configuré.' : 'Connexion au module LED…'}
+<BottomSheet
+  {open}
+  title={chooser ? lineLabel(chooser.name) : 'Terrasse'}
+  onClose={() => (chooser ? (chooserId = null) : onClose())}
+>
+  {#if segs.length === 0}
+    <p class="empty">
+      {wled.connected ? 'Aucune ligne configurée sur le module.' : 'Connexion au module LED…'}
     </p>
+  {:else if chooser}
+    {@render sourceChooser(chooser)}
   {:else}
-    <!-- ─── Toujours vrai : la lumière, sa luminosité, son interrupteur ─── -->
-    <WledPreview
-      animated={preferences.animationsEnabled}
-      selectable={!isTogether}
-      {selectedId}
-      onselect={(id) => {
-        haptic('light');
-        selectedId = id;
-      }}
-    />
-
-    <div class="master-row">
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="var(--color-muted-fg)"
-        stroke-width="2"
-        stroke-linecap="round"
-        aria-hidden="true"
-        class="shrink-0"
-      >
-        <circle cx="12" cy="12" r="4" />
-        <path
-          d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M19.1 4.9l-2.2 2.2M7.1 16.9l-2.2 2.2"
-        />
-      </svg>
-      <input
-        type="range"
-        class="bri-range"
-        min="0"
-        max="255"
-        value={wled.bri}
-        disabled={ctlDisabled}
-        oninput={(e) => wled.setBri(+(e.currentTarget as HTMLInputElement).value)}
-        onchange={() => haptic('light')}
-        aria-label="Luminosité générale"
-      />
-      <span class="bri-pct tabular-nums">{briPct}%</span>
-      <label class="toggle-pill" aria-label="Allumer / éteindre l'éclairage terrasse">
-        <input
-          type="checkbox"
-          checked={wled.on}
-          onchange={(e) => {
-            haptic('light');
-            wled.setOn((e.currentTarget as HTMLInputElement).checked);
-          }}
-        />
-        <span class="toggle-pill-knob"></span>
-      </label>
-    </div>
-
-    <!-- ─── UNE décision à la fois — un SEUL niveau d'onglets ─── -->
-    <div class="tabs" role="tablist" aria-label="Que voulez-vous régler ?">
-      {#each tabs as t (t.key)}
-        <button
-          type="button"
-          class="tab"
-          class:active={tab === t.key}
-          role="tab"
-          aria-selected={tab === t.key}
-          onclick={() => (tab = t.key)}
-        >
-          {t.label}
-        </button>
-      {/each}
-    </div>
-
-    {#if tab === 'ambiances'}
-      <!-- Toutes les ambiances, d'un coup : la feuille a la place que la carte
-           n'avait pas (fini le « … » qui dépliait une 2ᵉ rangée). -->
-      <div class="scene-grid" role="group" aria-label="Ambiances">
-        {#each WLED_AMBIANCES as a (a.key)}
-          <button
-            type="button"
-            class="scene"
-            onclick={() => {
-              haptic('medium');
-              manual();
-              wled.applyAmbiance(a.key);
-            }}
-          >
-            <span
-              class="scene-dot"
-              class:scene-off={a.off}
-              style={a.off ? '' : `background: ${a.swatch};`}
-              aria-hidden="true"
-            ></span>
-            <span class="scene-label">{a.label}</span>
-          </button>
-        {/each}
-      </div>
-    {:else if tab === 'musique'}
-      <!-- Panneau PARTAGÉ avec le lecteur de la page Musique : un seul endroit
-           décrit ce réglage, sinon les deux divergent au premier style ajouté. -->
-      <MusicLightPanel />
-    {:else if target}
-      {#if !isTogether}
-        <span class="applies-to">
-          S'applique à <strong>{target.name}</strong> — touchez une barre ci-dessus pour changer de ligne.
-        </span>
-      {/if}
-      {#if tab === 'couleur'}
-        {@render colorPanel(target)}
-      {:else if tab === 'effet'}
-        {@render effectPanel(target)}
-      {:else if tab === 'lignes'}
-        {@render linesPanel()}
-      {/if}
-    {/if}
+    {@render mainView()}
   {/if}
 </BottomSheet>
 
-{#snippet colorPanel(s: WledSegment)}
-  <!-- Vue COULEUR : les pastilles, le blanc — rien d'autre. -->
-  <div class="flex flex-col gap-3" class:dimmed={ctlDisabled}>
-    <WledColorPicker
-      color={s.col}
-      disabled={ctlDisabled}
-      onpick={(rgb) => {
-        manual();
-        wled.setSegColor(s.id, rgb);
-      }}
-    />
-    {#if wled.rgbw}
-      <div class="master-row">
-        <span class="mini-label">Blanc 4000K</span>
-        <input
-          type="range"
-          class="bri-range white-range"
-          min="0"
-          max="255"
-          value={s.white}
-          disabled={ctlDisabled}
-          oninput={(e) => {
-            manual();
-            wled.setSegWhite(s.id, +(e.currentTarget as HTMLInputElement).value);
-          }}
-          onchange={() => haptic('light')}
-          aria-label="Canal blanc 4000K"
-        />
-        <span class="bri-pct tabular-nums">{Math.round((s.white / 255) * 100)}%</span>
-      </div>
+<!-- ══════════════ VUE PRINCIPALE — une carte par ruban ══════════════ -->
+{#snippet mainView()}
+  <div class="stack">
+    {#if !wled.connected}
+      <p class="warn">Le module ne répond pas — les réglages ci-dessous ne partiront pas.</p>
     {/if}
+    {#if wledMusic.enabled && wledMusic.beatError}
+      <p class="warn">La lumière ne reçoit pas la musique : {wledMusic.beatError}</p>
+    {/if}
+
+    <!-- Le seul réglage qui vaut pour TOUTE la terrasse -->
+    <div class="card master">
+      <div class="master-top">
+        <div
+          class="bri-bar"
+          role="slider"
+          tabindex="0"
+          aria-label="Luminosité générale"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow={briPct}
+          onpointerdown={(e) => {
+            const el = e.currentTarget as HTMLElement;
+            el.setPointerCapture(e.pointerId);
+            dragId = -1;
+            void wled.setBri(briFromEvent(e, el));
+          }}
+          onpointermove={(e) => {
+            if (dragId === -1) void wled.setBri(briFromEvent(e, e.currentTarget as HTMLElement));
+          }}
+          onpointerup={(e) => {
+            if (dragId === -1) {
+              dragId = null;
+              haptic('light');
+              (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+            }
+          }}
+          onpointercancel={() => (dragId = null)}
+          onkeydown={(e) => {
+            const step = e.shiftKey ? 26 : 8;
+            let v: number | null = null;
+            if (e.key === 'ArrowRight' || e.key === 'ArrowUp') v = wled.bri + step;
+            else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') v = wled.bri - step;
+            else if (e.key === 'Home') v = 0;
+            else if (e.key === 'End') v = 255;
+            if (v === null) return;
+            e.preventDefault();
+            void wled.setBri(Math.max(0, Math.min(255, v)));
+          }}
+        >
+          <span class="bri-fill" style="width: {briPct}%;"></span>
+          <span class="bri-cap" style="left: calc({briPct}% - 3px);"></span>
+          <span class="bri-text">
+            <svg
+              width="19"
+              height="19"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="4" />
+              <path
+                d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M19.1 4.9l-2.2 2.2M7.1 16.9l-2.2 2.2"
+              />
+            </svg>
+            {briPct} %
+          </span>
+        </div>
+        <button
+          type="button"
+          class="power"
+          class:on={wled.on}
+          aria-pressed={wled.on}
+          aria-label={wled.on ? 'Éteindre la terrasse' : 'Allumer la terrasse'}
+          onclick={() => {
+            haptic('medium');
+            void wled.setOn(!wled.on);
+          }}
+        >
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <path d="M12 3v9" /><path d="M18.4 6.6a9 9 0 1 1-12.8 0" />
+          </svg>
+        </button>
+      </div>
+
+      {#if wled.canSplit}
+        <div class="link-row">
+          <span class="link-text">
+            {linked
+              ? 'Les deux rubans suivent le même réglage'
+              : 'Les deux rubans sont réglés séparément'}
+          </span>
+          <span class="link-label">Les lier</span>
+          <label class="sw" aria-label="Lier les deux rubans">
+            <input
+              type="checkbox"
+              checked={linked}
+              onchange={(e) => {
+                haptic('medium');
+                void wled.setScope(
+                  (e.currentTarget as HTMLInputElement).checked ? 'together' : 'perLine'
+                );
+              }}
+            />
+            <span class="sw-knob"></span>
+          </label>
+        </div>
+      {/if}
+    </div>
+
+    {#if !wled.on}
+      <p class="hint off-hint">
+        Le ruban est éteint — les réglages ci-dessous s'appliqueront à l'allumage.
+      </p>
+    {/if}
+
+    <!-- Une carte par ruban : tout son état, à sa place -->
+    {#each segs as s (s.id)}
+      {@const src = lineSource(s)}
+      {@const pct = Math.round((s.bri / 255) * 100)}
+      <div class="card line" class:dim={!wled.on || !s.on}>
+        <div class="line-head">
+          <span class="line-name">{lineLabel(s.name)}</span>
+          <span class="badge {src.kind}">{badgeLabel(src.kind)}</span>
+          <span class="spacer"></span>
+          <label class="sw" aria-label="Allumer / éteindre {lineLabel(s.name)}">
+            <input
+              type="checkbox"
+              checked={s.on}
+              onchange={(e) => {
+                haptic('light');
+                void wled.setSegOn(s.id, (e.currentTarget as HTMLInputElement).checked);
+              }}
+            />
+            <span class="sw-knob green"></span>
+          </label>
+        </div>
+
+        <!-- Le ruban EST le curseur : sa couleur réelle, remplie jusqu'à sa luminosité -->
+        <div
+          class="ruban"
+          role="slider"
+          tabindex="0"
+          aria-label="Luminosité de {lineLabel(s.name)}"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow={pct}
+          style="--c: {segCss(s)}; --paint: {segPaint(s)}; --ink: {inkOn(s)};"
+          onpointerdown={(e) => rubanDown(e, s)}
+          onpointermove={(e) => rubanMove(e, s)}
+          onpointerup={rubanUp}
+          onpointercancel={() => (dragId = null)}
+          onkeydown={(e) => rubanKey(e, s)}
+        >
+          <span class="ruban-fill" style="width: {pct}%;"></span>
+          <span class="ruban-cap" style="left: calc({pct}% - 3px);"></span>
+          <span class="ruban-pct">{pct} %</span>
+        </div>
+
+        <!-- LA ligne qui dit ce que fait ce ruban — et qui ouvre son choix -->
+        <button type="button" class="source" onclick={() => openChooser(s.id)}>
+          {#if src.swatch}
+            <span class="source-dot" style="background: {src.swatch};" aria-hidden="true"></span>
+          {:else}
+            <span class="source-dot music" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M9 18V6l10-2v12" opacity="0" />
+                <rect x="4" y="10" width="3" height="9" rx="1.2" />
+                <rect x="9" y="6" width="3" height="13" rx="1.2" />
+                <rect x="14" y="12" width="3" height="7" rx="1.2" />
+                <rect x="19" y="8" width="2" height="11" rx="1" />
+              </svg>
+            </span>
+          {/if}
+          <span class="source-text">
+            <span class="source-label">{src.label}</span>
+            <span class="source-sub">{src.sub}</span>
+          </span>
+          <span class="chev" aria-hidden="true">›</span>
+        </button>
+      </div>
+    {/each}
+
+    <p class="hint">
+      Glissez sur un ruban pour sa luminosité. Touchez sa ligne du bas pour changer ce qu'il fait.
+    </p>
   </div>
 {/snippet}
 
-{#snippet effectPanel(s: WledSegment)}
-  {@const isSolid = !effLoaded || (wled.effects[s.fx] ?? 'Solid') === 'Solid'}
-  <!-- Vue EFFET : des noms simples + UNE vitesse. Le reste est un catalogue
-       replié. (Choisir un effet remet ses couleurs par défaut : zéro réglage
-       de « palette » à comprendre.) -->
-  <div class="flex flex-col gap-3" class:dimmed={ctlDisabled}>
-    <div class="chip-wrap">
-      {#each curatedFx as c (c.idx)}
+<!-- ══════════ CHOIX DE SOURCE — une seule chose à la fois ══════════ -->
+{#snippet sourceChooser(s: WledSegment)}
+  {@const src = lineSource(s)}
+  <div class="stack">
+    <button type="button" class="back" onclick={() => (chooserId = null)}>
+      <span class="chev back-chev" aria-hidden="true">‹</span> Terrasse
+    </button>
+
+    <div class="card recap">
+      <span class="recap-now">{src.label}</span>
+      <span class="recap-sub">{src.sub}</span>
+    </div>
+
+    <p class="section">Ce que fait {lineLabel(s.name).toLowerCase()} — une seule chose à la fois</p>
+
+    <!-- 1 · Ambiances -->
+    <div class="amb-grid" role="group" aria-label="Ambiances">
+      {#each ambiances as a (a.key)}
         <button
           type="button"
-          class="chip"
-          class:active={s.fx === c.idx}
-          aria-pressed={s.fx === c.idx}
-          disabled={ctlDisabled}
-          onclick={() => {
-            manual();
-            wled.setSegEffect(s.id, c.idx);
-            wled.setSegPalette(s.id, 0); // couleurs par défaut de l'effet
-          }}
+          class="amb"
+          class:active={src.kind === 'ambiance' && src.label === a.label}
+          onclick={() => pickAmbiance(s.id, a.key)}
         >
-          {c.label}
+          <span class="amb-dot" style="background: {a.swatch};" aria-hidden="true"></span>
+          <span class="amb-label">{a.label}</span>
         </button>
       {/each}
     </div>
 
-    {#if effLoaded && !isSolid}
-      <div class="master-row">
-        <span class="mini-label">Vitesse</span>
-        <input
-          type="range"
-          class="bri-range"
-          min="0"
-          max="255"
-          value={s.sx}
-          disabled={ctlDisabled}
-          oninput={(e) => {
-            manual();
-            wled.setSegSpeed(s.id, +(e.currentTarget as HTMLInputElement).value);
-          }}
-          onchange={() => haptic('light')}
-          aria-label="Vitesse de l'effet"
-        />
-      </div>
-    {/if}
-
+    <!-- 2 · Ma couleur -->
     <button
       type="button"
-      class="disclosure"
-      aria-expanded={showAllFx}
-      onclick={() => (showAllFx = !showAllFx)}
-    >
-      <span>Tous les effets ({wled.effects.length})</span>
-      <span class="chevron" class:open={showAllFx} aria-hidden="true">⌄</span>
-    </button>
-    {#if showAllFx}
-      <input
-        type="search"
-        class="fx-search"
-        placeholder="Rechercher un effet…"
-        bind:value={fxQuery}
-        disabled={ctlDisabled}
-        aria-label="Rechercher un effet"
-      />
-      <div class="fx-grid" role="listbox" aria-label="Tous les effets">
-        {#each fxFiltered as e (e.i)}
-          <button
-            type="button"
-            class="chip"
-            class:active={s.fx === e.i}
-            role="option"
-            aria-selected={s.fx === e.i}
-            disabled={ctlDisabled}
-            onclick={() => {
-              manual();
-              wled.setSegEffect(s.id, e.i);
-            }}
-          >
-            {e.name}{#if wled.audioFx.has(e.i)}<span class="fx-audio" aria-label="suit la musique"
-                >&nbsp;♫</span
-              >{/if}
-          </button>
-        {/each}
-      </div>
-    {/if}
-
-    <!-- 37 des 220 effets du firmware NE VIVENT QUE du flux musique : posés
-         sans lecture en cours, ils rendent un ruban noir ou figé qu'on prend
-         pour une panne. Le dire au moment où ça arrive, en mots simples. -->
-    {#if effLoaded && wled.audioFx.has(s.fx) && !wledMusic.playing}
-      <p class="fx-audio-note">
-        ♫ Cet effet suit la musique — lancez une lecture (ou choisissez le mode Musique de l'onglet
-        dédié) pour le voir vivre. Sans musique, le ruban reste sombre.
-      </p>
-    {/if}
-  </div>
-{/snippet}
-
-{#snippet linesPanel()}
-  <!-- Vue LIGNES : piloter ensemble ou séparément, et la ligne choisie. -->
-  <div class="flex flex-col gap-3">
-    <button
-      type="button"
-      class="split-toggle"
+      class="row"
+      class:active={src.kind === 'couleur'}
+      aria-expanded={expanded === 'couleur'}
       onclick={() => {
         haptic('light');
-        wled.setScope(isTogether ? 'perLine' : 'together');
+        expanded = expanded === 'couleur' ? 'none' : 'couleur';
       }}
     >
-      {isTogether ? 'Régler les lignes séparément' : 'Piloter toutes les lignes ensemble'}
+      <span class="row-text">
+        <span class="row-label">Ma couleur…</span>
+        <span class="row-sub">Choisir une teinte et le blanc</span>
+      </span>
+      <span class="chev" class:open={expanded === 'couleur'} aria-hidden="true">›</span>
     </button>
-    {#if !isTogether && target}
-      <div class="line-panel" class:dimmed={ctlDisabled}>
-        <div class="flex items-center justify-between">
-          <span class="text-[13px] font-semibold" style="color: var(--color-fg);">
-            {target.name}
-          </span>
-          <label class="toggle-pill" aria-label="Allumer / éteindre {target.name}">
+    {#if expanded === 'couleur'}
+      <div class="panel">
+        <WledColorPicker
+          color={s.col}
+          disabled={false}
+          onpick={(rgb) => {
+            leaveMusic(s.id);
+            void wled.setSegColor(s.id, rgb);
+            if (effLoaded && wled.solidFx >= 0 && s.fx !== wled.solidFx) {
+              void wled.setSegEffect(s.id, wled.solidFx);
+            }
+          }}
+        />
+        {#if wled.rgbw}
+          <div class="mini-row">
+            <span class="mini-label">Blanc 4000 K</span>
             <input
-              type="checkbox"
-              checked={target.on}
-              disabled={!wled.on}
-              onchange={(e) => {
-                haptic('light');
-                wled.setSegOn(target.id, (e.currentTarget as HTMLInputElement).checked);
+              type="range"
+              class="range"
+              min="0"
+              max="255"
+              value={s.white}
+              oninput={(e) => {
+                leaveMusic(s.id);
+                void wled.setSegWhite(s.id, +(e.currentTarget as HTMLInputElement).value);
               }}
+              onchange={() => haptic('light')}
+              aria-label="Canal blanc 4000 K"
             />
-            <span class="toggle-pill-knob"></span>
-          </label>
-        </div>
-        <div class="master-row">
-          <span class="mini-label">Luminosité</span>
-          <input
-            type="range"
-            class="bri-range"
-            min="0"
-            max="255"
-            value={target.bri}
-            disabled={ctlDisabled}
-            oninput={(e) => wled.setSegBri(target.id, +(e.currentTarget as HTMLInputElement).value)}
-            onchange={() => haptic('light')}
-            aria-label="Luminosité {target.name}"
-          />
-          <span class="bri-pct tabular-nums">{Math.round((target.bri / 255) * 100)}%</span>
-        </div>
+            <span class="mini-pct">{Math.round((s.white / 255) * 100)} %</span>
+          </div>
+        {/if}
       </div>
+    {/if}
+
+    <!-- 3 · Un effet -->
+    <button
+      type="button"
+      class="row"
+      class:active={src.kind === 'effet'}
+      aria-expanded={expanded === 'effet'}
+      onclick={() => {
+        haptic('light');
+        expanded = expanded === 'effet' ? 'none' : 'effet';
+      }}
+    >
+      <span class="row-text">
+        <span class="row-label">Un effet…</span>
+        <span class="row-sub">Bougie, Feu, Arc-en-ciel, Comète…</span>
+      </span>
+      <span class="chev" class:open={expanded === 'effet'} aria-hidden="true">›</span>
+    </button>
+    {#if expanded === 'effet'}
+      <div class="panel">
+        <div class="chips">
+          {#each curatedFx as c (c.idx)}
+            <button
+              type="button"
+              class="chip"
+              class:active={s.fx === c.idx}
+              onclick={() => {
+                haptic('light');
+                leaveMusic(s.id);
+                void wled.setSegEffect(s.id, c.idx);
+                void wled.setSegPalette(s.id, 0);
+              }}
+            >
+              {c.label}
+            </button>
+          {/each}
+        </div>
+        {#if effLoaded && (wled.effects[s.fx] ?? 'Solid') !== 'Solid'}
+          <div class="mini-row">
+            <span class="mini-label">Vitesse</span>
+            <input
+              type="range"
+              class="range"
+              min="0"
+              max="255"
+              value={s.sx}
+              oninput={(e) => {
+                leaveMusic(s.id);
+                void wled.setSegSpeed(s.id, +(e.currentTarget as HTMLInputElement).value);
+              }}
+              onchange={() => haptic('light')}
+              aria-label="Vitesse de l'effet"
+            />
+          </div>
+        {/if}
+        <button
+          type="button"
+          class="disclosure"
+          aria-expanded={showAllFx}
+          onclick={() => (showAllFx = !showAllFx)}
+        >
+          <span>Tous les effets ({wled.effects.length})</span>
+          <span class="chev" class:open={showAllFx} aria-hidden="true">⌄</span>
+        </button>
+        {#if showAllFx}
+          <input
+            type="search"
+            class="search"
+            placeholder="Rechercher un effet…"
+            bind:value={fxQuery}
+            aria-label="Rechercher un effet"
+          />
+          <div class="chips scroll" role="listbox" aria-label="Tous les effets">
+            {#each fxFiltered as e (e.i)}
+              <button
+                type="button"
+                class="chip"
+                class:active={s.fx === e.i}
+                role="option"
+                aria-selected={s.fx === e.i}
+                onclick={() => {
+                  haptic('light');
+                  leaveMusic(s.id);
+                  void wled.setSegEffect(s.id, e.i);
+                }}
+              >
+                {e.name}{#if wled.audioFx.has(e.i)}<span class="fx-note" aria-hidden="true"
+                    >&nbsp;♫</span
+                  >{/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+        <!-- Les effets ♫ ne vivent que du flux musique : posés à la main sans
+             lecture, le ruban reste noir et on croit à une panne. -->
+        {#if effLoaded && wled.audioFx.has(s.fx) && !wledMusic.playing}
+          <p class="hint">
+            ♫ Cet effet a besoin de musique pour vivre. Sans lecture en cours, le ruban reste sombre
+            — préférez « Sur la musique » ci-dessous.
+          </p>
+        {/if}
+      </div>
+    {/if}
+
+    <!-- 4 · Sur la musique -->
+    <p class="section">Sur la musique</p>
+    <div class="chips" role="group" aria-label="Styles musicaux">
+      {#each WLED_MUSIC_STYLES as st (st.key)}
+        <button
+          type="button"
+          class="chip music"
+          class:active={src.kind === 'musique' && wledMusic.lineStyle(s.id) === st.key}
+          title={st.hint}
+          onclick={() => pickMusic(s.id, st.key)}
+        >
+          {st.label}
+        </button>
+      {/each}
+    </div>
+    {#if segs.length > 1}
+      {@const other = segs.find((o) => o.id !== s.id)}
+      {#if other}
+        <p class="hint">
+          {lineLabel(other.name)} n'est pas touché : {lineSource(other).label.toLowerCase()}.
+        </p>
+      {/if}
     {/if}
   </div>
 {/snippet}
 
 <style>
-  /* ─── Rangée générique [libellé/icône | slider | valeur | interrupteur] ─── */
-  .master-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  }
-  .bri-pct {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--color-fg);
-    min-width: 38px;
-    text-align: right;
-  }
-  .mini-label {
-    font-size: 12px;
-    color: var(--color-muted-fg);
-    white-space: nowrap;
-  }
-
-  .bri-range {
-    width: 100%;
-    min-width: 0;
-    flex: 1;
-    height: 6px;
-    appearance: none;
-    background: var(--color-muted);
-    border-radius: 9999px;
-    cursor: pointer;
-  }
-  .bri-range:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
-  }
-  .bri-range::-webkit-slider-thumb {
-    appearance: none;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: var(--color-primary);
-    cursor: pointer;
-    box-shadow: 0 1px 3px oklch(0 0 0 / 0.25);
-  }
-  .bri-range::-moz-range-thumb {
-    width: 18px;
-    height: 18px;
-    border: none;
-    border-radius: 50%;
-    background: var(--color-primary);
-    cursor: pointer;
-  }
-  .bri-range:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 3px;
-  }
-  .white-range {
-    background: linear-gradient(90deg, var(--color-muted), rgb(255 223 191));
-  }
-
-  /* ─── Onglets : un seul niveau, défilables si l'écran est étroit ─── */
-  .tabs {
-    display: flex;
-    gap: 3px;
-    padding: 4px;
-    border-radius: var(--radius-lg);
-    background: var(--color-muted);
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-  }
-  .tabs::-webkit-scrollbar {
-    display: none;
-  }
-  .tab {
-    /* Serré pour que les 5 onglets tiennent d'un bloc sur iPhone (le
-       défilement horizontal reste le filet de sécurité, pas la norme). */
-    flex: 1 0 auto;
-    min-height: 44px;
-    padding: 8px 9px;
-    border-radius: var(--radius-md);
-    border: 1px solid transparent;
-    background: transparent;
-    font-size: 12px;
-    font-weight: 600;
-    white-space: nowrap;
-    color: var(--color-muted-fg);
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    transition: all var(--duration-fast) var(--ease-default);
-  }
-  .tab.active {
-    border-color: var(--color-primary);
-    background: var(--color-primary-muted);
-    color: var(--color-primary);
-  }
-  .tab:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 2px;
-  }
-
-  .applies-to {
-    font-size: 12px;
-    color: var(--color-muted-fg);
-  }
-  .applies-to strong {
-    color: var(--color-fg);
-  }
-
-  /* ─── Ambiances : grille de pastilles (toutes visibles) ─── */
-  .scene-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
-    gap: 6px;
-    padding: 2px;
-  }
-  .scene {
+  .stack {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 4px;
-    border: none;
-    background: transparent;
-    border-radius: var(--radius-lg);
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
+    gap: 14px;
   }
-  .scene:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 2px;
-  }
-  .scene-dot {
-    display: inline-flex;
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    border: 1px solid oklch(1 0 0 / 0.25);
-    box-shadow:
-      inset 0 1px 2px oklch(1 0 0 / 0.4),
-      0 1px 4px oklch(0.1 0.01 286 / 0.2);
-  }
-  .scene-off {
-    background:
-      linear-gradient(
-        45deg,
-        transparent 45%,
-        var(--color-alert) 45%,
-        var(--color-alert) 55%,
-        transparent 55%
-      ),
-      var(--color-muted);
-  }
-  .scene-label {
-    font-size: 11px;
-    color: var(--color-muted-fg);
-    max-width: 84px;
-    text-align: center;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* ─── Chips (effets) ─── Les styles musicaux ont migré dans
-     MusicLightPanel, qui porte les siens. */
-  .chip-wrap {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .fx-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-    gap: 6px;
-    max-height: 200px;
-    overflow-y: auto;
-    padding: 2px;
-    -webkit-overflow-scrolling: touch;
-  }
-  .chip {
-    min-height: 40px;
-    padding: 8px 14px;
-    border-radius: 9999px;
-    border: 1px solid var(--color-border);
-    background: transparent;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--color-muted-fg);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    transition: all var(--duration-fast) var(--ease-default);
-  }
-  .chip:hover:not(:disabled) {
-    border-color: var(--color-border-strong);
-  }
-  .chip.active {
-    border-color: var(--color-primary);
-    background: var(--color-primary-muted);
-    color: var(--color-primary-active);
-    font-weight: 600;
-  }
-  .chip:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 2px;
-  }
-  .chip:disabled {
-    cursor: not-allowed;
-  }
-
-  /* Marqueur des effets audio-réactifs : discret dans la grille, la note
-     au-dessous porte l'explication quand on en pose un sans musique. */
-  .fx-audio {
-    color: var(--color-primary);
-    font-size: 11px;
-  }
-  .chip.active .fx-audio {
-    color: inherit;
-  }
-  .fx-audio-note {
-    padding: 8px 10px;
-    border-radius: var(--radius-md);
-    background: var(--color-card-hover);
-    border: 1px solid var(--color-border);
+  .empty,
+  .hint {
     font-size: 12.5px;
     line-height: 1.45;
     color: var(--color-muted-fg);
   }
-
-  .fx-search {
-    width: 100%;
-    padding: 9px 12px;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--color-border);
-    background: var(--color-card-hover);
-    color: var(--color-fg);
-    font-size: 16px;
+  .empty {
+    padding: 16px 0;
+    text-align: center;
   }
-  .fx-search:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 1px;
+  .hint {
+    text-align: center;
+    margin: 0;
   }
-
-  /* ─── Bascule Ensemble ⇄ Par ligne (action rare → discrète) ─── */
-  .split-toggle {
-    align-self: center;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 40px;
-    padding: 6px 14px;
-    border: none;
-    background: transparent;
-    font-size: 12px;
+  .off-hint {
+    text-align: left;
+  }
+  .warn {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.45;
     font-weight: 600;
-    color: var(--color-primary);
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
+    color: oklch(0.72 0.17 27);
   }
-  .split-toggle:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 2px;
-    border-radius: var(--radius-md);
+  .section {
+    margin: 2px 0 -4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted-fg);
+  }
+  .spacer {
+    flex: 1;
   }
 
-  .line-panel {
+  /* ─── Cartes (verre Yeldra centralisé par app.css) ─── */
+  .card {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 12px;
+    gap: 12px;
+    padding: 14px;
+    border-radius: var(--radius-2xl, 1rem);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
+    background: var(--color-card);
+  }
+  .card.dim {
+    opacity: 0.62;
   }
 
-  /* ─── Bouton dépliant (catalogue d'effets) ─── */
+  /* ─── Carte maître ─── */
+  .master-top {
+    display: flex;
+    gap: 10px;
+  }
+  .bri-bar {
+    position: relative;
+    flex: 1;
+    height: 60px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    background: var(--color-muted);
+    overflow: hidden;
+    cursor: ew-resize;
+    touch-action: pan-y;
+  }
+  .bri-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: linear-gradient(90deg, oklch(0.55 0.09 78), oklch(0.82 0.13 78));
+  }
+  .bri-cap {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    border-radius: 4px;
+    background: oklch(0.99 0 0 / 0.85);
+  }
+  .bri-text {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 15px;
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: oklch(0.22 0.03 286);
+    pointer-events: none;
+  }
+  .power {
+    width: 60px;
+    flex-shrink: 0;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    background: var(--color-muted);
+    color: var(--color-muted-fg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+  .power.on {
+    background: oklch(0.541 0.281 293 / 0.22);
+    border-color: oklch(0.72 0.2 293 / 0.6);
+    color: oklch(0.86 0.14 293);
+  }
+  .link-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .link-text {
+    flex: 1;
+    min-width: 0;
+    font-size: 12.5px;
+    line-height: 1.35;
+    color: var(--color-muted-fg);
+  }
+  .link-label {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--color-muted-fg);
+  }
+
+  /* ─── Carte d'un ruban ─── */
+  .line-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .line-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--color-fg);
+  }
+  .badge {
+    padding: 3px 9px;
+    border-radius: 9999px;
+    font-size: 11.5px;
+    font-weight: 700;
+    border: 1px solid currentColor;
+  }
+  .badge.ambiance,
+  .badge.couleur {
+    color: var(--color-ambre);
+  }
+  .badge.effet {
+    color: var(--color-cyan);
+  }
+  .badge.musique {
+    color: oklch(0.86 0.14 293);
+  }
+
+  .ruban {
+    position: relative;
+    height: 34px;
+    border-radius: 9999px;
+    background: color-mix(in oklch, var(--c) 22%, transparent);
+    box-shadow:
+      0 0 16px color-mix(in oklch, var(--c) 50%, transparent),
+      0 0 40px color-mix(in oklch, var(--c) 22%, transparent);
+    overflow: hidden;
+    cursor: ew-resize;
+    touch-action: pan-y;
+  }
+  .ruban-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    /* Le dégradé RÉEL de la ligne (palette du firmware), pas sa couleur de
+       base : « Coucher de soleil » a une base noire et des couleurs de feu. */
+    background: var(--paint);
+  }
+  .ruban-cap {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    border-radius: 4px;
+    background: var(--ink);
+    opacity: 0.75;
+  }
+  .ruban-pct {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 13px;
+    font-weight: 800;
+    /* Encre calculée sur la luminance du ruban : lisible sur un jaune pâle
+       comme sur un bleu profond. */
+    color: var(--ink);
+    pointer-events: none;
+  }
+
+  .source,
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 60px;
+    padding: 11px 12px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    background: var(--color-muted);
+    text-align: left;
+    cursor: pointer;
+  }
+  .row.active {
+    border-color: var(--color-primary);
+  }
+  .source-dot {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 1px solid oklch(1 0 0 / 0.25);
+  }
+  .source-dot.music {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: oklch(0.541 0.281 293 / 0.25);
+    color: oklch(0.86 0.14 293);
+  }
+  .source-text,
+  .row-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .source-label,
+  .row-label {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--color-fg);
+  }
+  .source-sub,
+  .row-sub {
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--color-muted-fg);
+  }
+  .chev {
+    flex-shrink: 0;
+    font-size: 20px;
+    line-height: 1;
+    color: var(--color-muted-fg);
+    transition: transform var(--duration-fast, 120ms) ease;
+  }
+  .chev.open {
+    transform: rotate(90deg);
+  }
+
+  /* ─── Choix de source ─── */
+  .back {
+    align-self: flex-start;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 4px 2px;
+    border: none;
+    background: none;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-primary-active, var(--color-primary));
+    cursor: pointer;
+  }
+  .back-chev {
+    font-size: 22px;
+    color: inherit;
+  }
+  .recap {
+    gap: 3px;
+    padding: 12px 14px;
+  }
+  .recap-now {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--color-fg);
+  }
+  .recap-sub {
+    font-size: 12.5px;
+    color: var(--color-muted-fg);
+  }
+
+  .amb-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+  .amb {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 2px;
+    border: none;
+    background: none;
+    cursor: pointer;
+  }
+  .amb-dot {
+    width: 54px;
+    height: 54px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+  }
+  .amb.active .amb-dot {
+    border-color: oklch(0.99 0 0 / 0.9);
+    box-shadow: 0 0 0 3px var(--color-primary);
+  }
+  .amb-label {
+    font-size: 11.5px;
+    line-height: 1.25;
+    text-align: center;
+    color: var(--color-muted-fg);
+  }
+  .amb.active .amb-label {
+    color: var(--color-fg);
+    font-weight: 700;
+  }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    background: oklch(0.5 0.03 286 / 0.1);
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .chips.scroll {
+    max-height: 240px;
+    overflow-y: auto;
+  }
+  .chip {
+    min-height: 40px;
+    padding: 7px 14px;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border);
+    background: var(--color-muted);
+    color: var(--color-fg);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .chip.active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-primary-fg);
+  }
+  .chip.music.active {
+    box-shadow: 0 0 14px oklch(0.72 0.2 293 / 0.5);
+  }
+  .fx-note {
+    color: var(--color-glow);
+  }
   .disclosure {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    width: 100%;
-    min-height: 40px;
-    padding: 8px 4px;
-    background: transparent;
-    border: none;
-    border-top: 1px solid var(--color-border);
-    color: var(--color-muted-fg);
-    font-size: 12px;
+    min-height: 44px;
+    padding: 8px 12px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    background: none;
+    color: var(--color-fg);
+    font-size: 13px;
     font-weight: 600;
     cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
   }
-  .disclosure:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 2px;
+  .search {
+    min-height: 40px;
+    padding: 8px 12px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    background: var(--color-muted);
+    color: var(--color-fg);
+    font-size: 13px;
   }
-  .chevron {
-    transition: transform var(--duration-normal) var(--ease-default);
+  .mini-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
-  .chevron.open {
-    transform: rotate(180deg);
+  .mini-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-muted-fg);
+  }
+  .mini-pct {
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-fg);
+  }
+  .range {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    accent-color: var(--color-primary);
   }
 
-  /* ─── Interrupteur (toggle-pill iOS, 44×24) ─── */
-  .toggle-pill {
+  /* ─── Interrupteur iOS (même dessin que partout dans Domo) ─── */
+  .sw {
     position: relative;
     display: inline-block;
     width: 44px;
@@ -763,7 +1203,7 @@
     flex-shrink: 0;
     cursor: pointer;
   }
-  .toggle-pill input {
+  .sw input {
     position: absolute;
     inset: 0;
     z-index: 1;
@@ -771,18 +1211,15 @@
     cursor: pointer;
     opacity: 0;
   }
-  .toggle-pill input:disabled {
-    cursor: not-allowed;
-  }
-  .toggle-pill-knob {
+  .sw-knob {
     position: absolute;
     inset: 0;
     border-radius: 9999px;
     background: var(--color-muted);
     border: 1px solid var(--color-border);
-    transition: background-color var(--duration-fast) var(--ease-default);
+    transition: background-color var(--duration-fast, 120ms) ease;
   }
-  .toggle-pill-knob::after {
+  .sw-knob::after {
     content: '';
     position: absolute;
     top: 2px;
@@ -792,52 +1229,54 @@
     border-radius: 50%;
     background: oklch(0.99 0.004 286);
     box-shadow: 0 1px 2px oklch(0.1 0.01 286 / 0.18);
-    transition: transform var(--duration-normal) var(--ease-spring);
+    transition: transform var(--duration-normal, 200ms) var(--ease-spring, ease);
   }
-  .toggle-pill input:checked + .toggle-pill-knob {
+  .sw input:checked + .sw-knob {
     background: var(--color-primary);
     border-color: var(--color-primary);
   }
-  .toggle-pill input:checked + .toggle-pill-knob::after {
+  .sw input:checked + .sw-knob.green {
+    background: var(--color-success);
+    border-color: var(--color-success);
+  }
+  .sw input:checked + .sw-knob::after {
     transform: translateX(20px);
   }
-  .toggle-pill input:focus-visible + .toggle-pill-knob {
+  .sw input:focus-visible + .sw-knob,
+  .bri-bar:focus-visible,
+  .ruban:focus-visible,
+  .source:focus-visible,
+  .row:focus-visible,
+  .chip:focus-visible,
+  .amb:focus-visible,
+  .power:focus-visible,
+  .back:focus-visible {
     outline: 2px solid var(--color-primary);
     outline-offset: 2px;
   }
 
-  .dimmed {
-    opacity: 0.45;
+  /* iPad paysage : les rubans côte à côte, le niveau supplémentaire disparaît. */
+  @media (min-width: 900px) {
+    .stack {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      align-items: start;
+    }
+    .card.master,
+    .section,
+    .hint,
+    .warn,
+    .back,
+    .amb-grid {
+      grid-column: 1 / -1;
+    }
   }
 
-  /* ─── Avis « le manuel a repris la main sur le suivi musique » ─── */
-  .music-released {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
-    padding: 9px 12px;
-    border-radius: var(--radius-lg);
-    border: 1px solid oklch(0.62 0.19 27 / 0.4);
-    background: oklch(0.62 0.19 27 / 0.1);
-    font-size: 12.5px;
-    line-height: 1.4;
-    color: var(--color-fg);
-  }
-  .music-released span {
-    flex: 1;
-    min-width: 0;
-  }
-  .music-resume {
-    flex-shrink: 0;
-    min-height: 34px;
-    padding: 5px 12px;
-    border-radius: 9999px;
-    border: none;
-    background: var(--color-primary);
-    color: var(--color-primary-fg);
-    font-size: 12.5px;
-    font-weight: 700;
-    cursor: pointer;
+  @media (prefers-reduced-motion: reduce) {
+    .sw-knob,
+    .sw-knob::after,
+    .chev {
+      transition: none;
+    }
   }
 </style>

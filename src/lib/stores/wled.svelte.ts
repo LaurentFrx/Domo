@@ -195,6 +195,24 @@ export const WLED_AMBIANCES: WledAmbiance[] = [
   { key: 'off', label: 'Éteint', swatch: 'transparent', off: true }
 ];
 
+/**
+ * Noms AFFICHÉS des lignes (décision Laurent, 29/08 — piste B « Deux rubans »).
+ * Les segments WLED gardent leurs noms techniques côté module (« SàM d'Été »,
+ * « Store ») : on ne renomme rien dans le firmware, on parle simplement la
+ * langue de la maison à l'écran.
+ */
+const LINE_LABELS: Record<string, string> = {
+  "SàM d'Été": 'La Table',
+  'SàM Été': 'La Table',
+  Store: 'Le Store',
+  Terrasse: 'La terrasse'
+};
+
+/** Nom d'une ligne tel qu'on le montre — jamais le nom technique du segment. */
+export function lineLabel(name: string): string {
+  return LINE_LABELS[name] ?? name;
+}
+
 function clamp(v: number, min = 0, max = 255): number {
   return Math.max(min, Math.min(max, Math.round(v)));
 }
@@ -806,6 +824,46 @@ class WledStore {
   // Le rendu du mode Musique (couleurs de pochette + effet du style) est
   // appliqué CÔTÉ SERVEUR (src/lib/server/wled/music-mode.ts) : le client
   // n'envoie que l'extraction de pochette avec son heartbeat.
+
+  /**
+   * Applique une ambiance à UNE SEULE ligne — cœur de la piste B : chaque
+   * ruban porte sa propre source, faire dîner la table pendant que le store
+   * fait la fête est l'usage normal, pas une exception.
+   */
+  async applyAmbianceTo(segId: number, key: string): Promise<void> {
+    const a = WLED_AMBIANCES.find((x) => x.key === key);
+    const s = this.#seg(segId);
+    if (!a || !s) return;
+    if (a.off) {
+      await this.setSegOn(segId, false);
+      return;
+    }
+    const wanted = resolveByName(this.effects, a.fx);
+    const fxIdx = a.fx ? (wanted >= 0 ? wanted : this.solidFx) : -1;
+    const palIdx = a.pal ? Math.max(0, resolveByName(this.palettes, a.pal)) : 0;
+
+    // Reflet optimiste + payload depuis la même source (le segment réel).
+    s.on = true;
+    if (a.bri !== undefined) s.bri = clamp(a.bri);
+    if (a.col) s.col = a.col;
+    if (a.white !== undefined) s.white = clamp(a.white);
+    if (fxIdx >= 0) s.fx = fxIdx;
+    if (palIdx >= 0) s.pal = palIdx;
+    if (a.sx !== undefined) s.sx = clamp(a.sx);
+    if (a.ix !== undefined) s.ix = clamp(a.ix);
+    this.on = true;
+
+    const o: Record<string, unknown> = { id: segId, on: true };
+    if (a.bri !== undefined) o.bri = clamp(a.bri);
+    o.col = this.#colPayload(a.col ?? s.col, a.white ?? s.white);
+    if (fxIdx >= 0) o.fx = fxIdx;
+    if (palIdx >= 0) o.pal = palIdx;
+    if (a.sx !== undefined) o.sx = clamp(a.sx);
+    if (a.ix !== undefined) o.ix = clamp(a.ix);
+    // `on: true` en racine : régler une ligne d'un ruban éteint l'allume —
+    // c'est un GESTE explicite, pas un rendu automatique.
+    await this.#post({ on: true, seg: [o] });
+  }
 
   /** Applique une ambiance aux segments RÉELS (jamais d'id fantôme). */
   async applyAmbiance(key: string): Promise<void> {
