@@ -30,6 +30,8 @@
    */
   import { wled, previewColor, type RGB } from '$stores/wled.svelte';
   import { wledMusic } from '$stores/wledMusic.svelte';
+  import { wledLeds } from '$stores/wledLeds.svelte';
+  import { ledStrip } from '$lib/wled/led-strip';
   import { preferences } from '$stores/preferences.svelte';
   import {
     averageOfStops,
@@ -94,6 +96,16 @@
   });
   const motionOn = $derived(preferences.animationsEnabled && !reducedMotion);
 
+  // Aperçu LED temps réel : la tuile montre le ruban ENTIER (les deux lignes
+  // bout à bout), avec les couleurs que le firmware sort vraiment. Une seule
+  // connexion montante pour toute la maison, suspendue en arrière-plan.
+  $effect(() => {
+    wledLeds.open();
+    return () => wledLeds.close();
+  });
+  /** Le direct est-il exploitable ? (sinon : rendu calculé, inchangé) */
+  const live = $derived(wledLeds.active && wled.on && (dominant?.on ?? false));
+
   const model = $derived.by(() => {
     const seg = dominant;
     if (!seg) {
@@ -143,7 +155,9 @@
     // comme le module. Sans mouvement (préférence Animations OFF, réduction
     // système), tout reste en famille « solid » : couleurs justes, image fixe,
     // dégradé COMPLET — ni classe d'animation, ni version bouclée.
-    const family = lit && motionOn ? familyOf(fxName, stops) : 'solid';
+    // En direct, les couleurs bougent d'elles-mêmes : toute animation CSS
+    // par-dessus ferait défiler une image qui défile déjà (double mouvement).
+    const family = lit && motionOn && !live ? familyOf(fxName, stops) : 'solid';
     const speed = seg.sx / 255;
     let anim = '';
     let animDur = 0;
@@ -397,7 +411,15 @@
        la couche interne : une animation d'opacité sur le cadre écraserait le
        dosage qui garde le texte lisible. -->
     <div class="tile-paint" aria-hidden="true">
-      <div class="tile-paint-fill {model.anim}" style="animation-duration: {model.animDur}s;"></div>
+      {#if live}
+        <!-- Les VRAIES LED du ruban entier, une par une. -->
+        <canvas class="tile-paint-leds" use:ledStrip={{ start: 0, len: wled.total || 1 }}></canvas>
+      {:else}
+        <div
+          class="tile-paint-fill {model.anim}"
+          style="animation-duration: {model.animDur}s;"
+        ></div>
+      {/if}
       {#if model.sweep}
         <!-- Effets de balayage : le point qui traverse. Clippé par la tuile.
            N'existe que si le mouvement est permis (arbitré dans le modèle). -->
@@ -622,6 +644,15 @@
      les animations d'opacité (pulsation, scintillement) se multiplient au
      dosage ci-dessus au lieu de l'écraser — sinon un « Feu » à 100 % ferait
      clignoter le fond jusque sous le texte. */
+  .tile-paint-leds {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    /* Une LED = un rectangle net (jamais lissé par l'agrandissement). */
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
   .tile-paint-fill {
     position: absolute;
     inset: 0;

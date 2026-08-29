@@ -35,6 +35,7 @@
   import { averageOfStops, paintStops, stopsToCss, vividTint } from '$lib/wled/preview-model';
   import { wledMusic } from '$stores/wledMusic.svelte';
   import { wledLeds } from '$stores/wledLeds.svelte';
+  import { ledStrip } from '$lib/wled/led-strip';
   import { acquire } from '$stores/refcount';
   import { haptic } from '$utils/haptic';
   import { WLED_MUSIC_STYLES } from '$lib/wled/music-styles';
@@ -61,48 +62,6 @@
       wledLeds.close();
     };
   });
-
-  /**
-   * Peinture LED par LED, en temps réel.
-   *
-   * Un canvas d'UN pixel par LED (52 pour la table, 50 pour le store), étiré
-   * en `image-rendering: pixelated` : chaque LED reste un rectangle net, aux
-   * couleurs que le firmware sort vraiment. La trame n'est pas réactive (12
-   * images/s re-rendraient la feuille) — une boucle rAF la lit et repeint.
-   */
-  function ledStrip(canvas: HTMLCanvasElement, seg: { start: number; len: number }) {
-    let raf = 0;
-    let painted = -1;
-    const ctx = canvas.getContext('2d', { alpha: false });
-    const tick = () => {
-      raf = requestAnimationFrame(tick);
-      if (!ctx || !wledLeds.frame || wledLeds.frameAt === painted) return;
-      painted = wledLeds.frameAt;
-      const n = seg.len;
-      if (canvas.width !== n) canvas.width = n;
-      if (canvas.height !== 1) canvas.height = 1;
-      const img = ctx.createImageData(n, 1);
-      for (let i = 0; i < n; i++) {
-        const c = wledLeds.led(seg.start + i);
-        const o = i * 4;
-        img.data[o] = c ? c[0] : 0;
-        img.data[o + 1] = c ? c[1] : 0;
-        img.data[o + 2] = c ? c[2] : 0;
-        img.data[o + 3] = 255;
-      }
-      ctx.putImageData(img, 0, 0);
-    };
-    raf = requestAnimationFrame(tick);
-    return {
-      update(next: { start: number; len: number }) {
-        seg = next;
-        painted = -1; // la topologie a changé : repeindre sans attendre
-      },
-      destroy() {
-        cancelAnimationFrame(raf);
-      }
-    };
-  }
 
   /** Ligne dont on choisit la source (null = vue principale). */
   let chooserId = $state<number | null>(null);
