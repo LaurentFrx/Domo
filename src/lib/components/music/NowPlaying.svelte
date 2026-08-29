@@ -418,7 +418,11 @@
         {fadeSummary}
       </button>
 
-      {#if player.lastError || player.skipNotice}
+      {#if player.takenOverBy}
+        <p class="error">
+          La musique est passée sur {player.takenOverBy} — appuyez sur Lecture pour la reprendre ici.
+        </p>
+      {:else if player.lastError || player.skipNotice}
         <p class="error">{player.lastError ?? player.skipNotice}</p>
       {/if}
 

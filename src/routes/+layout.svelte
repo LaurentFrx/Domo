@@ -91,6 +91,22 @@
     return () => wledMusic.closeLive();
   });
 
+  // Session d'écoute de la MAISON : un seul appareil joue à la fois. Ce flux
+  // dit qui a la main ; si ce n'est pas nous et qu'on jouait encore, le
+  // lecteur se met en pause (fin de la cacophonie iPhone/iPad).
+  $effect(() => {
+    if (typeof EventSource === 'undefined') return;
+    const es = new EventSource('/api/music/session');
+    es.onmessage = (m) => {
+      try {
+        player.onSessionEvent(JSON.parse(m.data as string));
+      } catch {
+        /* trame illisible : la suivante recalera */
+      }
+    };
+    return () => es.close();
+  });
+
   // ─── Auto-reload après déploiement (anti « client périmé ») ─────────────
   // À chaque déploiement, les chunks JS changent de hash : un onglet/PWA déjà
   // ouvert garde d'anciennes références → une navigation client échoue à charger

@@ -49,6 +49,10 @@ const MIN_SMART_FADE_S = 0.6;
 const DJ_EXTEND_S = 25;
 /** DJ automatique : morceaux ajoutés par fournée. */
 const DJ_BATCH = 20;
+/** Clé localStorage de l'identifiant d'appareil (session d'écoute partagée). */
+const DEVICE_KEY = 'domo.deviceId';
+/** Cadence des signes de vie de la session d'écoute (le serveur périme à 90 s). */
+const SESSION_PING_MS = 30_000;
 /** Station de repli du DJ si la préférence pointe un id inconnu. */
 const DJ_STATION_FALLBACK = 1;
 
@@ -664,6 +668,11 @@ class PlayerState {
   lastError = $state<string | null>(null);
   /** Avis transitoire « piste sautée » (la lecture, elle, continue). */
   skipNotice = $state<string | null>(null);
+  /**
+   * Un AUTRE appareil de la maison a pris la musique : on s'est mis en pause.
+   * Null quand c'est nous qui jouons (ou que personne ne joue).
+   */
+  takenOverBy = $state<string | null>(null);
   /** Feuille « Now Playing » plein écran ouverte ? (UI globale) */
   sheetOpen = $state(false);
   /** Sélecteur de destination dispo ('airplay' WebKit iOS/macOS, 'remote' ailleurs). */
@@ -748,11 +757,14 @@ class PlayerState {
       if (!this.isActiveEl(a)) return;
       this.lastError = null;
       this.failStreak = 0;
+      // Du son SORT ici : cet appareil prend la session d'écoute de la maison.
+      this.claimSession();
     });
     a.addEventListener('pause', () => {
       if (!this.isActiveEl(a)) return;
       this.playing = false;
       this.syncMediaSessionState();
+      this.releaseSession();
     });
     a.addEventListener('ended', () => {
       if (this.isActiveEl(a)) this.autoNext();
@@ -1499,6 +1511,7 @@ class PlayerState {
     this.companionKeys.clear();
     this.djAnchorKey = null;
     this.outputArmed = false;
+    this.releaseSession();
     this.failStreak = 0;
     this.skipNotice = null;
     if (this.skipNoticeTimer) clearTimeout(this.skipNoticeTimer);
@@ -1658,6 +1671,91 @@ class PlayerState {
       this.lastError = 'Serveur injoignable (réseau).';
     }
     return { auth: false };
+  }
+
+  // ─── Session d'écoute de la MAISON (un seul appareil à la fois) ──────────
+  //
+  // Sans arbitre, chaque navigateur jouait son propre morceau : « cacophonie
+  // désorganisée » (Laurent, 29/08), et deux appareils qui se disputaient le
+  // suivi lumineux du ruban. Règle d'AirPlay : le dernier qui appuie sur
+  // lecture gagne, les autres se mettent en pause et disent où c'est parti.
+
+  /** Identifiant stable de CE navigateur (localStorage). */
+  private deviceId(): string {
+    if (typeof localStorage === 'undefined') return '';
+    let id = localStorage.getItem(DEVICE_KEY);
+    if (!id || !/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
+      id = (crypto.randomUUID?.() ?? String(Math.random()).slice(2)).replace(/-/g, '');
+      try {
+        localStorage.setItem(DEVICE_KEY, id);
+      } catch {
+        /* mode privé : l'appareil sera simplement anonyme à chaque visite */
+      }
+    }
+    return id;
+  }
+
+  /** Type d'appareil, pour le libellé (le serveur y ajoute le prénom). */
+  private deviceKind(): string {
+    const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+    if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'iPad';
+    if (/iPhone|iPod/.test(ua)) return 'iPhone';
+    if (/Android/.test(ua)) return 'Android';
+    if (/Macintosh/.test(ua)) return 'Mac';
+    if (/Windows|Linux/.test(ua)) return 'Ordinateur';
+    return 'Navigateur';
+  }
+
+  private sessionPing: ReturnType<typeof setInterval> | null = null;
+
+  private postSession(action: 'claim' | 'ping' | 'release'): void {
+    const deviceId = this.deviceId();
+    if (!deviceId) return;
+    void fetch('/api/music/session', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action,
+        deviceId,
+        kind: this.deviceKind(),
+        title: this.current?.title ?? ''
+      })
+    }).catch(() => undefined); // réseau : le prochain signe de vie recalera
+  }
+
+  /** Cet appareil joue : il prend la session (et la garde vivante). */
+  private claimSession(): void {
+    this.takenOverBy = null;
+    this.postSession('claim');
+    if (this.sessionPing) return;
+    this.sessionPing = setInterval(() => this.postSession('ping'), SESSION_PING_MS);
+    this.sessionPing.unref?.();
+  }
+
+  /** Cet appareil ne joue plus : il rend la session. */
+  private releaseSession(): void {
+    if (this.sessionPing) {
+      clearInterval(this.sessionPing);
+      this.sessionPing = null;
+    }
+    this.postSession('release');
+  }
+
+  /**
+   * Le serveur annonce qui joue dans la maison. Si c'est un AUTRE appareil et
+   * qu'on jouait encore, on se tait — c'est la fin de la cacophonie.
+   */
+  onSessionEvent(owner: { deviceId: string | null; label?: string } | null): void {
+    const me = this.deviceId();
+    if (!owner?.deviceId || owner.deviceId === me) {
+      if (this.takenOverBy) this.takenOverBy = null;
+      return;
+    }
+    if (this.playing) {
+      this.decks[this.active]?.el.pause();
+      if (this.fading) this.stopFadeHard();
+    }
+    this.takenOverBy = owner.label ?? 'un autre appareil';
   }
 
   // ─── MediaSession (écran verrouillé / centre de contrôle iOS) ─────────────

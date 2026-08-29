@@ -182,7 +182,11 @@
         <!-- L'erreur (ou l'avis de piste sautée) prend la place de l'artiste :
              sans ça, un morceau qui ne démarre pas ne dit RIEN ici, et il
              fallait ouvrir le lecteur pour comprendre pourquoi. -->
-        {#if player.lastError || player.skipNotice}
+        {#if player.takenOverBy}
+          <!-- Un autre appareil de la maison a pris la musique : on l'a dit
+               ici plutôt que de se taire sans raison apparente. -->
+          <span class="err">La musique est passée sur {player.takenOverBy}</span>
+        {:else if player.lastError || player.skipNotice}
           <span class="err">{player.lastError ?? player.skipNotice}</span>
         {:else}
           <span class="a">{player.current.artist}</span>
