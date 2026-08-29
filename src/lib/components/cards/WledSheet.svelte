@@ -348,18 +348,21 @@
 
 <BottomSheet
   {open}
+  wide
   title={chooser ? lineLabel(chooser.name) : 'Terrasse'}
   onClose={() => (chooser ? (chooserId = null) : onClose())}
 >
-  {#if segs.length === 0}
-    <p class="empty">
-      {wled.connected ? 'Aucune ligne configurée sur le module.' : 'Connexion au module LED…'}
-    </p>
-  {:else if chooser}
-    {@render sourceChooser(chooser)}
-  {:else}
-    {@render mainView()}
-  {/if}
+  <div class="scope">
+    {#if segs.length === 0}
+      <p class="empty">
+        {wled.connected ? 'Aucune ligne configurée sur le module.' : 'Connexion au module LED…'}
+      </p>
+    {:else if chooser}
+      {@render sourceChooser(chooser)}
+    {:else}
+      {@render mainView()}
+    {/if}
+  </div>
 </BottomSheet>
 
 <!-- ══════════════ VUE PRINCIPALE — une carte par ruban ══════════════ -->
@@ -775,6 +778,14 @@
 {/snippet}
 
 <style>
+  /* Le CONTENEUR de requête : les colonnes se décident sur la largeur du
+     PANNEAU, pas de l'écran (la feuille est plafonnée — une requête média sur
+     le viewport mettait deux colonnes dans 480 px sur iPad, cartes écrasées).
+     ⚠️ Une requête de conteneur ne style JAMAIS son propre conteneur : d'où
+     cette enveloppe autour de `.stack`. */
+  .scope {
+    container-type: inline-size;
+  }
   .stack {
     display: flex;
     flex-direction: column;
@@ -1255,8 +1266,8 @@
     outline-offset: 2px;
   }
 
-  /* iPad paysage : les rubans côte à côte, le niveau supplémentaire disparaît. */
-  @media (min-width: 900px) {
+  /* iPad paysage : les rubans côte à côte quand le PANNEAU est assez large. */
+  @container (min-width: 680px) {
     .stack {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -1267,8 +1278,14 @@
     .hint,
     .warn,
     .back,
-    .amb-grid {
+    .amb-grid,
+    .panel,
+    .recap {
       grid-column: 1 / -1;
+    }
+    /* La grille d'ambiances profite de la largeur : 7 d'un coup, pas 4+3. */
+    .amb-grid {
+      grid-template-columns: repeat(7, 1fr);
     }
   }
 

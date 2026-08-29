@@ -33,12 +33,17 @@
   let {
     open = false,
     title = '',
+    wide = false,
     onClose,
     children,
     footer
   }: {
     open?: boolean;
     title?: string;
+    /** Feuille LARGE sur grand écran (iPad) : le contenu s'y met en colonnes.
+     *  Sans ça, le panneau reste à 30rem et une mise en deux colonnes s'y
+     *  écrase (constaté sur l'iPad de Laurent, 29/08). Sans effet sur iPhone. */
+    wide?: boolean;
     onClose: () => void;
     children?: Snippet;
     footer?: Snippet;
@@ -140,6 +145,7 @@
   >
     <div
       class="bs-panel"
+      class:wide
       bind:this={panelEl}
       tabindex="-1"
       role="dialog"
@@ -213,6 +219,10 @@
          n'a plus lieu d'être. */
       padding: 1rem;
       animation: bs-fade 200ms ease;
+    }
+    /* Feuille large (opt-in) : la place que réclame une mise en colonnes. */
+    .bs-panel.wide {
+      max-width: 61.25rem;
     }
   }
   .bs-header {
