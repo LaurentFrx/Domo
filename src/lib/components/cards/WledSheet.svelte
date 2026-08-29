@@ -155,6 +155,7 @@
       fxName,
       palName,
       palIndex: s.pal,
+      fxPalIndex: wled.fxDefaultPal[s.fx],
       palettes: wled.paletteColors,
       c1: previewColor(s.col, s.white),
       c2: s.col2,

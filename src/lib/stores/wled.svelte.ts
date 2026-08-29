@@ -280,6 +280,15 @@ class WledStore {
    * Jamais muté — réassigné en bloc (la réassignation porte la réactivité).
    */
   audioFx = $state<ReadonlySet<number>>(new Set());
+  /**
+   * Palette PAR DÉFAUT que chaque effet déclare dans `/json/fxdata` (`pal=N`).
+   *
+   * Sans elle, un effet à couleurs propres était peint avec la couleur de BASE
+   * du segment : « Océan » (Pacifica, qui déclare la palette Atlantica)
+   * s'affichait en ORANGE sur l'iPad de Laurent alors que le ruban sort des
+   * bleus. On lit ce que le firmware déclare — aucune couleur inventée.
+   */
+  fxDefaultPal = $state<Record<number, number>>({});
   #fxFetch: Promise<void> | null = null;
   #fxRetryAt = 0;
   /** Distingue « chargé, zéro effet audio » (mock) d'un échec à retenter. */
@@ -507,11 +516,20 @@ class WledStore {
         const d = (await res.json()) as unknown;
         if (!Array.isArray(d)) return;
         const audio = new Set<number>();
+        const defPal: Record<number, number> = {};
         d.forEach((meta, i) => {
-          const flags = typeof meta === 'string' ? (meta.split(';')[3] ?? '') : '';
+          if (typeof meta !== 'string') return;
+          const flags = meta.split(';')[3] ?? '';
           if (flags.includes('v') || flags.includes('f')) audio.add(i);
+          // Défauts de l'effet, en queue de chaîne : « …;pal=51,sx=64 ».
+          const m = /(?:^|,|;)pal=(\d+)/.exec(meta);
+          if (m) {
+            const n = Number(m[1]);
+            if (n > 0) defPal[i] = n;
+          }
         });
         this.audioFx = audio;
+        this.fxDefaultPal = defPal;
         this.#fxLoaded = true;
       } catch {
         /* silencieux : la grille reste sans badges, rien de cassé */

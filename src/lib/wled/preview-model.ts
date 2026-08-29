@@ -339,15 +339,23 @@ export function paintStops(opts: {
   palName: string;
   palIndex: number;
   palettes: PaletteMap;
+  /** Palette que l'EFFET déclare par défaut (`pal=N` de /json/fxdata). Sur
+   *  palette « Default », c'est ELLE qui peint : Pacifica sort de l'Atlantica
+   *  (bleus), pas de la couleur de base du segment (orange). */
+  fxPalIndex?: number;
   c1: RGB;
   c2: RGB;
   c3: RGB;
 }): Stop[] | null {
-  const { fxName, palName, palIndex, palettes } = opts;
+  const { fxName, palName, palIndex, palettes, fxPalIndex } = opts;
   if (fxName === 'Solid') return null;
 
   const bare = palName.replace(/^\* /, '');
   if (palIndex === 0 || bare === 'Default') {
+    if (fxPalIndex && fxPalIndex > 0) {
+      const own = resolvePalette(palettes[fxPalIndex], opts);
+      if (own) return own;
+    }
     return RAINBOW_FX.has(fxName) ? hexesToStops(RAINBOW) : null;
   }
 

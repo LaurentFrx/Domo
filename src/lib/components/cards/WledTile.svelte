@@ -123,6 +123,7 @@
           fxName,
           palName,
           palIndex: seg.pal,
+          fxPalIndex: wled.fxDefaultPal[seg.fx],
           palettes: wled.paletteColors,
           c1: previewColor(seg.col, seg.white),
           c2: seg.col2,
