@@ -34,6 +34,7 @@
   } from '$stores/wled.svelte';
   import { averageOfStops, paintStops, stopsToCss, vividTint } from '$lib/wled/preview-model';
   import { wledMusic } from '$stores/wledMusic.svelte';
+  import { wledLeds } from '$stores/wledLeds.svelte';
   import { acquire } from '$stores/refcount';
   import { haptic } from '$utils/haptic';
   import { WLED_MUSIC_STYLES } from '$lib/wled/music-styles';
@@ -51,11 +52,57 @@
     if (!open) return;
     const release = acquire(wled);
     wledMusic.openLive();
+    // Aperçu LED temps réel : le module ne travaille que pendant que la
+    // feuille est ouverte (une seule connexion montante, tous clients confondus).
+    wledLeds.open();
     return () => {
       release();
       wledMusic.closeLive();
+      wledLeds.close();
     };
   });
+
+  /**
+   * Peinture LED par LED, en temps réel.
+   *
+   * Un canvas d'UN pixel par LED (52 pour la table, 50 pour le store), étiré
+   * en `image-rendering: pixelated` : chaque LED reste un rectangle net, aux
+   * couleurs que le firmware sort vraiment. La trame n'est pas réactive (12
+   * images/s re-rendraient la feuille) — une boucle rAF la lit et repeint.
+   */
+  function ledStrip(canvas: HTMLCanvasElement, seg: { start: number; len: number }) {
+    let raf = 0;
+    let painted = -1;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      if (!ctx || !wledLeds.frame || wledLeds.frameAt === painted) return;
+      painted = wledLeds.frameAt;
+      const n = seg.len;
+      if (canvas.width !== n) canvas.width = n;
+      if (canvas.height !== 1) canvas.height = 1;
+      const img = ctx.createImageData(n, 1);
+      for (let i = 0; i < n; i++) {
+        const c = wledLeds.led(seg.start + i);
+        const o = i * 4;
+        img.data[o] = c ? c[0] : 0;
+        img.data[o + 1] = c ? c[1] : 0;
+        img.data[o + 2] = c ? c[2] : 0;
+        img.data[o + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+    };
+    raf = requestAnimationFrame(tick);
+    return {
+      update(next: { start: number; len: number }) {
+        seg = next;
+        painted = -1; // la topologie a changé : repeindre sans attendre
+      },
+      destroy() {
+        cancelAnimationFrame(raf);
+      }
+    };
+  }
 
   /** Ligne dont on choisit la source (null = vue principale). */
   let chooserId = $state<number | null>(null);
@@ -532,7 +579,19 @@
           onpointercancel={() => (dragId = null)}
           onkeydown={(e) => rubanKey(e, s)}
         >
-          <span class="ruban-fill" style="width: {pct}%;"></span>
+          {#if wledLeds.active && wled.on && s.on}
+            <!-- Les VRAIES LED, une par une (aperçu live du firmware). Ruban
+                 ÉTEINT : on repasse au rendu calculé — un aperçu tout noir
+                 serait fidèle mais inutile, alors que le bandeau dit déjà
+                 « éteint » et que l'on veut voir ce qui s'appliquera. -->
+            <canvas
+              class="ruban-leds"
+              use:ledStrip={{ start: s.start, len: s.len }}
+              aria-hidden="true"
+            ></canvas>
+          {:else}
+            <span class="ruban-fill" style="width: {pct}%;"></span>
+          {/if}
           <span class="ruban-cap" style="left: calc({pct}% - 3px);"></span>
           <span class="ruban-pct">{pct} %</span>
         </div>
@@ -966,6 +1025,15 @@
     /* Le dégradé RÉEL de la ligne (palette du firmware), pas sa couleur de
        base : « Coucher de soleil » a une base noire et des couleurs de feu. */
     background: var(--paint);
+  }
+  .ruban-leds {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    /* Une LED = un rectangle net, jamais un dégradé interpolé. */
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
   }
   .ruban-cap {
     position: absolute;

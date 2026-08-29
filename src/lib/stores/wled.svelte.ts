@@ -64,6 +64,8 @@ export interface WledSegment {
   ix: number;
   /** Index de palette (dans `palettes`). */
   pal: number;
+  /** Première LED physique du segment — découpe la trame d'aperçu temps réel. */
+  start: number;
   /** Nombre de LED du segment. */
   len: number;
 }
@@ -386,6 +388,7 @@ class WledStore {
         sx: typeof seg.sx === 'number' ? clamp(seg.sx) : 128,
         ix: typeof seg.ix === 'number' ? clamp(seg.ix) : 128,
         pal: typeof seg.pal === 'number' ? seg.pal : 0,
+        start,
         len
       };
 
