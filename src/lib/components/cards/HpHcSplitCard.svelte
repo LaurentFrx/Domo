@@ -64,7 +64,7 @@
 
   // Hauteur de segment en px sur l'échelle commune (piste 120 px, comme le graphe
   // Saisons) ; un flux réel mais minuscule reste visible (plancher 2 px).
-  const H = 120;
+  const H = 170;
   const segH = (v: number) => (maxMonth > 0 && v > 0 ? Math.max((H * v) / maxMonth, 2) : 0);
 
   // Mois dont la VENTILATION est estimée : 'local' (total ET répartition mesure
@@ -214,7 +214,7 @@
   .track {
     display: flex;
     width: 100%;
-    height: 120px;
+    height: 170px;
     flex-direction: column;
     justify-content: flex-end;
     overflow: hidden;

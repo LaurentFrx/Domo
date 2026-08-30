@@ -319,6 +319,23 @@
   // L'échelle FIXE toutes années n'a de sens qu'au niveau des mois : au jour et à
   // l'heure, elle écraserait tout (un mois d'hiver pèse 1000× une heure d'été).
   const viewScale = $derived(energyDrill.level === 'year' ? energyMonthly.scaleMaxKwh : 0);
+  // Totaux de la période affichée — ils vivent maintenant dans la ligne
+  // d'en-tête, aux côtés du fil d'Ariane et du sélecteur d'année.
+  const viewTotals = $derived({
+    auto: viewBuckets.reduce((s, b) => s + (b.autoconso_kwh || 0), 0),
+    imp: viewBuckets.reduce((s, b) => s + (b.import_kwh || 0), 0),
+    eur: viewBuckets.reduce((s, b) => s + (b.savings_eur || 0), 0),
+    est: viewBuckets.some((b) => b.autoconso_estimated && (b.autoconso_kwh || 0) > 0)
+  });
+  // Même bleu réseau que le graphe et que l'accueil : l'import garde UNE couleur
+  // dans toute l'app.
+  const EDF_BLUE = 'oklch(0.62 0.19 256)';
+  const nfTot = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
+  const nfTot1 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
+  // Sous 10 kWh (une journée, une heure), l'entier écrase tout à « 0 ».
+  const fmtTot = (v: number) =>
+    Math.max(viewTotals.auto, viewTotals.imp) < 10 ? nfTot1.format(v) : nfTot.format(v);
+
   const viewHighlight = $derived(
     energyDrill.level === 'year' && isCurrentYear ? currentMonthIdx : -1
   );
@@ -363,7 +380,7 @@
 
   <!-- ═══ Bilan (année → mois → jour) — en TÊTE de page ═══ -->
   <section class="flex flex-col gap-3">
-    <div class="flex items-center justify-between gap-3">
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-2 sm:gap-x-5">
       <!-- Fil d'Ariane : chaque échelon remonte d'un niveau. Pas de feuille
            modale ici — la page vit dans le Pager, où une modale s'ouvrirait hors
            écran (will-change:transform crée un containing block). -->
@@ -396,6 +413,32 @@
           <span class="crumb crumb-current">{Number(energyDrill.day.slice(8))}</span>
         {/if}
       </nav>
+      <!-- Totaux de la période, sur la MÊME ligne que le titre et le sélecteur.
+           Seuls les flux qui existent ont un chiffre (une année pré-solaire n'a
+           que le réseau). -->
+      <div class="flex flex-1 flex-wrap items-baseline gap-x-4 gap-y-1">
+        {#if viewTotals.auto >= 1}
+          <span class="tot" style="color: var(--color-solar);">
+            {viewTotals.est ? '~' : ''}{fmtTot(viewTotals.auto)}<span class="tot-u tot-u-kwh"
+              >kWh</span
+            >
+            <span class="tot-l">solaire</span>
+          </span>
+        {/if}
+        {#if viewTotals.imp >= 1}
+          <span class="tot" style="color: {EDF_BLUE};">
+            {fmtTot(viewTotals.imp)}<span class="tot-u tot-u-kwh">kWh</span>
+            <span class="tot-l">réseau</span>
+          </span>
+        {/if}
+        {#if viewTotals.eur >= 0.5}
+          <span class="tot" style="color: var(--color-success);">
+            {nfTot.format(viewTotals.eur)}<span class="tot-u">€</span>
+            <span class="tot-l">économisés</span>
+          </span>
+        {/if}
+      </div>
+
       <!-- Sélecteur d'année : ‹ minYear … année courante › (pas de futur). Il
            disparaît dès qu'on descend dans un mois — c'est le fil d'Ariane qui
            pilote alors la navigation. -->
@@ -938,6 +981,40 @@
   .crumb-sep {
     color: var(--color-muted-fg);
     opacity: 0.6;
+  }
+  /* Totaux en ligne : le chiffre porte la couleur du flux, l'unité et le
+     libellé restent discrets pour que la ligne tienne sur un iPhone. */
+  .tot {
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    white-space: nowrap;
+  }
+  @media (min-width: 640px) {
+    .tot {
+      font-size: 22px;
+    }
+  }
+  /* iPhone : les libellés (« solaire », « réseau », « économisés ») sautent pour
+     que titre + chiffres + sélecteur tiennent sur UNE ligne — les trois couleurs
+     les distinguent déjà, et ce sont celles des barres juste en dessous. */
+  @media (max-width: 639px) {
+    .tot-l,
+    .tot-u-kwh {
+      display: none;
+    }
+  }
+  .tot-u {
+    margin-left: 1px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-muted-fg);
+  }
+  .tot-l {
+    margin-left: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--color-muted-fg);
   }
   .back-btn {
     padding: 6px 12px;

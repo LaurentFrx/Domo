@@ -65,7 +65,7 @@
   const tickStep = $derived(data.length > 26 ? 5 : data.length > 16 ? 3 : 1);
   const isTick = (i: number) => i % tickStep === 0 || i === data.length - 1;
 
-  const H = 120; // hauteur de piste (px), alignée sur la carte HC/HP
+  const H = 170; // hauteur de piste (px), alignée sur la carte HC/HP
   // Un flux réel mais minuscule reste VISIBLE (plancher 2 px) — le liseré bleu
   // d'un été presque autonome fait partie de l'histoire.
   const segH = (v: number) => (maxTotal > 0 && v > 0 ? Math.max((H * v) / maxTotal, 2) : 0);
@@ -85,53 +85,6 @@
 </script>
 
 <div class="flex flex-col gap-4">
-  <!-- Totaux de l'année affichée : seuls les flux qui EXISTENT ont un chiffre
-       (année pré-solaire → la seule stat est le réseau). -->
-  <div class="flex flex-wrap gap-x-8 gap-y-2">
-    {#if totalAuto >= 1}
-      <div class="flex flex-col gap-0.5">
-        <span class="text-[22px] font-extrabold tracking-tight" style="color: var(--color-solar);">
-          {anyEst ? '~' : ''}{fmtVal(totalAuto)}<span
-            class="text-[12px] font-semibold"
-            style="color: var(--color-muted-fg);"
-          >
-            kWh</span
-          >
-        </span>
-        <span class="text-[11px]" style="color: var(--color-muted-fg);">Solaire consommé</span>
-      </div>
-    {/if}
-    {#if totalImport >= 1}
-      <div class="flex flex-col gap-0.5">
-        <span class="text-[22px] font-extrabold tracking-tight" style="color: {EDF_BLUE};">
-          {fmtVal(totalImport)}<span
-            class="text-[12px] font-semibold"
-            style="color: var(--color-muted-fg);"
-          >
-            kWh</span
-          >
-        </span>
-        <span class="text-[11px]" style="color: var(--color-muted-fg);">Réseau EDF</span>
-      </div>
-    {/if}
-    {#if totalEur >= 0.005}
-      <div class="flex flex-col gap-0.5">
-        <span
-          class="text-[22px] font-extrabold tracking-tight"
-          style="color: var(--color-success);"
-        >
-          {nf0.format(totalEur)}<span
-            class="text-[12px] font-semibold"
-            style="color: var(--color-muted-fg);"
-          >
-            €</span
-          >
-        </span>
-        <span class="text-[11px]" style="color: var(--color-muted-fg);">Économisés</span>
-      </div>
-    {/if}
-  </div>
-
   <!-- Barres : hauteur = conso du mois, jaune = payé par le soleil. -->
   <div
     class="bars"
@@ -169,19 +122,29 @@
         >
         <div class="track" class:empty class:sel={selected === i}>
           {#if !empty}
+            {@const hAuto = segH(m.autoconso_kwh)}
+            {@const hImp = segH(m.import_kwh)}
             <div
               class="seg"
-              style="height: {segH(
-                m.autoconso_kwh
-              )}px; background: var(--color-solar); border-radius: 5px 5px 0 0;"
-            ></div>
+              style="height: {hAuto}px; background: var(--color-solar); border-radius: 5px 5px 0 0;"
+            >
+              <!-- La valeur s'inscrit DANS le segment, dans la couleur qui se lit
+                   sur lui : sombre sur le jaune, blanc sur le bleu. Elle
+                   disparaît sous 18 px — un été n'a qu'un liseré de réseau. -->
+              {#if hAuto >= 18}
+                <span class="seg-val on-solar">{fmtVal(m.autoconso_kwh)}</span>
+              {/if}
+            </div>
             <div
               class="seg"
-              style="height: {segH(m.import_kwh)}px; background: {EDF_BLUE}; {(m.autoconso_kwh ||
-                0) < 0.5
+              style="height: {hImp}px; background: {EDF_BLUE}; {(m.autoconso_kwh || 0) < 0.5
                 ? 'border-radius: 5px 5px 0 0;'
                 : ''}"
-            ></div>
+            >
+              {#if hImp >= 18}
+                <span class="seg-val on-grid">{fmtVal(m.import_kwh)}</span>
+              {/if}
+            </div>
           {/if}
         </div>
         <span class="col-lbl" class:cur class:tick={isTick(i)}>{m.label}</span>
@@ -266,7 +229,7 @@
   .track {
     display: flex;
     width: 100%;
-    height: 120px;
+    height: 170px;
     flex-direction: column;
     justify-content: flex-end;
     overflow: hidden;
@@ -281,8 +244,25 @@
     box-shadow: 0 0 0 2px var(--color-primary);
   }
   .seg {
+    display: flex;
     width: 100%;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
     transition: height var(--duration-slow, 300ms) var(--ease-default, ease);
+  }
+  /* Valeur inscrite dans la barre : contraste maximal sur son propre fond. */
+  .seg-val {
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .on-solar {
+    color: oklch(0.25 0.04 86); /* brun sombre : lisible sur le jaune, jamais noir pur */
+  }
+  .on-grid {
+    color: oklch(0.99 0.005 256); /* blanc légèrement bleuté */
   }
   .col-lbl {
     font-size: 10px;
