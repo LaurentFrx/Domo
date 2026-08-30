@@ -122,19 +122,31 @@
         >
         <div class="track" class:empty class:sel={selected === i}>
           {#if !empty}
+            {@const hAuto = segH(m.autoconso_kwh)}
+            {@const hImp = segH(m.import_kwh)}
             <div
               class="seg"
-              style="height: {segH(
-                m.autoconso_kwh
-              )}px; background: var(--color-solar); border-radius: 5px 5px 0 0;"
-            ></div>
+              style="height: {hAuto}px; background: var(--color-solar); border-radius: 5px 5px 0 0;"
+            >
+              <!-- Valeur inscrite DANS le segment, dans la couleur qui se lit sur
+                   lui. Réservée à la vue ANNUELLE (12 colonnes) : dans un mois
+                   (28-31 jours) ou une journée (24 heures), les colonnes sont
+                   trop étroites. Et sous 18 px de haut, le segment ne peut rien
+                   contenir — un été n'a qu'un liseré de réseau. -->
+              {#if !dense && hAuto >= 18}
+                <span class="seg-val on-solar">{fmtVal(m.autoconso_kwh)}</span>
+              {/if}
+            </div>
             <div
               class="seg"
-              style="height: {segH(m.import_kwh)}px; background: {EDF_BLUE}; {(m.autoconso_kwh ||
-                0) < 0.5
+              style="height: {hImp}px; background: {EDF_BLUE}; {(m.autoconso_kwh || 0) < 0.5
                 ? 'border-radius: 5px 5px 0 0;'
                 : ''}"
-            ></div>
+            >
+              {#if !dense && hImp >= 18}
+                <span class="seg-val on-grid">{fmtVal(m.import_kwh)}</span>
+              {/if}
+            </div>
           {/if}
         </div>
         <span class="col-lbl" class:cur class:tick={isTick(i)}>{m.label}</span>
@@ -234,8 +246,26 @@
     box-shadow: 0 0 0 2px var(--color-primary);
   }
   .seg {
+    display: flex;
     width: 100%;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
     transition: height var(--duration-slow, 300ms) var(--ease-default, ease);
+  }
+  /* Valeur inscrite dans la barre : contraste maximal sur son propre fond, et
+     jamais de noir ni de blanc purs (charte). */
+  .seg-val {
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .on-solar {
+    color: oklch(0.25 0.04 86); /* brun sombre, lisible sur le jaune */
+  }
+  .on-grid {
+    color: oklch(0.99 0.005 256); /* blanc légèrement bleuté */
   }
   .col-lbl {
     font-size: 9px;
