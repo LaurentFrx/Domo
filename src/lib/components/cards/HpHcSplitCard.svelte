@@ -13,6 +13,7 @@
     data,
     periode,
     scaleMaxKwh = 0,
+    pending = false,
     onOpen
   }: {
     /** Les tranches du niveau courant : 12 mois, les jours d'un mois, ou 24 h. */
@@ -23,6 +24,10 @@
      * toutes années — fourni par l'API) : les hauteurs des deux graphes se
      * comparent. 0 = repli sur le max des données affichées. */
     scaleMaxKwh?: number;
+    /** La courbe ½h de cette période n'est pas encore récupérée chez Enedis (le
+     * backfill remonte le temps) : on le dit, au lieu de laisser croire qu'elle
+     * n'existera jamais. */
+    pending?: boolean;
     /** Descendre d'un niveau (absent au dernier niveau). */
     onOpen?: (key: string) => void;
   } = $props();
@@ -141,7 +146,9 @@
     </div>
   {:else}
     <p class="py-3 text-[12px]" style="color: var(--color-muted-fg);">
-      Pas de ventilation Heures Creuses / Pleines pour {periode.toLowerCase()}.
+      {pending
+        ? `Heures Creuses / Pleines de ${periode.toLowerCase()} : relevés en cours de récupération chez Enedis.`
+        : `Pas de ventilation Heures Creuses / Pleines pour ${periode.toLowerCase()}.`}
     </p>
   {/if}
 </div>

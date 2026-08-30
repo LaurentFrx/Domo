@@ -79,6 +79,10 @@ interface MonthlyPayload {
    * années confondues : l'échelle FIXE du graphe Saisons — les hauteurs
    * restent comparables d'une année à l'autre. */
   scale_max_kwh: number;
+  /** Vrai quand la courbe ½h n'a pas encore été récupérée pour cette année mais
+   * que le backfill y descend (il remonte le temps semaine par semaine, freiné
+   * par le quota Enedis) : l'UI dit « en cours » plutôt que « pas de données ». */
+  curve_pending: boolean;
 }
 
 function zeroMonth(): MonthAgg {
@@ -679,11 +683,27 @@ export const GET: RequestHandler = async ({ url }) => {
 
     foldBaseline(months, year);
 
+    // Le backfill de la courbe descend du présent vers le passé : une année
+    // entièrement située AVANT le curseur est simplement en attente.
+    let curvePending = false;
+    try {
+      const r = db
+        .prepare('SELECT curve_backfill_cursor AS c FROM enedis_state WHERE id=1')
+        .get() as { c: string | null } | undefined;
+      // Le curseur pointe la prochaine tranche à récupérer : toute année à sa
+      // hauteur ou en dessous reste à couvrir.
+      const cur = r?.c;
+      curvePending = !!cur && String(year) <= cur.slice(0, 4);
+    } catch {
+      /* colonne absente : on reste sur « pas de données » */
+    }
+
     const payload: MonthlyPayload = {
       year,
       months,
       min_year: minYear,
-      scale_max_kwh: scaleMaxKwh
+      scale_max_kwh: scaleMaxKwh,
+      curve_pending: curvePending
     };
     return json(payload);
   } catch (e) {
