@@ -512,8 +512,13 @@ export const GET: RequestHandler = async ({ url }) => {
     // répartit au prorata). C'est LA mesure : elle prime sur tout, y compris sur
     // les relevés saisis (qui couvrent des périodes de facturation, pas des mois
     // civils — d'où l'écart de juin 2026 : 7,8 kWh saisis contre 26,6 mesurés).
-    // Un mois n'est pris que si la courbe couvre ≥ 95 % de ses kWh ; sinon on
-    // laisse la chaîne d'estimation ci-dessous faire son travail.
+    // Couverture du mois par la courbe (le backfill remonte le temps peu à peu) :
+    //  · ≥ 95 % des kWh → 'curve', la ventilation est la MESURE ;
+    //  · 40 à 95 %      → on l'affiche quand même, en appliquant la répartition
+    //    des jours connus au total du mois, mais marquée 'enedis' — l'UI la met
+    //    alors en italique avec la mention « répartition estimée » ;
+    //  · < 40 %         → trop peu pour dire quoi que ce soit, on laisse la
+    //    chaîne d'estimation EM-50 ci-dessous faire son travail.
     const curveMonths = new Set<number>();
     try {
       const rows = db
@@ -528,13 +533,15 @@ export const GET: RequestHandler = async ({ url }) => {
         const i = r.m - 1;
         const covered = (r.hc || 0) + (r.hp || 0);
         if (i < 0 || i > 11 || covered <= 0) continue;
-        if (covered / (covered + Math.max(0, r.missing || 0)) < 0.95) continue;
+        const part = covered / (covered + Math.max(0, r.missing || 0));
+        if (part < 0.4) continue;
         // Normalise sur le total du mois (qui peut inclure des jours de repli
-        // mesure-maison) pour que HC + HP == import_kwh, toujours.
+        // mesure-maison, ou ceux que la courbe n'a pas encore couverts) pour que
+        // HC + HP == import_kwh, toujours.
         const k = months[i].import_kwh > 0 ? months[i].import_kwh / covered : 1;
         months[i].import_hc_kwh = r.hc * k;
         months[i].import_hp_kwh = r.hp * k;
-        months[i].import_split_source = 'curve';
+        months[i].import_split_source = part >= 0.95 ? 'curve' : 'enedis';
         curveMonths.add(i);
       }
     } catch {
