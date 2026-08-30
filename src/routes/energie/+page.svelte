@@ -985,14 +985,14 @@
   /* Totaux en ligne : le chiffre porte la couleur du flux, l'unité et le
      libellé restent discrets pour que la ligne tienne sur un iPhone. */
   .tot {
-    font-size: 17px;
+    font-size: 15px;
     font-weight: 800;
     letter-spacing: -0.02em;
     white-space: nowrap;
   }
   @media (min-width: 640px) {
     .tot {
-      font-size: 22px;
+      font-size: 18px;
     }
   }
   /* iPhone : les libellés (« solaire », « réseau », « économisés ») sautent pour
@@ -1006,13 +1006,13 @@
   }
   .tot-u {
     margin-left: 1px;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     color: var(--color-muted-fg);
   }
   .tot-l {
     margin-left: 3px;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 500;
     color: var(--color-muted-fg);
   }

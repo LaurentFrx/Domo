@@ -65,7 +65,7 @@
   const tickStep = $derived(data.length > 26 ? 5 : data.length > 16 ? 3 : 1);
   const isTick = (i: number) => i % tickStep === 0 || i === data.length - 1;
 
-  const H = 170; // hauteur de piste (px), alignée sur la carte HC/HP
+  const H = 200; // hauteur de piste (px) ; la carte HC/HP en dessous reste à 170
   // Un flux réel mais minuscule reste VISIBLE (plancher 2 px) — le liseré bleu
   // d'un été presque autonome fait partie de l'histoire.
   const segH = (v: number) => (maxTotal > 0 && v > 0 ? Math.max((H * v) / maxTotal, 2) : 0);
@@ -122,29 +122,19 @@
         >
         <div class="track" class:empty class:sel={selected === i}>
           {#if !empty}
-            {@const hAuto = segH(m.autoconso_kwh)}
-            {@const hImp = segH(m.import_kwh)}
             <div
               class="seg"
-              style="height: {hAuto}px; background: var(--color-solar); border-radius: 5px 5px 0 0;"
-            >
-              <!-- La valeur s'inscrit DANS le segment, dans la couleur qui se lit
-                   sur lui : sombre sur le jaune, blanc sur le bleu. Elle
-                   disparaît sous 18 px — un été n'a qu'un liseré de réseau. -->
-              {#if hAuto >= 18}
-                <span class="seg-val on-solar">{fmtVal(m.autoconso_kwh)}</span>
-              {/if}
-            </div>
+              style="height: {segH(
+                m.autoconso_kwh
+              )}px; background: var(--color-solar); border-radius: 5px 5px 0 0;"
+            ></div>
             <div
               class="seg"
-              style="height: {hImp}px; background: {EDF_BLUE}; {(m.autoconso_kwh || 0) < 0.5
+              style="height: {segH(m.import_kwh)}px; background: {EDF_BLUE}; {(m.autoconso_kwh ||
+                0) < 0.5
                 ? 'border-radius: 5px 5px 0 0;'
                 : ''}"
-            >
-              {#if hImp >= 18}
-                <span class="seg-val on-grid">{fmtVal(m.import_kwh)}</span>
-              {/if}
-            </div>
+            ></div>
           {/if}
         </div>
         <span class="col-lbl" class:cur class:tick={isTick(i)}>{m.label}</span>
@@ -217,8 +207,8 @@
     cursor: default;
   }
   .col-val {
-    min-height: 10px;
-    font-size: 9px;
+    min-height: 9px;
+    font-size: 8px;
     line-height: 1;
     font-variant-numeric: tabular-nums;
     color: var(--color-muted-fg);
@@ -229,7 +219,7 @@
   .track {
     display: flex;
     width: 100%;
-    height: 170px;
+    height: 200px;
     flex-direction: column;
     justify-content: flex-end;
     overflow: hidden;
@@ -244,28 +234,11 @@
     box-shadow: 0 0 0 2px var(--color-primary);
   }
   .seg {
-    display: flex;
     width: 100%;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
     transition: height var(--duration-slow, 300ms) var(--ease-default, ease);
   }
-  /* Valeur inscrite dans la barre : contraste maximal sur son propre fond. */
-  .seg-val {
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-  }
-  .on-solar {
-    color: oklch(0.25 0.04 86); /* brun sombre : lisible sur le jaune, jamais noir pur */
-  }
-  .on-grid {
-    color: oklch(0.99 0.005 256); /* blanc légèrement bleuté */
-  }
   .col-lbl {
-    font-size: 10px;
+    font-size: 9px;
     line-height: 1;
     color: var(--color-muted-fg);
     white-space: nowrap;
@@ -296,8 +269,8 @@
     color: var(--color-primary);
   }
   .col-eur {
-    min-height: 11px;
-    font-size: 9px;
+    min-height: 10px;
+    font-size: 8px;
     line-height: 1;
     font-variant-numeric: tabular-nums;
     color: var(--color-success);
