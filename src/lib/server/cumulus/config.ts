@@ -52,8 +52,12 @@ export function defaultPilotConfig(): PilotConfig {
     battFullPct: 98, // batteries « pleines » (valeur Laurent)
     chargeIdleW: 120, // charge résiduelle « quasi nulle »
     solarStartsPerDay: 2, // quota d'allumages SPONTANÉS (reprises après cession-achat HORS quota)
-    apsMinW: 300, // soleil RÉEL exigé (production APS minimale)
+    apsMinW: 300, // seuil de l'ALERTE « APS muet » (n'est plus une condition d'allumage)
     minUsefulHeatMin: 45, // jamais d'allumage à moins de 45 min de la fin de fenêtre
+    // Marge exigée au-delà de l'énergie de la chauffe pour que le parc puisse
+    // revenir à 100 % avant la nuit. Couvre l'erreur du modèle de chauffe
+    // (MAE 375 Wh) et un nuage de fin de journée.
+    rechargeBufferWh: 500,
     invisibleSurplusMinW: 2000, // déclencheur de secours : surplus invisible estimé minimal
     // Voie saturation/réserve (Max AC zéro-export) : ballon 2900 W − budget de
     // drain batterie ~900 W = 2000 W de surplus mesuré ; SoC 65 % → une chauffe
@@ -191,6 +195,7 @@ export function normalizePilotConfig(raw: unknown): PilotConfig {
     chargeIdleW: asNum(o.chargeIdleW, d.chargeIdleW, 0, 1000),
     solarStartsPerDay: asNum(o.solarStartsPerDay, d.solarStartsPerDay, 1, 10),
     apsMinW: asNum(o.apsMinW, d.apsMinW, 50, 900),
+    rechargeBufferWh: asNum(o.rechargeBufferWh, d.rechargeBufferWh, 0, 5000),
     minUsefulHeatMin: asNum(o.minUsefulHeatMin, d.minUsefulHeatMin, 10, 240),
     invisibleSurplusMinW: asNum(o.invisibleSurplusMinW, d.invisibleSurplusMinW, 300, 5000),
     surplusOnW: asNum(o.surplusOnW, d.surplusOnW, 500, 5000),

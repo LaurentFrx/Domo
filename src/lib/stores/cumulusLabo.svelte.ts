@@ -27,6 +27,12 @@ export interface CriterionSample {
   cause: string;
   gridW: number;
   residualW: number | null;
+  /** Critère de rechargeabilité (31/08) : PV prévu restant − maison prévue −
+   *  place dans le parc, en Wh. `null` = indécidable. */
+  rechargeMarginWh: number | null;
+  rechargeOk: boolean | null;
+  /** Ce que notre anti-injection retenait à l'onduleur APS (W). */
+  apsRecoverableW: number;
 }
 
 class CumulusLaboState {

@@ -72,7 +72,10 @@ export interface CumulusInputs {
   priceHp: number; // €/kWh heures pleines
   priceHc: number; // €/kWh heures creuses
 
-  // ── Prévision PV (UNIQUEMENT pour la décision nocturne de recharge HC) ──
+  // ── Prévision PV ──
+  // J+1/J+2 : décision nocturne de recharge HC. `solNextDaylightKwh` : depuis le
+  // 31/08, critère de rechargeabilité du parc — c'est la seule vue du soleil que
+  // notre propre bridage de l'onduleur APS ne fausse pas.
   forecastAvailable: boolean;
   /** Énergie PV prévue sur le prochain créneau diurne à venir (kWh). */
   solNextDaylightKwh: number;
@@ -113,9 +116,17 @@ export interface CumulusInputs {
    *  null si le Modbus local est muet. Le signe est indispensable au bilan de charge
    *  maison : sans lui, une Max AC qui absorbe l'excédent se compte comme une source. */
   maxAcNetW: number | null;
-  pvApsW: number; // prod du micro-onduleur APsystems EZ1 (pan Sud), W — l'ÉTALON (jamais bridé)
+  /** Prod du micro-onduleur APsystems EZ1 (pan Sud), W.
+   *  ⚠ CE N'EST PLUS UN ÉTALON DU SOLEIL. Depuis le 27/07 notre propre boucle
+   *  anti-injection le plafonne (30 W au plancher matériel) pendant les épisodes
+   *  d'injection — c'est-à-dire exactement quand il y a du surplus à valoriser.
+   *  Un chiffre bas ne prouve donc RIEN sur le ciel : voir `apsRecoverableW`. */
+  pvApsW: number;
   apsAvailable: boolean; // le bridge APS répond (distinguer « injoignable » de « 0 W réel »)
   apsAgeSec: number | null; // fraîcheur de la donnée APS (s), null si inconnue
+  /** Puissance que le bridage anti-injection retient à l'onduleur (W ≥ 0), et
+   *  qu'il rendra dès qu'une charge aura absorbé l'injection. 0 = aucun bail. */
+  apsRecoverableW: number;
 
   // ── Températures ambiantes (modèle d'énergie ballon, ÉTAPE 1b+) ──
   // Moyennes des sources disponibles ; null si aucune source.
@@ -256,7 +267,10 @@ export interface PilotConfig {
   battFullPct: number; // batteries « pleines » au-dessus de ce SoC — Laurent : 98
   chargeIdleW: number; // charge résiduelle « quasi nulle » sous ce seuil (W)
   solarStartsPerDay: number; // quota d'allumages SPONTANÉS par jour (reprises après cession-achat HORS quota)
-  apsMinW: number; // soleil RÉEL exigé : production APS minimale (W)
+  apsMinW: number; // seuil de l'alerte « APS muet » (W) — plus une condition d'allumage
+  /** Marge (Wh) exigée en plus de l'énergie de chauffe pour que le parc puisse
+   *  revenir à 100 % avant la nuit. */
+  rechargeBufferWh: number;
   minUsefulHeatMin: number; // jamais d'allumage s'il reste moins de X min de fenêtre devant soi
   invisibleSurplusMinW: number; // déclencheur de secours : surplus invisible estimé minimal (W)
   // ── Voie « saturation/réserve » (contexte Max AC zéro-export, 22/07/2026) ──
@@ -378,7 +392,13 @@ export interface PilotView {
   surplusNeedW: number;
   invisibleSurplusW: number; // surplus invisible estimé (W)
   potTotalW: number; // potentiel solaire total estimé (W)
-  pApsW: number; // production APS (l'étalon)
+  pApsW: number; // production APS MESURÉE (bridée par l'anti-injection, cf. apsRecoverableW)
+  apsRecoverableW: number; // ce que notre bridage retient à l'onduleur (W)
+  /** Critère de rechargeabilité : PV prévu restant − maison prévue − place dans
+   *  le parc (Wh). `null` = indécidable (météo, profil ou cloud muet). */
+  rechargeMarginWh: number | null;
+  /** Énergie estimée de la chauffe à venir (Wh), null si la sonde est muette. */
+  heatNeedWh: number | null;
   socNow: number | null;
   socStart: number | null; // SoC au début de la chauffe en cours
   solarStartsToday: number;
@@ -421,6 +441,13 @@ export interface CriterionSample {
   /** Fenêtre solaire ouverte (éphémérides) — les comparaisons de voies n'ont
    *  de sens que le jour ; le quota, lui, n'est PAS dans ce drapeau. */
   windowOpen: boolean;
+  /** Critère de rechargeabilité (31/08) — ce qui a remplacé le seuil « APS ≥
+   *  300 W » que notre propre bridage rendait infranchissable. Journalisé pour
+   *  pouvoir juger a posteriori, sur des ticks réels, si le remplacement tient. */
+  rechargeMarginWh: number | null;
+  rechargeOk: boolean | null;
+  /** Puissance que le bridage anti-injection retenait à l'onduleur (W). */
+  apsRecoverableW: number;
   /** Réel. */
   wantOn: boolean; // ce que le pilote a voulu
   relayOn: boolean;

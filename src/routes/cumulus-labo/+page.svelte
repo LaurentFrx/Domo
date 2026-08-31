@@ -179,6 +179,31 @@
           </div>
         </div>
       {/if}
+
+      <!-- Critère de RECHARGEABILITÉ (31/08) : le parc finira-t-il la journée
+           plein malgré la chauffe ? Il a remplacé le seuil « APS ≥ 300 W » que
+           notre propre anti-injection rendait infranchissable — d'où l'affichage
+           conjoint des watts que ce bridage retient à l'onduleur. -->
+      <div
+        class="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t pt-3 text-[12px]"
+        style="border-color: var(--color-border); color: var(--color-muted-fg);"
+      >
+        <span class="font-semibold" style="color: var(--color-fg);">
+          {cur.rechargeOk === null
+            ? 'Rechargeabilité : indécidable'
+            : cur.rechargeOk
+              ? '✓ Le parc peut finir la journée plein'
+              : '✗ Pas assez de soleil devant pour recharger'}
+        </span>
+        {#if cur.rechargeMarginWh !== null}
+          <span class="tabular-nums">marge {kWh(cur.rechargeMarginWh)}</span>
+        {/if}
+        {#if cur.apsRecoverableW > 0}
+          <span class="tabular-nums">
+            onduleur bridé : {cur.apsRecoverableW} W rendus dès la chauffe
+          </span>
+        {/if}
+      </div>
     </section>
 
     <!-- ═══ La journée : parc vs besoin, chauffes en fond ═══ -->

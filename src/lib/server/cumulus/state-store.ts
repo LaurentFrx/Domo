@@ -283,7 +283,12 @@ function normCriterionLog(v: unknown): CriterionSample[] {
         heating: boolOr(o.heating, false),
         cause: typeof o.cause === 'string' ? (o.cause as CriterionSample['cause']) : 'idle',
         gridW: numOr(o.gridW, 0),
-        residualW: wh(o.residualW)
+        residualW: wh(o.residualW),
+        // Champs du critère de rechargeabilité (31/08) : absents des
+        // échantillons écrits avant, d'où le repli `null` / 0.
+        rechargeMarginWh: wh(o.rechargeMarginWh),
+        rechargeOk: typeof o.rechargeOk === 'boolean' ? o.rechargeOk : null,
+        apsRecoverableW: numOr(o.apsRecoverableW, 0)
       };
     })
     .slice(-CRITERION_LOG_MAX);
@@ -451,6 +456,10 @@ function normPilotView(v: unknown): PilotView | null {
     invisibleSurplusW: numOr(o.invisibleSurplusW, 0),
     potTotalW: numOr(o.potTotalW, 0),
     pApsW: numOr(o.pApsW, 0),
+    apsRecoverableW: numOr(o.apsRecoverableW, 0),
+    rechargeMarginWh:
+      typeof o.rechargeMarginWh === 'number' ? Math.round(o.rechargeMarginWh) : null,
+    heatNeedWh: typeof o.heatNeedWh === 'number' ? Math.round(o.heatNeedWh) : null,
     socNow: numOrNull(o.socNow),
     socStart: numOrNull(o.socStart),
     solarStartsToday: numOr(o.solarStartsToday, 0),

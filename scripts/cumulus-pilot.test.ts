@@ -8,12 +8,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { pilotStep, defaultPilotState, type PilotCtx } from '../src/lib/server/cumulus/pilot.ts';
 import { sunPosition } from '../src/lib/server/cumulus/sun.ts';
+import { defaultCumulusState } from '../src/lib/server/cumulus/state-store.ts';
 import type {
   CumulusInputs,
   CumulusConfig,
   CumulusRuntimeState,
   PilotState
 } from '../src/lib/server/cumulus/types.ts';
+import type { HouseProfile } from '../src/lib/server/cumulus/reserve.ts';
 
 // 3 juillet 2026, 12:00 UTC = 14:00 locale (Paris, été) — plein soleil à Sanguinet.
 const NOON = Date.parse('2026-07-03T12:00:00Z');
@@ -48,6 +50,7 @@ function cfg(o: Record<string, unknown> = {}, pilotO: Record<string, unknown> = 
       solarStartsPerDay: 2,
       apsMinW: 300,
       minUsefulHeatMin: 45,
+      rechargeBufferWh: 500,
       invisibleSurplusMinW: 2000,
       surplusOnW: 2000,
       maxAcSocOnPct: 65,
@@ -87,7 +90,11 @@ function st(
   o: Partial<CumulusRuntimeState> = {},
   pilotO: Partial<PilotState> = {}
 ): CumulusRuntimeState {
+  // Base = l'état par défaut RÉEL du store : les fixtures n'ont plus à suivre à
+  // la main chaque champ ajouté au type (c'est un `energy` manquant qui faisait
+  // planter les 52 tests dès que le pilote l'a lu plus tôt dans son flux).
   return {
+    ...defaultCumulusState(),
     autoMode: 'auto',
     manualRelayOn: false,
     boostUntilFull: false,
@@ -153,6 +160,7 @@ function inp(o: Partial<CumulusInputs> = {}): CumulusInputs {
     pvApsW: 800,
     apsAvailable: true,
     apsAgeSec: 5,
+    apsRecoverableW: 0,
     indoorC: 24,
     outdoorC: 25,
     indoorSources: [],
@@ -880,4 +888,149 @@ test('protection batterie : le PLANCHER tient même si le parc pondéré est ind
   );
   assert.equal(r.wantOn, false);
   assert.equal(r.pilot.lastCessionCause, 'battery');
+});
+
+// ─── CRITÈRE DE RECHARGEABILITÉ (31/08/2026) ────────────────────────────────
+// Remplace le verrou « APS ≥ 300 W » de la condition « fenêtre solaire ». Ce
+// seuil-là était infranchissable pendant les épisodes de surplus : c'est NOTRE
+// anti-injection qui plafonne l'onduleur à 30 W, donc le pilote se retrouvait
+// aveuglé au moment précis où il y avait quelque chose à récupérer (le 31/08,
+// 203 relevés de don franc sur 209 avaient l'APS sous le seuil, pendant que
+// 2,1 kWh partaient chez EDF).
+//
+// La question posée est désormais celle de Laurent : « les batteries pourront-
+// elles revenir à 100 % avant la nuit si la chauffe est utilisée ? »
+
+/** Profil maison appris : `meanW` constants sur les 24 heures. */
+function profilPlat(meanW: number): HouseProfile {
+  return Array.from({ length: 24 }, () => [{ day: '2026-07-02', meanW }]);
+}
+
+test('APS bridé à 30 W mais PV à venir abondant → la fenêtre ne bloque plus', () => {
+  const r = pilotStep(
+    // Don franc, batteries pleines, et un onduleur que NOUS avons plafonné.
+    inp({
+      gridPowerW: -800,
+      pvApsW: 30,
+      apsRecoverableW: 750,
+      batterySocPct: [100, 100],
+      batteryEnergyWh: 5360,
+      batteryCapacityWh: 5360,
+      solNextDaylightKwh: 12
+    }),
+    cfg(),
+    st({}, { houseProfile: profilPlat(300) }),
+    ctx()
+  );
+  const win = r.view.conds.find((c) => c.key === 'window');
+  assert.equal(win?.ok, true, `fenêtre refusée : ${win?.detail}`);
+  assert.equal(r.energy.rechargeOk, true);
+});
+
+test('même situation, mais fin de journée : la marge PV ne couvre plus la chauffe', () => {
+  const r = pilotStep(
+    inp({
+      gridPowerW: -800,
+      pvApsW: 30,
+      apsRecoverableW: 750,
+      batterySocPct: [100, 100],
+      batteryEnergyWh: 5360,
+      batteryCapacityWh: 5360,
+      solNextDaylightKwh: 0.3 // 300 Wh : moins que la chauffe + le tampon
+    }),
+    cfg(),
+    st({}, { houseProfile: profilPlat(300) }),
+    ctx()
+  );
+  const win = r.view.conds.find((c) => c.key === 'window');
+  assert.equal(win?.ok, false);
+  assert.equal(r.energy.rechargeOk, false);
+  assert.equal(r.wantOn, false);
+});
+
+test('la place à remplir dans le parc est déduite AVANT la chauffe', () => {
+  // 4 kWh de PV à venir, 1,2 kWh pour la maison — mais 3 kWh manquent au parc :
+  // chauffer maintenant l'empêcherait de finir la journée plein.
+  const r = pilotStep(
+    inp({
+      gridPowerW: -800,
+      batterySocPct: [40, 40],
+      batteryEnergyWh: 2360,
+      batteryCapacityWh: 5360,
+      solNextDaylightKwh: 4
+    }),
+    cfg(),
+    st({}, { houseProfile: profilPlat(300) }),
+    ctx()
+  );
+  assert.equal(r.energy.rechargeOk, false);
+  assert.ok((r.energy.rechargeMarginWh ?? 0) < 3000, 'la place du parc doit amputer la marge');
+});
+
+test('météo muette → le critère ne décide pas, il ne bloque pas non plus', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: -800, forecastAvailable: false, solNextDaylightKwh: 0 }),
+    cfg(),
+    st({}, { houseProfile: profilPlat(300) }),
+    ctx()
+  );
+  assert.equal(r.energy.rechargeOk, null);
+  assert.equal(r.energy.rechargeMarginWh, null);
+  assert.equal(r.view.conds.find((c) => c.key === 'window')?.ok, true);
+});
+
+test('profil maison non appris → même repli prudent (aucun blocage muet)', () => {
+  const r = pilotStep(inp({ gridPowerW: -800 }), cfg(), st(), ctx());
+  assert.equal(r.energy.rechargeOk, null);
+  assert.equal(r.view.conds.find((c) => c.key === 'window')?.ok, true);
+});
+
+test('l’APS récupérable compte dans le surplus réorientable', () => {
+  const sans = pilotStep(
+    inp({ gridPowerW: -700, maxAcAvailable: true, maxAcChargeW: 0, maxAcNetW: 0 }),
+    cfg(),
+    st(),
+    ctx()
+  );
+  const avec = pilotStep(
+    inp({
+      gridPowerW: -700,
+      apsRecoverableW: 750,
+      maxAcAvailable: true,
+      maxAcChargeW: 0,
+      maxAcNetW: 0
+    }),
+    cfg(),
+    st(),
+    ctx()
+  );
+  assert.equal(avec.view.surplusW - sans.view.surplusW, 750);
+  assert.match(avec.view.conds.find((c) => c.key === 'surplus')?.detail ?? '', /750 W/);
+});
+
+test('don franc + journée rechargeable : le ballon peut aller jusqu’au plein', () => {
+  // 97 % rempli — au-dessus du seuil anti-cyclage de 95 %. Le 31/08 c'est cet
+  // état qui refusait les 500 Wh de place restants pendant que 2,1 kWh partaient
+  // au réseau.
+  const presquePlein = ctx({ eAvailWh: 15_520, eFullWh: 16_000 });
+  const bloque = pilotStep(
+    inp({ gridPowerW: -50 }), // pas de don franc → seuil 95 % maintenu
+    cfg(),
+    st({}, { houseProfile: profilPlat(300) }),
+    presquePlein
+  );
+  const libre = pilotStep(
+    inp({
+      gridPowerW: -800, // don franc
+      batterySocPct: [100, 100],
+      batteryEnergyWh: 5360,
+      batteryCapacityWh: 5360,
+      solNextDaylightKwh: 12
+    }),
+    cfg(),
+    st({}, { houseProfile: profilPlat(300) }),
+    presquePlein
+  );
+  assert.equal(bloque.view.conds.find((c) => c.key === 'tank')?.ok, false);
+  assert.equal(libre.view.conds.find((c) => c.key === 'tank')?.ok, true);
 });

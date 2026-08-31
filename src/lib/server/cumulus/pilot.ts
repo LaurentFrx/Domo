@@ -12,8 +12,11 @@
  *   - EM50 (instantané) = SEULE source des décisions d'allumage/coupure ;
  *   - cloud Anker (~1 min de retard) = conditions LENTES uniquement (SoC) — sa
  *     production affichée MENT en bridage, INTERDITE comme condition d'allumage ;
- *   - APS local = étalon du potentiel (voir solar-potential.ts) ;
- *   - météo = UNIQUEMENT la décision nocturne de recharge HC.
+ *   - APS local = étalon du potentiel (voir solar-potential.ts) — MAIS depuis que
+ *     notre anti-injection le bride (27/07), sa production ne prouve plus rien
+ *     sur le ciel : elle ne conditionne plus aucun allumage (31/08) ;
+ *   - météo = décision nocturne de recharge HC, ET critère de rechargeabilité du
+ *     parc (31/08) : c'est la seule vue du soleil que notre bridage ne fausse pas.
  *
  * ARCHITECTURE : la « phase » est DÉRIVÉE du relais réel + de l'état (jamais
  * désynchronisée) ; la mémoire de la machine (chronos de persistance, compteurs,
@@ -39,10 +42,12 @@ import type {
 import {
   accumulateHouseLoad,
   emptyHouseProfile,
+  profileEnergyWh,
   reserveWh,
   PV_END_ELEVATION_DEG,
+  RECHARGE_QUANTILE,
   type ReserveResult
-} from './reserve';
+} from './reserve.ts';
 import { nextTariffSwitch, isHC } from '$lib/server/tariffs';
 import { sunPosition } from './sun.ts';
 import type { PotentialResult } from './solar-potential';
@@ -88,6 +93,14 @@ export interface PilotStepResult {
     /** Fenêtre solaire OUVERTE (éphémérides seules — sans seuil APS ni quota).
      *  Sert au labo : comparer les voies hors quota, mais jamais la nuit. */
     windowOpen: boolean;
+    /** Critère de rechargeabilité (31/08) : PV prévu restant − maison prévue −
+     *  place à remplir dans le parc, en Wh. `null` = indécidable. */
+    rechargeMarginWh: number | null;
+    /** Verdict de ce critère : le parc pourra-t-il finir à 100 % malgré la
+     *  chauffe ? `null` = indécidable, la fenêtre laisse alors passer. */
+    rechargeOk: boolean | null;
+    /** Ce que notre bridage retenait à l'onduleur APS au moment du tick (W). */
+    apsRecoverableW: number;
   };
 }
 
@@ -284,6 +297,70 @@ export function pilotStep(
     minutesToHcStart
   );
 
+  // ── ÉNERGIE DE LA CHAUFFE À VENIR (Wh) ────────────────────────────────────
+  // Remontée ici (elle servait plus bas au seul critère énergie) : le critère de
+  // rechargeabilité en a besoin AVANT les conditions d'allumage.
+  // 120 Wh/°C sous la coupure + 40 Wh par heure écoulée depuis le dernier plein
+  // — MAE 375 Wh en validation croisée sur 40 chauffes réelles.
+  const hSincePlein =
+    state.energy.lastAnchorTs !== null
+      ? Math.min(72, Math.max(0, (now - state.energy.lastAnchorTs) / 3_600_000))
+      : 24;
+  const eChauffeWh =
+    inputs.tempC !== null
+      ? Math.min(8000, Math.max(250, 120 * Math.max(0, 55 - inputs.tempC) + 40 * hSincePlein))
+      : null;
+
+  // ── CRITÈRE DE RECHARGEABILITÉ (Wh) — spec Laurent, 31/08/2026 ────────────
+  // « Profiter de cette énergie dans le cumulus sans entamer la consommation
+  // EDF : les batteries doivent pouvoir revenir à 100 % avant la nuit si la
+  // chauffe est utilisée. »
+  //
+  // Ce qui a rendu ce critère nécessaire : la condition d'allumage exigeait
+  // `APS ≥ 300 W` comme preuve de soleil. Or NOTRE anti-injection plafonne cet
+  // onduleur à 30 W précisément pendant les épisodes de surplus — le 31/08, sur
+  // 209 relevés de don franc en journée, 203 avaient l'APS sous le seuil. Le
+  // pilote était donc aveuglé par sa propre maison au moment exact où il y avait
+  // quelque chose à récupérer. La prévision météo, elle, ignore notre bridage.
+  //
+  //   marge = PV prévu restant − maison prévue − place à remplir dans le parc
+  //   autoriser ⟺ marge ≥ énergie de la chauffe + tampon
+  //
+  // Le PV prévu est celui du RESTE DE LA JOURNÉE (fenêtre [7 h, 19 h[ côté
+  // pont) : le comparer à une chauffe qui commence maintenant est conservateur
+  // en début de journée et juste en fin d'après-midi, là où la décision compte.
+  const houseToPvEnd = profileEnergyWh(
+    pilot.houseProfile,
+    ctx.minuteOfDay,
+    0,
+    minutesToPvEnd,
+    RECHARGE_QUANTILE
+  );
+  const parcRoomWh =
+    inputs.ankerAvailable && inputs.batteryCapacityWh > 0
+      ? Math.max(0, inputs.batteryCapacityWh - inputs.batteryEnergyWh)
+      : null;
+  const pvRestantWh = inputs.forecastAvailable
+    ? Math.max(0, Math.round(inputs.solNextDaylightKwh * 1000))
+    : null;
+  const rechargeMarginWh =
+    pvRestantWh !== null && houseToPvEnd.wh !== null && parcRoomWh !== null
+      ? Math.round(pvRestantWh - houseToPvEnd.wh - parcRoomWh)
+      : null;
+  // Ce que la chauffe VA réellement prendre : jamais plus que la place restante
+  // dans le ballon. L'estimateur thermique seul répondait « 1 452 Wh » le 31/08
+  // pour un ballon à 97 % qui n'en acceptait que 502 — et ce triplement du besoin
+  // refusait des reprises que le soleil couvrait largement.
+  const tankRoomWh = Math.max(0, ctx.eFullWh - ctx.eAvailWh);
+  const besoinChauffeWh = eChauffeWh === null ? null : Math.min(eChauffeWh, tankRoomWh);
+  // Indécidable (pont météo muet, profil non appris, cloud Anker down) : on ne
+  // bloque pas sur une absence de donnée — les voies historiques et le critère
+  // énergie restent seuls juges, comme avant ce changement.
+  const rechargeOk =
+    rechargeMarginWh === null || besoinChauffeWh === null
+      ? null
+      : rechargeMarginWh >= besoinChauffeWh + p.rechargeBufferWh;
+
   // Fenêtre du jour (horaires HH:MM) — calculée une fois par jour, mise en cache
   // (ne dépend que de la date + lat/lon + seuils, pas de l'instant courant).
   if (pilot.sunWindow?.forDate !== inputs.todayParis) {
@@ -335,8 +412,6 @@ export function pilotStep(
   const hcWants = hcPlanActive && !hcTargetReached;
 
   // ── Les 7 conditions d'allumage solaire (affichées telles quelles dans l'UI) ──
-  const tankNotFull =
-    ctx.eFullWh > 0 && ctx.eAvailWh < p.fullFraction * ctx.eFullWh && !state.ballonCharged;
   // L'axiome « l'export prouve la saturation du parc » ne tient que si la
   // régulation zéro-export de la Max AC est VIVANTE (mesure locale up). Si elle
   // est muette — et l'événement qui la rend muette peut être celui qui a tué la
@@ -348,8 +423,23 @@ export function pilotStep(
     !inputs.ankerAvailable ||
     (socAvg !== null && socAvg >= p.battFullPct && inputs.batteryChargeW < p.chargeIdleW);
   const exportFrank = inputs.em50Available && exportW > p.exportOnW && exportProof;
+
+  // BALLON PAS PLEIN — le seuil de 95 % est une protection anti-cyclage : sans
+  // elle, le ballon relancerait un cycle pour trois pour cent de marge. Mais
+  // quand l'énergie part au réseau ET que la journée pourra encore recharger le
+  // parc, ces derniers pour cent ne coûtent rien et l'alternative est de les
+  // donner : le 31/08 le ballon était à 97 % (500 Wh de place) pendant que
+  // 2,1 kWh partaient chez EDF. Dans ce cas précis, on va jusqu'au plein.
+  const tankCeilingFrac = exportFrank && rechargeOk === true ? 1 : p.fullFraction;
+  const tankNotFull =
+    ctx.eFullWh > 0 && ctx.eAvailWh < tankCeilingFrac * ctx.eFullWh && !state.ballonCharged;
   const quietHouse = !inputs.appliances.some((a) => a.powerW !== null && a.powerW >= a.onW);
-  const windowOk = windowOpen && inputs.pvApsW >= p.apsMinW && windowLeftMin >= p.minUsefulHeatMin;
+  // FENÊTRE — « peut-on encore chauffer utilement aujourd'hui ? ». Les
+  // éphémérides disent qu'il fait jour et qu'il reste du temps ; la preuve qu'il
+  // y a du soleil EXPLOITABLE ne vient plus de la production APS (que nous
+  // bridons) mais du bilan d'énergie prévisionnel. `rechargeOk === null` =
+  // donnée manquante : on laisse passer, les autres conditions décident.
+  const windowOk = windowOpen && windowLeftMin >= p.minUsefulHeatMin && rechargeOk !== false;
   const resumeFree = pilot.lastCessionCause === 'buy' || pilot.lastCessionCause === 'hard_buy';
   const quotaOk = resumeFree || pilot.solarStartsToday < p.solarStartsPerDay;
   const delaysOk =
@@ -432,7 +522,14 @@ export function pilotStep(
   // de panne que socParc à null qui désarmait les gardes batterie : une entrée
   // manquante ne doit jamais éteindre une fonction sans le dire.
   const nb = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-  const surplusDispoW = nb(inputs.maxAcChargeW) + nb(inputs.sb3ChargeW) + nb(exportW);
+  // Quatrième terme (31/08) : ce que notre propre anti-injection retient à
+  // l'onduleur APS. Ce n'est pas une prédiction optimiste — c'est un mécanisme
+  // que nous commandons : la boucle APS remet son plafond au MAXIMUM dès le
+  // premier soutirage (apsloop/decide.ts, voie « import »), donc allumer le
+  // ballon rend ces watts dans la minute. Les ignorer sous-estimait le surplus
+  // de ~750 W le 31/08, au moment précis où 2,1 kWh partaient au réseau.
+  const surplusDispoW =
+    nb(inputs.maxAcChargeW) + nb(inputs.sb3ChargeW) + nb(exportW) + nb(inputs.apsRecoverableW);
 
   // ── RÉSIDU (C4) : l'échec digéré par la physique, pas par un compteur ──
   // Une coupure pour achat a mesuré ce qui manquait ; on ne réessaie que quand
@@ -505,20 +602,13 @@ export function pilotStep(
   // depuis le dernier plein — MAE 375 Wh en validation croisée sur 40 chauffes
   // réelles, contre 951 Wh pour le déficit calorimétrique.
   //
-  // Le PV encore attendu n'est PAS crédité : le critère est donc plus strict que
-  // la spec, ce qui est le bon sens pour une première mise en service.
+  // Le PV encore attendu n'est PAS crédité ICI : ce critère-là juge le STOCK du
+  // parc, pas la journée qui reste. C'est la voie « fenêtre » qui, depuis le
+  // 31/08, crédite le PV à venir (rechargeMarginWh, calculé plus haut).
   const TAMPON_WH = 1500;
   const uParcWh =
     inputs.ankerAvailable && inputs.batteryCapacityWh > 0
       ? Math.max(0, inputs.batteryEnergyWh - 0.1 * inputs.batteryCapacityWh) * 0.95
-      : null;
-  const hSincePlein =
-    state.energy.lastAnchorTs !== null
-      ? Math.min(72, Math.max(0, (now - state.energy.lastAnchorTs) / 3_600_000))
-      : 24;
-  const eChauffeWh =
-    inputs.tempC !== null
-      ? Math.min(8000, Math.max(250, 120 * Math.max(0, 55 - inputs.tempC) + 40 * hSincePlein))
       : null;
   const besoinTotalWh =
     eChauffeWh !== null && reserve.wh !== null ? eChauffeWh + reserve.wh + TAMPON_WH : null;
@@ -819,7 +909,11 @@ export function pilotStep(
               (inputs.maxAcNetW ?? 0) > 20
                 ? `débite ${Math.round(inputs.maxAcNetW ?? 0)} W — rien à réorienter`
                 : `charge ${Math.round(inputs.maxAcChargeW ?? 0)} W`
-            } + SB3 ${inputs.sb3ChargeW} W + don ${exportW} W)`
+            } + SB3 ${inputs.sb3ChargeW} W + don ${exportW} W${
+              inputs.apsRecoverableW > 0
+                ? ` + ${inputs.apsRecoverableW} W que l'onduleur rendra dès la chauffe`
+                : ''
+            })`
           : exportW > 0
             ? `${exportW} W donnés (mesure locale muette)`
             : '≈ 0 W') + (buyW > 50 ? ` · achat ${buyW} W` : '')
@@ -850,7 +944,14 @@ export function pilotStep(
         'Fenêtre solaire',
         windowOk,
         windowOpen
-          ? `${sunWindowStart ?? '?'} → ${sunWindowEnd ?? '?'} · soleil ${Math.round(sun.elevationDeg)}° · APS ${inputs.pvApsW} W · reste ${windowLeftMin} min`
+          ? `reste ${windowLeftMin} min · ` +
+              (rechargeMarginWh === null
+                ? 'PV à venir inconnu (météo ou profil muet)'
+                : besoinChauffeWh === null
+                  ? `${rechargeMarginWh} Wh de PV en trop après la maison et le parc`
+                  : rechargeOk
+                    ? `${rechargeMarginWh} Wh de PV en trop : de quoi chauffer (${Math.round(besoinChauffeWh)} Wh) et finir la journée à 100 %`
+                    : `il manquerait ${Math.round(besoinChauffeWh + p.rechargeBufferWh - rechargeMarginWh)} Wh de soleil pour chauffer sans entamer la nuit`)
           : sunWindowStart && sunWindowEnd
             ? `fermée · aujourd'hui ${sunWindowStart} → ${sunWindowEnd}`
             : 'fermée'
@@ -885,6 +986,9 @@ export function pilotStep(
     invisibleSurplusW: ctx.potential.invisibleSurplusW,
     potTotalW: ctx.potential.potTotalW,
     pApsW: Math.round(inputs.pvApsW),
+    apsRecoverableW: Math.round(inputs.apsRecoverableW),
+    rechargeMarginWh,
+    heatNeedWh: eChauffeWh === null ? null : Math.round(eChauffeWh),
     // Échelle PARC (pondérée), la même que socStart : la carte affiche
     // « socNow − socStart pts », les deux doivent être comparables. C'est aussi
     // le pourcentage montré par la carte Batterie de l'accueil.
@@ -912,7 +1016,10 @@ export function pilotStep(
       trigger: energyTrigger,
       legacyTrigger,
       commonOk,
-      windowOpen
+      windowOpen,
+      rechargeMarginWh,
+      rechargeOk,
+      apsRecoverableW: Math.round(inputs.apsRecoverableW)
     }
   };
 }

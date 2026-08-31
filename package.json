@@ -17,7 +17,7 @@
     "lint": "prettier --check .",
     "test:cumulus": "node --experimental-strip-types --test scripts/cumulus-decide.test.ts",
     "test:energy": "node --experimental-strip-types --test scripts/cumulus-energy.test.ts",
-    "test:pilot": "node --experimental-strip-types --test scripts/cumulus-pilot.test.ts",
+    "test:pilot": "node --experimental-strip-types --import ./scripts/register-env.mjs --test scripts/cumulus-pilot.test.ts",
     "test:atomic": "node --experimental-strip-types --test scripts/atomic-store.test.ts",
     "test:sb3loop": "node --experimental-strip-types --test scripts/sb3loop.test.ts",
     "test:apsloop": "node --experimental-strip-types --test scripts/apsloop.test.ts",

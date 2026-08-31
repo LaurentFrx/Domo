@@ -43,6 +43,24 @@ export const PROFILE_DAYS = 21;
 export const PROFILE_QUANTILE = 0.75;
 
 /**
+ * Quantile du profil pour le critère de RECHARGEABILITÉ (31/08/2026), où la
+ * prudence va dans l'autre sens : surestimer la consommation à venir n'y protège
+ * rien, ça refuse une chauffe que le soleil pouvait payer.
+ *
+ * Le profil mesuré est BIMODAL, pas dispersé — relevé sur 21 jours à 15 h :
+ * un mode « maison au repos » à 160-600 W et un mode « clim/gros appareil » à
+ * 1 500-3 600 W, presque rien entre les deux. Aucun quantile ne décrit « la »
+ * consommation ; il faut choisir le régime qu'on veut décrire.
+ *
+ * Et ces deux régimes sont ANTI-CORRÉLÉS avec le surplus : s'il y a du surplus
+ * à orienter vers le ballon, c'est que la maison ne consomme pas. Conditionner
+ * sur le mode bas est donc la bonne lecture, pas de l'optimisme. Si la maison se
+ * réveille pendant la chauffe, le filet reste la cession sur achat EDF
+ * (150 W / 30 s) — une prévision ratée coûte une chauffe interrompue, rien de plus.
+ */
+export const RECHARGE_QUANTILE = 0.25;
+
+/**
  * Élévation solaire à laquelle la production PV s'éteint — début de la fenêtre
  * chère. MESURÉE, pas posée : sur 54 jours (01/07 → 23/08), l'élévation au
  * dernier échantillon au-dessus de 100 W a pour médiane 5,9° (p10 3,9° les jours
@@ -123,11 +141,15 @@ export function accumulateHouseLoad(
 }
 
 /** Quantile d'une tranche horaire ; null si la tranche n'a jamais été observée. */
-export function hourQuantileW(profile: HouseProfile, hour: number): number | null {
+export function hourQuantileW(
+  profile: HouseProfile,
+  hour: number,
+  quantile: number = PROFILE_QUANTILE
+): number | null {
   const cell = profile[((hour % 24) + 24) % 24];
   if (!cell || cell.length === 0) return null;
   const vals = cell.map((s) => s.meanW).sort((a, b) => a - b);
-  const idx = Math.min(vals.length - 1, Math.floor(PROFILE_QUANTILE * vals.length));
+  const idx = Math.min(vals.length - 1, Math.floor(quantile * vals.length));
   return vals[idx];
 }
 
@@ -139,6 +161,48 @@ export interface ReserveResult {
   /** Heures dont le profil manquait (comblées par la moyenne des heures connues). */
   hoursMissing: number;
   note: string;
+}
+
+/**
+ * Énergie que la maison consommera sur une fenêtre à venir, d'après le profil
+ * appris. Extraite de `reserveWh()` — la réserve du soir et le critère de
+ * rechargeabilité intègrent le MÊME profil, de la même façon, et doivent rester
+ * comparables. `wh: null` = profil non appris, l'appelant décide quoi en faire.
+ *
+ * @param fromMin minutes à partir de maintenant où la fenêtre commence
+ * @param toMin   minutes à partir de maintenant où elle finit
+ */
+export function profileEnergyWh(
+  profile: HouseProfile,
+  minuteOfDay: number,
+  fromMin: number,
+  toMin: number,
+  quantile: number = PROFILE_QUANTILE
+): { wh: number | null; hoursMissing: number } {
+  const start = Math.max(0, fromMin);
+  const end = toMin;
+  if (end <= start) return { wh: 0, hoursMissing: 0 };
+  // Moyenne des tranches connues : sert à combler une heure jamais observée
+  // plutôt que de la compter pour rien.
+  const known = Array.from({ length: 24 }, (_, h) => hourQuantileW(profile, h, quantile)).filter(
+    (v): v is number => v !== null
+  );
+  if (known.length === 0) return { wh: null, hoursMissing: 24 };
+  const fallbackW = known.reduce((s, v) => s + v, 0) / known.length;
+
+  let wh = 0;
+  let missing = 0;
+  // Intégration par pas de 15 min : plus fin que la tranche horaire du profil,
+  // donc aucun palier à la frontière d'une heure.
+  const STEP = 15;
+  for (let m = start; m < end; m += STEP) {
+    const dt = Math.min(STEP, end - m);
+    const hour = Math.floor(((((minuteOfDay + m) % 1440) + 1440) % 1440) / 60);
+    const q = hourQuantileW(profile, hour, quantile);
+    if (q === null) missing++;
+    wh += (q ?? fallbackW) * (dt / 60);
+  }
+  return { wh: Math.round(wh), hoursMissing: missing };
 }
 
 /**
@@ -169,32 +233,14 @@ export function reserveWh(
       note: 'les heures creuses arrivent avant la fin du solaire'
     };
   }
-  // Moyenne des tranches connues : sert à combler une heure jamais observée
-  // plutôt que de la compter pour rien.
-  const known = Array.from({ length: 24 }, (_, h) => hourQuantileW(profile, h)).filter(
-    (v): v is number => v !== null
-  );
-  if (known.length === 0) {
-    return { wh: null, windowMin: end - start, hoursMissing: 24, note: 'profil maison non appris' };
-  }
-  const fallbackW = known.reduce((s, v) => s + v, 0) / known.length;
-
-  let wh = 0;
-  let missing = 0;
-  // Intégration par pas de 15 min : plus fin que la tranche horaire du profil,
-  // donc aucun palier à la frontière d'une heure.
-  const STEP = 15;
-  for (let m = start; m < end; m += STEP) {
-    const dt = Math.min(STEP, end - m);
-    const hour = Math.floor(((((minuteOfDay + m) % 1440) + 1440) % 1440) / 60);
-    const q = hourQuantileW(profile, hour);
-    if (q === null) missing++;
-    wh += (q ?? fallbackW) * (dt / 60);
+  const { wh, hoursMissing } = profileEnergyWh(profile, minuteOfDay, start, end);
+  if (wh === null) {
+    return { wh: null, windowMin: end - start, hoursMissing, note: 'profil maison non appris' };
   }
   return {
-    wh: Math.round(wh),
+    wh,
     windowMin: end - start,
-    hoursMissing: missing,
+    hoursMissing,
     note: `${Math.round((end - start) / 6) / 10} h chères à couvrir`
   };
 }

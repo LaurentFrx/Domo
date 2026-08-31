@@ -121,7 +121,7 @@ const forecastUrl = () => (env.FORECAST_BRIDGE_URL || '').replace(/\/+$/, '');
 
 interface ForecastPoint {
   time?: string;
-  power_w?: { total?: number };
+  power_w?: { total?: number; paths?: { aps?: number } };
   total?: number;
   kw?: number;
   temp?: number; // température extérieure prévue (°C)
@@ -132,6 +132,14 @@ function pointPowerW(pt: ForecastPoint): number {
   if (typeof pt.total === 'number') return pt.total;
   if (typeof pt.kw === 'number') return pt.kw * 1000;
   return 0;
+}
+
+/** Production PRÉVUE du seul chemin APS (pan Sud). Sert à estimer ce que notre
+ *  bridage lui interdit de produire : la mesure ne peut pas le dire, elle EST le
+ *  bridage. `null` = le pont ne détaille pas les chemins. */
+function pointApsW(pt: ForecastPoint): number | null {
+  const v = pt.power_w?.paths?.aps;
+  return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, v) : null;
 }
 
 /**
@@ -147,8 +155,16 @@ async function readForecastNextDaylight(now: Date): Promise<{
   outdoorC: number | null;
   d1Kwh: number; // énergie prévue demain, journée complète (kWh) ; −1 si inconnue
   d2Kwh: number; // énergie prévue après-demain (kWh) ; −1 si inconnue
+  apsNowW: number | null; // production APS PRÉVUE à l'heure courante (W) ; null si inconnue
 }> {
-  const fail = { available: false, kwh: 0, outdoorC: null, d1Kwh: -1, d2Kwh: -1 };
+  const fail = {
+    available: false,
+    kwh: 0,
+    outdoorC: null,
+    d1Kwh: -1,
+    d2Kwh: -1,
+    apsNowW: null
+  };
   const base = forecastUrl();
   if (!base) return fail;
   try {
@@ -171,13 +187,15 @@ async function readForecastNextDaylight(now: Date): Promise<{
     const targetDay = h < 19 ? today : parisDate(new Date(now.getTime() + 86_400_000));
     const fromHour = h < 19 ? Math.max(h, 7) : 7;
 
-    // Température extérieure : point de l'HEURE COURANTE (aujourd'hui), indépendant
-    // de la fenêtre de production ci-dessous.
+    // Température extérieure et potentiel APS : point de l'HEURE COURANTE
+    // (aujourd'hui), indépendants de la fenêtre de production ci-dessous.
     let outdoorC: number | null = null;
+    let apsNowW: number | null = null;
     for (const pt of arr) {
       const time = typeof pt.time === 'string' ? pt.time : '';
       if (time.slice(0, 10) !== today || Number(time.slice(11, 13)) !== h) continue;
       if (typeof pt.temp === 'number' && Number.isFinite(pt.temp)) outdoorC = pt.temp;
+      apsNowW = pointApsW(pt);
       break;
     }
 
@@ -211,11 +229,11 @@ async function readForecastNextDaylight(now: Date): Promise<{
         if (!Number.isFinite(ph) || ph < fromHour || ph >= 19) continue;
         wh += pointPowerW(pt);
       }
-      return { available: true, kwh: +(wh / 1000).toFixed(2), outdoorC, d1Kwh, d2Kwh };
+      return { available: true, kwh: +(wh / 1000).toFixed(2), outdoorC, d1Kwh, d2Kwh, apsNowW };
     }
     if (typeof d.next_24h_kwh === 'number')
-      return { available: true, kwh: d.next_24h_kwh, outdoorC, d1Kwh, d2Kwh };
-    return { ...fail, outdoorC };
+      return { available: true, kwh: d.next_24h_kwh, outdoorC, d1Kwh, d2Kwh, apsNowW };
+    return { ...fail, outdoorC, apsNowW };
   } catch {
     return fail;
   }
@@ -229,24 +247,54 @@ interface ApsRead {
   powerW: number; // production instantanée (0 si indispo)
   available: boolean; // le bridge répond ET se dit disponible
   ageSec: number | null; // fraîcheur de la donnée (now − ts), null si ts absent
+  capW: number | null; // plafond de bridage EN COURS (null = aucun bail actif)
+  maxLimitW: number | null; // plafond matériel maximal de l'onduleur
 }
 
 /** Production du micro-onduleur APS EZ1 (pan Sud) + disponibilité/fraîcheur
- *  (l'alerte « APS muet » a besoin de distinguer « injoignable » de « 0 W réel »). */
+ *  (l'alerte « APS muet » a besoin de distinguer « injoignable » de « 0 W réel »)
+ *  + BAIL DE BRIDAGE : depuis le 27/07 notre propre anti-injection plafonne cet
+ *  onduleur, et sa production cesse alors de mesurer le soleil. Qui lit `powerW`
+ *  doit pouvoir savoir qu'il regarde un chiffre que NOUS avons fabriqué. */
 async function readApsystems(nowMs: number): Promise<ApsRead> {
-  const fail: ApsRead = { powerW: 0, available: false, ageSec: null };
+  const fail: ApsRead = {
+    powerW: 0,
+    available: false,
+    ageSec: null,
+    capW: null,
+    maxLimitW: null
+  };
   try {
     const r = await fetch(`${apsystemsUrl()}/api/apsystems/status`, {
       signal: AbortSignal.timeout(TIMEOUT_MS)
     });
     if (!r.ok) return fail;
-    const d = (await r.json()) as { available?: boolean; power_w?: number; ts?: number };
+    const d = (await r.json()) as {
+      available?: boolean;
+      power_w?: number;
+      ts?: number;
+      max_power_limit_w?: number;
+      cap_lease?: { active?: boolean; cap_w?: number };
+    };
     const ageSec =
       typeof d.ts === 'number' && Number.isFinite(d.ts)
         ? Math.max(0, Math.round(nowMs / 1000 - d.ts))
         : null;
-    if (d.available === false) return { powerW: 0, available: false, ageSec };
-    return { powerW: Math.max(0, Math.round(num(d.power_w))), available: true, ageSec };
+    const maxLimitW = Number.isFinite(num(d.max_power_limit_w))
+      ? Math.max(0, Math.round(num(d.max_power_limit_w)))
+      : null;
+    const capW =
+      d.cap_lease?.active === true && Number.isFinite(num(d.cap_lease.cap_w))
+        ? Math.max(0, Math.round(num(d.cap_lease.cap_w)))
+        : null;
+    if (d.available === false) return { ...fail, ageSec, capW, maxLimitW };
+    return {
+      powerW: Math.max(0, Math.round(num(d.power_w))),
+      available: true,
+      ageSec,
+      capW,
+      maxLimitW
+    };
   } catch {
     return fail;
   }
@@ -536,6 +584,25 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     pvApsW: aps.powerW,
     apsAvailable: aps.available,
     apsAgeSec: aps.ageSec,
+    // Ce que NOTRE anti-injection interdit à l'onduleur de produire, et qu'il
+    // rendra dès que la chauffe aura absorbé l'injection (la boucle APS remonte
+    // son plafond au maximum sur le premier soutirage). Borné par les deux
+    // sources qui ne dépendent pas du bridage : le plafond matériel qu'il
+    // n'atteint pas, et la prévision météo du pan Sud. 0 = aucun bail actif.
+    apsRecoverableW:
+      aps.capW !== null && aps.maxLimitW !== null
+        ? Math.max(
+            0,
+            Math.round(
+              Math.min(
+                aps.maxLimitW - aps.capW,
+                forecast.apsNowW === null
+                  ? aps.maxLimitW - aps.capW
+                  : Math.max(0, forecast.apsNowW - aps.powerW)
+              )
+            )
+          )
+        : 0,
     indoorC,
     outdoorC,
     indoorSources,
