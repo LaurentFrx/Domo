@@ -326,9 +326,9 @@ export function pilotStep(
   //   marge = PV prévu restant − maison prévue − place à remplir dans le parc
   //   autoriser ⟺ marge ≥ énergie de la chauffe + tampon
   //
-  // Le PV prévu est celui du RESTE DE LA JOURNÉE (fenêtre [7 h, 19 h[ côté
-  // pont) : le comparer à une chauffe qui commence maintenant est conservateur
-  // en début de journée et juste en fin d'après-midi, là où la décision compte.
+  // Le PV prévu est celui du RESTE DE LA JOURNÉE — `solTodayRestKwh`, jamais
+  // `solNextDaylightKwh` qui bascule sur DEMAIN à 19 h et créditerait le soleil
+  // du lendemain à une chauffe du soir.
   const houseToPvEnd = profileEnergyWh(
     pilot.houseProfile,
     ctx.minuteOfDay,
@@ -341,7 +341,7 @@ export function pilotStep(
       ? Math.max(0, inputs.batteryCapacityWh - inputs.batteryEnergyWh)
       : null;
   const pvRestantWh = inputs.forecastAvailable
-    ? Math.max(0, Math.round(inputs.solNextDaylightKwh * 1000))
+    ? Math.max(0, Math.round(inputs.solTodayRestKwh * 1000))
     : null;
   const rechargeMarginWh =
     pvRestantWh !== null && houseToPvEnd.wh !== null && parcRoomWh !== null

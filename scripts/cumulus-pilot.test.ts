@@ -137,6 +137,7 @@ function inp(o: Partial<CumulusInputs> = {}): CumulusInputs {
     priceHc: 0.1812,
     forecastAvailable: true,
     solNextDaylightKwh: 20,
+    solTodayRestKwh: 20,
     forecastD1Kwh: 18,
     forecastD2Kwh: 18,
     relayAvailable: true,
@@ -916,7 +917,7 @@ test('APS bridé à 30 W mais PV à venir abondant → la fenêtre ne bloque plu
       batterySocPct: [100, 100],
       batteryEnergyWh: 5360,
       batteryCapacityWh: 5360,
-      solNextDaylightKwh: 12
+      solTodayRestKwh: 12
     }),
     cfg(),
     st({}, { houseProfile: profilPlat(300) }),
@@ -936,7 +937,7 @@ test('même situation, mais fin de journée : la marge PV ne couvre plus la chau
       batterySocPct: [100, 100],
       batteryEnergyWh: 5360,
       batteryCapacityWh: 5360,
-      solNextDaylightKwh: 0.3 // 300 Wh : moins que la chauffe + le tampon
+      solTodayRestKwh: 0.3 // 300 Wh : moins que la chauffe + le tampon
     }),
     cfg(),
     st({}, { houseProfile: profilPlat(300) }),
@@ -957,7 +958,7 @@ test('la place à remplir dans le parc est déduite AVANT la chauffe', () => {
       batterySocPct: [40, 40],
       batteryEnergyWh: 2360,
       batteryCapacityWh: 5360,
-      solNextDaylightKwh: 4
+      solTodayRestKwh: 4
     }),
     cfg(),
     st({}, { houseProfile: profilPlat(300) }),
@@ -969,7 +970,7 @@ test('la place à remplir dans le parc est déduite AVANT la chauffe', () => {
 
 test('météo muette → le critère ne décide pas, il ne bloque pas non plus', () => {
   const r = pilotStep(
-    inp({ gridPowerW: -800, forecastAvailable: false, solNextDaylightKwh: 0 }),
+    inp({ gridPowerW: -800, forecastAvailable: false, solTodayRestKwh: 0 }),
     cfg(),
     st({}, { houseProfile: profilPlat(300) }),
     ctx()
@@ -1025,7 +1026,7 @@ test('don franc + journée rechargeable : le ballon peut aller jusqu’au plein'
       batterySocPct: [100, 100],
       batteryEnergyWh: 5360,
       batteryCapacityWh: 5360,
-      solNextDaylightKwh: 12
+      solTodayRestKwh: 12
     }),
     cfg(),
     st({}, { houseProfile: profilPlat(300) }),
@@ -1033,4 +1034,22 @@ test('don franc + journée rechargeable : le ballon peut aller jusqu’au plein'
   );
   assert.equal(bloque.view.conds.find((c) => c.key === 'tank')?.ok, false);
   assert.equal(libre.view.conds.find((c) => c.key === 'tank')?.ok, true);
+});
+
+test('le soir, le critère ne crédite PAS le soleil de demain', () => {
+  // Constaté en service le 31/08 à 20 h : `solNextDaylightKwh` bascule sur la
+  // journée du lendemain à 19 h (c'est voulu pour la recharge HC), et la marge
+  // affichait 12 660 Wh nuit tombée. Le critère doit lire le reste d'AUJOURD'HUI.
+  const soir = Date.parse('2026-07-03T17:30:00Z'); // 19:30 locale
+  const r = pilotStep(
+    inp({ now: soir, gridPowerW: -800, solNextDaylightKwh: 18, solTodayRestKwh: 0 }),
+    cfg(),
+    st({}, { houseProfile: profilPlat(300) }),
+    ctx({ hourLocal: 19.5, minuteOfDay: 19 * 60 + 30 })
+  );
+  assert.equal(r.energy.rechargeOk, false);
+  assert.ok(
+    (r.energy.rechargeMarginWh ?? 0) <= 0,
+    `marge = ${r.energy.rechargeMarginWh} Wh alors que la journée est finie`
+  );
 });

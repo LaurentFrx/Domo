@@ -148,6 +148,12 @@ function pointApsW(pt: ForecastPoint): number | null {
  *   - après 19 h → journée de demain (heures [7, 19[)
  * Comparaison par préfixe de chaîne sur le `time` ISO local (pas de new Date →
  * zéro ambiguïté DST). Repli sur next_24h_kwh si pas de série horaire.
+ *
+ * ⚠ `kwh` BASCULE sur demain à 19 h — c'est voulu pour la recharge HC, mais le
+ * critère de rechargeabilité, lui, veut TOUJOURS le reste d'aujourd'hui : sinon
+ * il crédite le soleil de demain à une chauffe de ce soir. Constaté en service
+ * le 31/08 à 20 h : marge annoncée 12 660 Wh, nuit tombée. D'où `todayRestKwh`,
+ * qui vaut 0 quand la journée est finie.
  */
 async function readForecastNextDaylight(now: Date): Promise<{
   available: boolean;
@@ -156,6 +162,7 @@ async function readForecastNextDaylight(now: Date): Promise<{
   d1Kwh: number; // énergie prévue demain, journée complète (kWh) ; −1 si inconnue
   d2Kwh: number; // énergie prévue après-demain (kWh) ; −1 si inconnue
   apsNowW: number | null; // production APS PRÉVUE à l'heure courante (W) ; null si inconnue
+  todayRestKwh: number; // reste d'AUJOURD'HUI seulement (kWh) ; 0 la nuit
 }> {
   const fail = {
     available: false,
@@ -163,7 +170,8 @@ async function readForecastNextDaylight(now: Date): Promise<{
     outdoorC: null,
     d1Kwh: -1,
     d2Kwh: -1,
-    apsNowW: null
+    apsNowW: null,
+    todayRestKwh: 0
   };
   const base = forecastUrl();
   if (!base) return fail;
@@ -220,6 +228,18 @@ async function readForecastNextDaylight(now: Date): Promise<{
     const d1Kwh = d1Seen ? +(d1Wh / 1000).toFixed(2) : -1;
     const d2Kwh = d2Seen ? +(d2Wh / 1000).toFixed(2) : -1;
 
+    // Reste d'AUJOURD'HUI, quelle que soit l'heure : toutes les heures du jour
+    // encore devant nous (la prod nocturne prévue vaut 0, rien à borner).
+    let todayRestWh = 0;
+    for (const pt of arr) {
+      const time = typeof pt.time === 'string' ? pt.time : '';
+      if (time.slice(0, 10) !== today) continue;
+      const ph = Number(time.slice(11, 13));
+      if (!Number.isFinite(ph) || ph < h) continue;
+      todayRestWh += pointPowerW(pt);
+    }
+    const todayRestKwh = +(todayRestWh / 1000).toFixed(2);
+
     if (arr.length) {
       let wh = 0;
       for (const pt of arr) {
@@ -229,11 +249,27 @@ async function readForecastNextDaylight(now: Date): Promise<{
         if (!Number.isFinite(ph) || ph < fromHour || ph >= 19) continue;
         wh += pointPowerW(pt);
       }
-      return { available: true, kwh: +(wh / 1000).toFixed(2), outdoorC, d1Kwh, d2Kwh, apsNowW };
+      return {
+        available: true,
+        kwh: +(wh / 1000).toFixed(2),
+        outdoorC,
+        d1Kwh,
+        d2Kwh,
+        apsNowW,
+        todayRestKwh
+      };
     }
     if (typeof d.next_24h_kwh === 'number')
-      return { available: true, kwh: d.next_24h_kwh, outdoorC, d1Kwh, d2Kwh, apsNowW };
-    return { ...fail, outdoorC, apsNowW };
+      return {
+        available: true,
+        kwh: d.next_24h_kwh,
+        outdoorC,
+        d1Kwh,
+        d2Kwh,
+        apsNowW,
+        todayRestKwh
+      };
+    return { ...fail, outdoorC, apsNowW, todayRestKwh };
   } catch {
     return fail;
   }
@@ -547,6 +583,7 @@ export async function collectInputs(config: CumulusConfig): Promise<CumulusInput
     priceHc: reg.hc_eur_kwh,
     forecastAvailable: forecast.available,
     solNextDaylightKwh: forecast.kwh,
+    solTodayRestKwh: forecast.todayRestKwh,
     forecastD1Kwh: forecast.d1Kwh,
     forecastD2Kwh: forecast.d2Kwh,
     relayAvailable: relay.available,

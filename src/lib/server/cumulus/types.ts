@@ -77,8 +77,12 @@ export interface CumulusInputs {
   // 31/08, critère de rechargeabilité du parc — c'est la seule vue du soleil que
   // notre propre bridage de l'onduleur APS ne fausse pas.
   forecastAvailable: boolean;
-  /** Énergie PV prévue sur le prochain créneau diurne à venir (kWh). */
+  /** Énergie PV prévue sur le prochain créneau diurne à venir (kWh).
+   *  ⚠ BASCULE sur DEMAIN à partir de 19 h — réservé à la recharge HC. */
   solNextDaylightKwh: number;
+  /** Énergie PV encore attendue AUJOURD'HUI (kWh) — 0 une fois la journée
+   *  finie. C'est celle-là que lit le critère de rechargeabilité. */
+  solTodayRestKwh: number;
   /** Énergie PV prévue demain (J+1), journée complète (kWh). −1 si inconnue. */
   forecastD1Kwh: number;
   /** Énergie PV prévue après-demain (J+2), journée complète (kWh). −1 si inconnue. */
