@@ -31,7 +31,7 @@
  * un délai non plus : elle remplace une lecture cloud périmée par la consigne
  * réellement écrite, ce qui rend l'estimation PLUS juste.
  */
-import type { Sb3Decision, Sb3LoopConfig, Sb3LoopInputs, Sb3LoopState } from './types';
+import type { Sb3Decision, Sb3LoopConfig, Sb3LoopInputs, Sb3LoopState, SlowBias } from './types';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 
@@ -101,12 +101,15 @@ export function decide(
   // compteur n'a pas encore « vu ». Cf. docs/regulation-energie.md §3-4.
   const enVol = (state.enVol ?? []).filter((c) => inputs.now - c.ts < cfg.enVolS * 1000);
   const dejaCommandeW = enVol.reduce((s, c) => s + c.dW, 0);
+  // Voie lente : on repart de la mémoire existante, `applyTarget` la met à jour.
+  const slowIn: SlowBias = state.slow ?? { sinceTs: null, signW: null, lastWriteTs: null };
+  let slow: SlowBias = slowIn;
   const noWrite = (
     mode: Sb3Decision['mode'],
     reason: string,
     houseLoadW: number | null = null,
     targetW: number | null = null
-  ): Sb3Decision => ({ writeW: null, targetW, mode, reason, houseLoadW, enVol });
+  ): Sb3Decision => ({ writeW: null, targetW, mode, reason, houseLoadW, enVol, slow });
 
   // Consigne « en place » de référence : la dernière écrite par la boucle, sinon
   // celle vue par le cloud (ancrage au premier cycle). CLAMPÉE : une valeur cloud
@@ -136,7 +139,9 @@ export function decide(
         mode: 'faillow',
         reason: `cloud périmé — décroissance ${currentW} → ${step} W`,
         houseLoadW: null,
-        enVol: can ? [...enVol, { ts: inputs.now, dW: step - currentW }] : enVol
+        enVol: can ? [...enVol, { ts: inputs.now, dW: step - currentW }] : enVol,
+        // Dégradation de sûreté : le biais lent n'a plus de sens sans le cloud.
+        slow: { ...slowIn, sinceTs: null, signW: null }
       };
     }
     return noWrite('faillow', 'cloud périmé — consigne déjà basse, rien à faire');
@@ -225,7 +230,13 @@ export function decide(
   const ffHold = (state.ffHoldUntilTs ?? 0) > inputs.now;
   const baisseInterdite = erreurW < 0 && (maxAcDebite || ffHold);
 
-  if (Math.abs(erreurW) > cfg.deadbandW && !baisseInterdite) {
+  // Seuil d'ENTRÉE abaissé à `slowMinW` (01/09) : au-dessus de la bande morte,
+  // `applyTarget` écrit immédiatement, comme avant ; en dessous, il confie
+  // l'écart à la voie lente au lieu de l'oublier. C'est ce qui manquait pour que
+  // les 20-40 W d'injection permanente cessent d'être invisibles à la boucle.
+  // La règle 1 passe donc toujours AVANT le partage (règle 2), y compris pour un
+  // biais de quelques dizaines de watts.
+  if (Math.abs(erreurW) >= cfg.slowMinW && !baisseInterdite) {
     const cible = clamp(base + erreurW, 0, cfg.maxPresetW);
     const enAttente = dejaCommandeW !== 0 ? ` (${Math.round(dejaCommandeW)} W déjà en vol)` : '';
     return applyTarget(
@@ -313,7 +324,15 @@ export function decide(
   // marge de puissance de la Max AC. Cela ne diffère AUCUNE réponse à la maison :
   // le soutirage et l'injection sont traités à gain plein juste au-dessus.
   const base0 = currentW ?? 0;
-  const progressif = base0 + cfg.shareGain * (cibleBrute - base0);
+  // ...mais SOUS la bande morte, le pas progressif se mord la queue : il rabote
+  // un écart déjà petit jusqu'à le faire passer sous le seuil de la voie lente,
+  // et le partage se fige à mi-chemin (simulé sur une nuit : les SB3 restaient à
+  // 49 % de la charge au lieu des 30 % que leur réserve commande). Un écart de
+  // moins de `deadbandW` ne peut pas déstabiliser la Max AC — c'est justement
+  // l'ordre de grandeur que la bande morte juge négligeable. On vise donc la
+  // cible pleine, en restant borné par sa marge de puissance.
+  const petitEcart = Math.abs(cibleBrute - base0) <= cfg.deadbandW;
+  const progressif = petitEcart ? cibleBrute : base0 + cfg.shareGain * (cibleBrute - base0);
   const borne = clamp(progressif, base0 - marge, base0 + marge);
   return applyTarget(
     borne,
@@ -324,22 +343,91 @@ export function decide(
       `(${Math.round(sb3UsableWh / 100) / 10}/${Math.round(parkUsableWh / 100) / 10} kWh utilisables)`
   );
 
-  /** Bande morte EN WATTS : une résolution, pas un délai. */
+  /**
+   * Bande morte EN WATTS : une résolution, pas un délai.
+   *
+   * ── VOIE LENTE (01/09/2026) ────────────────────────────────────────────────
+   * La bande morte est taillée pour le jour, où la charge se compte en kW. La
+   * nuit, la charge totale vaut ~130 W : tout écart utile passe dessous, et la
+   * boucle se fige. Mesuré dans la nuit du 31/08 au 01/09 — cible calculée
+   * 111 W, consigne restée à 178 W, « écrit: None » à chaque tick pendant des
+   * heures. Deux symptômes, une seule cause : les SB3 (58 %) se vidaient seules
+   * pendant que la Max AC (86 %) restait au repos, et ~600 Wh/jour partaient au
+   * réseau en continu, jour et nuit.
+   *
+   * Un correcteur proportionnel à bande morte laisse par construction une erreur
+   * STATIQUE. On lui ajoute la seule chose qui l'élimine : la mémoire du temps.
+   * Un écart trop petit pour la voie rapide n'est plus oublié — s'il tient
+   * `slowHoldS` dans le MÊME sens et dépasse `slowMinW`, il est corrigé.
+   *
+   * Ce n'est pas une réaction différée au sens de la règle 3 : les échelons de
+   * charge, eux, franchissent la bande morte et sont traités à gain plein et
+   * sans délai, exactement comme avant. Ce qu'on rattrape ici, c'est un biais
+   * permanent, qui par définition n'a pas d'urgence — seulement une fin.
+   */
   function applyTarget(rawW: number, reason: string): Sb3Decision {
     const targetW = Math.round(clamp(rawW, 0, cfg.maxPresetW));
-    if (currentW !== null && Math.abs(targetW - currentW) <= cfg.deadbandW) {
-      return noWrite('allocate', `${reason} — dans la bande morte`, houseLoadW, targetW);
+    const ecartW = currentW === null ? 0 : targetW - currentW;
+
+    if (currentW !== null && Math.abs(ecartW) <= cfg.deadbandW) {
+      const signW: 1 | -1 = ecartW >= 0 ? 1 : -1;
+      // Trop petit pour être un biais : on oublie et on repart de zéro.
+      if (Math.abs(ecartW) < cfg.slowMinW) {
+        slow = { ...slowIn, sinceTs: null, signW: null };
+        return noWrite('allocate', `${reason} — dans la bande morte`, houseLoadW, targetW);
+      }
+      // Changement de sens = ce n'est pas un biais, c'est du bruit : on redémarre.
+      const continu = slowIn.signW === signW && slowIn.sinceTs !== null;
+      const sinceTs = continu ? (slowIn.sinceTs as number) : inputs.now;
+      slow = { ...slowIn, sinceTs, signW };
+
+      const tenuS = (inputs.now - sinceTs) / 1000;
+      const depuisEcritureS =
+        slowIn.lastWriteTs === null ? Infinity : (inputs.now - slowIn.lastWriteTs) / 1000;
+      if (tenuS < cfg.slowHoldS) {
+        return noWrite(
+          'allocate',
+          `${reason} — biais de ${Math.round(ecartW)} W tenu depuis ${Math.round(tenuS)} s`,
+          houseLoadW,
+          targetW
+        );
+      }
+      if (depuisEcritureS < cfg.slowMinIntervalS) {
+        return noWrite(
+          'allocate',
+          `${reason} — biais confirmé, prochaine correction lente dans ` +
+            `${Math.round(cfg.slowMinIntervalS - depuisEcritureS)} s`,
+          houseLoadW,
+          targetW
+        );
+      }
+      // Biais confirmé et cadence respectée : on corrige, et on repart à zéro.
+      slow = { sinceTs: null, signW: null, lastWriteTs: inputs.now };
+      return {
+        writeW: targetW,
+        targetW,
+        mode: 'allocate',
+        reason: `${reason} — biais de ${Math.round(ecartW)} W tenu ${Math.round(tenuS)} s, corrigé`,
+        houseLoadW,
+        enVol: [...enVol, { ts: inputs.now, dW: ecartW }],
+        slow
+      };
     }
+
     // La correction part « en vol » : elle sera retranchée de l'erreur mesurée
     // tant que le compteur n'a pas eu le temps de la refléter.
     const dW = targetW - (currentW ?? 0);
+    // Une écriture rapide remet le biais à zéro : la consigne vient de bouger,
+    // ce qui était « tenu » ne l'est plus.
+    slow = { ...slowIn, sinceTs: null, signW: null };
     return {
       writeW: targetW,
       targetW,
       mode: 'allocate',
       reason,
       houseLoadW,
-      enVol: [...enVol, { ts: inputs.now, dW }]
+      enVol: [...enVol, { ts: inputs.now, dW }],
+      slow
     };
   }
 }

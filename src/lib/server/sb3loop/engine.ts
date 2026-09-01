@@ -439,6 +439,7 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
     const inputs = await collectSb3Inputs(cfg);
     const d = decide(inputs, cfg, state);
     state.enVol = d.enVol;
+    state.slow = d.slow;
 
     let writtenW: number | null = null;
     let confirmedW: number | null = null;

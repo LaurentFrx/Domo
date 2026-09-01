@@ -70,6 +70,12 @@ export interface Sb3LoopConfig {
    *  DOIT rester < marginW, sinon la cible « charge − marge » tombe dans la
    *  bande et une consigne trop haute ne redescend jamais (revue 23/07). */
   deadbandW: number;
+  /** Voie lente — écart minimal (W) pour qu'un biais sous la bande morte compte. */
+  slowMinW: number;
+  /** Durée (s) pendant laquelle ce biais doit tenir, de même signe. */
+  slowHoldS: number;
+  /** Intervalle minimal (s) entre deux écritures de la voie lente. */
+  slowMinIntervalS: number;
   /** Dwell dédié des paliers fail-low (s) — évite un login cloud par minute. */
   failLowDwellS: number;
   /** Après une écriture, le sb3Out cloud est périmé : pendant ce délai on lui
@@ -154,6 +160,22 @@ export interface Sb3Decision {
   houseLoadW: number | null;
   /** Nouvelle file des corrections en vol (persistée). */
   enVol: { ts: number; dW: number }[];
+  /** Nouvel état de la correction LENTE (biais persistant sous la bande morte). */
+  slow: SlowBias;
+}
+
+/**
+ * Mémoire du biais PERSISTANT — ce que la bande morte laissait filer.
+ *
+ * `sinceTs` : depuis quand un écart de même signe tient sous la bande morte.
+ * `signW`   : son signe (+1 monter / −1 descendre) ; un changement de signe
+ *             remet le chrono à zéro, pour ne jamais corriger du bruit.
+ * `lastWriteTs` : dernière écriture LENTE, qui borne leur cadence.
+ */
+export interface SlowBias {
+  sinceTs: number | null;
+  signW: 1 | -1 | null;
+  lastWriteTs: number | null;
 }
 
 export interface Sb3DecisionLogEntry {
@@ -184,6 +206,11 @@ export interface Sb3LoopState {
    *  Smith) : {ts, deltaW}. Sans elles la boucle compte deux fois la même
    *  correction et entre en cycle limite (docs/regulation-energie.md §3-4). */
   enVol: { ts: number; dW: number }[];
+  /** Biais PERSISTANT sous la bande morte — ce que la voie rapide laisse filer.
+   *  Sans cette mémoire, un écart de 20 à 99 W n'est JAMAIS corrigé : la nuit du
+   *  31/08 la boucle a calculé « cible 111 W » pendant des heures avec la
+   *  consigne à 178 W, sans écrire une seule fois. */
+  slow: SlowBias;
   /** Jusqu'à cet instant, les BAISSES de consigne sont suspendues : un
    *  pré-armement cumulus vient de monter la consigne AVANT l'échelon de
    *  charge — l'excédent que voit le compteur est voulu et éphémère. */
@@ -221,6 +248,7 @@ export function defaultSb3LoopState(): Sb3LoopState {
     rearmDayParis: null,
     rearmCount: 0,
     enVol: [],
+    slow: { sinceTs: null, signW: null, lastWriteTs: null },
     ffHoldUntilTs: null,
     transportFailCount: 0,
     lastCmdW: null,
@@ -247,6 +275,18 @@ export function defaultSb3LoopConfig(): Sb3LoopConfig {
     rebalanceGain: 0.5,
     failLowStepW: 300,
     deadbandW: 100, // < marginW — sinon la cible « charge − marge » est piégée dans la bande
+    // ── VOIE LENTE : le biais que la bande morte laissait filer ──────────────
+    // La bande morte est dimensionnée pour le jour (des kW). La nuit, la charge
+    // totale vaut ~130 W : TOUTE correction utile y est plus petite qu'elle, et
+    // rien ne bouge plus. Constaté le 31/08 : consigne 178 W, cible calculée
+    // 111 W, « écrit: None » à chaque tick pendant des heures — d'où deux
+    // symptômes d'une même cause, les SB3 qui se vident seules pendant que la
+    // Max AC reste pleine, et ~600 Wh/jour donnés au réseau en continu.
+    // On ne touche PAS à la voie rapide : les vrais échelons passent toujours à
+    // gain plein, sans délai (règle 3). On ajoute seulement une mémoire du biais.
+    slowMinW: 15, // en deçà, c'est du bruit de mesure, pas un biais
+    slowHoldS: 300, // il doit tenir 5 min, de même signe, pour être cru
+    slowMinIntervalS: 600, // au plus une écriture lente par 10 min (login cloud)
     failLowDwellS: 300,
     settleS: 180,
     maxPresetW: 2400,

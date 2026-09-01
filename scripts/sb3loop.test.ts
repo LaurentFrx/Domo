@@ -744,3 +744,120 @@ test('quota journalier : on cesse d’insister après 4 réarmements', () => {
     false
   );
 });
+
+// ─── VOIE LENTE — le biais que la bande morte laissait filer ─────────────────
+// Nuit du 31/08 au 01/09, mesuré en service : SB3 à 58 % débitant 134 W pendant
+// que la Max AC à 86 % restait au repos, et ~600 Wh/jour donnés au réseau en
+// continu. La boucle CALCULAIT « cible 111 W » à chaque tick avec la consigne à
+// 178 W, et n'écrivait jamais : l'écart de 67 W passait sous la bande morte de
+// 100 W. À charge nocturne (~130 W), toute correction utile y passe.
+
+/** L'état réel de cette nuit-là. */
+const nuit = () =>
+  inp({
+    em50: { ok: true, gridW: -22 }, // 22 W donnés au réseau, en permanence
+    maxac: { ok: true, socPct: 86, acNetW: 0, ratedEnergyWh: 7200 }, // pleine, au repos
+    cloud: {
+      ...inp().cloud,
+      sb3OutW: 134,
+      sb3SocAvg: 58,
+      sb3Packs: packs(58),
+      sb3PresetW: 178
+    }
+  });
+
+test('voie lente : un biais sous la bande morte n’est plus oublié, mais pas écrit tout de suite', () => {
+  const d = decide(nuit(), cfg, st({ lastCmdW: 178 }));
+  assert.equal(d.writeW, null, 'rien ne doit partir au premier tick');
+  assert.ok(d.slow.sinceTs !== null, 'le biais doit être mémorisé');
+  assert.match(d.reason, /tenu depuis/);
+});
+
+test('voie lente : le biais confirmé finit par être corrigé', () => {
+  const debut = NOW - (cfg.slowHoldS + 10) * 1000;
+  const d = decide(
+    nuit(),
+    cfg,
+    st({ lastCmdW: 178, slow: { sinceTs: debut, signW: -1, lastWriteTs: null } })
+  );
+  assert.ok(d.writeW !== null, `aucune écriture : ${d.reason}`);
+  assert.ok(
+    (d.writeW as number) < 178,
+    'la correction doit BAISSER la consigne — c’est ce qui rend la main à la Max AC'
+  );
+  assert.equal(d.slow.sinceTs, null, 'le chrono repart de zéro après correction');
+  assert.equal(d.slow.lastWriteTs, NOW);
+});
+
+test('voie lente : la cadence des écritures est bornée (login cloud à chaque fois)', () => {
+  const debut = NOW - (cfg.slowHoldS + 10) * 1000;
+  const d = decide(
+    nuit(),
+    cfg,
+    st({
+      lastCmdW: 178,
+      slow: { sinceTs: debut, signW: -1, lastWriteTs: NOW - 60_000 } // écrit il y a 1 min
+    })
+  );
+  assert.equal(d.writeW, null);
+  assert.match(d.reason, /prochaine correction lente dans/);
+});
+
+test('voie lente : un écart qui change de sens est du bruit, le chrono repart', () => {
+  const d = decide(
+    nuit(),
+    cfg,
+    st({ lastCmdW: 178, slow: { sinceTs: NOW - 600_000, signW: 1, lastWriteTs: null } })
+  );
+  assert.equal(d.writeW, null, 'un sens opposé ne doit pas hériter du chrono précédent');
+  assert.equal(d.slow.signW, -1);
+  assert.equal(d.slow.sinceTs, NOW);
+});
+
+test('voie lente : sous slowMinW, c’est du bruit de mesure — rien n’est mémorisé', () => {
+  // Compteur à ±5 W ET partage déjà juste : les deux batteries sont au même
+  // niveau relatif et fournissent chacune leur part. Il ne reste aucun biais.
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: -5 },
+      maxac: { ok: true, socPct: 58, acNetW: 75, ratedEnergyWh: 7200 },
+      cloud: { ...inp().cloud, sb3OutW: 55, sb3SocAvg: 58, sb3Packs: packs(58), sb3PresetW: 55 }
+    }),
+    cfg,
+    st({ lastCmdW: 55 })
+  );
+  assert.equal(d.writeW, null);
+  assert.equal(d.slow.sinceTs, null, `biais mémorisé à tort : ${d.reason}`);
+});
+
+test('la voie RAPIDE reste intacte : un échelon franc part immédiatement', () => {
+  // Règle 3 : aucune réaction différée pour la maison. 1,5 kW soutirés doivent
+  // être couverts au tick, sans passer par le chrono de la voie lente.
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: 1500 },
+      maxac: { ok: true, socPct: 60, acNetW: 2000, ratedEnergyWh: 7200 }
+    }),
+    cfg,
+    st({ lastCmdW: 0 })
+  );
+  assert.ok(d.writeW !== null && d.writeW >= 1500);
+  assert.equal(d.slow.sinceTs, null, 'une écriture rapide remet le biais à zéro');
+});
+
+test('la garde règle 0 tient toujours : pas de baisse pendant que la Max AC débite', () => {
+  const debut = NOW - (cfg.slowHoldS + 10) * 1000;
+  const d = decide(
+    inp({
+      em50: { ok: true, gridW: -30 },
+      maxac: { ok: true, socPct: 60, acNetW: 900, ratedEnergyWh: 7200 }, // elle débite
+      cloud: { ...inp().cloud, sb3OutW: 200, sb3SocAvg: 80, sb3Packs: packs(80), sb3PresetW: 200 }
+    }),
+    cfg,
+    st({ lastCmdW: 200, slow: { sinceTs: debut, signW: -1, lastWriteTs: null } })
+  );
+  assert.ok(
+    d.writeW === null || (d.writeW as number) >= 200,
+    `la consigne ne doit pas baisser : ${d.reason}`
+  );
+});
