@@ -6,6 +6,7 @@
  * cloud via anker-bridge (champs sb3_* ajoutés pour cette boucle).
  */
 import { env } from '$env/dynamic/private';
+import { calibratedGridW } from '$lib/server/em50-grid';
 import { readAnkerSolarbank } from '$lib/server/anker-modbus';
 import { sunPosition } from '../cumulus/sun.ts';
 import type { Sb3LoopConfig, Sb3LoopInputs } from './types';
@@ -25,9 +26,10 @@ async function readEm50(): Promise<Sb3LoopInputs['em50']> {
     });
     if (!r.ok) return { ok: false, gridW: 0 };
     const d = (await r.json()) as Record<string, { act_power?: number }>;
-    const sign = Number(env.EM50_GRID_SIGN ?? 1) < 0 ? -1 : 1;
-    const p = num(d[`em1:${Number(env.EM50_GRID_ID ?? 0)}`]?.act_power);
-    return p === null ? { ok: false, gridW: 0 } : { ok: true, gridW: Math.round(sign * p) };
+    // Étalonnage centralisé (em50-grid.ts) : la voie 0 sous-lit ~35 W, ce qui
+    // faisait piloter cette boucle sur une injection imaginaire.
+    const gridW = calibratedGridW(d[`em1:${Number(env.EM50_GRID_ID ?? 0)}`]?.act_power);
+    return gridW === null ? { ok: false, gridW: 0 } : { ok: true, gridW };
   } catch {
     return { ok: false, gridW: 0 };
   }

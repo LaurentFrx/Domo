@@ -22,6 +22,7 @@
  */
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { calibratedGridW } from '$lib/server/em50-grid';
 import { readAnkerMeter, readAnkerSolarbank } from '$lib/server/anker-modbus';
 import type { RequestHandler } from './$types';
 
@@ -46,9 +47,8 @@ async function em50GridW(): Promise<number | null> {
     });
     if (!res.ok) return null;
     const d = (await res.json()) as Record<string, { act_power?: number } | undefined>;
-    const sign = Number(env.EM50_GRID_SIGN ?? 1) < 0 ? -1 : 1;
     const p = d[`em1:${Number(env.EM50_GRID_ID ?? 0)}`]?.act_power;
-    return typeof p === 'number' && Number.isFinite(p) ? Math.round(sign * p) : null;
+    return calibratedGridW(p);
   } catch {
     return null;
   }

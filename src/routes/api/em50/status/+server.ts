@@ -22,6 +22,7 @@
  * Convention de sortie : grid_power_w SIGNÉ → + soutirage EDF / − injection PV.
  * Énergies converties en kWh (Wh du device / 1000).
  */
+import { calibratedGridW } from '$lib/server/em50-grid';
 import { error, json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
@@ -36,7 +37,7 @@ const deviceUrl = () => {
 // rebuild (cohérent avec l'env dynamique de SvelteKit).
 const gridId = () => Number(env.EM50_GRID_ID ?? 0);
 const cumulusId = () => Number(env.EM50_CUMULUS_ID ?? 1);
-const gridSign = () => (Number(env.EM50_GRID_SIGN ?? 1) < 0 ? -1 : 1);
+// Signe ET étalonnage viennent de em50-grid.ts — un seul endroit décide.
 
 const TIMEOUT_MS = 8_000;
 
@@ -77,7 +78,6 @@ export const GET: RequestHandler = async () => {
 
   const gi = gridId();
   const ci = cumulusId();
-  const sign = gridSign();
 
   const gEm = d[`em1:${gi}`] as Em1 | undefined;
   const gData = d[`em1data:${gi}`] as Em1Data | undefined;
@@ -91,7 +91,7 @@ export const GET: RequestHandler = async () => {
   return json({
     available: true,
     // Réseau (signé) : + soutirage EDF / − injection PV.
-    grid_power_w: Math.round(sign * num(gEm.act_power)),
+    grid_power_w: calibratedGridW(gEm.act_power) ?? 0,
     grid_voltage_v: num(gEm.voltage),
     grid_import_kwh: num(gData?.total_act_energy) / 1000,
     grid_export_kwh: num(gData?.total_act_ret_energy) / 1000,

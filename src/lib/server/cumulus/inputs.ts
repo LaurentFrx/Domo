@@ -10,6 +10,7 @@ import { env } from '$env/dynamic/private';
 import { isHC, nextTariffSwitch, parisDate, regimeAt } from '../tariffs';
 import type { CumulusConfig, CumulusInputs, TempSource, ApplianceInput } from './types';
 import { readRelay } from './relay';
+import { calibratedGridW } from '../em50-grid';
 import { readAnkerSolarbank } from '$lib/server/anker-modbus';
 import { averageTemp } from './energy-model';
 import { ensureTempSensor, getCumulusTemp, ensureTempTopic, getTempTopic } from './temp-sensor';
@@ -33,7 +34,7 @@ const parisHour = (d: Date): number => Number(HOUR_FMT.format(d));
 const em50Url = () => (env.EM50_URL || 'http://127.0.0.1:8102').replace(/\/+$/, '');
 const gridId = () => Number(env.EM50_GRID_ID ?? 0);
 const cumulusId = () => Number(env.EM50_CUMULUS_ID ?? 1);
-const gridSign = () => (Number(env.EM50_GRID_SIGN ?? 1) < 0 ? -1 : 1);
+// Signe et étalonnage réseau : em50-grid.ts (voie 0 sous-lisant ~35 W).
 
 interface Em50Read {
   available: boolean;
@@ -107,7 +108,7 @@ async function readEm50(): Promise<Em50Read> {
     if (!g.held) return fail;
     return {
       available: true,
-      gridPowerW: Math.round(gridSign() * g.value),
+      gridPowerW: calibratedGridW(g.value) ?? 0,
       cumulusPowerW: Math.round(c.value),
       cumulusKwh: num(cData?.total_act_energy) / 1000
     };
