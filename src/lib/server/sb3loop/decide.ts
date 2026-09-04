@@ -102,7 +102,14 @@ export function decide(
   const enVol = (state.enVol ?? []).filter((c) => inputs.now - c.ts < cfg.enVolS * 1000);
   const dejaCommandeW = enVol.reduce((s, c) => s + c.dW, 0);
   // Voie lente : on repart de la mémoire existante, `applyTarget` la met à jour.
-  const slowIn: SlowBias = state.slow ?? { sinceTs: null, signW: null, lastWriteTs: null };
+  const slowIn: SlowBias = state.slow ?? {
+    sinceTs: null,
+    signW: null,
+    lastWriteTs: null,
+    gridSumW: 0,
+    gridN: 0,
+    gridSinceTs: null
+  };
   let slow: SlowBias = slowIn;
   const noWrite = (
     mode: Sb3Decision['mode'],
@@ -230,20 +237,44 @@ export function decide(
   const ffHold = (state.ffHoldUntilTs ?? 0) > inputs.now;
   const baisseInterdite = erreurW < 0 && (maxAcDebite || ffHold);
 
-  // Seuil d'ENTRÉE abaissé à `slowMinW` (01/09) : au-dessus de la bande morte,
+  // ── MOYENNE GLISSANTE DE L'ERREUR COMPTEUR (04/09) ────────────────────────
+  // Le compteur bruite de ±30 W. Jugée sur sa valeur INSTANTANÉE, une erreur de
+  // 20 W déclenche la voie compteur un tick sur deux, la voie partage l'autre —
+  // les deux demandent des corrections de sens opposé, le chrono repart à zéro
+  // à chaque fois et plus rien n'est jamais écrit. Mesuré le 04/09 : cible 204,
+  // puis 92, puis 217 W, consigne figée à 184 W, zéro écriture en vingt minutes.
+  // Un BIAIS survit à la moyenne ; le bruit non. On accumule donc l'erreur, et
+  // c'est SA MOYENNE qui a le droit d'ouvrir la voie lente.
+  const gridFenetreMs = cfg.slowHoldS * 1000;
+  const accVieux =
+    slowIn.gridSinceTs !== null && inputs.now - slowIn.gridSinceTs > 2 * gridFenetreMs;
+  const gridSumW = (accVieux ? 0 : (slowIn.gridSumW ?? 0)) + erreurW;
+  const gridN = (accVieux ? 0 : (slowIn.gridN ?? 0)) + 1;
+  const gridSinceTs = accVieux || slowIn.gridSinceTs === null ? inputs.now : slowIn.gridSinceTs;
+  slow = { ...slowIn, gridSumW, gridN, gridSinceTs };
+  const erreurMoyenneW = gridN > 0 ? gridSumW / gridN : 0;
+  const fenetreMure = inputs.now - gridSinceTs >= gridFenetreMs;
+
+  // Seuil d'ENTRÉE (01/09) : au-dessus de la bande morte,
   // `applyTarget` écrit immédiatement, comme avant ; en dessous, il confie
   // l'écart à la voie lente au lieu de l'oublier. C'est ce qui manquait pour que
   // les 20-40 W d'injection permanente cessent d'être invisibles à la boucle.
   // La règle 1 passe donc toujours AVANT le partage (règle 2), y compris pour un
   // biais de quelques dizaines de watts.
-  if (Math.abs(erreurW) >= cfg.slowMinW && !baisseInterdite) {
+  const voieCompteur =
+    Math.abs(erreurW) > cfg.deadbandW || // urgent : gain plein, immédiat
+    (fenetreMure && Math.abs(erreurMoyenneW) >= cfg.slowMinW); // biais confirmé
+  if (voieCompteur && !baisseInterdite) {
     const cible = clamp(base + erreurW, 0, cfg.maxPresetW);
     const enAttente = dejaCommandeW !== 0 ? ` (${Math.round(dejaCommandeW)} W déjà en vol)` : '';
     return applyTarget(
       base + erreurW,
-      gridW > 0
-        ? `SOUTIRAGE ${gridW} W${enAttente} — consigne ${base} → ${cible} W`
-        : `injection ${-gridW} W${enAttente} — consigne ${base} → ${cible} W`
+      (Math.abs(erreurW) > cfg.deadbandW
+        ? gridW > 0
+          ? `SOUTIRAGE ${gridW} W${enAttente}`
+          : `injection ${-gridW} W${enAttente}`
+        : `biais compteur ${Math.round(erreurMoyenneW)} W en moyenne sur ` +
+          `${Math.round((inputs.now - gridSinceTs) / 1000)} s`) + ` — consigne ${base} → ${cible} W`
     );
   }
 
@@ -402,7 +433,17 @@ export function decide(
         );
       }
       // Biais confirmé et cadence respectée : on corrige, et on repart à zéro.
-      slow = { sinceTs: null, signW: null, lastWriteTs: inputs.now };
+      // Écriture : le biais ET la moyenne repartent de zéro — ce qui était
+      // accumulé vient d'être corrigé.
+      slow = {
+        ...slow,
+        sinceTs: null,
+        signW: null,
+        lastWriteTs: inputs.now,
+        gridSumW: 0,
+        gridN: 0,
+        gridSinceTs: inputs.now
+      };
       return {
         writeW: targetW,
         targetW,
@@ -418,8 +459,8 @@ export function decide(
     // tant que le compteur n'a pas eu le temps de la refléter.
     const dW = targetW - (currentW ?? 0);
     // Une écriture rapide remet le biais à zéro : la consigne vient de bouger,
-    // ce qui était « tenu » ne l'est plus.
-    slow = { ...slowIn, sinceTs: null, signW: null };
+    // ce qui était « tenu » ne l'est plus — la moyenne d'erreur non plus.
+    slow = { ...slow, sinceTs: null, signW: null, gridSumW: 0, gridN: 0, gridSinceTs: inputs.now };
     return {
       writeW: targetW,
       targetW,

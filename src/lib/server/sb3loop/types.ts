@@ -176,6 +176,16 @@ export interface SlowBias {
   sinceTs: number | null;
   signW: 1 | -1 | null;
   lastWriteTs: number | null;
+  /** Moyenne glissante de l'ERREUR COMPTEUR (somme et nombre d'échantillons),
+   *  repartie à zéro à chaque écriture. Le compteur bruite de ±30 W : jugé sur
+   *  sa valeur instantanée, un seuil de 15 W se déclenche sur le bruit, et les
+   *  deux voies (erreur compteur / partage) se réclament des corrections de sens
+   *  opposé à chaque tick — plus rien ne part. Un BIAIS survit à la moyenne, le
+   *  bruit non. Mesuré le 04/09 : cible 204 W puis 92 W puis 217 W, consigne
+   *  figée à 184 W, zéro écriture en vingt minutes. */
+  gridSumW: number;
+  gridN: number;
+  gridSinceTs: number | null;
 }
 
 export interface Sb3DecisionLogEntry {
@@ -248,7 +258,14 @@ export function defaultSb3LoopState(): Sb3LoopState {
     rearmDayParis: null,
     rearmCount: 0,
     enVol: [],
-    slow: { sinceTs: null, signW: null, lastWriteTs: null },
+    slow: {
+      sinceTs: null,
+      signW: null,
+      lastWriteTs: null,
+      gridSumW: 0,
+      gridN: 0,
+      gridSinceTs: null
+    },
     ffHoldUntilTs: null,
     transportFailCount: 0,
     lastCmdW: null,

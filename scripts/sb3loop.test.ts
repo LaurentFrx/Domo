@@ -861,3 +861,75 @@ test('la garde règle 0 tient toujours : pas de baisse pendant que la Max AC dé
     `la consigne ne doit pas baisser : ${d.reason}`
   );
 });
+
+// ─── La moyenne d'erreur : le bruit ne doit plus ouvrir la voie compteur ─────
+// Mesuré en service le 04/09 : le compteur bruite de ±30 W. Jugée instantanée,
+// une erreur de 20 W ouvrait la voie compteur un tick sur deux et la voie
+// partage l'autre — deux corrections de sens opposé, chrono remis à zéro à
+// chaque fois, ZÉRO écriture en vingt minutes, consigne figée à 184 W.
+
+/** Rejoue n ticks en enchaînant l'état, avec une erreur compteur donnée par tick. */
+function rejoue(erreurs: number[], base: Partial<Sb3LoopInputs> = {}) {
+  let st0 = st({ lastCmdW: 184 });
+  const ecritures: number[] = [];
+  let last: ReturnType<typeof decide> | null = null;
+  erreurs.forEach((g, i) => {
+    const now = NOW + i * 25_000; // un tick toutes les 25 s
+    last = decide(
+      inp({
+        now,
+        em50: { ok: true, gridW: g },
+        maxac: { ok: true, socPct: 86, acNetW: 0, ratedEnergyWh: 7200 },
+        cloud: {
+          ...inp().cloud,
+          sb3OutW: 184,
+          sb3SocAvg: 58,
+          sb3Packs: packs(58),
+          sb3PresetW: 184
+        },
+        ...base
+      }),
+      cfg,
+      st0
+    );
+    if (last.writeW !== null) ecritures.push(last.writeW);
+    st0 = { ...st0, enVol: last.enVol, slow: last.slow };
+  });
+  return { ecritures, last: last as NonNullable<typeof last> };
+}
+
+test('bruit symétrique : la moyenne reste nulle, la voie compteur ne s’ouvre pas', () => {
+  // ±25 W alternés pendant 20 min — le compteur est à l'équilibre en moyenne.
+  const erreurs = Array.from({ length: 48 }, (_, i) => (i % 2 ? 25 : -25));
+  const { last } = rejoue(erreurs);
+  assert.ok(
+    !/SOUTIRAGE|injection|biais compteur/.test(last.reason),
+    `la voie compteur s'est ouverte sur du bruit : ${last.reason}`
+  );
+});
+
+test('biais réel : la moyenne le révèle et il finit corrigé', () => {
+  // −40 W bruités de ±25 : la moyenne vaut −40, bien au-delà du seuil.
+  const erreurs = Array.from({ length: 48 }, (_, i) => -40 + (i % 2 ? 25 : -25));
+  const { ecritures } = rejoue(erreurs);
+  assert.ok(ecritures.length >= 1, 'un biais soutenu doit finir par être écrit');
+  assert.ok(
+    ecritures[0] < 184,
+    `une injection persistante doit BAISSER la consigne (écrit ${ecritures[0]})`
+  );
+});
+
+test('le partage n’est plus interrompu par le bruit du compteur', () => {
+  // Compteur à l'équilibre bruité : la voie partage doit pouvoir accumuler son
+  // chrono et corriger le déséquilibre SB3 58 % / Max AC 86 %.
+  const erreurs = Array.from({ length: 60 }, (_, i) => (i % 2 ? 12 : -12));
+  const { ecritures } = rejoue(erreurs);
+  assert.ok(ecritures.length >= 1, 'le partage doit finir par être écrit');
+  assert.ok(ecritures[0] < 184, `le partage doit BAISSER la part SB3 (écrit ${ecritures[0]})`);
+});
+
+test('un échelon franc reste traité au tick, sans attendre la moyenne', () => {
+  const { ecritures } = rejoue([1500]);
+  assert.equal(ecritures.length, 1, 'la voie rapide ne doit pas attendre');
+  assert.ok(ecritures[0] >= 1500);
+});
