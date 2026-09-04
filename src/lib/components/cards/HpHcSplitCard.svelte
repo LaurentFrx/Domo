@@ -11,7 +11,9 @@
   // facturé (tariffs.json) ou ventilation estimée — annoncée en clair. Les
   // pistes sont TOUJOURS dessinées, même sans la moindre ventilation : une
   // tranche antérieure aux 24 mois de courbe conservés par Enedis est un
-  // placeholder en pointillé (demande Laurent 04/09), pas un paragraphe.
+  // placeholder en pointillé, et quand rien n'est ventilé du tout, « Pas de
+  // relevé » s'écrit en grand au milieu des pistes (demandes Laurent 04/09) —
+  // jamais un paragraphe d'explication.
   let {
     data,
     periode,
@@ -51,7 +53,6 @@
     !!m.key &&
     (m.key.length === 7 ? `${m.key}-31` < curveFloor : m.key < curveFloor) &&
     monthTotal(m) <= 0;
-  const anyUnreachable = $derived(data.some(isUnreachable));
   const floorLabel = $derived(
     curveFloor
       ? new Date(`${curveFloor}T12:00:00Z`).toLocaleDateString('fr-FR', {
@@ -115,48 +116,54 @@
     <!-- Barres par mois : hauteur = part HC/HP, largeur = volume (cf. segH/colW).
          Toujours dessinées, même sans ventilation : une année ancienne garde ses
          12 pistes — pointillé avant le plancher des 24 mois d'Enedis, vide après
-         (courbe jamais publiée ou relevé absent). -->
-    <div
-      class="bars"
-      class:dense
-      style="--n: {data.length}; --gap: {data.length > 20 ? 2 : 6}px;"
-      role="img"
-      aria-label="Part Heures Creuses / Pleines par mois — barre d'autant plus large que le mois a consommé"
-    >
-      {#each data as m, i (i)}
-        {@const tot = monthTotal(m)}
-        {@const est = isEst(m)}
-        {@const gone = isUnreachable(m)}
-        {@const canOpen = tot > 0 && !!m.key && !!onOpen}
-        <svelte:element
-          this={canOpen ? 'button' : 'div'}
-          role={canOpen ? 'button' : undefined}
-          tabindex={canOpen ? 0 : undefined}
-          onclick={canOpen ? () => onOpen?.(m.key as string) : undefined}
-          class="col"
-          class:clickable={canOpen}
-          title={tot > 0
-            ? `${m.label} — Creuses ${nf1.format(m.import_hc_kwh)} kWh (${pct(
-                m.import_hc_kwh,
-                tot
-              )} %) · Pleines ${nf1.format(m.import_hp_kwh)} kWh (${pct(m.import_hp_kwh, tot)} %)${
-                isEnedis(m)
-                  ? ' · total compteur EDF, répartition estimée'
-                  : est
-                    ? ' · estimé (mesure maison)'
-                    : ''
-              }`
-            : gone
-              ? `${m.label} — avant le ${floorLabel} : hors des 24 mois de courbe conservés par Enedis`
-              : `${m.label} — pas de relevé`}
-        >
-          <span class="col-val">{tot >= (fine ? 0.05 : 0.5) ? fmtVal(tot) : ''}</span>
-          <div class="track" class:filled={tot > 0} class:unreachable={gone}>
-            <div class="seg seg-hp" style="height: {segH(m.import_hp_kwh)}px;"></div>
-            <div class="seg seg-hc" style="height: {segH(m.import_hc_kwh)}px;"></div>
-          </div>
-        </svelte:element>
-      {/each}
+         (courbe jamais publiée ou relevé absent). Sans la moindre ventilation,
+         « Pas de relevé » se lit en grand par-dessus. -->
+    <div class="relative">
+      <div
+        class="bars"
+        class:dense
+        style="--n: {data.length}; --gap: {data.length > 20 ? 2 : 6}px;"
+        role="img"
+        aria-label="Part Heures Creuses / Pleines par mois — barre d'autant plus large que le mois a consommé"
+      >
+        {#each data as m, i (i)}
+          {@const tot = monthTotal(m)}
+          {@const est = isEst(m)}
+          {@const gone = isUnreachable(m)}
+          {@const canOpen = tot > 0 && !!m.key && !!onOpen}
+          <svelte:element
+            this={canOpen ? 'button' : 'div'}
+            role={canOpen ? 'button' : undefined}
+            tabindex={canOpen ? 0 : undefined}
+            onclick={canOpen ? () => onOpen?.(m.key as string) : undefined}
+            class="col"
+            class:clickable={canOpen}
+            title={tot > 0
+              ? `${m.label} — Creuses ${nf1.format(m.import_hc_kwh)} kWh (${pct(
+                  m.import_hc_kwh,
+                  tot
+                )} %) · Pleines ${nf1.format(m.import_hp_kwh)} kWh (${pct(m.import_hp_kwh, tot)} %)${
+                  isEnedis(m)
+                    ? ' · total compteur EDF, répartition estimée'
+                    : est
+                      ? ' · estimé (mesure maison)'
+                      : ''
+                }`
+              : gone
+                ? `${m.label} — avant le ${floorLabel} : hors des 24 mois de courbe conservés par Enedis`
+                : `${m.label} — pas de relevé`}
+          >
+            <span class="col-val">{tot >= (fine ? 0.05 : 0.5) ? fmtVal(tot) : ''}</span>
+            <div class="track" class:filled={tot > 0} class:unreachable={gone}>
+              <div class="seg seg-hp" style="height: {segH(m.import_hp_kwh)}px;"></div>
+              <div class="seg seg-hc" style="height: {segH(m.import_hc_kwh)}px;"></div>
+            </div>
+          </svelte:element>
+        {/each}
+      </div>
+      {#if !hasData}
+        <div class="overlay">{pending ? 'Relevés en cours…' : 'Pas de relevé'}</div>
+      {/if}
     </div>
 
     {#if hasData}
@@ -181,18 +188,6 @@
           <span>{nf1.format(totalHp)} kWh pleines</span>
         </div>
       </div>
-    {:else if pending}
-      <p class="text-[11px]" style="color: var(--color-muted-fg);">
-        Relevés Heures Creuses / Pleines de {periode.toLowerCase()} en cours de récupération chez Enedis.
-      </p>
-    {/if}
-    {#if anyUnreachable}
-      <!-- Légende du pointillé, une ligne : sans elle, une piste vide et une
-           piste hors de portée se ressembleraient. -->
-      <p class="text-[10px]" style="color: var(--color-muted-fg);">
-        Pointillé : avant le {floorLabel}, hors des 24 mois de courbe de charge conservés par
-        Enedis.
-      </p>
     {/if}
   {/if}
 </div>
@@ -274,6 +269,22 @@
   .track.unreachable {
     background: transparent;
     border: 1.5px dashed var(--color-border);
+  }
+  /* « Pas de relevé » : en grand, centré sur les pistes vides — le graphe reste
+     en place (même alignement que le graphe Saisons au-dessus), le constat se
+     lit d'un coup d'œil. Ne capte pas les clics (les pistes restent là). */
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-muted-fg);
   }
   .seg {
     width: 100%;
