@@ -12,13 +12,14 @@
  * pas une erreur d'échelle — il vaut +31 à +43 W sur toute la plage exploitable
  * (EM-50 de −100 à +500 W), sans dépendance à la puissance :
  *
- *     EM-50 ∈ [−100, −20] W : n=2839  écart médian +35,5 W
- *     EM-50 ∈ [ −20,  +20] W : n= 213  écart médian +31,1 W
- *     EM-50 ∈ [ +20, +100] W : n= 145  écart médian +34,4 W
- *     EM-50 ∈ [+100, +500] W : n= 224  écart médian +42,7 W
+ * Étalonné sur l'ÉNERGIE SOUTIRÉE du jour (la seule grandeur que les deux
+ * compteurs mesurent pareil), 89 jours appariés :
  *
- * (Au-delà de −100 W l'écart apparent explose : Enedis ne mesure PAS l'injection,
- * il rend 0. Ces créneaux ne disent rien sur le biais et sont exclus.)
+ *     offset 20 W → biais −107 Wh/j      offset 28 W → biais  −51 Wh/j
+ *     offset 25 W → biais  −76 Wh/j      offset 30 W → biais  −31 Wh/j
+ *     offset 26 W → MINIMUM d'erreur     offset 35 W → biais  +28 Wh/j
+ *
+ * Stable dans le temps : 29 W en juillet, 28 W en août.
  *
  * Pourquoi c'est grave : cette voie pilote la boucle SB3 ET le veto d'achat du
  * cumulus. Croyant injecter, la boucle baisse la consigne des Solarbank — et
@@ -41,9 +42,21 @@ export const gridSign = (): 1 | -1 => (Number(env.EM50_GRID_SIGN ?? 1) < 0 ? -1 
  * Correction d'étalonnage (W) ajoutée à la voie réseau, APRÈS le signe.
  * Mesurée contre Enedis sur cette installation ; surchargeable par
  * `EM50_GRID_OFFSET_W` sans toucher au code.
+ *
+ * ⚠ MÉTHODE — la première calibration (35 W, 01/09) était FAUSSE, et sa faute
+ * est instructive. Elle comparait la MOYENNE des demi-heures Enedis à celle de
+ * l'EM-50. Or Enedis ne mesure QUE le soutirage : sur une demi-heure où la
+ * maison alterne, il compte les seuls instants positifs, pas le net. L'écart
+ * apparent contenait donc l'injection, et l'offset s'en trouvait gonflé.
+ *
+ * La bonne mesure compare la même grandeur des deux côtés : l'ÉNERGIE SOUTIRÉE
+ * du jour, intégrée depuis `pv_samples` d'un côté, `enedis_daily.soutirage_kwh`
+ * de l'autre. Sur 89 jours, l'offset qui annule le biais vaut 28-30 W et le
+ * minimum d'erreur tombe à 26 W. Et il est STABLE : 29 W en juillet, 28 W en
+ * août — pas de dérive. D'où 28 W.
  */
 export const gridOffsetW = (): number => {
-  const v = Number(env.EM50_GRID_OFFSET_W ?? 35);
+  const v = Number(env.EM50_GRID_OFFSET_W ?? 28);
   return Number.isFinite(v) ? v : 0;
 };
 
