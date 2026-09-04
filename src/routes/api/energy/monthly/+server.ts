@@ -84,7 +84,16 @@ interface MonthlyPayload {
    * que le backfill y descend (il remonte le temps semaine par semaine, freiné
    * par le quota Enedis) : l'UI dit « en cours » plutôt que « pas de données ». */
   curve_pending: boolean;
+  /** Premier jour que la courbe ½h peut encore couvrir : Enedis ne la conserve
+   * que 24 mois (au-delà, HTTP 500 — constaté le 27/08/2026, le backfill s'y
+   * arrête). Toute date antérieure est DÉFINITIVEMENT sans mesure ; l'UI le dit
+   * tel quel au lieu d'un « pas de ventilation » qui ressemble à un oubli. */
+  curve_floor: string;
 }
+
+/** Miroir de ENEDIS_CURVE_MAX_AGE_DAYS (domo-recorder/record.py) : la limite
+ * de rétention de la courbe de charge côté Enedis, 24 mois glissants. */
+const CURVE_MAX_AGE_DAYS = 730;
 
 function zeroMonth(): MonthAgg {
   return {
@@ -650,7 +659,10 @@ export const GET: RequestHandler = async ({ url }) => {
     foldBaseline(months, year);
 
     // Le backfill de la courbe descend du présent vers le passé : une année
-    // entièrement située AVANT le curseur est simplement en attente.
+    // entièrement située AVANT le curseur est simplement en attente — tant que
+    // le backfill peut encore avancer. Au-delà de 24 mois il s'arrête (Enedis
+    // ne sert plus rien) : plus rien n'est « en cours », c'est hors de portée.
+    const curveFloor = parisDate(new Date(now.getTime() - CURVE_MAX_AGE_DAYS * 86_400_000));
     let curvePending = false;
     try {
       const r = db
@@ -659,7 +671,7 @@ export const GET: RequestHandler = async ({ url }) => {
       // Le curseur pointe la prochaine tranche à récupérer : toute année à sa
       // hauteur ou en dessous reste à couvrir.
       const cur = r?.c;
-      curvePending = !!cur && String(year) <= cur.slice(0, 4);
+      curvePending = !!cur && String(year) <= cur.slice(0, 4) && cur > curveFloor;
     } catch {
       /* colonne absente : on reste sur « pas de données » */
     }
@@ -669,7 +681,8 @@ export const GET: RequestHandler = async ({ url }) => {
       months,
       min_year: minYear,
       scale_max_kwh: scaleMaxKwh,
-      curve_pending: curvePending
+      curve_pending: curvePending,
+      curve_floor: curveFloor
     };
     return json(payload);
   } catch (e) {

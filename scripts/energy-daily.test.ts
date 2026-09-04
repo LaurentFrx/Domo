@@ -1,6 +1,7 @@
 /**
- * Le développement des JOURS d'un mois (/api/energy/daily) et sa ventilation
- * Heures Creuses / Pleines.
+ * Le bilan de la page Énergie : les JOURS d'un mois (/api/energy/daily) et leur
+ * ventilation Heures Creuses / Pleines, puis la vue ANNUELLE (/api/energy/monthly :
+ * curve_pending, curve_floor).
  *   pnpm test:bilan
  *
  * Ce que ces tests protègent : un jour dont la courbe ½h Enedis n'est pas encore
@@ -142,4 +143,53 @@ test('un mois d’avant l’EM-50 ne reçoit AUCUNE estimation', async () => {
   assert.equal(d.import_split_source, null);
   assert.equal(d.import_hc_kwh + d.import_hp_kwh, 0);
   assert.equal(jan.has_curve, false);
+});
+
+// ── Vue ANNUELLE : « en cours » ne doit plus se dire d'une année hors de portée ──
+// Enedis ne conserve la courbe de charge que 24 mois : le backfill s'arrête là.
+// Tant que curve_pending disait « en cours » pour 2024, l'UI promettait une
+// récupération qui n'arriverait jamais.
+const { GET: getMonthly } = await import('../src/routes/api/energy/monthly/+server.ts');
+
+async function fetchYear(year: number) {
+  const res = await getMonthly({
+    url: new URL(`http://domo/api/energy/monthly?year=${year}`)
+  } as never);
+  assert.equal(res.status, 200);
+  return (await res.json()) as { curve_pending: boolean; curve_floor: string };
+}
+
+let dbSeq = 0;
+function withCursor(cursor: string): string {
+  const p = path.join(sandbox, `monthly-${++dbSeq}-${cursor}.db`);
+  const d = new Database(p);
+  d.exec(`
+    CREATE TABLE enedis_daily (date TEXT PRIMARY KEY, soutirage_kwh REAL, hc_kwh REAL, hp_kwh REAL);
+    CREATE TABLE enedis_state (id INTEGER PRIMARY KEY, curve_backfill_cursor TEXT);
+  `);
+  d.prepare('INSERT INTO enedis_daily (date, soutirage_kwh) VALUES (?,?)').run('2023-08-25', 10);
+  d.prepare('INSERT INTO enedis_state (id, curve_backfill_cursor) VALUES (1, ?)').run(cursor);
+  d.close();
+  return p;
+}
+
+test('curve_floor = aujourd’hui − 24 mois, exposé à l’UI', async () => {
+  process.env.RECORDER_DB_PATH = withCursor('2024-08-27');
+  const r = await fetchYear(2024);
+  assert.match(r.curve_floor, /^\d{4}-\d{2}-\d{2}$/);
+  const attendu = Date.now() - 730 * 86_400_000;
+  assert.ok(Math.abs(Date.parse(r.curve_floor) - attendu) < 2 * 86_400_000, r.curve_floor);
+});
+
+test('backfill arrêté au plancher des 24 mois → plus rien n’est « en cours »', async () => {
+  process.env.RECORDER_DB_PATH = withCursor('2024-08-27');
+  assert.equal((await fetchYear(2024)).curve_pending, false);
+  assert.equal((await fetchYear(2023)).curve_pending, false);
+});
+
+test('backfill encore en route → les années à sa hauteur ou en dessous attendent', async () => {
+  process.env.RECORDER_DB_PATH = withCursor('2025-06-01');
+  assert.equal((await fetchYear(2025)).curve_pending, true);
+  assert.equal((await fetchYear(2024)).curve_pending, true);
+  assert.equal((await fetchYear(2026)).curve_pending, false);
 });

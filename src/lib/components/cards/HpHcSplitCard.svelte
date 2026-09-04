@@ -14,6 +14,7 @@
     periode,
     scaleMaxKwh = 0,
     pending = false,
+    curveFloor = null,
     onOpen
   }: {
     /** Les tranches du niveau courant : 12 mois, les jours d'un mois, ou 24 h. */
@@ -28,9 +29,30 @@
      * backfill remonte le temps) : on le dit, au lieu de laisser croire qu'elle
      * n'existera jamais. */
     pending?: boolean;
+    /** Premier jour que la courbe ½h peut encore couvrir chez Enedis (24 mois
+     * glissants, fourni par l'API) : au niveau année, on explique POURQUOI une
+     * année ancienne n'a pas de répartition, au lieu d'un « pas de ventilation »
+     * qui ressemble à un oubli. */
+    curveFloor?: string | null;
     /** Descendre d'un niveau (absent au dernier niveau). */
     onOpen?: (key: string) => void;
   } = $props();
+
+  // Année entière affichée (« 2024 ») → hors de portée d'Enedis, en tout ou partie ?
+  const yearShown = $derived(/^\d{4}$/.test(periode) ? periode : null);
+  const outOfReach = $derived(!!yearShown && !!curveFloor && `${yearShown}-12-31` < curveFloor);
+  const partlyOutOfReach = $derived(
+    !!yearShown && !!curveFloor && !outOfReach && `${yearShown}-01-01` < curveFloor
+  );
+  const floorLabel = $derived(
+    curveFloor
+      ? new Date(`${curveFloor}T12:00:00Z`).toLocaleDateString('fr-FR', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric'
+        })
+      : ''
+  );
 
   const nf1 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
   const nf0 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
@@ -146,9 +168,17 @@
     </div>
   {:else}
     <p class="py-3 text-[12px]" style="color: var(--color-muted-fg);">
-      {pending
-        ? `Heures Creuses / Pleines de ${periode.toLowerCase()} : relevés en cours de récupération chez Enedis.`
-        : `Pas de ventilation Heures Creuses / Pleines pour ${periode.toLowerCase()}.`}
+      {#if pending}
+        Heures Creuses / Pleines de {periode.toLowerCase()} : relevés en cours de récupération chez Enedis.
+      {:else if outOfReach}
+        Pas de répartition Heures Creuses / Pleines pour {periode} : Enedis ne conserve la courbe de charge
+        que 24 mois, elle n'est plus récupérable.
+      {:else if partlyOutOfReach}
+        Pas de répartition Heures Creuses / Pleines pour {periode} : Enedis ne conserve la courbe de charge
+        que 24 mois (rien avant le {floorLabel}) et n'en a pas publié sur le reste de l'année.
+      {:else}
+        Pas de ventilation Heures Creuses / Pleines pour {periode.toLowerCase()}.
+      {/if}
     </p>
   {/if}
 </div>
