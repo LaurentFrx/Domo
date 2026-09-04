@@ -8,7 +8,10 @@
   // d'import du mois sur l'échelle FIXE commune — la barre d'un mois arrive à la
   // même hauteur que sa part bleue dans le graphe du dessus ; l'empilement
   // cyan/corail dit la répartition. Provenances distinguées : relevé compteur
-  // facturé (tariffs.json) ou ventilation estimée — hachurée + annoncée en clair.
+  // facturé (tariffs.json) ou ventilation estimée — annoncée en clair. Les
+  // pistes sont TOUJOURS dessinées, même sans la moindre ventilation : une
+  // tranche antérieure aux 24 mois de courbe conservés par Enedis est un
+  // placeholder en pointillé (demande Laurent 04/09), pas un paragraphe.
   let {
     data,
     periode,
@@ -38,12 +41,17 @@
     onOpen?: (key: string) => void;
   } = $props();
 
-  // Année entière affichée (« 2024 ») → hors de portée d'Enedis, en tout ou partie ?
-  const yearShown = $derived(/^\d{4}$/.test(periode) ? periode : null);
-  const outOfReach = $derived(!!yearShown && !!curveFloor && `${yearShown}-12-31` < curveFloor);
-  const partlyOutOfReach = $derived(
-    !!yearShown && !!curveFloor && !outOfReach && `${yearShown}-01-01` < curveFloor
-  );
+  // Tranche ENTIÈREMENT antérieure au plancher des 24 mois d'Enedis : la courbe
+  // n'existera jamais → piste en pointillé (placeholder), et non une piste
+  // « vide » qui laisserait croire à un relevé manquant. Un mois se compare par
+  // son dernier jour ('2024-08-31' < '2024-09-04' : août hors de portée,
+  // septembre inclus) ; un jour par sa date ; une heure (key null) jamais.
+  const isUnreachable = (m: Bucket) =>
+    !!curveFloor &&
+    !!m.key &&
+    (m.key.length === 7 ? `${m.key}-31` < curveFloor : m.key < curveFloor) &&
+    monthTotal(m) <= 0;
+  const anyUnreachable = $derived(data.some(isUnreachable));
   const floorLabel = $derived(
     curveFloor
       ? new Date(`${curveFloor}T12:00:00Z`).toLocaleDateString('fr-FR', {
@@ -103,8 +111,11 @@
   class="flex flex-col gap-4"
   aria-label="Répartition Heures Creuses / Heures Pleines des imports réseau"
 >
-  {#if hasData}
-    <!-- Barres par mois : hauteur = part HC/HP, largeur = volume (cf. segH/colW) -->
+  {#if data.length > 0}
+    <!-- Barres par mois : hauteur = part HC/HP, largeur = volume (cf. segH/colW).
+         Toujours dessinées, même sans ventilation : une année ancienne garde ses
+         12 pistes — pointillé avant le plancher des 24 mois d'Enedis, vide après
+         (courbe jamais publiée ou relevé absent). -->
     <div
       class="bars"
       class:dense
@@ -115,6 +126,7 @@
       {#each data as m, i (i)}
         {@const tot = monthTotal(m)}
         {@const est = isEst(m)}
+        {@const gone = isUnreachable(m)}
         {@const canOpen = tot > 0 && !!m.key && !!onOpen}
         <svelte:element
           this={canOpen ? 'button' : 'div'}
@@ -134,10 +146,12 @@
                     ? ' · estimé (mesure maison)'
                     : ''
               }`
-            : `${m.label} — pas de relevé`}
+            : gone
+              ? `${m.label} — avant le ${floorLabel} : hors des 24 mois de courbe conservés par Enedis`
+              : `${m.label} — pas de relevé`}
         >
           <span class="col-val">{tot >= (fine ? 0.05 : 0.5) ? fmtVal(tot) : ''}</span>
-          <div class="track" class:filled={tot > 0}>
+          <div class="track" class:filled={tot > 0} class:unreachable={gone}>
             <div class="seg seg-hp" style="height: {segH(m.import_hp_kwh)}px;"></div>
             <div class="seg seg-hc" style="height: {segH(m.import_hc_kwh)}px;"></div>
           </div>
@@ -145,41 +159,41 @@
       {/each}
     </div>
 
-    <!-- Proportion globale, SOUS son graphique : on lit d'abord le détail
-         mois par mois, la synthèse vient ensuite. -->
-    <div class="flex flex-col gap-1.5">
-      <!-- Cette ligne EST le titre du graphe du dessus : elle le nomme et le
-           chiffre d'un coup, dans les couleurs des barres. -->
-      <div class="flex items-center justify-between text-[13px] font-semibold">
-        <span style="color: var(--color-hc);">Heures Creuses {pctHc} %</span>
-        <span style="color: var(--color-hp);">Heures Pleines {pctHp} %</span>
+    {#if hasData}
+      <!-- Proportion globale, SOUS son graphique : on lit d'abord le détail
+           mois par mois, la synthèse vient ensuite. -->
+      <div class="flex flex-col gap-1.5">
+        <!-- Cette ligne EST le titre du graphe du dessus : elle le nomme et le
+             chiffre d'un coup, dans les couleurs des barres. -->
+        <div class="flex items-center justify-between text-[13px] font-semibold">
+          <span style="color: var(--color-hc);">Heures Creuses {pctHc} %</span>
+          <span style="color: var(--color-hp);">Heures Pleines {pctHp} %</span>
+        </div>
+        <div class="prop-bar">
+          <div class="prop-hc" style="width: {pctHc}%;"></div>
+          <div class="prop-hp" style="width: {pctHp}%;"></div>
+        </div>
+        <div
+          class="flex justify-between text-[10px] tabular-nums"
+          style="color: var(--color-muted-fg);"
+        >
+          <span>{nf1.format(totalHc)} kWh creuses</span>
+          <span>{nf1.format(totalHp)} kWh pleines</span>
+        </div>
       </div>
-      <div class="prop-bar">
-        <div class="prop-hc" style="width: {pctHc}%;"></div>
-        <div class="prop-hp" style="width: {pctHp}%;"></div>
-      </div>
-      <div
-        class="flex justify-between text-[10px] tabular-nums"
-        style="color: var(--color-muted-fg);"
-      >
-        <span>{nf1.format(totalHc)} kWh creuses</span>
-        <span>{nf1.format(totalHp)} kWh pleines</span>
-      </div>
-    </div>
-  {:else}
-    <p class="py-3 text-[12px]" style="color: var(--color-muted-fg);">
-      {#if pending}
-        Heures Creuses / Pleines de {periode.toLowerCase()} : relevés en cours de récupération chez Enedis.
-      {:else if outOfReach}
-        Pas de répartition Heures Creuses / Pleines pour {periode} : Enedis ne conserve la courbe de charge
-        que 24 mois, elle n'est plus récupérable.
-      {:else if partlyOutOfReach}
-        Pas de répartition Heures Creuses / Pleines pour {periode} : Enedis ne conserve la courbe de charge
-        que 24 mois (rien avant le {floorLabel}) et n'en a pas publié sur le reste de l'année.
-      {:else}
-        Pas de ventilation Heures Creuses / Pleines pour {periode.toLowerCase()}.
-      {/if}
-    </p>
+    {:else if pending}
+      <p class="text-[11px]" style="color: var(--color-muted-fg);">
+        Relevés Heures Creuses / Pleines de {periode.toLowerCase()} en cours de récupération chez Enedis.
+      </p>
+    {/if}
+    {#if anyUnreachable}
+      <!-- Légende du pointillé, une ligne : sans elle, une piste vide et une
+           piste hors de portée se ressembleraient. -->
+      <p class="text-[10px]" style="color: var(--color-muted-fg);">
+        Pointillé : avant le {floorLabel}, hors des 24 mois de courbe de charge conservés par
+        Enedis.
+      </p>
+    {/if}
   {/if}
 </div>
 
@@ -253,6 +267,13 @@
   }
   .track.filled .seg:first-child {
     border-radius: 5px 5px 0 0;
+  }
+  /* Placeholder : tranche hors des 24 mois de courbe conservés par Enedis — la
+     mesure n'existera jamais, la piste le dit d'un pointillé (≠ piste pleine
+     « vide », qui attend un relevé ou n'en a pas eu). */
+  .track.unreachable {
+    background: transparent;
+    border: 1.5px dashed var(--color-border);
   }
   .seg {
     width: 100%;
