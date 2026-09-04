@@ -27,6 +27,7 @@
  */
 import path from 'node:path';
 import { env } from '$env/dynamic/private';
+import { calibratedGridW } from '$lib/server/em50-grid';
 import { readJsonSafe, writeJsonAtomic, withFileLock } from '$lib/server/atomic-store';
 import { decideAps, shouldRearmAps } from './decide';
 import { sendPush } from '$lib/server/monitor/push';
@@ -229,11 +230,14 @@ async function readGrid(): Promise<{ available: boolean; gridW: number }> {
     });
     if (!r.ok) return { available: false, gridW: 0 };
     const d = (await r.json()) as Record<string, { act_power?: number }>;
-    const g = d[`em1:${Number(env.EM50_GRID_ID ?? 0)}`];
-    const sign = Number(env.EM50_GRID_SIGN ?? 1) < 0 ? -1 : 1;
-    if (!g || typeof g.act_power !== 'number' || !Number.isFinite(g.act_power))
-      return { available: false, gridW: 0 };
-    return { available: true, gridW: Math.round(sign * g.act_power) };
+    // Étalonnage CENTRALISÉ (em50-grid.ts). Cette lecture-ci était la seule des
+    // cinq à ne pas l'appliquer — oubli du 01/09. Conséquence mesurée : croyant
+    // injecter 35 W de plus qu'en réalité, l'anti-injection bridait l'onduleur
+    // dès 115 W d'injection réelle au lieu de 150, et ne le relâchait qu'en
+    // dessous de 15 W au lieu de 50. De la production perdue pour rien.
+    const gridW = calibratedGridW(d[`em1:${Number(env.EM50_GRID_ID ?? 0)}`]?.act_power);
+    if (gridW === null) return { available: false, gridW: 0 };
+    return { available: true, gridW };
   } catch {
     return { available: false, gridW: 0 };
   }
