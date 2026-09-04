@@ -43,6 +43,7 @@ import {
   accumulateHouseLoad,
   emptyHouseProfile,
   profileEnergyWh,
+  hourQuantileW,
   reserveWh,
   PV_END_ELEVATION_DEG,
   RECHARGE_QUANTILE,
@@ -101,6 +102,8 @@ export interface PilotStepResult {
     rechargeOk: boolean | null;
     /** Ce que notre bridage retenait à l'onduleur APS au moment du tick (W). */
     apsRecoverableW: number;
+    /** Place gardée libre dans le ballon pour le surplus prévu (Wh). */
+    tankReserveWh: number;
   };
 }
 
@@ -424,13 +427,57 @@ export function pilotStep(
     (socAvg !== null && socAvg >= p.battFullPct && inputs.batteryChargeW < p.chargeIdleW);
   const exportFrank = inputs.em50Available && exportW > p.exportOnW && exportProof;
 
+  // ── RÉSERVE DE PLACE POUR LE SURPLUS DE L'APRÈS-MIDI (04/09/2026) ─────────
+  // Le défaut central du 03/09 : le ballon a atteint 99,4 % à 12h47, le parc a
+  // saturé à 14h56, et 1,16 kWh est parti chez EDF entre 15h et 18h faute du
+  // moindre puits. Le pilote chauffait à fond dès qu'il pouvait, sans jamais se
+  // demander s'il faudrait de la place plus tard — alors que la météo le sait.
+  //
+  // On SIMULE donc le reste de la journée, heure par heure : le PV remplit
+  // d'abord la maison, puis le parc ; ce qui dépasse une fois le parc plein est
+  // le surplus qui débordera. C'est cette quantité — pas un pourcentage posé —
+  // que le ballon doit garder libre.
+  //
+  // Deux garde-fous. La réserve est bornée à `tankReserveMaxFrac` de la
+  // capacité : l'eau chaude prime sur le kWh récupéré. Et elle tombe dès que le
+  // surplus est LÀ (don franc) : à ce moment il faut prendre, pas économiser.
+  const placeParcInitialeWh = parcRoomWh ?? 0;
+  let resteParcWh = placeParcInitialeWh;
+  let surplusDebordantWh = 0;
+  // `?? []` : une prévision absente ne doit RIEN casser — elle rend seulement la
+  // réserve nulle, donc le comportement d'avant ce changement.
+  for (const { hour, w } of inputs.solTodayRestHourly ?? []) {
+    const maisonW = hourQuantileW(pilot.houseProfile, hour, RECHARGE_QUANTILE) ?? 0;
+    const netWh = w - maisonW; // sur une heure, W = Wh
+    if (netWh <= 0) continue;
+    const absorbe = Math.min(netWh, resteParcWh);
+    resteParcWh -= absorbe;
+    surplusDebordantWh += netWh - absorbe;
+  }
+  // `|| 0` sur la borne : un paramètre absent ou non fini rendrait la réserve
+  // NaN, et `eAvail < NaN` étant TOUJOURS faux, la condition « ballon pas plein »
+  // s'éteindrait EN SILENCE — la famille de panne qui a déjà coûté une voie
+  // entière du pilote. Sans borne lisible, pas de réserve : on retombe sur le
+  // comportement d'avant, jamais sur un blocage muet.
+  const reserveMaxFrac = Number.isFinite(p.tankReserveMaxFrac) ? p.tankReserveMaxFrac : 0;
+  const reserveMaxWh = reserveMaxFrac * ctx.eFullWh;
+  const tankReserveWh = Math.max(
+    0,
+    Math.min(Math.round(surplusDebordantWh) || 0, reserveMaxWh || 0)
+  );
+
   // BALLON PAS PLEIN — le seuil de 95 % est une protection anti-cyclage : sans
   // elle, le ballon relancerait un cycle pour trois pour cent de marge. Mais
   // quand l'énergie part au réseau ET que la journée pourra encore recharger le
   // parc, ces derniers pour cent ne coûtent rien et l'alternative est de les
   // donner : le 31/08 le ballon était à 97 % (500 Wh de place) pendant que
   // 2,1 kWh partaient chez EDF. Dans ce cas précis, on va jusqu'au plein.
-  const tankCeilingFrac = exportFrank && rechargeOk === true ? 1 : p.fullFraction;
+  // Plafond effectif : plein autorisé quand le surplus est là ; sinon on garde
+  // la place que la journée annonce, sans jamais dépasser la protection de 95 %.
+  const tankCeilingFrac =
+    exportFrank && rechargeOk === true
+      ? 1
+      : Math.min(p.fullFraction, (ctx.eFullWh - tankReserveWh) / Math.max(1, ctx.eFullWh));
   const tankNotFull =
     ctx.eFullWh > 0 && ctx.eAvailWh < tankCeilingFrac * ctx.eFullWh && !state.ballonCharged;
   const quietHouse = !inputs.appliances.some((a) => a.powerW !== null && a.powerW >= a.onW);
@@ -893,7 +940,10 @@ export function pilotStep(
         'tank',
         'Ballon pas plein',
         tankNotFull,
-        `${Math.round((ctx.eAvailWh / Math.max(1, ctx.eFullWh)) * 100)} % rempli`
+        `${Math.round((ctx.eAvailWh / Math.max(1, ctx.eFullWh)) * 100)} % rempli` +
+          (tankReserveWh > 0 && !(exportFrank && rechargeOk === true)
+            ? ` · ${tankReserveWh} Wh gardés pour le surplus prévu cet après-midi`
+            : '')
       ),
       cond(
         'surplus',
@@ -987,6 +1037,7 @@ export function pilotStep(
     potTotalW: ctx.potential.potTotalW,
     pApsW: Math.round(inputs.pvApsW),
     apsRecoverableW: Math.round(inputs.apsRecoverableW),
+    tankReserveWh,
     rechargeMarginWh,
     heatNeedWh: eChauffeWh === null ? null : Math.round(eChauffeWh),
     // Échelle PARC (pondérée), la même que socStart : la carte affiche
@@ -1019,7 +1070,8 @@ export function pilotStep(
       windowOpen,
       rechargeMarginWh,
       rechargeOk,
-      apsRecoverableW: Math.round(inputs.apsRecoverableW)
+      apsRecoverableW: Math.round(inputs.apsRecoverableW),
+      tankReserveWh
     }
   };
 }

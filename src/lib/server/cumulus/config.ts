@@ -58,6 +58,11 @@ export function defaultPilotConfig(): PilotConfig {
     // revenir à 100 % avant la nuit. Couvre l'erreur du modèle de chauffe
     // (MAE 375 Wh) et un nuage de fin de journée.
     rechargeBufferWh: 500,
+    // Réserve de place dans le ballon pour le surplus de l'après-midi. Bornée à
+    // 15 % de la capacité (~2,3 kWh) : c'est l'ordre de grandeur des surplus
+    // mesurés après saturation du parc (1,1 kWh le 03/09, 2,1 kWh le 31/08), et
+    // au-delà on entamerait le service d'eau chaude pour un gain incertain.
+    tankReserveMaxFrac: 0.15,
     invisibleSurplusMinW: 2000, // déclencheur de secours : surplus invisible estimé minimal
     // Voie saturation/réserve (Max AC zéro-export) : ballon 2900 W − budget de
     // drain batterie ~900 W = 2000 W de surplus mesuré ; SoC 65 % → une chauffe
@@ -196,6 +201,7 @@ export function normalizePilotConfig(raw: unknown): PilotConfig {
     solarStartsPerDay: asNum(o.solarStartsPerDay, d.solarStartsPerDay, 1, 10),
     apsMinW: asNum(o.apsMinW, d.apsMinW, 50, 900),
     rechargeBufferWh: asNum(o.rechargeBufferWh, d.rechargeBufferWh, 0, 5000),
+    tankReserveMaxFrac: asNum(o.tankReserveMaxFrac, d.tankReserveMaxFrac, 0, 0.5),
     minUsefulHeatMin: asNum(o.minUsefulHeatMin, d.minUsefulHeatMin, 10, 240),
     invisibleSurplusMinW: asNum(o.invisibleSurplusMinW, d.invisibleSurplusMinW, 300, 5000),
     surplusOnW: asNum(o.surplusOnW, d.surplusOnW, 500, 5000),

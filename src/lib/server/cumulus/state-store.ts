@@ -457,6 +457,7 @@ function normPilotView(v: unknown): PilotView | null {
     potTotalW: numOr(o.potTotalW, 0),
     pApsW: numOr(o.pApsW, 0),
     apsRecoverableW: numOr(o.apsRecoverableW, 0),
+    tankReserveWh: numOr(o.tankReserveWh, 0),
     rechargeMarginWh:
       typeof o.rechargeMarginWh === 'number' ? Math.round(o.rechargeMarginWh) : null,
     heatNeedWh: typeof o.heatNeedWh === 'number' ? Math.round(o.heatNeedWh) : null,

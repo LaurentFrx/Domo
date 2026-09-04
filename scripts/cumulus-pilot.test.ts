@@ -51,6 +51,7 @@ function cfg(o: Record<string, unknown> = {}, pilotO: Record<string, unknown> = 
       apsMinW: 300,
       minUsefulHeatMin: 45,
       rechargeBufferWh: 500,
+      tankReserveMaxFrac: 0.15,
       invisibleSurplusMinW: 2000,
       surplusOnW: 2000,
       maxAcSocOnPct: 65,
@@ -138,6 +139,7 @@ function inp(o: Partial<CumulusInputs> = {}): CumulusInputs {
     forecastAvailable: true,
     solNextDaylightKwh: 20,
     solTodayRestKwh: 20,
+    solTodayRestHourly: [],
     forecastD1Kwh: 18,
     forecastD2Kwh: 18,
     relayAvailable: true,
@@ -1052,4 +1054,103 @@ test('le soir, le critère ne crédite PAS le soleil de demain', () => {
     (r.energy.rechargeMarginWh ?? 0) <= 0,
     `marge = ${r.energy.rechargeMarginWh} Wh alors que la journée est finie`
   );
+});
+
+// ─── RÉSERVE DE PLACE POUR LE SURPLUS DE L'APRÈS-MIDI (04/09/2026) ──────────
+// Le défaut du 03/09 : ballon à 99,4 % dès 12h47, parc saturé à 14h56, et
+// 1,16 kWh parti chez EDF entre 15h et 18h faute du moindre puits. Le pilote
+// chauffait à fond dès qu'il pouvait, sans jamais garder de place pour un
+// surplus que la météo annonçait pourtant.
+
+/** Série horaire de PV prévu, à partir de l'heure donnée. */
+const pvHoraire = (depuis: number, watts: number[]) =>
+  watts.map((w, i) => ({ hour: depuis + i, w }));
+
+test('journée qui va saturer : le ballon garde de la place pour le surplus', () => {
+  // 5 heures à 2,5 kW devant, maison modeste, parc presque plein : le PV
+  // débordera largement. Le ballon ne doit pas se remplir jusqu'en haut.
+  const r = pilotStep(
+    inp({
+      gridPowerW: 0,
+      batterySocPct: [95, 95],
+      batteryEnergyWh: 11_950,
+      batteryCapacityWh: 12_576,
+      solTodayRestKwh: 12.5,
+      solTodayRestHourly: pvHoraire(14, [2500, 2500, 2500, 2500, 2500])
+    }),
+    cfg(),
+    st({}, { houseProfile: profilPlat(300) }),
+    ctx({ eAvailWh: 12_000, eFullWh: 16_000, hourLocal: 14, minuteOfDay: 840 })
+  );
+  const tank = r.view.conds.find((c) => c.key === 'tank');
+  assert.ok(r.view.tankReserveWh > 0, 'une réserve doit être calculée');
+  assert.ok(
+    r.view.tankReserveWh <= 0.15 * 16_000 + 1,
+    `la réserve reste bornée à 15 % (obtenu ${r.view.tankReserveWh})`
+  );
+  assert.match(tank?.detail ?? '', /gardés pour le surplus/);
+});
+
+test('journée sans surplus prévu : aucune réserve, le ballon se remplit normalement', () => {
+  // Parc très creux : tout le PV sera absorbé par les batteries, rien ne débordera.
+  const r = pilotStep(
+    inp({
+      gridPowerW: 0,
+      batterySocPct: [20, 20],
+      batteryEnergyWh: 2500,
+      batteryCapacityWh: 12_576,
+      solTodayRestKwh: 6,
+      solTodayRestHourly: pvHoraire(14, [1500, 1500, 1500, 1500])
+    }),
+    cfg(),
+    st({}, { houseProfile: profilPlat(300) }),
+    ctx({ eAvailWh: 12_000, eFullWh: 16_000, hourLocal: 14, minuteOfDay: 840 })
+  );
+  assert.equal(r.view.tankReserveWh, 0, 'rien ne débordera : rien à réserver');
+});
+
+test('le surplus est LÀ : la réserve tombe, on prend tout', () => {
+  // Don franc au compteur + journée encore rechargeable : à ce moment il faut
+  // remplir le ballon, pas économiser de la place pour plus tard.
+  const commun = {
+    batterySocPct: [100, 100],
+    batteryEnergyWh: 12_576,
+    batteryCapacityWh: 12_576,
+    solTodayRestKwh: 10,
+    solTodayRestHourly: pvHoraire(14, [2500, 2500, 2500, 2500])
+  };
+  const presquePlein = ctx({
+    eAvailWh: 15_400,
+    eFullWh: 16_000,
+    hourLocal: 14,
+    minuteOfDay: 840
+  });
+  const sansDon = pilotStep(
+    inp({ ...commun, gridPowerW: -50 }),
+    cfg(),
+    st({}, { houseProfile: profilPlat(300) }),
+    presquePlein
+  );
+  const avecDon = pilotStep(
+    inp({ ...commun, gridPowerW: -900 }),
+    cfg(),
+    st({}, { houseProfile: profilPlat(300) }),
+    presquePlein
+  );
+  assert.equal(sansDon.view.conds.find((c) => c.key === 'tank')?.ok, false);
+  assert.equal(
+    avecDon.view.conds.find((c) => c.key === 'tank')?.ok,
+    true,
+    'don franc : le plafond doit sauter'
+  );
+});
+
+test('prévision absente : aucune réserve, comportement d’avant', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: 0, forecastAvailable: false, solTodayRestHourly: [] }),
+    cfg(),
+    st({}, { houseProfile: profilPlat(300) }),
+    ctx({ eAvailWh: 12_000, eFullWh: 16_000 })
+  );
+  assert.equal(r.view.tankReserveWh, 0);
 });

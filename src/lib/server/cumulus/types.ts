@@ -83,6 +83,10 @@ export interface CumulusInputs {
   /** Énergie PV encore attendue AUJOURD'HUI (kWh) — 0 une fois la journée
    *  finie. C'est celle-là que lit le critère de rechargeabilité. */
   solTodayRestKwh: number;
+  /** La même, détaillée HEURE PAR HEURE. Permet de simuler le remplissage du
+   *  parc et de savoir à quelle heure il saturera — donc combien de surplus
+   *  débordera ensuite, et combien de place le ballon doit garder pour lui. */
+  solTodayRestHourly: { hour: number; w: number }[];
   /** Énergie PV prévue demain (J+1), journée complète (kWh). −1 si inconnue. */
   forecastD1Kwh: number;
   /** Énergie PV prévue après-demain (J+2), journée complète (kWh). −1 si inconnue. */
@@ -275,6 +279,10 @@ export interface PilotConfig {
   /** Marge (Wh) exigée en plus de l'énergie de chauffe pour que le parc puisse
    *  revenir à 100 % avant la nuit. */
   rechargeBufferWh: number;
+  /** Part maximale de la capacité du ballon qu'on accepte de laisser vide pour
+   *  absorber le surplus prévu de l'après-midi. Borne de SERVICE : l'eau chaude
+   *  prime sur le kWh récupéré, on ne sacrifie jamais plus que ça. */
+  tankReserveMaxFrac: number;
   minUsefulHeatMin: number; // jamais d'allumage s'il reste moins de X min de fenêtre devant soi
   invisibleSurplusMinW: number; // déclencheur de secours : surplus invisible estimé minimal (W)
   // ── Voie « saturation/réserve » (contexte Max AC zéro-export, 22/07/2026) ──
@@ -398,6 +406,9 @@ export interface PilotView {
   potTotalW: number; // potentiel solaire total estimé (W)
   pApsW: number; // production APS MESURÉE (bridée par l'anti-injection, cf. apsRecoverableW)
   apsRecoverableW: number; // ce que notre bridage retient à l'onduleur (W)
+  /** Place (Wh) volontairement laissée libre dans le ballon pour absorber le
+   *  surplus que la météo annonce une fois le parc saturé. 0 = rien à garder. */
+  tankReserveWh: number;
   /** Critère de rechargeabilité : PV prévu restant − maison prévue − place dans
    *  le parc (Wh). `null` = indécidable (météo, profil ou cloud muet). */
   rechargeMarginWh: number | null;
