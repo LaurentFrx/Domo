@@ -42,7 +42,6 @@ export interface MonthlyPayload {
   min_year?: number; // première année avec des données (borne du sélecteur)
   scale_max_kwh?: number; // plus gros mois de CONSO toutes années (échelle fixe du graphe)
   curve_pending?: boolean; // la courbe ½h de cette année n'est pas encore récupérée
-  curve_floor?: string; // 'YYYY-MM-DD' : avant ce jour, Enedis ne sert plus la courbe (24 mois)
 }
 
 function zeroMonth(): MonthAgg {
@@ -102,7 +101,6 @@ class EnergyMonthlyState {
   #minYear = $state<number>(new Date().getFullYear());
   #scaleMaxKwh = $state<number>(0);
   #curvePending = $state<boolean>(false);
-  #curveFloor = $state<string | null>(null);
 
   connected = $state(false);
   status = $state<'idle' | 'polling' | 'connected' | 'unconfigured' | 'error'>('idle');
@@ -129,11 +127,6 @@ class EnergyMonthlyState {
   /** La courbe ½h de l'année affichée est encore en cours de récupération. */
   get curvePending(): boolean {
     return this.#curvePending;
-  }
-  /** Premier jour encore couvert par la courbe ½h chez Enedis (24 mois glissants) ;
-   * null tant que l'API ne l'a pas dit. */
-  get curveFloor(): string | null {
-    return this.#curveFloor;
   }
 
   connect() {
@@ -180,24 +173,18 @@ class EnergyMonthlyState {
    * les KPI « Impact ce mois »). Échec/503 → 12 mois à zéro (le tableau affiche
    * « — »). La page met ce résultat en cache : une année passée ne bouge plus.
    */
-  async fetchYear(
-    year: number
-  ): Promise<{ months: MonthAgg[]; curvePending: boolean; curveFloor: string | null }> {
+  async fetchYear(year: number): Promise<{ months: MonthAgg[]; curvePending: boolean }> {
     try {
       const res = await fetch(`/api/energy/monthly?year=${year}`, {
         signal: AbortSignal.timeout(TIMEOUT_MS)
       });
-      if (!res.ok) return { months: emptyMonths(), curvePending: false, curveFloor: null };
+      if (!res.ok) return { months: emptyMonths(), curvePending: false };
       const p = (await res.json()) as Partial<MonthlyPayload>;
       // `curve_pending` est propre à l'ANNÉE demandée : le getter du store, lui,
       // ne parle que de l'année courante — d'où sa remontée ici.
-      return {
-        months: normMonths(p.months),
-        curvePending: p.curve_pending === true,
-        curveFloor: typeof p.curve_floor === 'string' ? p.curve_floor : null
-      };
+      return { months: normMonths(p.months), curvePending: p.curve_pending === true };
     } catch {
-      return { months: emptyMonths(), curvePending: false, curveFloor: null };
+      return { months: emptyMonths(), curvePending: false };
     }
   }
 
@@ -219,7 +206,6 @@ class EnergyMonthlyState {
       this.#minYear = typeof p.min_year === 'number' ? p.min_year : this.#year;
       this.#scaleMaxKwh = num(p.scale_max_kwh);
       this.#curvePending = p.curve_pending === true;
-      this.#curveFloor = typeof p.curve_floor === 'string' ? p.curve_floor : null;
       this.connected = true;
       this.status = 'connected';
       this.lastError = null;

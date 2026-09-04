@@ -276,11 +276,7 @@
   let selectedYear = $state(curYear);
   let pastMonths = $state<MonthAgg[]>(zeros12());
   let pastCurvePending = $state(false);
-  let pastCurveFloor = $state<string | null>(null);
-  const pastYearsCache = new Map<
-    number,
-    { months: MonthAgg[]; curvePending: boolean; curveFloor: string | null }
-  >();
+  const pastYearsCache = new Map<number, { months: MonthAgg[]; curvePending: boolean }>();
   const isCurrentYear = $derived(selectedYear === curYear);
   const minSelectableYear = $derived(Math.min(energyMonthly.minYear, curYear));
 
@@ -291,7 +287,6 @@
     if (cached) {
       pastMonths = cached.months;
       pastCurvePending = cached.curvePending;
-      pastCurveFloor = cached.curveFloor;
       return;
     }
     energyMonthly.fetchYear(y).then((r) => {
@@ -300,7 +295,6 @@
         // garde-fou course (re-clic rapide sur le sélecteur)
         pastMonths = r.months;
         pastCurvePending = r.curvePending;
-        pastCurveFloor = r.curveFloor;
       }
     });
   });
@@ -541,7 +535,6 @@
           scaleMaxKwh={viewScale}
           pending={energyDrill.level === 'year' &&
             (isCurrentYear ? energyMonthly.curvePending : pastCurvePending)}
-          curveFloor={isCurrentYear ? energyMonthly.curveFloor : pastCurveFloor}
           onOpen={energyDrill.level === 'day' ? undefined : (k) => energyDrill.open(k)}
         />
         {#if energyDrill.level === 'month' && viewHasEstimatedSplit}

@@ -1,7 +1,7 @@
 /**
  * Le bilan de la page Énergie : les JOURS d'un mois (/api/energy/daily) et leur
  * ventilation Heures Creuses / Pleines, puis la vue ANNUELLE (/api/energy/monthly :
- * curve_pending, curve_floor).
+ * curve_pending).
  *   pnpm test:bilan
  *
  * Ce que ces tests protègent : un jour dont la courbe ½h Enedis n'est pas encore
@@ -156,7 +156,7 @@ async function fetchYear(year: number) {
     url: new URL(`http://domo/api/energy/monthly?year=${year}`)
   } as never);
   assert.equal(res.status, 200);
-  return (await res.json()) as { curve_pending: boolean; curve_floor: string };
+  return (await res.json()) as { curve_pending: boolean };
 }
 
 let dbSeq = 0;
@@ -172,14 +172,6 @@ function withCursor(cursor: string): string {
   d.close();
   return p;
 }
-
-test('curve_floor = aujourd’hui − 24 mois, exposé à l’UI', async () => {
-  process.env.RECORDER_DB_PATH = withCursor('2024-08-27');
-  const r = await fetchYear(2024);
-  assert.match(r.curve_floor, /^\d{4}-\d{2}-\d{2}$/);
-  const attendu = Date.now() - 730 * 86_400_000;
-  assert.ok(Math.abs(Date.parse(r.curve_floor) - attendu) < 2 * 86_400_000, r.curve_floor);
-});
 
 test('backfill arrêté au plancher des 24 mois → plus rien n’est « en cours »', async () => {
   process.env.RECORDER_DB_PATH = withCursor('2024-08-27');

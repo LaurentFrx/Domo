@@ -84,15 +84,12 @@ interface MonthlyPayload {
    * que le backfill y descend (il remonte le temps semaine par semaine, freiné
    * par le quota Enedis) : l'UI dit « en cours » plutôt que « pas de données ». */
   curve_pending: boolean;
-  /** Premier jour que la courbe ½h peut encore couvrir : Enedis ne la conserve
-   * que 24 mois (au-delà, HTTP 500 — constaté le 27/08/2026, le backfill s'y
-   * arrête). Toute date antérieure est DÉFINITIVEMENT sans mesure ; l'UI le dit
-   * tel quel au lieu d'un « pas de ventilation » qui ressemble à un oubli. */
-  curve_floor: string;
 }
 
 /** Miroir de ENEDIS_CURVE_MAX_AGE_DAYS (domo-recorder/record.py) : la limite
- * de rétention de la courbe de charge côté Enedis, 24 mois glissants. */
+ * de rétention de la courbe de charge côté Enedis, 24 mois glissants (au-delà,
+ * HTTP 500 — constaté le 27/08/2026, le backfill s'y arrête). Ne sert qu'à ne
+ * plus dire « en cours » d'une année que le backfill n'atteindra jamais. */
 const CURVE_MAX_AGE_DAYS = 730;
 
 function zeroMonth(): MonthAgg {
@@ -681,8 +678,7 @@ export const GET: RequestHandler = async ({ url }) => {
       months,
       min_year: minYear,
       scale_max_kwh: scaleMaxKwh,
-      curve_pending: curvePending,
-      curve_floor: curveFloor
+      curve_pending: curvePending
     };
     return json(payload);
   } catch (e) {

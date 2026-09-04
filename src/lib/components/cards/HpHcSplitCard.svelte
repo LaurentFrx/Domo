@@ -9,17 +9,15 @@
   // même hauteur que sa part bleue dans le graphe du dessus ; l'empilement
   // cyan/corail dit la répartition. Provenances distinguées : relevé compteur
   // facturé (tariffs.json) ou ventilation estimée — annoncée en clair. Les
-  // pistes sont TOUJOURS dessinées, même sans la moindre ventilation : une
-  // tranche antérieure aux 24 mois de courbe conservés par Enedis est un
-  // placeholder en pointillé, et quand rien n'est ventilé du tout, « Pas de
-  // relevé » s'écrit en grand au milieu des pistes (demandes Laurent 04/09) —
-  // jamais un paragraphe d'explication.
+  // pistes sont TOUJOURS dessinées, toutes identiques, même sans la moindre
+  // ventilation : « Pas de relevé » s'écrit alors en grand au milieu des pistes
+  // (arbitrages Laurent 04/09 : ni paragraphe d'explication, ni distinction
+  // entre mois hors des 24 mois de courbe Enedis et mois sans courbe publiée).
   let {
     data,
     periode,
     scaleMaxKwh = 0,
     pending = false,
-    curveFloor = null,
     onOpen
   }: {
     /** Les tranches du niveau courant : 12 mois, les jours d'un mois, ou 24 h. */
@@ -34,34 +32,9 @@
      * backfill remonte le temps) : on le dit, au lieu de laisser croire qu'elle
      * n'existera jamais. */
     pending?: boolean;
-    /** Premier jour que la courbe ½h peut encore couvrir chez Enedis (24 mois
-     * glissants, fourni par l'API) : au niveau année, on explique POURQUOI une
-     * année ancienne n'a pas de répartition, au lieu d'un « pas de ventilation »
-     * qui ressemble à un oubli. */
-    curveFloor?: string | null;
     /** Descendre d'un niveau (absent au dernier niveau). */
     onOpen?: (key: string) => void;
   } = $props();
-
-  // Tranche ENTIÈREMENT antérieure au plancher des 24 mois d'Enedis : la courbe
-  // n'existera jamais → piste en pointillé (placeholder), et non une piste
-  // « vide » qui laisserait croire à un relevé manquant. Un mois se compare par
-  // son dernier jour ('2024-08-31' < '2024-09-04' : août hors de portée,
-  // septembre inclus) ; un jour par sa date ; une heure (key null) jamais.
-  const isUnreachable = (m: Bucket) =>
-    !!curveFloor &&
-    !!m.key &&
-    (m.key.length === 7 ? `${m.key}-31` < curveFloor : m.key < curveFloor) &&
-    monthTotal(m) <= 0;
-  const floorLabel = $derived(
-    curveFloor
-      ? new Date(`${curveFloor}T12:00:00Z`).toLocaleDateString('fr-FR', {
-          day: 'numeric',
-          month: 'long',
-          year: 'numeric'
-        })
-      : ''
-  );
 
   const nf1 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
   const nf0 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
@@ -115,9 +88,7 @@
   {#if data.length > 0}
     <!-- Barres par mois : hauteur = part HC/HP, largeur = volume (cf. segH/colW).
          Toujours dessinées, même sans ventilation : une année ancienne garde ses
-         12 pistes — pointillé avant le plancher des 24 mois d'Enedis, vide après
-         (courbe jamais publiée ou relevé absent). Sans la moindre ventilation,
-         « Pas de relevé » se lit en grand par-dessus. -->
+         12 pistes vides, et « Pas de relevé » se lit en grand par-dessus. -->
     <div class="relative">
       <div
         class="bars"
@@ -129,7 +100,6 @@
         {#each data as m, i (i)}
           {@const tot = monthTotal(m)}
           {@const est = isEst(m)}
-          {@const gone = isUnreachable(m)}
           {@const canOpen = tot > 0 && !!m.key && !!onOpen}
           <svelte:element
             this={canOpen ? 'button' : 'div'}
@@ -149,12 +119,10 @@
                       ? ' · estimé (mesure maison)'
                       : ''
                 }`
-              : gone
-                ? `${m.label} — avant le ${floorLabel} : hors des 24 mois de courbe conservés par Enedis`
-                : `${m.label} — pas de relevé`}
+              : `${m.label} — pas de relevé`}
           >
             <span class="col-val">{tot >= (fine ? 0.05 : 0.5) ? fmtVal(tot) : ''}</span>
-            <div class="track" class:filled={tot > 0} class:unreachable={gone}>
+            <div class="track" class:filled={tot > 0}>
               <div class="seg seg-hp" style="height: {segH(m.import_hp_kwh)}px;"></div>
               <div class="seg seg-hc" style="height: {segH(m.import_hc_kwh)}px;"></div>
             </div>
@@ -262,13 +230,6 @@
   }
   .track.filled .seg:first-child {
     border-radius: 5px 5px 0 0;
-  }
-  /* Placeholder : tranche hors des 24 mois de courbe conservés par Enedis — la
-     mesure n'existera jamais, la piste le dit d'un pointillé (≠ piste pleine
-     « vide », qui attend un relevé ou n'en a pas eu). */
-  .track.unreachable {
-    background: transparent;
-    border: 1.5px dashed var(--color-border);
   }
   /* « Pas de relevé » : en grand, centré sur les pistes vides — le graphe reste
      en place (même alignement que le graphe Saisons au-dessus), le constat se
