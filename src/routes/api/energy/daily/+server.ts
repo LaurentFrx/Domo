@@ -6,9 +6,17 @@
  *    repli sur `savings_daily.import_wh` pour les jours qu'Enedis n'a pas encore
  *    publiés (J et J−1) ;
  *  · ventilation HC/HP = `enedis_daily.hc_kwh/hp_kwh` (courbe ½h ventilée à la
- *    minute par le recorder). Absente ⇒ on ne l'invente pas : 0 et l'UI le dit ;
+ *    minute par le recorder, source 'curve'). Pour les jours qui ne l'ont pas
+ *    encore — J et J−1 (Enedis publie le lendemain), ou une panne de la
+ *    passerelle — repli sur la FORME de la journée vue par l'EM-50 (ratio HC/HP
+ *    appliqué au total du jour), marqué 'enedis' ou 'local' exactement comme la
+ *    vue mensuelle : l'estimation s'affiche, annoncée comme telle, et la mesure
+ *    la remplace dès qu'elle arrive. Avant l'EM-50 (juin 2026), rien à estimer ;
  *  · autoconso et € = `savings_daily` (depuis juin 2026 seulement) ;
  *  · production et surplus = intégrale de `pv_samples` sur les bornes du jour.
+ *
+ * `has_curve` dit si TOUS les jours à import ont leur courbe : le client ne met
+ * en cache qu'un mois complet (sinon l'estimation survivrait à la mesure).
  *
  * Robustesse calquée sur /api/energy/monthly : readonly d'abord, gardes par
  * table, 503 + tableau vide plutôt qu'un crash, connexion toujours refermée.
@@ -19,6 +27,7 @@ import {
   emptyBucket,
   hasTable,
   integrateByEdges,
+  localHcShareByDay,
   openDb,
   parisDayStart,
   type Bucket
@@ -46,6 +55,8 @@ export const GET: RequestHandler = async ({ url }) => {
       return emptyBucket(String(i + 1), `${month}-${dd}`);
     });
     const byKey = new Map(days.map((d) => [d.key as string, d]));
+    // Jours dont le TOTAL vient du compteur Linky (→ repli marqué 'enedis').
+    const enedisDays = new Set<string>();
 
     // ── Import Linky + ventilation HC/HP (tout l'historique) ──
     if (hasTable(db, 'enedis_daily')) {
@@ -65,6 +76,7 @@ export const GET: RequestHandler = async ({ url }) => {
         if (!b || !Number.isFinite(r.kwh as number)) continue;
         b.import_kwh = Math.max(0, r.kwh as number);
         b.empty = false;
+        enedisDays.add(r.date);
         if (r.hc_kwh !== null && r.hp_kwh !== null) {
           b.import_hc_kwh = Math.max(0, r.hc_kwh);
           b.import_hp_kwh = Math.max(0, r.hp_kwh);
@@ -122,7 +134,30 @@ export const GET: RequestHandler = async ({ url }) => {
       }
     }
 
-    return json({ month, days });
+    // ── Ventilation de REPLI pour les jours sans courbe ──
+    // Même chaîne que la vue mensuelle (ratio EM-50 × total du jour), même
+    // marquage : 'enedis' quand le total est celui du compteur, 'local' quand tout
+    // est mesure maison. Sans ce repli, le mois en cours n'avait AUCUNE barre
+    // HC/HP dans le développement des jours tant que la courbe n'était pas là —
+    // alors que sa cellule du tableau annuel, elle, en avait une (estimée).
+    // Le scan pv_samples est borné aux seuls jours concernés (une poignée).
+    const need = days.filter((d) => d.import_kwh > 0 && d.import_split_source === null);
+    if (need.length > 0 && hasTable(db, 'pv_samples')) {
+      const share = localHcShareByDay(
+        db,
+        need.map((d) => d.key as string)
+      );
+      for (const d of need) {
+        const s = share.get(d.key as string);
+        if (s === undefined) continue; // rien à estimer (avant l'EM-50)
+        d.import_hc_kwh = d.import_kwh * s;
+        d.import_hp_kwh = d.import_kwh * (1 - s);
+        d.import_split_source = enedisDays.has(d.key as string) ? 'enedis' : 'local';
+      }
+    }
+    const hasCurve = days.every((d) => d.import_kwh <= 0 || d.import_split_source === 'curve');
+
+    return json({ month, days, has_curve: hasCurve });
   } catch (e) {
     console.error('[energy/daily] DB error:', e instanceof Error ? e.message : e);
     return json({ month, days: [], error: 'database_unavailable' }, { status: 503 });

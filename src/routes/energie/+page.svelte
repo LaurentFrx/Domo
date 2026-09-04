@@ -339,6 +339,15 @@
   const viewHighlight = $derived(
     energyDrill.level === 'year' && isCurrentYear ? currentMonthIdx : -1
   );
+  // Au niveau mois : des jours ventilés par estimation (sans courbe Enedis
+  // encore) sont-ils affichés ? → une ligne l'explique sous la carte HC/HP.
+  const viewHasEstimatedSplit = $derived(
+    viewBuckets.some(
+      (b) =>
+        (b.import_split_source === 'enedis' || b.import_split_source === 'local') &&
+        b.import_hc_kwh + b.import_hp_kwh > 0
+    )
+  );
   // Changer d'année remet la navigation à plat (le « 14 » d'août 2026 n'est pas
   // celui de 2024).
   $effect(() => {
@@ -528,6 +537,13 @@
             (isCurrentYear ? energyMonthly.curvePending : pastCurvePending)}
           onOpen={energyDrill.level === 'day' ? undefined : (k) => energyDrill.open(k)}
         />
+        {#if energyDrill.level === 'month' && viewHasEstimatedSplit}
+          <p class="text-[11px]" style="color: var(--color-muted-fg);">
+            Les derniers jours attendent la courbe du compteur Enedis (publiée le lendemain) : leur
+            répartition Creuses / Pleines est estimée d'après la mesure maison, la mesure prend le
+            relais dès qu'elle arrive.
+          </p>
+        {/if}
       {/if}
     </div>
   </section>

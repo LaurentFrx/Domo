@@ -40,6 +40,7 @@ import {
   parisDate,
   regimeAt
 } from '$lib/server/tariffs';
+import { bucketing, em50ImportByBucket } from '$lib/server/energy-buckets';
 import type { RequestHandler } from './$types';
 
 /** D'où vient la ventilation HC/HP d'un mois, du plus fiable au moins fiable :
@@ -169,28 +170,6 @@ function pvIntegrateRange(
 }
 
 /**
- * Taille de bucket d'intégration (s) alignée sur les frontières HC du régime, et
- * son décalage. But : qu'aucun bucket ne CHEVAUCHE une bascule HP/HC — sinon son
- * énergie serait classée en bloc du mauvais côté.
- *
- * Les fenêtres réelles (00:06 → 08:06) tombent à 6 min de l'heure ronde ; comme
- * les décalages Paris↔UTC sont des heures entières, un bucket de 30 min décalé
- * de 360 s cale EXACTEMENT sur les deux bascules, été comme hiver. Si les
- * fenêtres du régime ne partagent pas ce reste (config exotique), on rétrograde
- * à 60 s : toujours exact, juste plus de lignes à agréger.
- */
-function bucketing(t: Date): { sizeS: number; offsetS: number } {
-  const wins = regimeAt(t).hc_windows ?? [];
-  const bounds = wins.flat();
-  const rests = bounds.map((hhmm) => {
-    const [h, m] = hhmm.split(':').map(Number);
-    return ((h || 0) * 3600 + (m || 0) * 60) % 1800;
-  });
-  const same = rests.length > 0 && rests.every((r) => r === rests[0]);
-  return same ? { sizeS: 1800, offsetS: rests[0] } : { sizeS: 60, offsetS: 0 };
-}
-
-/**
  * Ventilation HC/HP de l'import réseau DÉRIVÉE de la mesure locale, par mois.
  *
  * Pourquoi : la ventilation ne venait QUE des relevés compteur mensuels saisis à
@@ -237,22 +216,9 @@ function localHcShare(db: Database.Database, year: number, wanted: number[]): Ma
   const yStart = Math.floor(Date.UTC(year, first, 1) / 1000) - 7200; // marge de bord Paris
   const yEnd = Math.floor(Date.UTC(year, last + 1, 1) / 1000) + 7200;
 
-  let rows: { bucket: number; wh: number }[];
-  try {
-    rows = db
-      .prepare(
-        'WITH d AS (' +
-          ' SELECT ts, ts - LAG(ts) OVER (ORDER BY ts) AS dt,' +
-          '  (MAX(0.0,em50_grid_w) + MAX(0.0,LAG(em50_grid_w) OVER (ORDER BY ts)))/2.0 AS avg_imp' +
-          '  FROM pv_samples WHERE em50_grid_w IS NOT NULL AND ts >= ? AND ts < ?' +
-          ') SELECT (ts - ?) / ? AS bucket,' +
-          ' COALESCE(SUM(CASE WHEN dt>0 AND dt<=600 THEN avg_imp*dt/3600.0 END),0) AS wh' +
-          ' FROM d GROUP BY bucket HAVING wh > 0'
-      )
-      .all(yStart, yEnd, offsetS, sizeS) as { bucket: number; wh: number }[];
-  } catch {
-    return out; // colonne em50_grid_w absente (base pré-EM-50)
-  }
+  // Intégration partagée avec le repli par JOUR de /api/energy/daily
+  // (energy-buckets.ts) : une seule définition de la forme EM-50.
+  const rows = em50ImportByBucket(db, yStart, yEnd, sizeS, offsetS);
 
   // Accumulation par mois PARIS (le bord de mois UTC diffère de 1-2 h) × tranche.
   const hc = new Array<number>(12).fill(0);

@@ -125,7 +125,9 @@ class EnergyDrillState {
   hasPv = $state(true);
   /** Niveau jour : la courbe ½h de ce jour a-t-elle déjà été récupérée ?
    * (le backfill remonte le temps sur plusieurs heures — avant son passage,
-   * une journée ancienne est vide sans que rien ne soit cassé). */
+   * une journée ancienne est vide sans que rien ne soit cassé).
+   * Niveau mois : TOUS les jours à import ont-ils leur courbe ? Sinon les
+   * derniers sont ventilés par estimation (source 'enedis'/'local'). */
   hasCurve = $state(true);
 
   #cache = new Map<string, Bucket[]>();
@@ -199,13 +201,15 @@ class EnergyDrillState {
       const raw = (isDay ? p.hours : p.days) ?? [];
       const list = raw.map((b, i) => normBucket(b, String(i + 1)));
       // Un jour du passé ne bouge plus ; le jour courant et le mois courant, si —
-      // on ne met en cache que ce qui est figé.
+      // on ne met en cache que ce qui est figé. Un mois passé dont les derniers
+      // jours attendent encore leur courbe n'est pas figé non plus : sa
+      // ventilation estimée doit céder la place à la mesure sans recharger.
       const today = new Date().toISOString().slice(0, 10);
-      const complete = !isDay || p.has_curve !== false;
+      const complete = p.has_curve !== false;
       if (complete && key < today.slice(0, key.length)) this.#cache.set(key, list);
       this.buckets = list;
       this.hasPv = isDay ? p.has_pv !== false : true;
-      this.hasCurve = isDay ? p.has_curve !== false : true;
+      this.hasCurve = p.has_curve !== false;
     } catch (e) {
       if (seq !== this.#seq) return;
       this.buckets = [];
