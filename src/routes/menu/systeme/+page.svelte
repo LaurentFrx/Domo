@@ -137,7 +137,7 @@
     </div>
     <div class="ios-cell">
       <span class="ios-cell-label">Serveur</span>
-      <span class="ios-cell-value">tazieff-dev</span>
+      <span class="ios-cell-value">feroux-vps</span>
     </div>
     <div class="ios-cell">
       <span class="ios-cell-label">Adresse</span>
