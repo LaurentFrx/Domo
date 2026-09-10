@@ -45,18 +45,24 @@
   // ils redeviennent la navigation — sans eux, Climat et Pièces ne seraient
   // plus atteignables que par la recherche. La recherche, elle, les trouve
   // toujours.
+  // Synonyme de recherche : sur un poste de travail l'accueil s'appelle « tableau
+  // de bord » (c'est ce qu'il montre), et personne ne tape « accueil » pour le
+  // trouver. Le nom de l'app, en haut, y mène aussi.
+  const SYNONYMES: Record<string, string> = { '/': 'tableau de bord' };
   const navHits = $derived(
     filtering
-      ? navItems.filter((n) => normalize(n.label).includes(normalize(query.trim())))
+      ? navItems
+          // Sur un poste de travail, « Bibliothèque musicale » EST /musique :
+          // le lister deux fois pour la même page n'aide personne.
+          .filter((n) => !(desk.is && n.href === '/musique'))
+          .filter((n) =>
+            normalize(`${n.label} ${SYNONYMES[n.href] ?? ''}`).includes(normalize(query.trim()))
+          )
       : desk.is
         ? []
         : navItems
   );
-  // Le tableau de bord de bureau n'est PAS un onglet (il n'existe que sur grand
-  // écran) : il vit ici, en tête du pilotage, et répond à la recherche.
-  const bureauHit = $derived(
-    !filtering || normalize('tableau de bord accueil').includes(normalize(query.trim()))
-  );
+
   // La colonne « Ambiance » du tableau de bord ne porte que la lecture : la
   // bibliothèque (albums, artistes, recherche, playlists) reste une page, donc
   // une destination de la barre. Icône reprise du registre de navigation.
@@ -66,9 +72,7 @@
   const musiqueHit = $derived(
     !filtering || normalize('musique bibliotheque').includes(normalize(query.trim()))
   );
-  const noHit = $derived(
-    filtering && groups.length === 0 && navHits.length === 0 && !bureauHit && !musiqueHit
-  );
+  const noHit = $derived(filtering && groups.length === 0 && navHits.length === 0 && !musiqueHit);
   function normalize(s: string): string {
     return s
       .toLowerCase()
@@ -100,20 +104,25 @@
   class="sb safe-top fixed top-0 left-0 z-40 hidden h-screen w-[72px] flex-col sm:flex"
   aria-label="Navigation principale"
 >
-  <!-- Branding -->
-  <div
-    class="desk:justify-start desk:gap-2.5 desk:px-3.5 flex h-14 items-center justify-center px-5"
+  <!-- Branding — et chemin du retour. Sur un poste de travail, l'accueil EST le
+       tableau de bord : une entrée « Tableau de bord » dans la liste ferait
+       doublon avec le nom de l'app, que tout le monde clique déjà par réflexe. -->
+  <a
+    href="/"
+    class="sb-brand desk:justify-start desk:gap-2.5 desk:px-3.5 flex h-14 items-center justify-center px-5"
+    aria-current={page.url.pathname === '/' ? 'page' : undefined}
+    title={desk.is ? 'Tableau de bord' : 'Accueil'}
   >
     <img
       src="/icons/apple-touch-icon.png"
-      alt="Domo"
+      alt=""
       width="28"
       height="28"
       class="h-7 w-7 rounded-lg"
       style="object-fit: cover;"
     />
     <span class="desk:inline hidden text-[14px] font-semibold tracking-tight"> Domo </span>
-  </div>
+  </a>
 
   <!-- ═══ RAIL (iPad) : pilotage + tiroir ☰ ═══════════════════════════════ -->
   <nav class="desk:hidden flex flex-1 flex-col gap-4 px-2 pt-3 pb-4">
@@ -207,36 +216,8 @@
     </div>
 
     <nav class="sb-list" aria-label="Pages et réglages">
-      {#if bureauHit && desk.is}
-        <span class="sb-sec">Pilotage</span>
-        {@const active = page.url.pathname === '/'}
-        <a
-          href="/"
-          class="sb-item"
-          class:sb-item-active={active}
-          aria-current={active ? 'page' : undefined}
-        >
-          <span class="sb-ico" style="background: var(--ios-blue);">
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <path
-                d="M3 3 H10 V10 H3 Z M14 3 H21 V10 H14 Z M3 14 H10 V21 H3 Z M14 14 H21 V21 H14 Z"
-              />
-            </svg>
-          </span>
-          <span class="sb-label">Tableau de bord</span>
-        </a>
-      {/if}
       {#if musiqueHit && desk.is}
+        <span class="sb-sec">Ouvrir</span>
         {@const active = isActive(page.url.pathname, '/musique')}
         <a
           href="/musique"
@@ -293,7 +274,9 @@
       {/if}
 
       {#each groups as group, gi (group.header ?? `g${gi}`)}
-        <span class="sb-sec">{group.header ?? 'Ouvrir'}</span>
+        {#if group.header || !(gi === 0 && musiqueHit && desk.is)}
+          <span class="sb-sec">{group.header ?? 'Ouvrir'}</span>
+        {/if}
         {#each group.items as item (item.href)}
           {@const active = itemActive(item)}
           <a
@@ -414,6 +397,19 @@
   }
 
   /* ─── Bureau ──────────────────────────────────────────────────────────── */
+  .sb-brand {
+    color: inherit;
+    text-decoration: none;
+    transition: background-color var(--duration-fast) var(--ease-default);
+  }
+  .sb-brand:hover {
+    background: oklch(1 0 0 / 0.06);
+  }
+  .sb-brand:focus-visible {
+    outline: 2px solid var(--color-sidebar-active-border);
+    outline-offset: -2px;
+  }
+
   .sb-search {
     display: flex;
     align-items: center;
