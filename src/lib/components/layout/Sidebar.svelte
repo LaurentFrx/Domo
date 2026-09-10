@@ -4,7 +4,6 @@
   import {
     MENU_ICON,
     isMenuDestination,
-    isMenuPath,
     menuGroups,
     filterGroups,
     type MenuGroup,
@@ -333,30 +332,6 @@
       {#if noHit}
         <p class="sb-empty">Aucun résultat pour « {query} »</p>
       {/if}
-
-      <!-- L'index du menu reste atteignable : il porte la recherche plein écran
-           et les notes de bas de groupe que la barre ne montre pas. -->
-      <a
-        href="/menu"
-        class="sb-item sb-item-quiet"
-        class:sb-item-active={isMenuPath(page.url.pathname) && page.url.pathname === '/menu'}
-      >
-        <span class="sb-ico sb-ico-quiet">
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            aria-hidden="true"
-          >
-            <path d={MENU_ICON} />
-          </svg>
-        </span>
-        <span class="sb-label">Tout le menu</span>
-      </a>
     </nav>
   </div>
 
@@ -525,21 +500,11 @@
   .sb-item-active .sb-ico {
     background: oklch(1 0 0 / 0.22) !important;
   }
-  .sb-ico-quiet {
-    background: var(--color-sidebar-accent);
-    color: var(--color-sidebar-muted);
-  }
   .sb-label {
     flex: 1 1 auto;
     min-width: 0;
     font-size: 13.5px;
     line-height: 1.25;
-  }
-  .sb-item-quiet .sb-label {
-    color: var(--color-sidebar-muted);
-  }
-  .sb-item-quiet:hover .sb-label {
-    color: var(--color-sidebar-fg);
   }
   .sb-badge {
     flex: 0 0 auto;
