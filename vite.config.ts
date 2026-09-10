@@ -18,7 +18,12 @@ export default defineConfig({
         theme_color: '#07001F',
         background_color: '#07001F',
         display: 'standalone',
-        orientation: 'portrait',
+        // PAS d'`orientation` (10/09/2026). Déclarer 'portrait' faisait ouvrir
+        // la fenêtre d'app de Chrome sur le BUREAU au format portrait — moins de
+        // 1 280 px de large, donc sous le seuil `desk:` : l'app installée
+        // rendait l'écran d'énergie et son rail d'icônes au lieu du tableau de
+        // bord. iOS ignore ce champ (l'app suit la rotation de l'appareil) : il
+        // ne servait donc qu'à casser le poste de travail.
         scope: '/',
         start_url: '/',
         lang: 'fr',

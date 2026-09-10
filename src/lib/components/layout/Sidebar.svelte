@@ -12,6 +12,7 @@
   } from './menu-items';
   import { menuSheet, openMenu } from './menu-state.svelte';
   import { health } from '$stores/health.svelte';
+  import { desk } from '$stores/desk.svelte';
 
   interface Section {
     title?: string;
@@ -39,12 +40,18 @@
   }
   const filtering = $derived(query.trim().length > 0);
   const groups = $derived(visibles(filtering ? filterGroups(query) : menuGroups));
-  // Les quatre onglets ne sont PAS listés ici : sur un poste de travail, leurs
-  // contenus sont les quatre colonnes de l'accueil (cf. DeskDashboard). Ils
-  // restent la navigation du rail, ci-dessus, et leurs adresses répondent
-  // toujours — la recherche les y emmène.
+  // Les quatre onglets ne sont listés que si l'accueil N'EST PAS le tableau de
+  // bord : là, leurs contenus sont les quatre colonnes (cf. DeskDashboard) et
+  // les répéter n'aurait aucun sens. Dans une fenêtre plus étroite en revanche,
+  // ils redeviennent la navigation — sans eux, Climat et Pièces ne seraient
+  // plus atteignables que par la recherche. La recherche, elle, les trouve
+  // toujours.
   const navHits = $derived(
-    filtering ? navItems.filter((n) => normalize(n.label).includes(normalize(query.trim()))) : []
+    filtering
+      ? navItems.filter((n) => normalize(n.label).includes(normalize(query.trim())))
+      : desk.is
+        ? []
+        : navItems
   );
   // Le tableau de bord de bureau n'est PAS un onglet (il n'existe que sur grand
   // écran) : il vit ici, en tête du pilotage, et répond à la recherche.
@@ -55,6 +62,8 @@
   // bibliothèque (albums, artistes, recherche, playlists) reste une page, donc
   // une destination de la barre. Icône reprise du registre de navigation.
   const MUSIQUE_ICON = navItems.find((n) => n.href === '/musique')?.icon ?? '';
+  // Doublon à éviter : hors tableau de bord, l'onglet « Musique » ci-dessous est
+  // déjà la bibliothèque — cette entrée n'existe que pour la remplacer.
   const musiqueHit = $derived(
     !filtering || normalize('musique bibliotheque').includes(normalize(query.trim()))
   );
@@ -199,7 +208,7 @@
     </div>
 
     <nav class="sb-list" aria-label="Pages et réglages">
-      {#if bureauHit}
+      {#if bureauHit && desk.is}
         <span class="sb-sec">Pilotage</span>
         {@const active = page.url.pathname === '/'}
         <a
@@ -228,7 +237,7 @@
           <span class="sb-label">Tableau de bord</span>
         </a>
       {/if}
-      {#if musiqueHit}
+      {#if musiqueHit && desk.is}
         {@const active = isActive(page.url.pathname, '/musique')}
         <a
           href="/musique"
@@ -255,7 +264,7 @@
         </a>
       {/if}
       {#if navHits.length > 0}
-        <span class="sb-sec">Écrans</span>
+        <span class="sb-sec">{desk.is ? 'Écrans' : 'Pilotage'}</span>
         {#each navHits as item (item.href)}
           {@const active = isActive(page.url.pathname, item.href)}
           <a

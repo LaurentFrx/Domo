@@ -84,8 +84,11 @@
     align-items: start;
     padding: 8px 0 12px;
   }
-  /* Portable / iPad paysage : deux colonnes. */
-  @media (min-width: 1500px) {
+  /* Fenêtre de bureau étroite : deux colonnes. Seuil MESURÉ et non arrondi —
+     la colonne « Pièces » ne descend pas sous 527 px (sept volets à 73 px plus
+     les marges de la carte), soit 1 400 px de fenêtre une fois la barre
+     latérale (240) et les marges (64) déduites. */
+  @media (min-width: 1400px) {
     .bureau {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
