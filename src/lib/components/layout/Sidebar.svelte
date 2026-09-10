@@ -39,19 +39,28 @@
   }
   const filtering = $derived(query.trim().length > 0);
   const groups = $derived(visibles(filtering ? filterGroups(query) : menuGroups));
-  // La recherche couvre AUSSI les pages de pilotage : « climat » doit trouver
-  // l'onglet Climat, pas seulement la rubrique Chauffage.
+  // Les quatre onglets ne sont PAS listés ici : sur un poste de travail, leurs
+  // contenus sont les quatre colonnes de l'accueil (cf. DeskDashboard). Ils
+  // restent la navigation du rail, ci-dessus, et leurs adresses répondent
+  // toujours — la recherche les y emmène.
   const navHits = $derived(
-    filtering
-      ? navItems.filter((n) => normalize(n.label).includes(normalize(query.trim())))
-      : navItems
+    filtering ? navItems.filter((n) => normalize(n.label).includes(normalize(query.trim()))) : []
   );
   // Le tableau de bord de bureau n'est PAS un onglet (il n'existe que sur grand
   // écran) : il vit ici, en tête du pilotage, et répond à la recherche.
   const bureauHit = $derived(
-    !filtering || normalize('tableau de bord').includes(normalize(query.trim()))
+    !filtering || normalize('tableau de bord accueil').includes(normalize(query.trim()))
   );
-  const noHit = $derived(filtering && groups.length === 0 && navHits.length === 0 && !bureauHit);
+  // La colonne « Ambiance » du tableau de bord ne porte que la lecture : la
+  // bibliothèque (albums, artistes, recherche, playlists) reste une page, donc
+  // une destination de la barre. Icône reprise du registre de navigation.
+  const MUSIQUE_ICON = navItems.find((n) => n.href === '/musique')?.icon ?? '';
+  const musiqueHit = $derived(
+    !filtering || normalize('musique bibliotheque').includes(normalize(query.trim()))
+  );
+  const noHit = $derived(
+    filtering && groups.length === 0 && navHits.length === 0 && !bureauHit && !musiqueHit
+  );
   function normalize(s: string): string {
     return s
       .toLowerCase()
@@ -190,13 +199,11 @@
     </div>
 
     <nav class="sb-list" aria-label="Pages et réglages">
-      {#if navHits.length > 0 || bureauHit}
-        <span class="sb-sec">Pilotage</span>
-      {/if}
       {#if bureauHit}
-        {@const active = page.url.pathname === '/bureau'}
+        <span class="sb-sec">Pilotage</span>
+        {@const active = page.url.pathname === '/'}
         <a
-          href="/bureau"
+          href="/"
           class="sb-item"
           class:sb-item-active={active}
           aria-current={active ? 'page' : undefined}
@@ -221,7 +228,34 @@
           <span class="sb-label">Tableau de bord</span>
         </a>
       {/if}
+      {#if musiqueHit}
+        {@const active = isActive(page.url.pathname, '/musique')}
+        <a
+          href="/musique"
+          class="sb-item"
+          class:sb-item-active={active}
+          aria-current={active ? 'page' : undefined}
+        >
+          <span class="sb-ico" style="background: var(--ios-pink);">
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d={MUSIQUE_ICON} />
+            </svg>
+          </span>
+          <span class="sb-label">Bibliothèque musicale</span>
+        </a>
+      {/if}
       {#if navHits.length > 0}
+        <span class="sb-sec">Écrans</span>
         {#each navHits as item (item.href)}
           {@const active = isActive(page.url.pathname, item.href)}
           <a

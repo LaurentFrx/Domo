@@ -28,6 +28,7 @@
   import { settings } from '$stores/settings.svelte';
   import { health } from '$stores/health.svelte';
   import { clock } from '$stores/clock.svelte';
+  import { desk } from '$stores/desk.svelte';
   import { haptic } from '$utils/haptic';
   import { PORTAL_TARGET_ID } from '$utils/portal';
   import { setupServiceWorker } from '$lib/sw-client';
@@ -48,7 +49,8 @@
   // (menu, planning, labo) ont leur propre registre ; sinon on suit le pager.
   // Le tableau de bord de bureau occupe la DALLE, pas la colonne de lecture de
   // 1 280 px : c'est tout son objet — quatre panneaux côte à côte sur un 27".
-  const pleineLargeur = $derived(page.url.pathname === '/bureau');
+  // C'est l'ACCUEIL sur un poste de travail (cf. src/routes/+page.svelte).
+  const pleineLargeur = $derived(desk.is && page.url.pathname === '/');
 
   const offNavTitle = $derived(pageTitleFor(page.url.pathname));
   const docTitle = $derived(
@@ -322,7 +324,11 @@
     <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
       <HealthBanner />
     </div>
-    {#if pagerReady && onNavItem}
+    {#if pagerReady && onNavItem && !desk.is}
+      <!-- Pas de pager à la souris : le balayage à deux doigts est un geste
+           tactile, et sur un poste de travail l'accueil porte DÉJÀ les quatre
+           écrans — les monter une seconde fois dans le rail du pager doublerait
+           tout le tableau de bord. -->
       <Pager />
     {:else}
       <!-- SSR/1er paint + espace du menu (/menu/…) : rendu par le routeur -->

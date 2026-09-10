@@ -104,7 +104,8 @@ Toutes les cartes = **verre transparent à bords arrondis, éclairé par une sou
   L'iPad garde donc le **rail de 72 px** dans les deux orientations, quelle que soit sa
   largeur — un iPad Pro 12,9" en paysage fait 1366 px, autant qu'un laptop : seul
   `pointer: coarse` les distingue.
-- **Tableau de bord de bureau (`/bureau`)** — les quatre écrans de pilotage côte à côte, sans
+- **Tableau de bord de bureau** — c'est **l'accueil** (`/`) sur un poste de travail, pas une
+  adresse à part : les quatre écrans de pilotage côte à côte, sans
   défilement, sur un 27" 2K. Les panneaux sont les MÊMES composants que `/`, `/climat` et
   `/pieces`, montés avec `layout="column"` : leurs grilles internes lisent la largeur du
   **viewport** (`pad:`), jamais celle de la colonne — sans cette prop elles se déplieraient
@@ -113,6 +114,13 @@ Toutes les cartes = **verre transparent à bords arrondis, éclairé par une sou
   Sankey est carré et commande sa colonne, les sept volets ont besoin de 73 px chacun.
   La page lève le `max-w-screen-xl` du layout (c'est tout son objet) et masque le
   mini-player, que la carte de lecture de la colonne « Ambiance » remplace.
+  Le choix se fait au MONTAGE (store `desk`, même définition que le variant `desk:`) et
+  non en CSS : monter les deux pour en masquer un ferait tourner le polling de Climat,
+  Pièces et Musique sur un iPhone. Corollaire : **pas de pager à la souris** — le balayage
+  à deux doigts est un geste tactile, et le rail monterait une seconde fois les écrans que
+  l'accueil porte déjà. La barre latérale de bureau ne liste donc plus les quatre onglets
+  (ils SONT les colonnes), mais garde la bibliothèque musicale, que le tableau de bord ne
+  porte pas — il n'en a que la lecture.
 - **Zéro demi-ligne vide en paysage.** Trois sections successives qui ne portent qu'une
   carte chacune, ce sont trois lignes à moitié vides. Les regrouper en **une grille
   commune** : wrapper `contents pad:grid pad:grid-cols-2`, puis `pad:contents` sur les

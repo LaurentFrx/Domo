@@ -2,10 +2,10 @@
   /**
    * Tableau de bord de BUREAU — les quatre écrans de pilotage sur un seul.
    *
-   * Pourquoi une route à part : sur un 27" 2K, l'app n'occupe que 1 280 px de
-   * large (max-w-screen-xl) et l'accueil s'arrête à mi-hauteur — 1 000 px de
-   * dalle perdus à droite, et quatre onglets à visiter pour voir la maison.
-   * Ici les quatre panneaux tiennent côte à côte, sans défilement, à 2 560 px.
+   * C'est CE QU'EST L'ACCUEIL sur un poste de travail (cf. src/routes/+page.svelte) :
+   * pas une page à aller chercher. Sur un 27" 2K, l'app n'occupait que 1 280 px
+   * de large et l'accueil s'arrêtait à mi-hauteur — mille pixels de dalle perdus
+   * à droite, et quatre onglets à visiter pour voir la maison.
    *
    * Aucun contenu n'est réécrit : ce sont les MÊMES composants que /, /climat et
    * /pieces, montés avec `layout="column"` (leurs grilles internes se déplient
@@ -42,8 +42,6 @@
     }
   ] as const;
 </script>
-
-<svelte:head><title>Tableau de bord · Domo</title></svelte:head>
 
 <div class="bureau">
   {#each COLS as col (col.key)}
