@@ -125,6 +125,13 @@
   --color-sidebar-active: oklch(0.541 0.281 293 / 0.2);
   --color-sidebar-active-border: oklch(0.541 0.281 293);
   --color-sidebar-hover: oklch(0.245 0.045 286);
+  /* Barre latérale de BUREAU (desk:) : même indigo, en verre — le halo
+     d'ambiance passe au travers (façon macOS). Plus opaque en clair, où le fond
+     de page est lumineux et mangerait le contraste du texte blanc. */
+  --color-sidebar-glass: oklch(0.185 0.04 286 / 0.9);
+  /* Largeur de la barre de bureau — UNE source : l'aside, le décalage du
+     contenu (+layout) et le mini-player s'y accrochent. */
+  --sidebar-desk-w: 240px;
 
   /* ─── Top bar ─── */
   --color-topbar: oklch(1 0.002 286);
@@ -217,6 +224,9 @@
 
   --color-topbar: oklch(0.195 0.036 286);
   --color-topbar-border: oklch(0.31 0.038 286);
+  /* Verre de la barre de bureau : plus transparent en sombre, le fond y est
+     déjà profond et le halo doit se voir. */
+  --color-sidebar-glass: oklch(0.235 0.045 286 / 0.72);
 
   --color-solar: oklch(0.828 0.16 84.4);
   --color-solar-muted: oklch(0.828 0.16 84.4 / 0.12);

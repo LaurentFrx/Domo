@@ -46,6 +46,10 @@
   // Titre d'onglet : une SEULE source (plusieurs pages sont montées à la fois sous
   // le pager, un <title> par page se télescoperait). Les pages hors navigation
   // (menu, planning, labo) ont leur propre registre ; sinon on suit le pager.
+  // Le tableau de bord de bureau occupe la DALLE, pas la colonne de lecture de
+  // 1 280 px : c'est tout son objet — quatre panneaux côte à côte sur un 27".
+  const pleineLargeur = $derived(page.url.pathname === '/bureau');
+
   const offNavTitle = $derived(pageTitleFor(page.url.pathname));
   const docTitle = $derived(
     offNavTitle
@@ -311,7 +315,7 @@
   <main
     id="main"
     tabindex="-1"
-    class="safe-top desk:pl-[280px] min-h-screen sm:pl-[72px]"
+    class="safe-top desk:pl-[var(--sidebar-desk-w)] min-h-screen sm:pl-[72px]"
     class:has-mini={!!player.current}
     style="padding-bottom: calc(60px + env(safe-area-inset-bottom) + var(--mini-h, 0px));"
   >
@@ -322,7 +326,7 @@
       <Pager />
     {:else}
       <!-- SSR/1er paint + espace du menu (/menu/…) : rendu par le routeur -->
-      <div class="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
+      <div class="mx-auto w-full px-4 sm:px-6 lg:px-8" class:max-w-screen-xl={!pleineLargeur}>
         {@render children()}
       </div>
     {/if}
@@ -337,7 +341,9 @@
   <!-- Mini-player musique GLOBAL (+ feuille Now Playing) : n'apparaît que si une
        file de lecture existe. L'audio vit dans le store `player` (module-level),
        la musique survit donc aux navigations et aux swipes du pager. -->
-  <MiniPlayer />
+  {#if !pleineLargeur}
+    <MiniPlayer />
+  {/if}
 
   <!-- Pop-up global « historique de température 4 h » (piloté par openTempHistory) -->
   <TempHistorySheet />

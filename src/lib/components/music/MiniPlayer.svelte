@@ -272,7 +272,7 @@
      app.css) — l'iPad, tactile, garde le rail quelle que soit sa largeur. */
   @media (min-width: 1280px) and (pointer: fine) {
     .mini {
-      left: calc(280px + 20px);
+      left: calc(var(--sidebar-desk-w) + 20px);
     }
   }
 

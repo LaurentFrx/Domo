@@ -25,7 +25,11 @@ Inspiration : [Yeldra](https://www.yeldra.com/) — profondeur premium, violet �
 - **Sombre** : `--color-bg oklch(0.205 …)` — **jamais quasi-noir** ; l'élévation se lit par des **surfaces plus claires**, pas par l'obscurité.
 - **Clair** : fond de page = **dégradé vert→bleu** (cf. §5) ; cartes **neutres**, quasi opaques.
 - **Règle d'or couleur** : jamais de **noir pur ni blanc pur** ; garder une teinte (hue ~286 indigo) et un chroma audible.
-- **Sidebar = indigo immuable** (ne change pas avec le thème).
+- **Sidebar = indigo immuable** (ne change pas avec le thème). Sur `desk:` seulement, ce même
+  indigo passe en **verre** (`--color-sidebar-glass` + `blur(30) saturate(180)`) : le halo
+  d'ambiance transparaît, façon barre latérale macOS. Teinte inchangée, opacité seule
+  (0,9 en clair où le fond est lumineux, 0,72 en sombre) ; `prefers-reduced-transparency`
+  retombe sur l'indigo plein.
 
 ## 3. Glassmorphism « plexiglass » (cœur du design)
 
@@ -79,7 +83,7 @@ Toutes les cartes = **verre transparent à bords arrondis, éclairé par une sou
 ## 6. Responsive — iPhone-first, avec un variant dédié à l'iPad (`pad:`)
 
 - Mobile : colonne unique + TabBar.
-- `sm` : rail sidebar 72 px ; `lg` (≥1024 px) : sidebar 280 px.
+- `sm` : rail sidebar 72 px ; `desk:` : barre de **240 px** (`--sidebar-desk-w`, jeton unique — l'aside, le décalage du contenu et le mini-player s'y accrochent).
 - **`pad:` = l'iPad, dans les DEUX orientations, jamais un iPhone.** Défini dans `src/app.css` :
   `@custom-variant pad (@media (min-width: 768px) and (min-height: 600px))`.
   Pourquoi la hauteur : un iPhone **couché** fait 852–932 px de large — `sm:` et `md:` s'y
@@ -100,6 +104,15 @@ Toutes les cartes = **verre transparent à bords arrondis, éclairé par une sou
   L'iPad garde donc le **rail de 72 px** dans les deux orientations, quelle que soit sa
   largeur — un iPad Pro 12,9" en paysage fait 1366 px, autant qu'un laptop : seul
   `pointer: coarse` les distingue.
+- **Tableau de bord de bureau (`/bureau`)** — les quatre écrans de pilotage côte à côte, sans
+  défilement, sur un 27" 2K. Les panneaux sont les MÊMES composants que `/`, `/climat` et
+  `/pieces`, montés avec `layout="column"` : leurs grilles internes lisent la largeur du
+  **viewport** (`pad:`), jamais celle de la colonne — sans cette prop elles se déplieraient
+  à l'horizontale dans 600 px. Largeurs **taillées sur le contenu** et non à parts égales
+  (`590fr 615fr 565fr 434fr` ≥ 2200 px, 2 colonnes ≥ 1500 px, 1 colonne en dessous) : le
+  Sankey est carré et commande sa colonne, les sept volets ont besoin de 73 px chacun.
+  La page lève le `max-w-screen-xl` du layout (c'est tout son objet) et masque le
+  mini-player, que la carte de lecture de la colonne « Ambiance » remplace.
 - **Zéro demi-ligne vide en paysage.** Trois sections successives qui ne portent qu'une
   carte chacune, ce sont trois lignes à moitié vides. Les regrouper en **une grille
   commune** : wrapper `contents pad:grid pad:grid-cols-2`, puis `pad:contents` sur les
