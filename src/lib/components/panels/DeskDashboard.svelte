@@ -93,6 +93,16 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
+  /* Portable 2K mis à l'échelle 150 % : le navigateur n'y voit que 1 706 px, et
+     quatre colonnes de 340 px ne seraient plus lisibles. Trois, oui — « Ambiance »
+     passe alors sous « Énergie », la plus courte des trois (mesuré : 1 100 px
+     contre 1 332 pour Climat et 1 201 pour Pièces), ce qui équilibre au mieux
+     des panneaux insécables. */
+  @media (min-width: 1600px) {
+    .bureau {
+      grid-template-columns: minmax(0, 590fr) minmax(0, 615fr) minmax(0, 565fr);
+    }
+  }
   /* Écran de bureau : les quatre colonnes, largeurs proportionnelles au contenu
      (Sankey carré ‖ climat ‖ volets à sept curseurs ‖ ambiance).
      Seuil à 1 900 px et non 2 200 : un portable 2K mis à l'échelle Windows à
