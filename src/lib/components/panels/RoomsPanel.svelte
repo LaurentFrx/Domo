@@ -429,8 +429,20 @@
      cible tactile de 44 px. Le nom suit : « Chambre » ne tient pas à 13 px. */
   .rooms-col :global(.shutter-tile) {
     --ssize: 16px;
-    --bsize: 44px;
-    --body-h: 150px;
+    container-type: inline-size;
+  }
+  /* Le volet se taille sur SA tuile, pas sur un seuil d'écran. Mesuré : il lui
+     faut la piste (16) + l'écart (6) + les marges (4) avant le bouton — d'où
+     `100cqw - 26px`. Sans ça, les boutons sortaient de leur tuile dès que la
+     fenêtre passait sous 2 400 px (3 px à 2 200, 9 px à 1 900) : invisible de
+     près, mais c'est ce qui empilait les curseurs sur un portable mis à
+     l'échelle. Plancher 24 px (cible de clic à la souris), plafond 44 (le
+     gabarit tactile d'origine, atteint dès 2 400 px de fenêtre).
+     Les variables sont posées sur le CORPS et non sur la tuile : les unités de
+     conteneur se résolvent sur un ANCÊTRE, jamais sur l'élément qui les porte. */
+  .rooms-col :global(.shutter-body) {
+    --bsize: clamp(24px, calc(100cqw - 26px), 44px);
+    --body-h: calc(3 * var(--bsize) + 12px);
   }
   /* Le volet de bureau ajoute 12 px de marge intérieure de chaque côté et
      12 px entre le curseur et les boutons : 24 + 16 + 12 + 44 = 96 px, pour
@@ -442,8 +454,14 @@
   .rooms-col :global(.shutter-body) {
     gap: 6px;
   }
+  /* Le nom suit la largeur réelle de la tuile : « Chambre » doit tenir entier,
+     que la colonne fasse 563 px (27 pouces) ou 432 (portable mis à l'échelle).
+     Bornes mesurées — en dessous de 10 px le mot devient illisible à 80 cm. */
+  .rooms-col :global(.shutter-tile) {
+    container-type: inline-size;
+  }
   .rooms-col :global(.shutter-name) {
-    font-size: 11.5px;
+    font-size: clamp(10px, 21cqw, 11.5px);
   }
   /* En colonne (/bureau) : la carte store n'a plus de voisin à sa droite. */
   .store-wrap.store-col {

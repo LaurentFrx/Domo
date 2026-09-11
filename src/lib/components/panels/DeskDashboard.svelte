@@ -94,8 +94,13 @@
     }
   }
   /* Écran de bureau : les quatre colonnes, largeurs proportionnelles au contenu
-     (Sankey carré ‖ climat ‖ volets à sept curseurs ‖ ambiance). */
-  @media (min-width: 2200px) {
+     (Sankey carré ‖ climat ‖ volets à sept curseurs ‖ ambiance).
+     Seuil à 1 900 px et non 2 200 : un portable 2K mis à l'échelle Windows à
+     125 % ne présente que 2 048 px CSS au navigateur — il avait donc droit à
+     deux colonnes et 1 700 px de défilement, là où le 27" à 100 % en affichait
+     quatre. Les volets suivent maintenant la largeur de leur tuile (cf.
+     RoomsPanel), ce qui rend ces largeurs tenables. */
+  @media (min-width: 1900px) {
     .bureau {
       grid-template-columns: minmax(0, 590fr) minmax(0, 615fr) minmax(0, 565fr) minmax(0, 434fr);
     }
