@@ -13,7 +13,13 @@
 import Database from 'better-sqlite3';
 import { env } from '$env/dynamic/private';
 import { isMqttConnected } from '$lib/server/mqtt';
-import { raiseIncident, resolveIncident, type RaiseInput, type Severity } from './incidents';
+import {
+  getIncident,
+  raiseIncident,
+  resolveIncident,
+  type RaiseInput,
+  type Severity
+} from './incidents';
 import { readAnkerMeter, readAnkerSolarbank } from '$lib/server/anker-modbus';
 
 // Seuils (secondes). Le recorder tique ~30 s ; le cloud Solix se rafraîchit ~60 s.
@@ -22,6 +28,12 @@ const APS_WINDOW_S = 900; // 15 min sans APS éveillé en plein jour = aveugle
 const EM50_WINDOW_S = 600;
 const ANKER_WINDOW_S = 600;
 const MIN_SAMPLES = 8; // assez d'échantillons pour conclure (anti-faux positif)
+// Surplus solaire perdu (injection EDF, interdite par le contrat Enedis) :
+const EXPORT_WINDOW_S = 300; // 5 min d'export soutenu = surplus réellement perdu, pas un transitoire
+const EXPORT_MIN_W = 300; // injection franche (le EM-50 est étalonné, cf. 0c699b7)
+const EXPORT_CLEAR_W = 100; // hystérésis : l'alerte ne tombe que sous 100 W d'export moyen
+const SOC_FULL_PCT = 97; // parc considéré plein
+const CUMULUS_ON_W = 150; // le ballon chauffe → le pilote absorbe déjà, on ne dérange personne
 // L'onduleur EZ1 s'éteint NORMALEMENT quand ses panneaux ne reçoivent plus assez de
 // lumière (nuit, crépuscule, ciel très couvert) — ce n'est PAS un défaut. On ne juge
 // donc pas l'APS par la géométrie du soleil (trompeuse au crépuscule) mais par la
@@ -266,6 +278,47 @@ export async function runProbes(): Promise<ProbeSummary> {
       source: 'anker',
       kind: 'unreachable',
       message: 'Batterie/onduleur Anker Solix injoignable — répartition solaire incomplète'
+    });
+
+    // 5) SURPLUS SOLAIRE PERDU : du courant part chez EDF de façon SOUTENUE alors
+    //    que le ballon n'absorbe rien. Quand le parc est plein, AUCUN levier
+    //    logiciel ne bride le PV des SB3 (site sans compteur — mesuré le
+    //    04/09/2026) : la seule parade immédiate est humaine, lancer un gros
+    //    appareil. On prévient donc avec la puissance perdue, et on rassure
+    //    quand c'est absorbé. Hystérésis : une alerte active ne tombe que si
+    //    l'export moyen repasse sous EXPORT_CLEAR_W.
+    const sp = db
+      .prepare(
+        'SELECT COUNT(em50_grid_w) AS n, ' +
+          'SUM(CASE WHEN em50_grid_w <= ? THEN 1 ELSE 0 END) AS n_exp, ' +
+          'AVG(em50_grid_w) AS g_avg, MIN(soc_avg) AS soc_min, MIN(maxac_soc_pct) AS mx_min, ' +
+          'AVG(COALESCE(em50_cumulus_w, 0)) AS cum_avg ' +
+          'FROM pv_samples WHERE ts > ?'
+      )
+      .get(-EXPORT_MIN_W, nowS - EXPORT_WINDOW_S) as {
+      n: number;
+      n_exp: number | null;
+      g_avg: number | null;
+      soc_min: number | null;
+      mx_min: number | null;
+      cum_avg: number | null;
+    };
+    const exportW = Math.max(0, Math.round(-(sp.g_avg ?? 0)));
+    const tankHeating = (sp.cum_avg ?? 0) >= CUMULUS_ON_W;
+    const sustained = sp.n >= MIN_SAMPLES && (sp.n_exp ?? 0) >= 0.8 * sp.n;
+    const surplusActive = getIncident('grid:surplus-perdu')?.resolvedTs === null;
+    const surplusBad = !tankHeating && (sustained || (surplusActive && exportW >= EXPORT_CLEAR_W));
+    const parcFull =
+      (sp.soc_min ?? 0) >= SOC_FULL_PCT && (sp.mx_min == null || sp.mx_min >= SOC_FULL_PCT);
+    const etatParc = parcFull
+      ? 'batteries et eau chaude pleines'
+      : `batteries à ${Math.round(Math.min(sp.soc_min ?? 0, sp.mx_min ?? 100))} %`;
+    assess(surplusBad, {
+      key: 'grid:surplus-perdu',
+      severity: 'warning',
+      source: 'reseau',
+      kind: 'export',
+      message: `Surplus solaire perdu : ${exportW} W partent vers EDF (${etatParc}). C'est le moment de lancer lave-linge, lave-vaisselle ou sèche-linge.`
     });
   } catch (e) {
     console.error('[monitor] probe DB erreur:', (e as Error).message);

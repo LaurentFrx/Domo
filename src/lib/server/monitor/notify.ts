@@ -17,6 +17,9 @@ const WARN_PUSH_DELAY_MS = 5 * 60 * 1000;
 function shouldNotify(i: Incident): boolean {
   if (i.notified) return false;
   if (i.severity === 'critical') return true;
+  // Le surplus perdu n'est PAS une source qui clignote : la sonde exige déjà
+  // 5 min d'export soutenu, et chaque minute d'attente est du courant donné à EDF.
+  if (i.key === 'grid:surplus-perdu') return true;
   if (i.severity === 'warning') return Date.now() - i.firstTs >= WARN_PUSH_DELAY_MS;
   return false;
 }
@@ -27,7 +30,12 @@ export async function notifyNewIncidents(): Promise<number> {
   let sent = 0;
   for (const i of toNotify) {
     const n = await sendPush({
-      title: i.severity === 'critical' ? '🔴 Domo — anomalie détectée' : '🟠 Domo — alerte',
+      title:
+        i.key === 'grid:surplus-perdu'
+          ? '☀️ Domo — surplus solaire perdu'
+          : i.severity === 'critical'
+            ? '🔴 Domo — anomalie détectée'
+            : '🟠 Domo — alerte',
       body: i.message,
       tag: i.key,
       severity: i.severity,
@@ -44,6 +52,8 @@ function recoveryMessage(i: Incident): string {
     return 'Onduleur solaire rétabli — données manquantes réconciliées automatiquement.';
   if (i.key === 'recorder:stalled') return 'Enregistreur de données de nouveau opérationnel.';
   if (i.key === 'wled:down') return 'Éclairage terrasse de nouveau joignable.';
+  if (i.key === 'grid:surplus-perdu')
+    return 'Plus rien ne part vers EDF — le surplus solaire est de nouveau absorbé.';
   return `${i.source} de nouveau opérationnel.`;
 }
 
