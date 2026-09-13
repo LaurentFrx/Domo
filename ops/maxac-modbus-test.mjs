@@ -100,6 +100,16 @@ function execSyncSafe(cmd) {
   return execSync(cmd, { encoding: 'utf8', timeout: 5000 });
 }
 
+/** Carte officielle Anker (ha-anker-solix-official, config/*.yaml) — vérifiée sur l'appareil le 13/09/2026. */
+const REG = {
+  operatingMode: 10064, // UINT16, inscriptible. 3 = contrôle par tiers.
+  powerSetpoint: 10071, // INT32 (2 registres), WATTS, 0..10000 — visible en mode 3 seulement.
+  emsModeMask: 32774, // 0x8006 : BIT5 = contrôle par tiers autorisé (mesuré 111 → BIT5 présent).
+  maxChargeW: 10036, // INT32
+  maxDischargeW: 10038, // INT32
+  socLimits: 60000 // plafond charge / plancher décharge / réserve
+};
+
 const MODES = {
   0: 'autoconsommation',
   1: 'plages horaires',
@@ -151,7 +161,19 @@ async function cmdScan() {
       if (!r.err) log(`  @${a} = ${r.vals[0]}`);
     }
   }
-  log('Fin. Un registre de consigne de PUISSANCE n’apparaît qu’en mode 3 (contrôle par tiers).');
+  const mask = await readHolding(REG.emsModeMask, 1);
+  const m = mask.vals?.[0] ?? 0;
+  log(
+    `ems_mode_mask = ${m} → contrôle par tiers ${m & 32 ? 'AUTORISÉ (BIT5)' : 'REFUSÉ (BIT5 absent)'}`
+  );
+  const sp = await readHolding(REG.powerSetpoint, 2);
+  if (!sp.err) {
+    const raw = ((sp.vals[0] << 16) | sp.vals[1]) >>> 0;
+    log(
+      `consigne de puissance @${REG.powerSetpoint} = ${raw > 2147483647 ? raw - 4294967296 : raw} W`
+    );
+  }
+  log('Consigne de puissance = registre 10071 (INT32, watts) — n’agit qu’en mode 3.');
 }
 
 async function cmdWatch(minutes = 10) {
