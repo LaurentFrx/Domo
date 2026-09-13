@@ -1,0 +1,23 @@
+# Chien de garde de la Solarbank Max AC — RPi4 (voir ops/maxac-watchdog.py).
+# En mode « contrôle par un tiers », l'appareil ne régule plus : ce service le
+# ramène en autoconsommation dès que Domo cesse de revendiquer le contrôle.
+# Il doit démarrer AVANT tout usage du mode 3 et ne jamais être arrêté ensuite.
+[Unit]
+Description=Chien de garde Solarbank Max AC (retour autoconsommation si Domo se tait)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/maxac-watchdog.py
+Environment=MAXAC_HOST=192.168.1.49
+Environment=MAXAC_HEARTBEAT_URL=https://domo.feroux.fr/api/maxac/heartbeat
+# EnvironmentFile pour le jeton (fichier root, chmod 600) :
+EnvironmentFile=-/etc/maxac-watchdog.env
+Restart=always
+RestartSec=5
+# Le garde-fou lui-même ne doit jamais rester mort en silence.
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target

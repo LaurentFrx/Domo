@@ -104,7 +104,13 @@ const AUTH_PAR_JETON = [
   '/api/monitor/tick',
   '/api/sb3loop/tick',
   '/api/apsloop/tick',
-  '/api/temperature/tick'
+  '/api/temperature/tick',
+  // Signe de vie lu par le CHIEN DE GARDE de la Max AC (RPi4). Il DOIT rester
+  // joignable sans session : c'est son silence qui rend la main à l'appareil,
+  // donc un 303 vers /denied serait indiscernable d'une panne — et déclencherait
+  // le repli, ce qui est le bon sens, mais on ne veut pas d'un faux positif
+  // permanent. Lecture seule, aucun secret exposé (un booléen et un délai).
+  '/api/maxac/heartbeat'
 ];
 
 /** Vrai si la requête doit court-circuiter la garde (appel à jeton, match EXACT). */
