@@ -1,0 +1,19 @@
+# Planifie la boucle de charge Max AC toutes les 20 s.
+# Installation : voir l'en-tête de domo-maxacloop.service.
+#
+# 20 s et pas davantage : le chien de garde du RPi4 rend la main à l'appareil
+# après ~30 s sans revendication de Domo. Deux ticks doivent tenir dans cette
+# fenêtre, sinon le système oscillerait entre pilotage et repli.
+
+[Unit]
+Description=Planifie la boucle de charge Max AC toutes les 20 s
+
+[Timer]
+# Laisse le service Domo démarrer après un boot avant le 1er tick.
+OnBootSec=120s
+OnUnitActiveSec=20s
+AccuracySec=2s
+Unit=domo-maxacloop.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,39 @@
+# Boucle de charge Max AC — un « tick » de l'asservissement de charge.
+#
+# Déclenché toutes les 20 s par domo-maxacloop.timer : appelle l'endpoint interne
+# /api/maxacloop/tick (auth Bearer, bypass cookie en match exact via AUTH_PAR_JETON).
+# Le moteur lit le compteur EM-50, le Modbus de la Max AC et l'état du parc, décide
+# (asservissement sur l'erreur compteur + paliers d'exploration), et commande la
+# charge de la Max AC en Modbus LOCAL.
+#
+# ⚠ LA CADENCE N'EST PAS UN DÉTAIL. En mode « contrôle par un tiers » la Max AC ne
+# régule plus d'elle-même, et le chien de garde du RPi4 lui rend la main après ~30 s
+# sans revendication. Un tick plus lent que 30 s ferait osciller le système entre
+# pilotage et repli. 20 s laisse deux ticks de marge.
+#
+# ⚠ NON géré par le CI/CD (comme domo-sb3loop) — installation MANUELLE :
+#   sudo cp deploy/domo-maxacloop.service deploy/domo-maxacloop.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now domo-maxacloop.timer
+#   journalctl -u domo-maxacloop -f
+# Pré-requis dans /home/laurent/domo/.env :
+#   MAXACLOOP_TICK_TOKEN=<jeton>
+#   MAXACLOOP_ENABLED=1        (sans lui la boucle ne fait RIEN)
+#   MAXACLOOP_OBSERVE=1        (facultatif : décide et journalise sans commander)
+# Pré-requis matériel : le chien de garde doit tourner sur le RPi4
+#   (crontab @reboot /home/laurent/maxac-watchdog.sh).
+
+[Unit]
+Description=Domo — boucle de charge Max AC (un tick de l'asservissement)
+Documentation=file:/home/laurent/domo/src/lib/server/maxacloop/engine.ts
+After=network-online.target domo.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=laurent
+Group=laurent
+EnvironmentFile=-/home/laurent/domo/.env
+# -m 18 : le tick doit finir AVANT le suivant. Les écritures Modbus sont locales
+# (~30 ms) mais writeMaxAcMode relit en boucle jusqu'à 8 s après une bascule.
+ExecStart=/usr/bin/curl -fsS -m 18 -X POST -H "Authorization: Bearer ${MAXACLOOP_TICK_TOKEN}" http://127.0.0.1:3000/api/maxacloop/tick

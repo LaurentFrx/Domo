@@ -292,3 +292,126 @@ function shared<T>(fetcher: () => Promise<T>, offline: T): () => Promise<T> {
 export const readAnkerMeter = shared(fetchMeter, METER_OFFLINE);
 /** Lecture Solarbank Max AC — ne rejette jamais (offline ⇒ available:false). */
 export const readAnkerSolarbank = shared(fetchSolarbank, SB_OFFLINE);
+
+// ─── ÉCRITURE — réservée à la boucle de charge Max AC ──────────────────────
+//
+// ⚠️ Tout ce qui suit COMMANDE l'appareil. Le mode 3 « Contrôle par un tiers »
+// lui retire sa propre régulation : mesuré le 13/09/2026, sans consigne il tombe
+// à 0 W en trente secondes et l'installation injecte. Ne jamais l'utiliser sans
+// le chien de garde du RPi4 (`ops/maxac-watchdog.py`) NI sans renouveler
+// `claimMaxAcControl()` à chaque tick. Le mode SÛR est 0 (autoconsommation) :
+// c'est celui vers lequel tout chemin d'erreur doit retomber.
+//
+// Registres (carte officielle Anker, recoupée sur l'appareil le 13/09/2026) :
+//   10064 UINT16  operating_mode — 0 autoconsommation, 3 contrôle par un tiers.
+//                 La bascule prend ~5 s (write_protection_duration 15 s) : relire
+//                 immédiatement fait conclure à tort à un refus.
+//   10071 INT32   consigne de puissance en WATTS — NÉGATIF = charge, positif =
+//                 décharge. Vérifié : −400 → l'appareil charge exactement 400 W.
+
+/** Écrit un registre 16 bits (FC 6) et vérifie l'écho renvoyé par l'appareil. */
+function writeSingle(target: ModbusTarget, address: number, value: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const txId = 0x4200;
+    const req = Buffer.alloc(12);
+    req.writeUInt16BE(txId, 0);
+    req.writeUInt16BE(0, 2);
+    req.writeUInt16BE(6, 4);
+    req.writeUInt8(target.unitId, 6);
+    req.writeUInt8(6, 7);
+    req.writeUInt16BE(address, 8);
+    req.writeUInt16BE(value & 0xffff, 10);
+    runWrite(target, req, 12, resolve, reject);
+  });
+}
+
+/** Écrit un INT32 sur deux registres (FC 16) — la consigne de puissance. */
+function writeInt32(target: ModbusTarget, address: number, value: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const v = value < 0 ? value + 0x1_0000_0000 : value;
+    const req = Buffer.alloc(17);
+    req.writeUInt16BE(0x4300, 0);
+    req.writeUInt16BE(0, 2);
+    req.writeUInt16BE(11, 4);
+    req.writeUInt8(target.unitId, 6);
+    req.writeUInt8(16, 7);
+    req.writeUInt16BE(address, 8);
+    req.writeUInt16BE(2, 10);
+    req.writeUInt8(4, 12);
+    req.writeUInt16BE((v >>> 16) & 0xffff, 13);
+    req.writeUInt16BE(v & 0xffff, 15);
+    runWrite(target, req, 17, resolve, reject);
+  });
+}
+
+function runWrite(
+  target: ModbusTarget,
+  req: Buffer,
+  _len: number,
+  resolve: () => void,
+  reject: (e: Error) => void
+): void {
+  const sock = connect({ host: target.host, port: target.port });
+  let buf = Buffer.alloc(0);
+  let settled = false;
+  const done = (err?: Error) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    sock.destroy();
+    if (err) reject(err);
+    else resolve();
+  };
+  const timer = setTimeout(() => done(new Error('timeout écriture Modbus')), DEVICE_TIMEOUT_MS);
+  sock.on('connect', () => sock.write(req));
+  sock.on('error', (e) => done(e instanceof Error ? e : new Error(String(e))));
+  sock.on('close', () => done(new Error('socket fermée avant réponse')));
+  sock.on('data', (d) => {
+    buf = Buffer.concat([buf, d]);
+    if (buf.length < 9) return;
+    const rfc = buf.readUInt8(7);
+    if (rfc & 0x80) return done(new Error(`exception Modbus 0x${buf.readUInt8(8).toString(16)}`));
+    done();
+  });
+}
+
+export const MAXAC_MODE_SELF_CONSUMPTION = 0;
+export const MAXAC_MODE_THIRD_PARTY = 3;
+export const MAXAC_REG_MODE = 10064;
+export const MAXAC_REG_SETPOINT = 10071;
+
+/** Lit le mode courant. null si l'appareil ne répond pas. */
+export async function readMaxAcMode(): Promise<number | null> {
+  try {
+    const [r] = await readMany(solarbankTarget(), [{ fc: 3, address: MAXAC_REG_MODE, count: 1 }]);
+    return r?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Passe l'appareil en mode 3 ou 0. Rend `true` si le mode relu correspond. */
+export async function writeMaxAcMode(mode: 0 | 3): Promise<boolean> {
+  try {
+    await writeSingle(solarbankTarget(), MAXAC_REG_MODE, mode);
+  } catch {
+    return false;
+  }
+  // La bascule n'est pas instantanée : on relit en boucle courte plutôt qu'une
+  // seule fois tout de suite (l'erreur commise au premier essai du 13/09).
+  for (let i = 0; i < 4; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    if ((await readMaxAcMode()) === mode) return true;
+  }
+  return false;
+}
+
+/** Écrit la consigne de puissance (W, NÉGATIF = charge). */
+export async function writeMaxAcSetpoint(watts: number): Promise<boolean> {
+  try {
+    await writeInt32(solarbankTarget(), MAXAC_REG_SETPOINT, Math.round(watts));
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -105,6 +105,7 @@ const AUTH_PAR_JETON = [
   '/api/sb3loop/tick',
   '/api/apsloop/tick',
   '/api/temperature/tick',
+  '/api/maxacloop/tick',
   // Signe de vie lu par le CHIEN DE GARDE de la Max AC (RPi4). Il DOIT rester
   // joignable sans session : c'est son silence qui rend la main à l'appareil,
   // donc un 303 vers /denied serait indiscernable d'une panne — et déclencherait
