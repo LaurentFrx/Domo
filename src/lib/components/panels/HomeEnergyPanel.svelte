@@ -225,11 +225,24 @@
    * `clock.now` (10 s) garde la condition vivante même si le poll du store gèle.
    */
   const SB3LOOP_TICK_STALE_MS = 180_000; // aligné sur tickAlive du store
+  /** Écart consigne↔sortie au-delà duquel la consigne n'est manifestement PAS suivie. */
+  const SB3_CMD_TRUST_W = 150;
   const sb3CmdOutW = $derived.by((): number | null => {
     if (!sb3loop.connected || !sb3loop.enabled) return null;
     const tick = sb3loop.lastTickTs;
     if (tick === null || clock.now - tick > SB3LOOP_TICK_STALE_MS) return null;
-    return sb3loop.lastCmdW;
+    const cmd = sb3loop.lastCmdW;
+    if (cmd === null) return null;
+    // ⚠️ 13/09/2026 — depuis le Smart Meter Gen 1 sur le site SB3, le firmware
+    // régule lui-même et la consigne n'est plus qu'un PLAFOND : mesuré consigne
+    // 1 800 W → sortie 0 W. La substituer à la sortie peignait une décharge qui
+    // n'existe pas, et comme « Maison » ferme le bilan, elle absorbait l'écart :
+    // 1 100 W de conso affichée pour ~200 W réels (constat de Laurent).
+    // On ne fait donc confiance à la consigne QUE si la mesure la confirme —
+    // c'est-à-dire tant qu'elle sert encore à quelque chose. Sinon : sorties cloud.
+    if (!anker.connected) return null;
+    if (Math.abs(anker.sbOutputW - cmd) > SB3_CMD_TRUST_W) return null;
+    return cmd;
   });
 
   /** Horizon d'absorption : un pack ne peut encaisser que la PLACE qui lui reste.
