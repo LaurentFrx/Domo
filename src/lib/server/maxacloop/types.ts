@@ -32,9 +32,20 @@ export interface MaxAcLoopConfig {
    *  tout l'écart d'un coup, parce que les SB3 régulent aussi et qu'un gain
    *  unitaire ferait osciller les deux régulateurs l'un contre l'autre. */
   gain: number;
-  /** Écart de consigne en dessous duquel on n'écrit pas (W). Chaque écriture est
-   *  un aller-retour Modbus et une perturbation pour l'autre régulateur. */
+  /** Tolérance sur l'ERREUR COMPTEUR côté EXPORT (W) : en deçà, on ne corrige
+   *  pas. Un léger surplus n'est pas une faute — c'est une marge de sécurité. */
   deadbandW: number;
+  /** Tolérance sur l'ERREUR COMPTEUR côté IMPORT (W). VOLONTAIREMENT PRESQUE
+   *  NULLE : l'achat est interdit (règle 1), pas « toléré s'il est petit ».
+   *  Mesuré le 13/09 à l'activation : avec une bande morte symétrique de 40 W
+   *  exprimée sur la CONSIGNE (≈ 67 W au compteur avec le gain 0,6), la boucle
+   *  se garait indifféremment sur +30 à +130 W d'achat et y restait. La bande
+   *  morte doit porter sur ce qu'on veut annuler — le compteur — et pencher du
+   *  côté qui n'est pas interdit. */
+  importToleranceW: number;
+  /** Variation de consigne en deçà de laquelle on n'écrit pas (W) — évite les
+   *  écritures Modbus sans effet, rien de plus. */
+  writeEpsilonW: number;
   /** Pas d'EXPLORATION (W). Sans lui la boucle ne monterait jamais : à
    *  l'équilibre le compteur est à zéro, l'erreur est nulle, et l'asservissement
    *  seul se contenterait de la charge spontanée — alors que tout l'objet de la
@@ -95,7 +106,9 @@ export interface MaxAcLoopConfig {
 
 export const MAXAC_LOOP_DEFAULTS: MaxAcLoopConfig = {
   gain: 0.6,
-  deadbandW: 40,
+  deadbandW: 60,
+  importToleranceW: 15,
+  writeEpsilonW: 15,
   // Pas et cadence RÉGLÉS AU PLUS PRUDENT après simulation (13/09) : un palier
   // à l'aveugle achète pendant que les SB3 rampent (retard 10-20 s puis ~6 W/s).
   // 60 W tenus ~30 s ≈ 0,5 Wh d'achat par palier, contre 3 Wh à 200 W ; et 90 s

@@ -181,7 +181,11 @@ export function decideMaxAc(
   const pas = clamp(borne - cur, -cfg.slewW, Number.POSITIVE_INFINITY);
   const cible = clamp(cur + pas, -plafond, 0);
 
-  if (Math.abs(cible - cur) < cfg.deadbandW) {
+  // La bande morte porte sur l'ERREUR COMPTEUR, pas sur la consigne, et elle est
+  // ASYMÉTRIQUE : quasi nulle côté achat (interdit), large côté surplus (toléré).
+  const tolerance = inputs.gridW > 0 ? cfg.importToleranceW : cfg.deadbandW;
+  const dansLaTolerance = Math.abs(inputs.gridW) <= tolerance;
+  if (dansLaTolerance || Math.abs(cible - cur) < cfg.writeEpsilonW) {
     // EXPLORATION. À l'équilibre l'erreur est nulle : l'asservissement seul
     // resterait sur la charge spontanée et le PV des SB3 resterait bridé. On
     // pousse donc d'un palier tant que le réseau tient et qu'il reste de la
@@ -190,6 +194,7 @@ export function decideMaxAc(
     // On ne sonde JAMAIS sur un import : le palier s'ajouterait à un achat déjà
     // en cours. Il faut le compteur à l'équilibre ou en surplus.
     const peutSonder =
+      dansLaTolerance &&
       inputs.gridW <= 0 &&
       inputs.gridW >= -cfg.abortExportW &&
       cur > -plafond &&
@@ -213,7 +218,7 @@ export function decideMaxAc(
       mode: 'hold',
       writeW: null,
       targetW: cur,
-      reason: `réseau ${Math.round(inputs.gridW)} W, charge ${Math.round(-cur)} W — dans la bande morte`,
+      reason: `réseau ${Math.round(inputs.gridW)} W, charge ${Math.round(-cur)} W — dans la tolérance (${tolerance} W)`,
       nextState: st
     };
   }

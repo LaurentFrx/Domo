@@ -142,11 +142,24 @@ test('import au compteur → on RÉDUIT la charge', () => {
   assert.ok(d.writeW !== null && d.writeW > -1200, `attendu > -1200, reçu ${d.writeW}`);
 });
 
-test('réseau à l’équilibre, palier récent → bande morte, aucune écriture', () => {
+test('réseau à l’équilibre, palier récent → tolérance, aucune écriture', () => {
   // Sans `lastProbeTs` récent la boucle sonderait : c'est justement son rôle.
   const d = decideMaxAc(enMode3({ gridW: 10 }), cfg, piloting(-1000, { lastProbeTs: T0 - 5_000 }));
   assert.equal(d.mode, 'hold');
   assert.equal(d.writeW, null);
+});
+
+test('un ACHAT de 40 W est corrigé : la tolérance côté import est quasi nulle', () => {
+  // Régression du 13/09 : avec une bande morte symétrique sur la consigne, la
+  // boucle se garait sur +30 à +130 W d'achat et n'en bougeait plus.
+  const d = decideMaxAc(enMode3({ gridW: 40 }), cfg, piloting(-1000, { lastProbeTs: T0 - 5_000 }));
+  assert.equal(d.mode, 'adjust');
+  assert.ok(d.writeW !== null && d.writeW > -1000, `attendu une baisse, reçu ${d.writeW}`);
+});
+
+test('un SURPLUS de 40 W est toléré : ce n’est pas une faute', () => {
+  const d = decideMaxAc(enMode3({ gridW: -40 }), cfg, piloting(-1000, { lastProbeTs: T0 - 5_000 }));
+  assert.equal(d.mode, 'hold');
 });
 
 test('le pas est limité À LA MONTÉE : pas d’échelon même sur une grosse erreur', () => {
@@ -321,10 +334,20 @@ test('injection que la consigne PEUT absorber → on charge plus, on ne fuit pas
   assert.equal(d.mode, 'adjust');
 });
 
-test('on ne sonde JAMAIS sur un import', () => {
+test('on ne sonde JAMAIS sur un import — on le CORRIGE', () => {
+  // 30 W d'achat dépasse la tolérance d'import (15 W) : la boucle réduit sa
+  // charge au lieu de pousser un palier de plus.
   const st = piloting(-600, { lastProbeTs: T0 - 300_000 });
   const d = decideMaxAc(enMode3({ gridW: 30 }), cfg, st);
-  assert.equal(d.mode, 'hold', `attendu hold, reçu ${d.mode} (${d.reason})`);
+  assert.equal(d.mode, 'adjust');
+  assert.ok(d.writeW !== null && d.writeW > -600, `la charge doit BAISSER, reçu ${d.writeW}`);
+  assert.doesNotMatch(d.reason, /palier/);
+});
+
+test('on ne sonde pas non plus sur un import SOUS la tolérance', () => {
+  const st = piloting(-600, { lastProbeTs: T0 - 300_000 });
+  const d = decideMaxAc(enMode3({ gridW: 10 }), cfg, st);
+  assert.equal(d.mode, 'hold');
 });
 
 test('on n’entre pas quand la Max AC DÉCHARGE pour couvrir la maison', () => {
