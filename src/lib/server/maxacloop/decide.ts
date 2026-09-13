@@ -200,16 +200,25 @@ export function decideMaxAc(
       cur > -plafond &&
       (st.lastProbeTs === null || inputs.now - st.lastProbeTs >= cfg.probeEveryMs);
     if (peutSonder) {
-      const sonde = clamp(cur - cfg.probeStepW, -plafond, 0);
+      // Le pas précédent a tenu (on est dans la tolérance) : on double, borné.
+      // C'est ce qui fait la différence entre 9 minutes et 40 minutes pour
+      // atteindre le plafond au réveil — 8,3 kWh de PV perdus le 13/09 faute
+      // d'une montée assez franche.
+      const pasCourant = Math.min(
+        cfg.probeStepMaxW,
+        st.probeStepW === null ? cfg.probeStepW : Math.max(cfg.probeStepW, st.probeStepW * 2)
+      );
+      const sonde = clamp(cur - pasCourant, -plafond, 0);
       if (Math.abs(sonde - cur) >= 1) {
         st.setpointW = sonde;
         st.lastWriteTs = inputs.now;
         st.lastProbeTs = inputs.now;
+        st.probeStepW = pasCourant;
         return {
           mode: 'adjust',
           writeW: sonde,
           targetW: sonde,
-          reason: `réseau à l'équilibre, PV SB3 ${Math.round(inputs.sb3PvW)} W — palier d'essai, charge ${Math.round(-cur)} → ${Math.round(-sonde)} W`,
+          reason: `réseau à l'équilibre, PV SB3 ${Math.round(inputs.sb3PvW)} W — palier d'essai +${pasCourant} W, charge ${Math.round(-cur)} → ${Math.round(-sonde)} W`,
           nextState: st
         };
       }
@@ -225,6 +234,8 @@ export function decideMaxAc(
 
   st.setpointW = cible;
   st.lastWriteTs = inputs.now;
+  // Un achat signe un palier allé trop loin : on repart au pas minimum.
+  if (inputs.gridW > 0) st.probeStepW = null;
   return {
     mode: 'adjust',
     writeW: cible,

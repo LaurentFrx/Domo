@@ -269,6 +269,7 @@ test('exploration : à l’équilibre, la boucle POUSSE pour aller chercher le P
   const d = decideMaxAc(enMode3({ gridW: -10 }), cfg, st);
   assert.equal(d.mode, 'adjust');
   assert.equal(d.writeW, -(600 + cfg.probeStepW));
+  assert.equal(d.nextState.probeStepW, cfg.probeStepW);
   assert.match(d.reason, /palier d'essai/);
 });
 
@@ -360,4 +361,42 @@ test('on n’entre pas pendant un achat', () => {
   const d = decideMaxAc(inputs({ gridW: 200 }), cfg, emptyMaxAcState());
   assert.equal(d.mode, 'idle');
   assert.match(d.reason, /achat/);
+});
+
+test('le pas d’exploration DOUBLE tant que les paliers tiennent', () => {
+  let st = piloting(-400, { lastProbeTs: T0 - 120_000, probeStepW: 60 });
+  const d1 = decideMaxAc(enMode3({ gridW: -10 }), cfg, st);
+  assert.equal(d1.nextState.probeStepW, 120);
+  st = { ...d1.nextState, lastProbeTs: T0 - 120_000 };
+  const d2 = decideMaxAc(enMode3({ gridW: -10, now: T0 + 100_000 }), cfg, st);
+  assert.equal(d2.nextState.probeStepW, 240);
+});
+
+test('le pas est plafonné', () => {
+  const st = piloting(-400, { lastProbeTs: T0 - 120_000, probeStepW: cfg.probeStepMaxW });
+  const d = decideMaxAc(enMode3({ gridW: -10 }), cfg, st);
+  assert.equal(d.nextState.probeStepW, cfg.probeStepMaxW);
+});
+
+test('un achat remet le pas au minimum : on ne réessaie pas le palier qui a raté', () => {
+  const st = piloting(-1000, { probeStepW: 480 });
+  const d = decideMaxAc(enMode3({ gridW: 120 }), cfg, st);
+  assert.equal(d.mode, 'adjust');
+  assert.equal(d.nextState.probeStepW, null);
+});
+
+test('montée complète : le plafond est atteint en moins de 10 paliers', () => {
+  // Modèle : les SB3 couvrent tout ce qu'on demande (PV abondant, cas du matin).
+  let st = piloting(-400, { lastProbeTs: T0 - 200_000 });
+  let paliers = 0;
+  for (let i = 0; i < 40 && (st.setpointW ?? 0) > -cfg.maxChargeW; i++) {
+    const d = decideMaxAc(enMode3({ gridW: -5, now: T0 + i * 100_000 }), cfg, {
+      ...st,
+      lastProbeTs: T0 + i * 100_000 - 100_000
+    });
+    if (d.mode === 'adjust') paliers++;
+    st = d.nextState;
+  }
+  assert.equal(st.setpointW, -cfg.maxChargeW, `consigne finale ${st.setpointW}`);
+  assert.ok(paliers <= 10, `${paliers} paliers pour atteindre le plafond`);
 });

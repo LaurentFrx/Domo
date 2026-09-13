@@ -54,6 +54,12 @@ export interface MaxAcLoopConfig {
    *  l'import apparaît et l'asservissement redescend. Recherche du maximum,
    *  comme la remontée par paliers du bridage APS, en sens inverse. */
   probeStepW: number;
+  /** Plafond du pas d'exploration une fois qu'il a fait ses preuves (W).
+   *  Le pas DOUBLE à chaque palier réussi et retombe au minimum au premier
+   *  échec : monter de 400 à 2 000 W prenait 27 paliers de 60 W, soit 40 min de
+   *  production perdue chaque matin ; en doublant, il en faut 6, soit 9 min.
+   *  Un palier « réussi » = le compteur n'a pas basculé en achat au tick suivant. */
+  probeStepMaxW: number;
   /** Intervalle minimal entre deux paliers d'exploration (ms) — laisser aux SB3
    *  le temps de rouvrir leur production (mesuré : 10 à 20 s). */
   probeEveryMs: number;
@@ -115,6 +121,7 @@ export const MAXAC_LOOP_DEFAULTS: MaxAcLoopConfig = {
   // entre paliers laissent la réponse s'établir au lieu de la lire à mi-course
   // — c'est ce qui entretenait un cycle limite de 170 W au compteur.
   probeStepW: 60,
+  probeStepMaxW: 480,
   probeEveryMs: 90_000,
   slewW: 400,
   maxChargeW: 2000,
@@ -170,6 +177,9 @@ export interface MaxAcLoopState {
   lastWriteTs: number | null;
   /** Dernier palier d'exploration (epoch ms). */
   lastProbeTs: number | null;
+  /** Pas d'exploration courant (W) — double à chaque palier réussi, retombe au
+   *  minimum dès qu'un achat apparaît. */
+  probeStepW: number | null;
   lastTickTs: number | null;
   /** Journal court des dernières décisions, pour la carte et le diagnostic. */
   decisions: MaxAcDecisionLog[];
@@ -206,6 +216,7 @@ export function emptyMaxAcState(): MaxAcLoopState {
     penaltyUntilTs: 0,
     lastWriteTs: null,
     lastProbeTs: null,
+    probeStepW: null,
     lastTickTs: null,
     decisions: []
   };
