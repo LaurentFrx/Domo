@@ -124,7 +124,8 @@ export function defaultPilotState(): PilotState {
     sunWindow: null,
     houseProfile: emptyHouseProfile(),
     houseAccum: null,
-    residualW: null
+    residualW: null,
+    residualDate: null
   };
 }
 
@@ -584,6 +585,25 @@ export function pilotStep(
   // Max AC + charge SB3) ou rend au réseau. La persistance de 3 min
   // (observationBeforeOnSec) s'applique ENSUITE, comme à tout allumage : un
   // pic d'un tick ne suffit pas à rallumer.
+  //
+  // Mais ce manque est celui d'UN moment, pas une vérité durable. Armé un jour
+  // précédent, le résidu est abandonné à l'ouverture de la fenêtre solaire.
+  // Le 13/09 à 10:08, la Max AC a lâché d'un coup (2 000 → 0 W en 30 s, 2 682 W
+  // achetés) : ce résidu a tenu « Chauffer maintenant » ET le pilote solaire en
+  // attente plus de 24 h, parce qu'avec des SB3 pleines bridées par le Gen 1 le
+  // surplus VISIBLE a plafonné à 1 214 W — il ne pouvait jamais « revenir ».
+  // Une tentative de plus par jour, jugée par les mêmes coupures, ne peut pas
+  // refaire les 27 cycles du 15/08. Sans date (état d'avant ce champ) = ancien.
+  if (pilot.residualW !== null && pilot.residualDate !== inputs.todayParis && windowOpen) {
+    events.push({
+      ts: now,
+      kind: 'phase',
+      label: 'résidu abandonné',
+      detail: `achat de ${pilot.residualW} W mesuré ${pilot.residualDate ? `le ${pilot.residualDate}` : 'un jour précédent'} — nouvelle journée, nouvel essai`
+    });
+    pilot.residualW = null;
+    pilot.residualDate = null;
+  }
   if (pilot.residualW !== null && surplusDispoW >= pilot.residualW) {
     events.push({
       ts: now,
@@ -592,6 +612,7 @@ export function pilotStep(
       detail: `le surplus manquant est revenu (${Math.round(surplusDispoW)} W mesurés / ${pilot.residualW} W à couvrir)`
     });
     pilot.residualW = null;
+    pilot.residualDate = null;
   }
   const residualHold = pilot.residualW !== null;
   const saturationTrigger =
@@ -825,6 +846,7 @@ export function pilotStep(
     // petit n'aurait pas coupé.
     if (cutCause === 'buy' || cutCause === 'hard_buy' || cutCause === 'grace_fail') {
       pilot.residualW = Math.max(150, buyW);
+      pilot.residualDate = inputs.todayParis;
     }
     pilot.lastCessionCause = cutCause;
     pilot.lastCessionTs = now;

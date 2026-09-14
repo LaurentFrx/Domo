@@ -358,8 +358,16 @@ export interface PilotState {
    *  à RE-COUVRIR par un surplus prouvé avant toute reprise solaire (boost
    *  compris). Décroît avec la PHYSIQUE — le surplus mesuré qui revient —
    *  jamais avec un minuteur : c'est ce qui brise le cycle coupure-achat →
-   *  reprise gratuite → coupure (27 cycles et 1 723 Wh achetés le 15/08). */
+   *  reprise gratuite → coupure (27 cycles et 1 723 Wh achetés le 15/08).
+   *  Seules bornes : la journée (cf. residualDate) et l'appui explicite sur
+   *  « Chauffer maintenant » (cf. applyUserCommand). */
   residualW: number | null;
+  /** Jour (Paris) où le résidu a été armé. Le résidu mesure le manque d'UN
+   *  moment : armé un jour précédent, il est abandonné à l'ouverture de la
+   *  fenêtre solaire. Une tentative de plus par jour, jugée par les mêmes
+   *  coupures, ne peut pas refaire les cycles du 15/08. null = inconnu (état
+   *  antérieur à ce champ) ⇒ traité comme ancien. */
+  residualDate: string | null;
   /** Profil horaire APPRIS de la charge maison hors ballon (24 tranches × jours),
    *  base de la réserve du soir en Wh. Cf. cumulus/reserve.ts. */
   houseProfile: HouseHourSample[][];

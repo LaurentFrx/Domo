@@ -1154,3 +1154,56 @@ test('prévision absente : aucune réserve, comportement d’avant', () => {
   );
   assert.equal(r.view.tankReserveWh, 0);
 });
+
+// ─── RÉSIDU (C4) : borné à la journée ─────────────────────────────────────────
+// Le 13/09 à 10:08, un achat de 2 682 W a armé un résidu que le surplus visible
+// (1 214 W au mieux, SB3 pleines bridées) ne pouvait jamais couvrir : boost et
+// pilote solaire sont restés en attente plus de 24 h.
+
+test('résidu : une coupure pour achat franc le date du jour', () => {
+  const r = pilotStep(
+    inp({ relayOn: true, cumulusPowerW: 2900, gridPowerW: 800 }),
+    cfg(),
+    st({ onSinceTs: NOON - min(20), lastOnTs: NOON - min(20) }, { socStartOfHeat: 99 }),
+    ctx()
+  );
+  assert.equal(r.pilot.residualW, 800);
+  assert.equal(r.pilot.residualDate, '2026-07-03');
+});
+
+test('résidu du JOUR : il tient tant que le surplus manquant n’est pas revenu', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: 0 }),
+    cfg(),
+    st({}, { residualW: 2682, residualDate: '2026-07-03' }),
+    ctx()
+  );
+  assert.equal(r.pilot.residualW, 2682);
+  assert.equal(r.pilot.residualDate, '2026-07-03');
+});
+
+test('résidu de la VEILLE : abandonné dès que la fenêtre solaire est ouverte', () => {
+  const r = pilotStep(
+    inp({ gridPowerW: 0 }),
+    cfg(),
+    st({}, { residualW: 2682, residualDate: '2026-07-02' }),
+    ctx()
+  );
+  assert.equal(r.pilot.residualW, null);
+  assert.equal(r.pilot.residualDate, null);
+});
+
+test('résidu SANS DATE (état d’avant le champ) : traité comme ancien', () => {
+  const r = pilotStep(inp({ gridPowerW: 0 }), cfg(), st({}, { residualW: 2682 }), ctx());
+  assert.equal(r.pilot.residualW, null);
+});
+
+test('résidu de la veille, fenêtre FERMÉE (nuit) : gardé jusqu’au soleil', () => {
+  const r = pilotStep(
+    inp({ now: NIGHT, gridPowerW: 0 }),
+    cfg(),
+    st({}, { residualW: 2682, residualDate: '2026-07-02' }),
+    ctx({ hourLocal: 4, minuteOfDay: 240 })
+  );
+  assert.equal(r.pilot.residualW, 2682);
+});

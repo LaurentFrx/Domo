@@ -342,7 +342,8 @@ function defaultPilotStateStore(): PilotState {
     sunWindow: null,
     houseProfile: emptyHouseProfile(),
     houseAccum: null,
-    residualW: null
+    residualW: null,
+    residualDate: null
   };
 }
 
@@ -405,6 +406,7 @@ function normPilot(v: unknown): PilotState {
       : 'none',
     sunWindow: normSunWindow(o.sunWindow),
     residualW: typeof o.residualW === 'number' && Number.isFinite(o.residualW) ? o.residualW : null,
+    residualDate: typeof o.residualDate === 'string' ? o.residualDate : null,
     houseProfile: normalizeHouseProfile(o.houseProfile),
     houseAccum: normHouseAccum(o.houseAccum)
   };

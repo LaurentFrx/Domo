@@ -12,7 +12,7 @@
  * chaque décision qu'il AURAIT prise, decide() n'émet AUCUN ordre automatique.
  */
 
-import { decide, type PilotWant } from './decide';
+import { decide, applyUserCommand, type PilotWant } from './decide';
 import { feedforwardCumulusStep } from '../sb3loop/engine';
 import { collectInputs } from './inputs';
 import { readCumulusConfig } from './config';
@@ -187,6 +187,7 @@ async function runTick(apply: boolean): Promise<TickResult> {
   // gardait ses reprises gratuites (le cycle du 15/08).
   if (decision.reason === 'grid_veto') {
     next.pilot.residualW = Math.max(150, Math.round(inputs.gridPowerW));
+    next.pilot.residualDate = inputs.todayParis;
   }
   next.pilotView = pilotRes.view;
   // ── LABO : journal du critère énergie (n'influence RIEN) ──
@@ -620,18 +621,12 @@ export async function applyCommand(cmd: {
   boost?: boolean;
 }): Promise<TickResult> {
   const state = await readCumulusState();
-  if (cmd.autoMode) {
-    state.autoMode = cmd.autoMode;
-    if (cmd.autoMode === 'auto') state.boostUntilFull = false;
+  const next = applyUserCommand(state, cmd);
+  if (state.pilot.residualW !== null && next.pilot.residualW === null) {
+    console.log(
+      `[cumulus] « Chauffer maintenant » : résidu d'achat ${state.pilot.residualW} W effacé — nouvel essai, mêmes coupures`
+    );
   }
-  if (typeof cmd.manualRelayOn === 'boolean') {
-    state.manualRelayOn = cmd.manualRelayOn;
-    if (state.autoMode !== 'off') state.autoMode = 'manual';
-  }
-  if (typeof cmd.boost === 'boolean') {
-    state.boostUntilFull = cmd.boost;
-    if (cmd.boost) state.autoMode = 'auto';
-  }
-  await writeCumulusState(state);
+  await writeCumulusState(next);
   return tick(true);
 }

@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, type PilotWant } from '../src/lib/server/cumulus/decide.ts';
+import { decide, applyUserCommand, type PilotWant } from '../src/lib/server/cumulus/decide.ts';
 import type {
   CumulusInputs,
   CumulusConfig,
@@ -310,4 +310,48 @@ test('VETO : compteur muet → on ne coupe pas à l’aveugle', () => {
     st({ boostUntilFull: true, relayOn: true, onSinceTs: NOW - min(20) })
   );
   assert.notEqual(d.reason, 'grid_veto');
+});
+
+// ─── « Chauffer maintenant » face au RÉSIDU d'achat ─────────────────────────
+// Le 14/09, le bouton était inerte : un résidu armé la veille (2 682 W) tenait la
+// demande en attente d'un surplus que le parc n'affichait jamais.
+
+const avecResidu = (o: Partial<CumulusRuntimeState> = {}) =>
+  st({ pilot: { residualW: 2682, residualDate: '2026-09-13' } as never, ...o });
+
+test('résidu armé : un boost demandé attend (la protection existe toujours)', () => {
+  const d = decide(inp(), cfg(), st({ boostUntilFull: true }), { ...wantWait, residualW: 2682 });
+  assert.equal(d.relayDesired, false);
+  assert.equal(d.reason, 'pilot_wait');
+});
+
+test('Chauffer maintenant : l’APPUI efface le résidu — nouvel essai', () => {
+  const s = applyUserCommand(avecResidu(), { boost: true });
+  assert.equal(s.boostUntilFull, true);
+  assert.equal(s.autoMode, 'auto');
+  assert.equal(s.pilot.residualW, null);
+  assert.equal(s.pilot.residualDate, null);
+});
+
+test('Chauffer maintenant : redemander un boost DÉJÀ demandé n’efface rien (pas de boucle)', () => {
+  const s = applyUserCommand(avecResidu({ boostUntilFull: true }), { boost: true });
+  assert.equal(s.pilot.residualW, 2682);
+});
+
+test('Chauffer maintenant : annuler ne touche pas au résidu', () => {
+  const s = applyUserCommand(avecResidu({ boostUntilFull: true }), { boost: false });
+  assert.equal(s.boostUntilFull, false);
+  assert.equal(s.pilot.residualW, 2682);
+});
+
+test('commandes : manuel et retour en auto inchangés', () => {
+  const m = applyUserCommand(avecResidu({ boostUntilFull: true }), { manualRelayOn: true });
+  assert.equal(m.autoMode, 'manual');
+  assert.equal(m.manualRelayOn, true);
+  assert.equal(m.pilot.residualW, 2682);
+  const a = applyUserCommand(m, { autoMode: 'auto' });
+  assert.equal(a.autoMode, 'auto');
+  assert.equal(a.boostUntilFull, false);
+  const v = applyUserCommand(st(), { autoMode: 'off', manualRelayOn: true });
+  assert.equal(v.autoMode, 'off', 'le relais forcé ne sort pas des vacances');
 });

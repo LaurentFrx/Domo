@@ -21,6 +21,7 @@
 
 import type { CumulusMode } from '$theme/tokens';
 import type {
+  AutoMode,
   CumulusInputs,
   CumulusConfig,
   CumulusRuntimeState,
@@ -318,4 +319,40 @@ export function decide(
     apply: true,
     nextState: next
   };
+}
+
+/**
+ * Commande utilisateur appliquée à l'état persisté (pur).
+ *
+ * « Chauffer maintenant » est une demande EXPLICITE : l'appui (passage de
+ * non-demandé à demandé) efface le résidu d'achat. Sans ça, un résidu armé par
+ * un incident antérieur rendait le bouton inerte — le 14/09, celui de la veille
+ * (2 682 W) gardait la demande en attente d'un surplus que le parc n'affichait
+ * jamais. La règle zéro achat reste entière : l'essai est jugé par les mêmes
+ * coupures (grâce, 150 W/30 s, 500 W immédiat, veto) qui ré-arment le résidu
+ * s'il achète. Redemander un boost DÉJÀ demandé n'efface rien : aucun client ne
+ * peut relancer en boucle.
+ */
+export function applyUserCommand(
+  state: CumulusRuntimeState,
+  cmd: { autoMode?: AutoMode; manualRelayOn?: boolean; boost?: boolean }
+): CumulusRuntimeState {
+  const next: CumulusRuntimeState = { ...state };
+  const wasBoost = state.boostUntilFull;
+  if (cmd.autoMode) {
+    next.autoMode = cmd.autoMode;
+    if (cmd.autoMode === 'auto') next.boostUntilFull = false;
+  }
+  if (typeof cmd.manualRelayOn === 'boolean') {
+    next.manualRelayOn = cmd.manualRelayOn;
+    if (next.autoMode !== 'off') next.autoMode = 'manual';
+  }
+  if (typeof cmd.boost === 'boolean') {
+    next.boostUntilFull = cmd.boost;
+    if (cmd.boost) next.autoMode = 'auto';
+    if (cmd.boost && !wasBoost) {
+      next.pilot = { ...next.pilot, residualW: null, residualDate: null };
+    }
+  }
+  return next;
 }
