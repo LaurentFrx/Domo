@@ -293,23 +293,38 @@
       box-shadow var(--duration-normal) var(--ease-default);
   }
 
-  /* ─── Puce de la carte « Interrupteurs » (dès l'iPad, cf. prop `grouped`) ───
+  /* ─── Membre de la carte « Interrupteurs » (prop `grouped`) ───
      Pas de verre dans le verre : la carte commune porte le relief, la puce n'a
-     qu'un fond discret. 44 px de haut = la cible tactile, rien de moins. La
-     lueur « allumé » est resserrée — à 32 px elle bavait sur les voisines. */
+     qu'un fond discret. Sur iPhone elle garde sa forme (icône sur le nom, en
+     ligne de quatre) et son relief coloré quand elle est allumée — la règle
+     iPhone plus bas passe après celle-ci, à spécificité égale. */
+  .switch-tile.grouped {
+    gap: 4px;
+    padding: 8px 4px 7px;
+    border-radius: var(--radius-lg);
+    background: var(--color-card-hover) !important;
+    box-shadow: none;
+  }
+  .switch-tile.grouped .switch-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-md);
+  }
+  .switch-tile.grouped .switch-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+  /* Dès l'iPad : puce horizontale de 44 px (la cible tactile, rien de moins).
+     La lueur « allumé » est resserrée — à 32 px elle bavait sur les voisines. */
   @media (min-width: 768px) and (min-height: 600px) {
     .switch-tile.grouped {
       min-height: 44px;
       gap: 8px;
-      padding: 6px 6px 6px 6px;
-      border-radius: var(--radius-lg);
-      background: var(--color-card-hover) !important;
-      box-shadow: none;
+      padding: 6px;
     }
     .switch-tile.grouped .switch-icon {
       width: 28px;
       height: 28px;
-      border-radius: var(--radius-md);
     }
     /* Le nom peut passer sur DEUX lignes (« Sèche- / serviette ») plutôt que
        d'être tronqué : c'est ce qui permet trois puces de front dans la colonne

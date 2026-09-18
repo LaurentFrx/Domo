@@ -188,6 +188,9 @@
   const restOthers = $derived(
     flatZigbeeOthers.filter((d) => d !== atelierDevice && d !== portailDevice)
   );
+  // Le sèche-serviette (nodeId 1) est masqué sur iPhone : s'il est seul, la
+  // grille du reste n'a rien à y montrer.
+  const restOnPhone = $derived(restSwitches.some((s) => s.nodeId !== 1) || restOthers.length > 0);
   // Colonnes de la ligne rapide : autant que de tuiles réellement présentes —
   // une classe Tailwind fixe laisserait un trou (spot non appairé) ou ferait
   // déborder la 5ᵉ tuile sur une seconde ligne.
@@ -323,16 +326,15 @@
 
       <!-- ═══ Interrupteurs — Bureau / Chargeur / Atelier / Spot / Portail, puis
            le reste (sèche-serviette…) ═══
-           Dès l'iPad : UNE carte, en puces de 44 px (18/09/2026). Chaque commande
-           « un appui, un état » était une carte de 64 px à elle seule — cinq cartes
-           pour cinq boutons, 200 px de colonne au tableau de bord.
-           Sur iPhone la carte n'existe pas (`contents`) : la ligne de tuiles et la
-           grille du reste retombent dans le flux, telles qu'avant. Le même montage
-           sert aux deux (pas de `hidden`/`pad:hidden`) ; les tuiles savent qu'elles
-           sont groupées (`grouped`) et ne changent de gabarit qu'avec la carte. -->
+           UNE carte pour toutes (18/09/2026) : chaque commande « un appui, un état »
+           était une carte de verre à elle seule — cinq cartes pour cinq boutons,
+           200 px de colonne au tableau de bord. Les tuiles y perdent leur verre
+           propre (`grouped`). Sur iPhone : une ligne de puces, icône sur le nom ;
+           dès l'iPad : une grille de puces horizontales de 44 px, les deux listes
+           fondues en une (`pad:contents`). -->
       {#if quickTiles > 0 || restSwitches.length > 0 || restOthers.length > 0}
         <div
-          class="pad:grid pad:grid-cols-[repeat(auto-fit,minmax(108px,1fr))] pad:gap-1.5 pad:rounded-[var(--radius-xl)] pad:border pad:p-2 contents min-w-0"
+          class="pad:grid-cols-[repeat(auto-fit,minmax(108px,1fr))] grid min-w-0 gap-1.5 rounded-[var(--radius-xl)] border p-2"
           style="background: var(--color-card); border-color: var(--color-border);"
           aria-label="Interrupteurs"
         >
@@ -340,7 +342,7 @@
             <!-- iPhone : une ligne de N tuiles (N = tuiles réellement présentes —
                  une classe fixe laisserait un trou ou ferait déborder la 5ᵉ). -->
             <div
-              class="pad:contents grid min-w-0 grid-cols-[repeat(var(--qt),minmax(0,1fr))] gap-2.5 sm:gap-3"
+              class="pad:contents grid min-w-0 grid-cols-[repeat(var(--qt),minmax(0,1fr))] gap-1.5"
               style="--qt: {quickTiles};"
             >
               {#if bureauSwitch}<SwitchTile sw={bureauSwitch} grouped />{/if}
@@ -352,7 +354,13 @@
           {/if}
 
           {#if restSwitches.length > 0 || restOthers.length > 0}
-            <div class="pad:contents grid min-w-0 grid-cols-2 gap-2.5 sm:gap-3">
+            <!-- Masquée d'un bloc sur iPhone quand elle ne porte que le sèche-serviette
+                 (lui-même masqué) : une grille vide coûterait un écart dans la carte. -->
+            <div
+              class="pad:contents min-w-0 grid-cols-2 gap-1.5 {restOnPhone
+                ? 'grid'
+                : 'hidden sm:grid'}"
+            >
               {#each restSwitches as sw (sw.nodeId)}
                 {#if sw.nodeId === 1}
                   <!-- Sèche-serviette : doublon avec la carte « Salle de bain » (/climat) +

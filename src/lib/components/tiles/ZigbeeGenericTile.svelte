@@ -366,24 +366,45 @@
       box-shadow var(--duration-normal) var(--ease-default);
   }
 
-  /* ─── Puce de la carte « Interrupteurs » (dès l'iPad) — mêmes cotes que
-     SwitchTile, elles se côtoient dans la même grille. La ligne « fabricant ·
-     modèle » du portail et le curseur de luminosité n'ont pas leur place dans
-     une puce de 44 px : le premier est du jargon, le second prendrait une case
-     de la grille à lui seul. ─── */
+  /* ─── Membre de la carte « Interrupteurs » (prop `grouped`) ───
+     Pas de verre dans le verre : la carte commune porte le relief, la puce n'a
+     qu'un fond discret. Sur iPhone elle garde sa forme (icône sur le nom, en
+     ligne de quatre) et son relief coloré quand elle est allumée — la règle
+     iPhone plus bas passe après celle-ci, à spécificité égale. */
+  .generic-tile.grouped {
+    gap: 4px;
+    padding: 8px 4px 7px;
+    border-radius: var(--radius-lg);
+    background: var(--color-card-hover) !important;
+    box-shadow: none;
+  }
+  .generic-tile.grouped .generic-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-md);
+  }
+  .generic-tile.grouped .generic-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+  /* La ligne « fabricant · modèle » du portail et le curseur de luminosité
+     n'ont pas leur place dans une puce : le premier est du jargon, le second
+     prendrait une case de la grille à lui seul. */
+  .generic-tile.grouped .generic-sub,
+  .brightness-range.grouped {
+    display: none;
+  }
+  /* Dès l'iPad : puce horizontale de 44 px (la cible tactile, rien de moins).
+     La lueur « allumé » est resserrée — à 32 px elle bavait sur les voisines. */
   @media (min-width: 768px) and (min-height: 600px) {
     .generic-tile.grouped {
       min-height: 44px;
       gap: 8px;
-      padding: 6px 6px 6px 6px;
-      border-radius: var(--radius-lg);
-      background: var(--color-card-hover) !important;
-      box-shadow: none;
+      padding: 6px;
     }
     .generic-tile.grouped .generic-icon {
       width: 28px;
       height: 28px;
-      border-radius: var(--radius-md);
     }
     /* Le nom peut passer sur DEUX lignes (« Sèche- / serviette ») plutôt que
        d'être tronqué : c'est ce qui permet trois puces de front dans la colonne
@@ -405,10 +426,6 @@
     .generic-tile.grouped .generic-icon svg {
       width: 18px;
       height: 18px;
-    }
-    .generic-tile.grouped .generic-sub,
-    .brightness-range.grouped {
-      display: none;
     }
     /* Liseré néon : `!important` car le `border-color` INLINE (celui qui fait
        le verre de la tuile entière) l'emporterait — le halo seul, resserré,
