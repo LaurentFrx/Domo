@@ -398,13 +398,12 @@
     </div>
   {/if}
 
-  <!-- Terrasse et imprimante se partagent la ligne dès l'iPad : deux cartes que
-       l'on CONSULTE, aucune des deux n'a besoin de 1 100 px. -->
-  <div
-    class={column
-      ? 'flex flex-col gap-3'
-      : 'pad:grid pad:grid-cols-2 pad:items-start pad:gap-3 contents'}
-  >
+  <!-- Terrasse et imprimante se partagent la ligne, iPhone compris (18/09/2026) :
+       deux cartes que l'on CONSULTE, aucune n'a besoin de toute la largeur. Sur
+       iPhone chacune n'a que ~175 px — elles passent alors en gabarit étroit
+       d'elles-mêmes (container queries, dans leurs composants). Hauteurs
+       alignées par l'étirement de la grille, pas par un trou. -->
+  <div class="grid min-w-0 gap-3" class:grid-cols-2={printerPlug}>
     <!-- ═══ Terrasse — le ruban LEDS (WLED, QuinLed Dig-Uno). Indépendant de
          Matter, la carte reste donc HORS du bloc conditionnel ci-dessus (toujours
          visible). Le spot, lui, est monté sur la ligne des commandes rapides. ═══ -->

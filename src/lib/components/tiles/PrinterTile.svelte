@@ -57,95 +57,103 @@
 </script>
 
 <article
-  class="printer-tile flex items-center gap-3 rounded-[var(--radius-xl)] border px-3 py-2"
+  class="printer-tile flex flex-col justify-center rounded-[var(--radius-xl)] border px-3 py-2"
   class:opacity-50={!plug.available}
   class:printer-on={isOn}
   style="background: var(--color-card); border-color: var(--color-border);"
 >
-  <!-- Icône-interrupteur (touch = on/off) + titre DESSOUS, comme les tuiles du dessus. -->
-  <div class="flex shrink-0 flex-col items-center gap-1">
-    <button
-      type="button"
-      class="printer-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-lg)]"
-      style="background: {isOn
-        ? 'var(--color-consumption)'
-        : 'var(--color-consumption-muted)'}; color: {isOn ? 'white' : 'var(--color-consumption)'};"
-      role="switch"
-      aria-checked={isOn}
-      aria-label="Allumer ou éteindre l'imprimante"
-      onclick={onTogglePlug}
-      disabled={!plug.available}
-    >
-      <svg
-        width="22"
-        height="22"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.75"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+  <div class="printer-body flex items-center gap-3">
+    <!-- Icône-interrupteur (touch = on/off) + titre DESSOUS, comme les tuiles du dessus. -->
+    <div class="printer-head flex shrink-0 flex-col items-center gap-1">
+      <button
+        type="button"
+        class="printer-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-lg)]"
+        style="background: {isOn
+          ? 'var(--color-consumption)'
+          : 'var(--color-consumption-muted)'}; color: {isOn
+          ? 'white'
+          : 'var(--color-consumption)'};"
+        role="switch"
+        aria-checked={isOn}
+        aria-label="Allumer ou éteindre l'imprimante"
+        onclick={onTogglePlug}
+        disabled={!plug.available}
       >
-        <polyline points="6 9 6 2 18 2 18 9" />
-        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-        <rect x="6" y="14" width="12" height="8" rx="0.5" />
-      </svg>
-    </button>
-    <span
-      class="text-center text-[11px] leading-tight font-semibold sm:text-[13px]"
-      style="color: var(--color-fg);"
-    >
-      Imprimante
-    </span>
-  </div>
-
-  <!-- Niveaux d'encre CMYK : 4 jauges VERTICALES (remplies de bas en haut) + % dessous -->
-  {#if printer.inks.length > 0}
-    <div class="ink-pills" class:opacity-60={!printer.online}>
-      {#each printer.inks as ink (ink.color)}
-        {@const c = INK[ink.color]}
-        {@const pct = Math.max(0, Math.min(100, ink.percent))}
-        <div
-          class="ink-pill"
-          style="--ink-base: {c.base}; --ink-light: {c.light}; --ink-track: {c.track}; --ink-glow: {c.glow}; --ink-percent: {pct}%;"
-          title="{ink.label} · {ink.percent}%"
+        <svg
+          width="22"
+          height="22"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
         >
-          <span class="ink-pill-fill" aria-hidden="true"></span>
-          <span class="ink-pill-pct" class:ink-low={ink.percent < 10}>{ink.percent}</span>
-        </div>
-      {/each}
+          <polyline points="6 9 6 2 18 2 18 9" />
+          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+          <rect x="6" y="14" width="12" height="8" rx="0.5" />
+        </svg>
+      </button>
+      <span
+        class="text-center text-[11px] leading-tight font-semibold sm:text-[13px]"
+        style="color: var(--color-fg);"
+      >
+        Imprimante
+      </span>
     </div>
-    {#if !printer.online && printer.lastUpdate}
-      <!-- Une fois un relevé réussi, les jauges restaient affichées pour toujours,
+
+    <!-- Niveaux d'encre CMYK : 4 jauges VERTICALES (remplies de bas en haut) + % dessous -->
+    {#if printer.inks.length > 0}
+      <div class="ink-pills" class:opacity-60={!printer.online}>
+        {#each printer.inks as ink (ink.color)}
+          {@const c = INK[ink.color]}
+          {@const pct = Math.max(0, Math.min(100, ink.percent))}
+          <div
+            class="ink-pill"
+            style="--ink-base: {c.base}; --ink-light: {c.light}; --ink-track: {c.track}; --ink-glow: {c.glow}; --ink-percent: {pct}%;"
+            title="{ink.label} · {ink.percent}%"
+          >
+            <span class="ink-pill-fill" aria-hidden="true"></span>
+            <span class="ink-pill-pct" class:ink-low={ink.percent < 10}>{ink.percent}</span>
+          </div>
+        {/each}
+      </div>
+      {#if !printer.online && printer.lastUpdate}
+        <!-- Une fois un relevé réussi, les jauges restaient affichées pour toujours,
            y compris rechargées du cache de la semaine passée — alors que la dérive
            DHCP de cette imprimante est un incident récurrent. -->
-      <span class="text-[10px]" style="color: var(--color-muted-fg);">
-        Imprimante éteinte — niveaux relevés il y a {ageLabel(
-          clock.now - printer.lastUpdate.getTime()
-        )}
-      </span>
-    {/if}
-  {:else}
-    <button
-      type="button"
-      class="ink-error-btn text-left text-[11px]"
-      style="color: var(--color-muted-fg);"
-      onclick={() => printer.refresh()}
-    >
-      {#if printer.status === 'unconfigured'}
-        Niveaux d'encre indisponibles — `PRINTER_HOST` non configuré.
-      {:else if printer.status === 'polling'}
-        Lecture des niveaux d'encre…
-      {:else}
-        Imprimante jamais jointe — {printer.lastError ?? 'erreur réseau'}.
-        <span style="color: var(--color-primary);">Tap pour réessayer</span>
+        <span class="text-[10px]" style="color: var(--color-muted-fg);">
+          Imprimante éteinte — niveaux relevés il y a {ageLabel(
+            clock.now - printer.lastUpdate.getTime()
+          )}
+        </span>
       {/if}
-    </button>
-  {/if}
+    {:else}
+      <button
+        type="button"
+        class="ink-error-btn text-left text-[11px]"
+        style="color: var(--color-muted-fg);"
+        onclick={() => printer.refresh()}
+      >
+        {#if printer.status === 'unconfigured'}
+          Niveaux d'encre indisponibles — `PRINTER_HOST` non configuré.
+        {:else if printer.status === 'polling'}
+          Lecture des niveaux d'encre…
+        {:else}
+          Imprimante jamais jointe<span class="ink-error-detail"
+            >{` — ${printer.lastError ?? 'erreur réseau'}`}</span
+          >.
+          <span style="color: var(--color-primary);">Tap pour réessayer</span>
+        {/if}
+      </button>
+    {/if}
+  </div>
 </article>
 
 <style>
   .printer-tile {
+    /* La tuile se taille sur SA largeur (cf. « Tuile étroite » plus bas). */
+    container-type: inline-size;
     transition:
       border-color var(--duration-normal) var(--ease-default),
       box-shadow var(--duration-normal) var(--ease-default);
@@ -243,6 +251,30 @@
   }
   .ink-pill-pct.ink-low {
     color: oklch(0.92 0.08 30);
+  }
+
+  /* ─── Tuile étroite (≈ 175 px : à côté de la carte Terrasse sur iPhone) ───
+     En ligne, icône + libellé (70) et les quatre jauges (118) demandaient
+     ~225 px. On empile : icône et libellé côte à côte en tête, jauges (ou
+     message) dessous — 124 px de haut, la hauteur de la carte voisine. */
+  @container (max-width: 259px) {
+    .printer-body {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+    }
+    .printer-head {
+      flex-direction: row;
+      gap: 8px;
+    }
+    .ink-pills {
+      flex: none;
+    }
+    /* Le détail technique (« connect EHOSTUNREACH 192.168.1.19:80 ») prenait
+       cinq lignes à cette largeur et étirait toute la rangée. L'iPad le garde. */
+    .ink-error-detail {
+      display: none;
+    }
   }
 
   .ink-error-btn {

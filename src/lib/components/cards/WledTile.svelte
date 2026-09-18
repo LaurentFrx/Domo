@@ -562,6 +562,13 @@
 
   .tile {
     position: relative;
+    /* Colonne à un seul enfant : si la grille étire la tuile (voisine plus
+       haute — l'imprimante sur /pieces), le bloc LEDS suit, et avec lui le
+       lavage et la surface de geste. */
+    display: flex;
+    flex-direction: column;
+    /* La tuile se taille sur SA largeur (cf. « Tuile étroite » plus bas). */
+    container-type: inline-size;
     overflow: hidden;
     border-width: 1px;
     border-style: solid;
@@ -575,6 +582,7 @@
      hors de lui, donc hors du lavage et hors du glissé de luminosité. */
   .tile-light {
     position: relative;
+    flex: 1;
     min-height: 128px;
   }
   /* Pendant le glissé, le niveau suit le doigt SANS interpolation. */
@@ -1050,6 +1058,28 @@
   .toggle-pill input:focus-visible + .toggle-pill-knob {
     outline: 2px solid var(--color-primary);
     outline-offset: 2px;
+  }
+
+  /* ─── Tuile étroite (≈ 175 px : deux cartes de front sur iPhone) ─────────
+     Mesuré : icône 44 + écarts + actions 44 ne laissaient que 47 px au texte,
+     « 100 % » en fait 72. L'icône s'efface — l'ampoule répétait « Terrasse »
+     et l'interrupteur, et le ruban en bas dit déjà « lumière » — le texte
+     récupère 56 px. Au-delà de 240 px (iPad, bureau), rien ne change. */
+  @container (max-width: 239px) {
+    .tile-icon {
+      display: none;
+    }
+    .tile-body {
+      gap: 8px;
+      padding: 12px 12px 26px;
+    }
+    .tile-title {
+      flex-wrap: wrap;
+      row-gap: 2px;
+    }
+    .tile-pct {
+      font-size: 26px;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
