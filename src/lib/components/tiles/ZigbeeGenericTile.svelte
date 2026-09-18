@@ -6,9 +6,11 @@
 
   interface Props {
     device: ZigbeeDevice;
+    /** Membre de la carte « Interrupteurs » de /pieces — cf. la même prop de SwitchTile. */
+    grouped?: boolean;
   }
 
-  let { device }: Props = $props();
+  let { device, grouped = false }: Props = $props();
 
   const isCover = $derived(device.category === 'cover');
   const isSwitch = $derived(device.category === 'switch');
@@ -149,6 +151,7 @@
   <div
     class="generic-tile flex w-full flex-col items-center justify-center gap-1.5 rounded-[var(--radius-xl)] border px-3 py-2 sm:flex-row sm:justify-start sm:gap-3"
     class:opacity-50={!device.available}
+    class:grouped
     class:pulsing
     class:error={pulseError}
     style="background: var(--color-card); border-color: var(--color-border); --neon: {style.color}; --neon-glow: {style.glow}; --neon-mid: {style.mid}; --neon-soft: {style.soft};"
@@ -192,7 +195,10 @@
       >
         {pulseError ? 'Échec — réessayer' : displayName}
       </span>
-      <span class="hidden truncate text-[10px] sm:block" style="color: var(--color-muted-fg);">
+      <span
+        class="generic-sub hidden truncate text-[10px] sm:block"
+        style="color: var(--color-muted-fg);"
+      >
         {device.vendor} · {device.model}
       </span>
     </div>
@@ -203,6 +209,7 @@
     type="button"
     class="generic-tile flex w-full flex-col items-center justify-center gap-1.5 rounded-[var(--radius-xl)] border px-3 py-2 sm:flex-row sm:justify-start sm:gap-3 sm:text-left"
     class:opacity-50={!device.available}
+    class:grouped
     style="background: var(--color-card); border-color: var(--color-border); --neon: {style.color}; --neon-glow: {style.glow}; --neon-mid: {style.mid}; --neon-soft: {style.soft};"
     role="switch"
     aria-checked={isOn}
@@ -285,7 +292,7 @@
         {displayName}
       </span>
       <span
-        class="hidden text-[10px] font-semibold tracking-[0.04em] uppercase sm:block"
+        class="generic-state hidden text-[10px] font-semibold tracking-[0.04em] uppercase sm:block"
         style:color={isOn ? style.color : 'var(--color-muted-fg)'}
       >
         {isOn ? 'On' : 'Off'}
@@ -302,6 +309,7 @@
       oninput={(e) =>
         zigbee.setBrightness(device.friendlyName, +(e.currentTarget as HTMLInputElement).value)}
       class="brightness-range mt-2 hidden sm:block"
+      class:grouped
     />
   {/if}
 {/if}
@@ -356,6 +364,62 @@
       background-color var(--duration-normal) var(--ease-default),
       color var(--duration-normal) var(--ease-default),
       box-shadow var(--duration-normal) var(--ease-default);
+  }
+
+  /* ─── Puce de la carte « Interrupteurs » (dès l'iPad) — mêmes cotes que
+     SwitchTile, elles se côtoient dans la même grille. La ligne « fabricant ·
+     modèle » du portail et le curseur de luminosité n'ont pas leur place dans
+     une puce de 44 px : le premier est du jargon, le second prendrait une case
+     de la grille à lui seul. ─── */
+  @media (min-width: 768px) and (min-height: 600px) {
+    .generic-tile.grouped {
+      min-height: 44px;
+      gap: 8px;
+      padding: 6px 6px 6px 6px;
+      border-radius: var(--radius-lg);
+      background: var(--color-card-hover) !important;
+      box-shadow: none;
+    }
+    .generic-tile.grouped .generic-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-md);
+    }
+    /* Le nom peut passer sur DEUX lignes (« Sèche- / serviette ») plutôt que
+       d'être tronqué : c'est ce qui permet trois puces de front dans la colonne
+       du bureau (mesuré : 95 px pour « Sèche-serviette » à 12 px, 74 de place
+       sur une ligne). La ligne On/Off cède sa place — l'état se lit à l'icône
+       pleine et au liseré lumineux, comme sur iPhone. */
+    .generic-tile.grouped .generic-name {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+      white-space: normal;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+    .generic-tile.grouped .generic-state {
+      display: none;
+    }
+    .generic-tile.grouped .generic-icon svg {
+      width: 18px;
+      height: 18px;
+    }
+    .generic-tile.grouped .generic-sub,
+    .brightness-range.grouped {
+      display: none;
+    }
+    /* Liseré néon : `!important` car le `border-color` INLINE (celui qui fait
+       le verre de la tuile entière) l'emporterait — le halo seul, resserré,
+       ne suffit plus à lire « allumé » sur une puce. */
+    .generic-tile.grouped:is([aria-checked='true'], .pulsing) {
+      border-color: var(--neon) !important;
+      box-shadow: 0 0 12px var(--neon-soft);
+    }
+    .generic-tile.grouped:is([aria-checked='true'], .pulsing) .generic-icon {
+      box-shadow: 0 0 8px var(--neon-soft);
+    }
   }
 
   /* Vue iPhone : tuile ALLUMÉE (ou impulsion portail) = bouton coloré EN RELIEF.

@@ -6,9 +6,16 @@
 
   interface Props {
     sw: Switch;
+    /**
+     * Membre de la carte « Interrupteurs » de /pieces (RoomsPanel) : dès l'iPad,
+     * la tuile y perd son verre propre et prend le gabarit d'une puce. Sur
+     * iPhone le groupe n'existe pas (`display: contents`) et la tuile reste
+     * entière — d'où une bascule en CSS, pas un second rendu.
+     */
+    grouped?: boolean;
   }
 
-  let { sw }: Props = $props();
+  let { sw, grouped = false }: Props = $props();
 
   // Renommage d'affichage LOCAL à cette vue (n'affecte pas /energie, qui lit le
   // nom Matter réel via le store). Ex : « Bureau multimédia » → « Bureau ».
@@ -130,6 +137,7 @@
   type="button"
   class="switch-tile flex w-full flex-col items-center justify-center gap-1 rounded-[var(--radius-xl)] border px-3 py-2 sm:flex-row sm:justify-start sm:gap-3 sm:text-left"
   class:opacity-50={!sw.available}
+  class:grouped
   style="background: var(--color-card); border-color: var(--color-border); --neon: {style.color}; --neon-glow: {style.glow}; --neon-mid: {style.mid}; --neon-soft: {style.soft};"
   role="switch"
   aria-checked={displayedOn}
@@ -236,7 +244,7 @@
       {displayName}
     </span>
     <span
-      class="hidden text-[10px] font-semibold tracking-[0.04em] uppercase sm:block"
+      class="switch-state hidden text-[10px] font-semibold tracking-[0.04em] uppercase sm:block"
       style:color={displayedOn ? style.color : 'var(--color-muted-fg)'}
     >
       {displayedOn ? 'On' : 'Off'}
@@ -283,6 +291,57 @@
       background-color var(--duration-normal) var(--ease-default),
       color var(--duration-normal) var(--ease-default),
       box-shadow var(--duration-normal) var(--ease-default);
+  }
+
+  /* ─── Puce de la carte « Interrupteurs » (dès l'iPad, cf. prop `grouped`) ───
+     Pas de verre dans le verre : la carte commune porte le relief, la puce n'a
+     qu'un fond discret. 44 px de haut = la cible tactile, rien de moins. La
+     lueur « allumé » est resserrée — à 32 px elle bavait sur les voisines. */
+  @media (min-width: 768px) and (min-height: 600px) {
+    .switch-tile.grouped {
+      min-height: 44px;
+      gap: 8px;
+      padding: 6px 6px 6px 6px;
+      border-radius: var(--radius-lg);
+      background: var(--color-card-hover) !important;
+      box-shadow: none;
+    }
+    .switch-tile.grouped .switch-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-md);
+    }
+    /* Le nom peut passer sur DEUX lignes (« Sèche- / serviette ») plutôt que
+       d'être tronqué : c'est ce qui permet trois puces de front dans la colonne
+       du bureau (mesuré : 95 px pour « Sèche-serviette » à 12 px, 74 de place
+       sur une ligne). La ligne On/Off cède sa place — l'état se lit à l'icône
+       pleine et au liseré lumineux, comme sur iPhone. */
+    .switch-tile.grouped .switch-name {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+      white-space: normal;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+    .switch-tile.grouped .switch-state {
+      display: none;
+    }
+    .switch-tile.grouped .switch-icon svg {
+      width: 18px;
+      height: 18px;
+    }
+    /* Liseré néon : `!important` car le `border-color` INLINE (celui qui fait
+       le verre de la tuile entière) l'emporterait — le halo seul, resserré,
+       ne suffit plus à lire « allumé » sur une puce. */
+    .switch-tile.grouped[aria-checked='true'] {
+      border-color: var(--neon) !important;
+      box-shadow: 0 0 12px var(--neon-soft);
+    }
+    .switch-tile.grouped[aria-checked='true'] .switch-icon {
+      box-shadow: 0 0 8px var(--neon-soft);
+    }
   }
 
   /* Vue iPhone : tuile ALLUMÉE = bouton coloré EN RELIEF (verre bombé, lumière haut-gauche).

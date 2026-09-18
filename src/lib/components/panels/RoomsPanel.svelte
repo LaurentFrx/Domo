@@ -321,51 +321,54 @@
         </div>
       {/if}
 
-      <!-- ═══ Vue condensée — Ligne 1 : Bureau / Chargeur / Atelier / Spot / Portail ═══ -->
-      <!-- Toutes les commandes « un appui, un état » sur une seule ligne : elles se
-         lisent d'un coup d'œil. Les deux lumières (Atelier, Spot terrasse) sont
-         côte à côte. Les libellés sont déjà tronqués proprement dans les tuiles
-         (`truncate`), ce qui tient sur un iPhone étroit. -->
-      {#if quickTiles > 0}
-        <!-- Une ligne de N tuiles sur iPhone ; 2 colonnes dès l'iPad, où la tuile
-             passe en format horizontal (icône + libellé + état) et a besoin de
-             ~240 px pour ne pas tronquer « Chargeur Lau ». `min-w-0` : sans lui
-             l'item déborde de sa colonne (min-width auto = min-content). -->
+      <!-- ═══ Interrupteurs — Bureau / Chargeur / Atelier / Spot / Portail, puis
+           le reste (sèche-serviette…) ═══
+           Dès l'iPad : UNE carte, en puces de 44 px (18/09/2026). Chaque commande
+           « un appui, un état » était une carte de 64 px à elle seule — cinq cartes
+           pour cinq boutons, 200 px de colonne au tableau de bord.
+           Sur iPhone la carte n'existe pas (`contents`) : la ligne de tuiles et la
+           grille du reste retombent dans le flux, telles qu'avant. Le même montage
+           sert aux deux (pas de `hidden`/`pad:hidden`) ; les tuiles savent qu'elles
+           sont groupées (`grouped`) et ne changent de gabarit qu'avec la carte. -->
+      {#if quickTiles > 0 || restSwitches.length > 0 || restOthers.length > 0}
         <div
-          class={column
-            ? 'grid min-w-0 grid-cols-2 gap-2.5'
-            : 'pad:grid-cols-2 grid min-w-0 grid-cols-[repeat(var(--qt),minmax(0,1fr))] gap-2.5 sm:gap-3'}
-          style="--qt: {quickTiles};"
+          class="pad:grid pad:grid-cols-[repeat(auto-fit,minmax(108px,1fr))] pad:gap-1.5 pad:rounded-[var(--radius-xl)] pad:border pad:p-2 contents min-w-0"
+          style="background: var(--color-card); border-color: var(--color-border);"
+          aria-label="Interrupteurs"
         >
-          {#if bureauSwitch}<SwitchTile sw={bureauSwitch} />{/if}
-          {#if chargeurSwitch}<SwitchTile sw={chargeurSwitch} />{/if}
-          {#if atelierDevice}<ZigbeeGenericTile device={atelierDevice} />{/if}
-          {#if terraceSpot}<SwitchTile sw={terraceSpot} />{/if}
-          {#if portailDevice}<ZigbeeGenericTile device={portailDevice} />{/if}
-        </div>
-      {/if}
+          {#if quickTiles > 0}
+            <!-- iPhone : une ligne de N tuiles (N = tuiles réellement présentes —
+                 une classe fixe laisserait un trou ou ferait déborder la 5ᵉ). -->
+            <div
+              class="pad:contents grid min-w-0 grid-cols-[repeat(var(--qt),minmax(0,1fr))] gap-2.5 sm:gap-3"
+              style="--qt: {quickTiles};"
+            >
+              {#if bureauSwitch}<SwitchTile sw={bureauSwitch} grouped />{/if}
+              {#if chargeurSwitch}<SwitchTile sw={chargeurSwitch} grouped />{/if}
+              {#if atelierDevice}<ZigbeeGenericTile device={atelierDevice} grouped />{/if}
+              {#if terraceSpot}<SwitchTile sw={terraceSpot} grouped />{/if}
+              {#if portailDevice}<ZigbeeGenericTile device={portailDevice} grouped />{/if}
+            </div>
+          {/if}
 
-      <!-- ═══ Reste : sèche-serviette (iPad), autres switches/lumières Zigbee ═══ -->
-      {#if restSwitches.length > 0 || restOthers.length > 0}
-        <div
-          class={column
-            ? 'grid min-w-0 grid-cols-2 gap-2.5'
-            : 'pad:grid-cols-2 grid min-w-0 grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-3'}
-        >
-          {#each restSwitches as sw (sw.nodeId)}
-            {#if sw.nodeId === 1}
-              <!-- Sèche-serviette : doublon avec la carte « Salle de bain » (/climat) +
-                   piloté par le daemon → masqué sur iPhone, gardé sur iPad/desktop. -->
-              <div class="hidden sm:block">
-                <SwitchTile {sw} />
-              </div>
-            {:else}
-              <SwitchTile {sw} />
-            {/if}
-          {/each}
-          {#each restOthers as device (device.ieee)}
-            <ZigbeeGenericTile {device} />
-          {/each}
+          {#if restSwitches.length > 0 || restOthers.length > 0}
+            <div class="pad:contents grid min-w-0 grid-cols-2 gap-2.5 sm:gap-3">
+              {#each restSwitches as sw (sw.nodeId)}
+                {#if sw.nodeId === 1}
+                  <!-- Sèche-serviette : doublon avec la carte « Salle de bain » (/climat) +
+                       piloté par le daemon → masqué sur iPhone, gardé sur iPad/desktop. -->
+                  <div class="hidden min-w-0 sm:block">
+                    <SwitchTile {sw} grouped />
+                  </div>
+                {:else}
+                  <SwitchTile {sw} grouped />
+                {/if}
+              {/each}
+              {#each restOthers as device (device.ieee)}
+                <ZigbeeGenericTile {device} grouped />
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
 
