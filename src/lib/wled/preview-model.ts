@@ -441,3 +441,30 @@ export function vividTint(rgb: RGB): RGB {
 
 /** Teinte de repli quand il n'y a aucune couleur à normaliser (ruban à zéro). */
 const WARM_FALLBACK: RGB = [255, 223, 191];
+
+const toLinear = (c: number): number => {
+  const v = c / 255;
+  return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+};
+const toSrgb = (v: number): number =>
+  Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055));
+
+/**
+ * Couleur de la LUMIÈRE d'une LED RGBW : la teinte RGB et la puce blanche
+ * (`whiteRef`, le 4000K du ruban) mélangées comme de la lumière — en LINÉAIRE —
+ * puis ramenées à pleine luminance. Le niveau n'est PAS dans la couleur : il se
+ * lit à l'intensité, à part.
+ *
+ * Pourquoi pas `effectiveColor` : l'addition en sRGB sature. Un ambre
+ * [255,150,40] + blanc 255 y donne du blanc pur — la chaleur disparaît, c'est
+ * ce qui rendait la tuile grise. Ici : [255,191,143], le blanc chaud qu'on voit
+ * sur la terrasse. Même raison pour ne pas se fier à l'aperçu direct du module
+ * quand le blanc est allumé : WLED y AJOUTE le blanc à chaque canal (qadd8).
+ */
+export function lightColor(col: RGB, white: number, whiteRef: RGB): RGB {
+  const w = white / 255;
+  const lin = [0, 1, 2].map((i) => toLinear(col[i]) + toLinear(whiteRef[i]) * w);
+  const mx = Math.max(...lin);
+  if (mx <= 0) return [...WARM_FALLBACK];
+  return lin.map((v) => toSrgb(v / mx)) as RGB;
+}

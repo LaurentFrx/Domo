@@ -36,8 +36,11 @@ class WledLedsStore {
   }
 
   /**
-   * Couleur d'une LED (index physique) — `null` hors trame. Le canal blanc est
-   * déjà fondu dans le RGB par le firmware : c'est la couleur vue.
+   * Couleur d'une LED (index physique) — `null` hors trame. ⚠️ Le firmware
+   * AJOUTE le canal blanc à chaque canal (`qadd8(w, c)`) : dès que le blanc est
+   * allumé, la couleur sature vers le blanc et n'est PAS la couleur vue (un
+   * ambre + blanc arrive en blanc pur). La tuile de /pieces ne s'en sert donc
+   * que pour les lignes sans blanc ; cf. `lightColor` (preview-model).
    */
   led(i: number): [number, number, number] | null {
     const f = this.frame;

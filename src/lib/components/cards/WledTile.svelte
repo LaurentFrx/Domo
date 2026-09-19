@@ -1,22 +1,24 @@
 <script lang="ts">
   /**
-   * Carte « Terrasse » — surface par défaut sur /pieces. Le ruban WLED, bloc
-   * `.tile-light` : la tuile EST la lumière, son fond se remplit de la couleur
-   * réelle du ruban sur la largeur = la luminosité. Tout le réglage fin vit
-   * dans la feuille (WledSheet). Le spot de la terrasse, lui, est une tuile
-   * ordinaire sur la ligne des commandes rapides de /pieces — il n'a ni niveau
-   * ni réglages, il n'a rien à faire dans cette carte.
+   * Carte « Terrasse » — surface par défaut sur /pieces. Le ruban WLED : la
+   * tuile montre les LIGNES DE LED elles-mêmes, une par ligne, dans la couleur
+   * que la terrasse voit vraiment (teinte + blanc 4000K mélangés comme de la
+   * lumière, cf. `lightColor`), et la lueur qu'elles jettent sur la carte. Tout
+   * le réglage fin vit dans la feuille (WledSheet).
    *
-   * Le panneau de contrôle empilé (barre héros + luminosité + scènes + styles
-   * musicaux + accordéon de réglages) coûtait 5 à 7 rangées au milieu d'une
-   * page déjà dense ; le ruban se résume désormais à UN objet.
-   *
-   * ⚠️ Les couches lumineuses et la surface de geste sont en `inset: 0` sur
-   * `.tile-light`, PAS sur la carte : c'est ce qui borne le glissé de
-   * luminosité et le lavage coloré au bloc du ruban.
+   * Refonte du 19/09/2026 (Laurent : « trop d'infos inutiles, très moche
+   * allumée, ne montre pas les lumières en service ni la température de
+   * couleur »). L'ancienne tuile peignait la carte entière de l'aperçu direct
+   * du module — que WLED BLANCHIT dès que le canal blanc est allumé (il ajoute
+   * le blanc à chaque canal : un ambre + blanc arrivait en blanc pur) —, puis
+   * la voilait de bleu nuit sous le texte : gris à gauche, olive à droite.
+   * Surtitre, nom d'appareil, nom d'effet et gros pourcentage sont partis : il
+   * reste le lieu, l'interrupteur, les réglages, et la lumière.
    *
    * Gestes (façon Maison iOS, mais à l'HORIZONTALE — le ruban est horizontal) :
-   *   - glissé HORIZONTAL sur la tuile → luminosité, en direct ;
+   *   - glissé HORIZONTAL sur la tuile → luminosité, RELATIF au point de départ
+   *     (plus de jauge sous le doigt pour viser une position absolue) ; le
+   *     pourcentage s'affiche le temps du geste ;
    *   - tap (moins de 6 px de déplacement) → ouvre la feuille de réglages ;
    *   - l'interrupteur et le bouton Réglages restent des cibles à part.
    * `touch-action: pan-y` rend explicitement le défilement vertical de la page
@@ -28,7 +30,7 @@
    * sonore serveur (var CSS `--mvol` en rAF, hors réactivité Svelte). Gated
    * `animationsEnabled` + `prefers-reduced-motion`, en pause en arrière-plan.
    */
-  import { wled, previewColor, type RGB } from '$stores/wled.svelte';
+  import { wled, WHITE_4000K, type RGB } from '$stores/wled.svelte';
   import { wledMusic } from '$stores/wledMusic.svelte';
   import { wledLeds } from '$stores/wledLeds.svelte';
   import { ledStrip } from '$lib/wled/led-strip';
@@ -36,6 +38,7 @@
   import {
     averageOfStops,
     familyOf,
+    lightColor,
     paintStops,
     stateLabel,
     stopsToCss,
@@ -50,10 +53,10 @@
   }
   let { onopen }: Props = $props();
 
-  // ─── Modèle d'affichage ────────────────────────────────────────────────
-  // Une tuile = UN résumé : on peint la ligne la plus longue effectivement
-  // allumée (à défaut, la plus longue tout court). Les lignes se détaillent
-  // dans la feuille, pas ici.
+  // ─── Ligne « dominante » ───────────────────────────────────────────────
+  // La plus longue effectivement allumée (à défaut, la plus longue tout
+  // court). Chaque ligne est DESSINÉE à part plus bas ; celle-ci ne sert plus
+  // qu'à l'état musique (légende, lueur qui respire).
   const dominant = $derived.by(() => {
     const segs = wled.segments;
     if (!segs.length) return null;
@@ -96,40 +99,42 @@
   });
   const motionOn = $derived(preferences.animationsEnabled && !reducedMotion);
 
-  // Aperçu LED temps réel : la tuile montre le ruban ENTIER (les deux lignes
-  // bout à bout), avec les couleurs que le firmware sort vraiment. Une seule
-  // connexion montante pour toute la maison, suspendue en arrière-plan.
+  // Flux direct du module (couleur de chaque LED), refcounté et suspendu en
+  // arrière-plan. Il ne sert qu'aux lignes SANS canal blanc : avec du blanc,
+  // WLED l'ajoute à chaque canal de l'aperçu (qadd8) et tout vire au blanc.
   $effect(() => {
     wledLeds.open();
     return () => wledLeds.close();
   });
-  /** Le direct est-il exploitable ? (sinon : rendu calculé, inchangé) */
-  const live = $derived(wledLeds.active && wled.on && (dominant?.on ?? false));
 
-  const model = $derived.by(() => {
-    const seg = dominant;
-    if (!seg) {
-      return {
-        lit: false,
-        paint: 'transparent',
-        paintSize: '100% 100%',
-        glow: '0 0 0',
-        anim: '',
-        animDur: 0,
-        sweep: false,
-        spotDur: 0,
-        spotPaint: 'transparent',
-        label: wled.connected ? 'Aucun segment configuré' : 'Connexion au module LED…'
-      };
-    }
+  // ─── Une ligne de LED = un ruban dessiné ───────────────────────────────
+  interface Strip {
+    id: number;
+    start: number;
+    len: number;
+    lit: boolean;
+    /** Aperçu direct fidèle pour cette ligne (pas de canal blanc). */
+    live: boolean;
+    paint: string;
+    paintSize: string;
+    glow: RGB;
+    anim: string;
+    animDur: number;
+    sweep: boolean;
+    spotDur: number;
+    spotPaint: string;
+  }
+
+  function stripOf(seg: (typeof wled.segments)[number]): Strip {
     const lit = wled.on && seg.on;
     const fxName = wled.effects[seg.fx] ?? 'Solid';
     const palName = wled.palettes[seg.pal] ?? 'Default';
-    // Les couleurs que le ruban sort VRAIMENT : celles que le firmware publie
-    // pour cette palette, les couleurs de la ligne quand la palette s'y réfère
-    // (`c1`/`c2`/`c3`), ou rien du tout quand l'effet ignore la palette. La
-    // couleur 1 est passée EFFECTIVE (teinte + canal blanc) : le ruban est le
-    // plus souvent en blanc 4000K pur, dont la teinte brute est noire.
+    // La couleur de la LUMIÈRE : teinte + blanc 4000K mélangés en linéaire, à
+    // pleine luminance. C'est elle qui porte la température de couleur.
+    const light = lightColor(seg.col, seg.white, WHITE_4000K);
+    // Les couleurs que le ruban sort VRAIMENT quand l'effet/la palette est
+    // multicolore (couleurs publiées par le firmware, `c1`/`c2`/`c3` de la
+    // ligne), sinon `null` = la couleur de la ligne.
     const stops = lit
       ? paintStops({
           fxName,
@@ -137,26 +142,22 @@
           palIndex: seg.pal,
           fxPalIndex: wled.fxDefaultPal[seg.fx],
           palettes: wled.paletteColors,
-          c1: previewColor(seg.col, seg.white),
+          c1: light,
           c2: seg.col2,
           c3: seg.col3
         })
       : null;
-    // Sinon la TEINTE du segment, remontée à pleine luminance (`vividTint`) :
-    // le niveau est porté par la largeur et la lueur, pas par la couleur.
-    const tint = vividTint(previewColor(seg.col, seg.white));
-    const glow = stops ? vividTint(averageOfStops(stops)) : tint;
-    const whiteOnly = seg.col[0] === 0 && seg.col[1] === 0 && seg.col[2] === 0 && seg.white > 0;
+    // Lueur : la couleur de la lumière telle quelle — la « raviver » tordrait
+    // justement sa température. Seule la moyenne d'un dégradé, grisâtre par
+    // nature, est remontée en teinte.
+    const glow = stops ? vividTint(averageOfStops(stops)) : light;
+    const live = wledLeds.active && lit && seg.white === 0;
 
     // ─── Le MOUVEMENT de l'effet ────────────────────────────────────────
-    // Même vocabulaire que la barre de la feuille (`familyOf`) : une tuile qui
-    // peindrait un « Feu » ou un « Balayage » en image fixe montrerait des
-    // couleurs justes sur un ruban qui, lui, bouge. Vitesse dérivée de `sx`,
-    // comme le module. Sans mouvement (préférence Animations OFF, réduction
-    // système), tout reste en famille « solid » : couleurs justes, image fixe,
-    // dégradé COMPLET — ni classe d'animation, ni version bouclée.
-    // En direct, les couleurs bougent d'elles-mêmes : toute animation CSS
-    // par-dessus ferait défiler une image qui défile déjà (double mouvement).
+    // Même vocabulaire que la barre de la feuille (`familyOf`). Sans
+    // mouvement (préférence Animations OFF, réduction système), tout reste en
+    // famille « solid » : couleurs justes, image fixe, dégradé COMPLET. En
+    // direct, les couleurs bougent d'elles-mêmes : pas d'animation par-dessus.
     const family = lit && motionOn && !live ? familyOf(fxName, stops) : 'solid';
     const speed = seg.sx / 255;
     let anim = '';
@@ -177,73 +178,73 @@
       spotDur = +(5 - speed * 3.8).toFixed(1);
     }
     // Le dégradé qui défile doit BOUCLER : wrapStops rejoue le premier arrêt à
-    // la fin (en comprimant le reste pour lui faire une vraie place) et on
-    // peint sur deux largeurs, sinon la couture saute à chaque tour.
+    // la fin et on peint sur deux largeurs, sinon la couture saute à chaque tour.
     const loop = anim === 'anim-scroll' && stops;
-    const spotTint: RGB = [
+    const spot: RGB = [
       Math.min(255, glow[0] + 110),
       Math.min(255, glow[1] + 110),
       Math.min(255, glow[2] + 110)
     ];
-
-    // Une ligne éteinte pendant que l'autre éclaire est invisible sur une
-    // tuile-résumé : le dire, sinon l'utilisateur croit tout allumé.
-    const offLines = wled.on ? wled.segments.filter((s) => !s.on).length : 0;
-    const lines = offLines
-      ? `${offLines} ligne${offLines > 1 ? 's' : ''} éteinte${offLines > 1 ? 's' : ''}`
-      : '';
-    // Ruban coupé : l'interrupteur ET le « 0 % » le disent déjà — un « Éteint »
-    // écrit en toutes lettres serait la troisième fois. On ne garde ici que ce
-    // qu'aucune autre partie de la tuile ne porte : l'effet en cours, et le
-    // nombre de lignes restées éteintes alors que le reste éclaire.
-    // Deux rubans, un seul sur la musique : le dire, plutôt que laisser croire
-    // que toute la terrasse danse (ou qu'aucune ne le fait).
-    const partial =
-      musicLines > 0 && musicLines < wled.segments.length
-        ? `Musique · ${musicLines} ruban${musicLines > 1 ? 's' : ''} sur ${wled.segments.length}`
-        : '';
-    const label = !wled.on
-      ? ''
-      : lit
-        ? [partial || stateLabel({ on: true, fxName, whiteOnly, music }), lines]
-            .filter(Boolean)
-            .join(' · ')
-        : lines;
-
     return {
+      id: seg.id,
+      start: seg.start,
+      len: seg.len,
       lit,
+      live,
       paint: stops
         ? `linear-gradient(90deg, ${stopsToCss(loop ? wrapStops(stops) : stops)})`
-        : `linear-gradient(90deg, rgb(${tint.join(' ')}), rgb(${tint.join(' ')}))`,
+        : `rgb(${light.join(' ')})`,
       paintSize: loop ? '200% 100%' : '100% 100%',
-      glow: glow.join(' '),
+      glow,
       anim,
       animDur,
       sweep,
       spotDur,
-      spotPaint: `linear-gradient(90deg, transparent, rgb(${spotTint.join(' ')}) 50%, transparent)`,
-      label
+      spotPaint: `linear-gradient(90deg, transparent, rgb(${spot.join(' ')}) 50%, transparent)`
     };
+  }
+
+  // Ordre PHYSIQUE (ligne 1 en haut) : c'est l'ordre du ruban.
+  const strips = $derived([...wled.segments].sort((a, b) => a.start - b.start).map(stripOf));
+  const anyLit = $derived(strips.some((s) => s.lit));
+  /** Couleur de la lueur sur la carte : la moyenne des lignes allumées. */
+  const washRgb = $derived.by(() => {
+    const on = strips.filter((s) => s.lit);
+    if (!on.length) return '0 0 0';
+    const sum = on.reduce(
+      (a, s) => [a[0] + s.glow[0], a[1] + s.glow[1], a[2] + s.glow[2]],
+      [0, 0, 0]
+    );
+    return sum.map((c) => Math.round(c / on.length)).join(' ');
+  });
+
+  // Légende : seulement ce que la lumière ne dit pas d'elle-même. Le nom de
+  // l'effet (« Couleur fixe ») est parti — l'effet se VOIT sur les rubans ;
+  // une ligne éteinte aussi (son ruban reste noir). Reste le mode Musique,
+  // dont l'état (en pause, en attente de lecture…) ne se devine pas.
+  const label = $derived.by(() => {
+    if (!dominant) return wled.connected ? 'Aucun segment configuré' : 'Connexion au module LED…';
+    if (!wled.on || musicLines === 0) return '';
+    // Deux rubans, un seul sur la musique : le dire, plutôt que laisser croire
+    // que toute la terrasse danse.
+    if (musicLines < wled.segments.length)
+      return `Musique · ${musicLines} ruban${musicLines > 1 ? 's' : ''} sur ${wled.segments.length}`;
+    return stateLabel({ on: true, fxName: 'Solid', whiteOnly: false, music });
   });
 
   // Badge d'état SEULEMENT si anormal — « connecté » est l'état attendu.
   const abnormal = $derived(!wled.connected ? 'Hors ligne' : wled.isMock ? 'Démo' : null);
 
-  // Le mouvement est arbitré DANS le modèle (motionOn) : classes d'animation
-  // ET forme du dégradé vont ensemble. Seule la pause en arrière-plan reste en
-  // CSS (.paused), pour ne pas reconstruire le modèle à chaque visibilité.
-
   // ─── Luminosité : niveau affiché (optimiste pendant le glissé) ─────────
   const briPct = $derived(Math.round((wled.bri / 255) * 100));
   let dragging = $state(false);
   let dragPct = $state(0);
-  /* Éteinte, la tuile affiche « 0 % » — pas la dernière luminosité mémorisée
-     par le module : le mot « Éteint » a été retiré au motif que l'interrupteur
-     et le 0 % portent l'état, ce chiffre doit donc être VRAI. `briPct` reste
-     la valeur de reprise interne (glissé, flèches clavier). */
-  const shownPct = $derived(dragging ? dragPct : model.lit ? briPct : 0);
-  /** Largeur du remplissage : 0 quand c'est éteint (la tuile s'éteint vraiment). */
-  const fillPct = $derived(model.lit ? shownPct : 0);
+  /* Éteinte, la valeur annoncée est 0 — pas la dernière luminosité mémorisée
+     par le module. `briPct` reste la valeur de reprise interne (glissé,
+     flèches clavier). */
+  const shownPct = $derived(dragging ? dragPct : anyLit ? briPct : 0);
+  /** Intensité de la lumière dessinée : 0 quand c'est éteint. */
+  const level = $derived(anyLit ? shownPct : 0);
 
   // ─── Glissé horizontal = luminosité ────────────────────────────────────
   const SLOP = 6; // px avant de trancher entre « tap », « scroll » et « glissé »
@@ -253,11 +254,16 @@
   let startX = 0;
   let startY = 0;
   let lastSent = 0;
+  /** Point d'accroche du glissé : niveau et abscisse au moment où il a été tranché. */
+  let dragBase = 0;
+  let dragX0 = 0;
 
+  /** Niveau RELATIF : la largeur de la tuile = 100 points, depuis l'accroche. */
   function pctFromX(clientX: number): number {
     const r = surfEl?.getBoundingClientRect();
     if (!r || r.width === 0) return shownPct;
-    return Math.max(0, Math.min(100, Math.round(((clientX - r.left) / r.width) * 100)));
+    const pct = dragBase + ((clientX - dragX0) / r.width) * 100;
+    return Math.max(0, Math.min(100, Math.round(pct)));
   }
 
   function send(pct: number, force = false): void {
@@ -294,6 +300,8 @@
       }
       dragging = true;
       dragPct = briPct;
+      dragBase = briPct;
+      dragX0 = e.clientX;
       surfEl?.setPointerCapture(e.pointerId);
       haptic('light'); // accroche du slider, comme en natif
     }
@@ -360,7 +368,7 @@
   // qu'un style global réactif traîne) — sinon l'écran et le ruban racontent
   // deux histoires différentes.
   const pulsing = $derived(
-    model.lit &&
+    anyLit &&
       dominant !== null &&
       wledMusic.reactiveFor(dominant.id) &&
       wledMusic.playing &&
@@ -393,53 +401,50 @@
 <div
   bind:this={tileEl}
   class="tile"
-  class:lit={model.lit}
+  class:lit={anyLit}
   class:dragging
   class:paused={hidden}
-  style="background: var(--color-card); border-color: var(--color-border); --lvl: {fillPct}%; --lvlf: {fillPct /
-    100}; --paint: {model.paint}; --paint-size: {model.paintSize}; --glow: {model.glow};"
+  style="background: var(--color-card); border-color: var(--color-border); --lvlf: {level /
+    100}; --glow: {washRgb};"
 >
-  <!-- ═══ LEDS — le ruban. Toutes les couches lumineuses et la surface de
-       geste sont bornées à CE bloc : sans lui, le glissé de luminosité
-       s'étendrait sous la rangée Spot et le lavage la déborderait. ═══ -->
+  <!-- Toutes les couches lumineuses et la surface de geste sont bornées à CE
+       bloc (`inset: 0`). -->
   <div class="tile-light">
-    <!-- Lueur ambiante : c'est la lumière qui déborde de la tuile. -->
+    <!-- La lumière que les lignes jettent sur la carte : c'est elle qui dit
+         « allumé », depuis le bas où sont les rubans. -->
     <div class="tile-glow" aria-hidden="true"></div>
-    <!-- Lavage : peinture pleine largeur RÉVÉLÉE jusqu'au niveau (masque) — le
-       dégradé reste ancré à la tuile au lieu d'être comprimé par la largeur.
-       Le masque et l'opacité restent sur le cadre, le MOUVEMENT est porté par
-       la couche interne : une animation d'opacité sur le cadre écraserait le
-       dosage qui garde le texte lisible. -->
-    <div class="tile-paint" aria-hidden="true">
-      {#if live}
-        <!-- Les VRAIES LED du ruban entier, une par une. -->
-        <canvas class="tile-paint-leds" use:ledStrip={{ start: 0, len: wled.total || 1 }}></canvas>
-      {:else}
+    <div class="tile-wash" aria-hidden="true"></div>
+
+    <!-- LES LIGNES DE LED : un ruban par ligne, dans l'ordre physique. Éteinte,
+         une ligne reste un trait sombre — on voit ce qui est en service. -->
+    <div class="tile-strips" aria-hidden="true">
+      {#each strips as s (s.id)}
         <div
-          class="tile-paint-fill {model.anim}"
-          style="animation-duration: {model.animDur}s;"
-        ></div>
-      {/if}
-      {#if model.sweep}
-        <!-- Effets de balayage : le point qui traverse. Clippé par la tuile.
-           N'existe que si le mouvement est permis (arbitré dans le modèle). -->
-        <div
-          class="tile-spot"
-          style="background: {model.spotPaint}; animation-duration: {model.spotDur}s;"
-        ></div>
-      {/if}
-    </div>
-    <!-- Voile de lisibilité : la couleur étant désormais rendue pleine, le texte
-       ne peut plus compter sur un fond de carte neutre. Le voile ne couvre que
-       la colonne de gauche (texte) et s'efface avant le tiers droit, qui reste
-       en couleur pure. -->
-    <div class="tile-scrim" aria-hidden="true"></div>
-    <!-- LE RUBAN : la lecture précise du niveau. Un lavage translucide sur fond
-       sombre donne un brun sale, jamais « de la lumière » ; ce trait-là, lui,
-       est vif et bloomé — c'est lui qui dit « allumé ». -->
-    <div class="tile-bar" aria-hidden="true">
-      <div class="tile-bar-fill {model.anim}" style="animation-duration: {model.animDur}s;"></div>
-      <div class="tile-bar-tip"></div>
+          class="strip"
+          class:on={s.lit}
+          class:live={s.live}
+          style="--sglow: {s.glow.join(' ')};"
+        >
+          <div class="strip-light">
+            {#if s.live}
+              <!-- Les VRAIES LED de la ligne, une par une (lignes sans blanc). -->
+              <canvas class="strip-leds" use:ledStrip={{ start: s.start, len: s.len }}></canvas>
+            {:else}
+              <div
+                class="strip-fill {s.anim}"
+                style="--paint: {s.paint}; --paint-size: {s.paintSize}; animation-duration: {s.animDur}s;"
+              ></div>
+            {/if}
+            {#if s.sweep}
+              <!-- Effets de balayage : le point qui traverse la ligne. -->
+              <div
+                class="strip-spot"
+                style="background: {s.spotPaint}; animation-duration: {s.spotDur}s;"
+              ></div>
+            {/if}
+          </div>
+        </div>
+      {/each}
     </div>
 
     <!-- Surface de geste : glissé = luminosité, tap = feuille. `data-no-haptic`
@@ -465,30 +470,9 @@
     ></div>
 
     <div class="tile-body">
-      <span class="tile-icon" aria-hidden="true">
-        <svg
-          width="22"
-          height="22"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.75"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <path d="M9 18h6" />
-          <path d="M10 22h4" />
-          <path d="M12 2a7 7 0 0 1 4 12.8c-.6.5-1 1.2-1 2v1H9v-1c0-.8-.4-1.5-1-2A7 7 0 0 1 12 2z" />
-        </svg>
-      </span>
-
       <div class="tile-text">
-        <!-- La carte regroupe les deux lumières de la terrasse : le lieu passe
-           en surtitre, les noms des appareils (« LEDS », « Spot ») deviennent
-           les titres — sinon les deux rangées n'ont plus d'identité propre. -->
-        <span class="tile-eyebrow">Terrasse</span>
         <span class="tile-title">
-          LEDS
+          Terrasse
           {#if abnormal}
             <span
               class="tile-badge"
@@ -498,12 +482,9 @@
             </span>
           {/if}
         </span>
-        {#if model.label}
-          <span class="tile-state">{model.label}</span>
+        {#if label}
+          <span class="tile-state">{label}</span>
         {/if}
-        <span class="tile-pct tabular-nums" class:off={!wled.on}>
-          {shownPct}<span class="tile-pct-unit"> %</span>
-        </span>
       </div>
 
       <div class="tile-actions">
@@ -544,27 +525,20 @@
         </button>
       </div>
     </div>
+
+    <!-- Le niveau ne s'écrit que pendant le glissé : au repos, il se lit à
+         l'intensité de la lumière. -->
+    <span class="tile-drag tabular-nums" aria-hidden="true">
+      {shownPct}<span class="tile-drag-unit"> %</span>
+    </span>
   </div>
 </div>
 
 <style>
-  /* --lvl ENREGISTRÉE pour être interpolable : un masque, un dégradé ou un
-     `left` qui en dépendent ne s'animent pas d'eux-mêmes (mask-image et
-     background s'animent en mode DISCRET — les lister dans une transition est
-     sans effet). En transitionnant la VARIABLE, tout ce qui la lit — masques
-     de niveau, lueur, tête du ruban — glisse d'un même mouvement. iOS ≥ 16.4,
-     en deçà le niveau saute (dégradation acceptable). */
-  @property --lvl {
-    syntax: '<percentage>';
-    inherits: true;
-    initial-value: 0%;
-  }
-
   .tile {
     position: relative;
     /* Colonne à un seul enfant : si la grille étire la tuile (voisine plus
-       haute — l'imprimante sur /pieces), le bloc LEDS suit, et avec lui le
-       lavage et la surface de geste. */
+       haute — l'imprimante sur /pieces), le bloc lumineux suit. */
     display: flex;
     flex-direction: column;
     /* La tuile se taille sur SA largeur (cf. « Tuile étroite » plus bas). */
@@ -575,84 +549,118 @@
     border-radius: var(--radius-2xl);
     /* Repos neutre quand la musique ne pilote pas la lueur. */
     --mvol: 0.5;
-    transition: --lvl var(--duration-normal) var(--ease-default);
   }
-  /* Bloc LEDS : le référent de position de TOUTES les couches lumineuses
-     (elles sont en `inset: 0`) et de la surface de geste. La rangée Spot vit
-     hors de lui, donc hors du lavage et hors du glissé de luminosité. */
   .tile-light {
     position: relative;
     flex: 1;
     min-height: 128px;
   }
-  /* Pendant le glissé, le niveau suit le doigt SANS interpolation. */
-  .tile.dragging {
-    transition: none;
-  }
 
-  /* ─── Couches lumineuses ─────────────────────────────────────────────── */
-  /* Lueur ambiante : elle déborde du niveau, comme une vraie source. */
+  /* ─── La lumière sur la carte ────────────────────────────────────────── */
+  /* Lueur ambiante, depuis le bas où sont les rubans. Elle respire avec la
+     musique (--mvol) et suit le niveau (--lvlf) : une lampe à 5 % doit être
+     faible. Sans musique --mvol vaut 0.5 → facteur 1. */
   .tile-glow {
     position: absolute;
-    inset: -40% -10%;
-    background: radial-gradient(
-      60% 90% at calc(var(--lvl) * 0.85) 50%,
-      rgb(var(--glow) / 0.5),
-      transparent 70%
-    );
+    inset: -10% -10% -40%;
+    background: radial-gradient(70% 60% at 50% 100%, rgb(var(--glow) / 0.55), transparent 72%);
     opacity: 0;
-    /* Le déplacement de la lueur suit --lvl (transitionnée sur .tile) ;
-       `background` s'anime en discret, le lister ici serait sans effet. */
     transition: opacity var(--duration-normal) var(--ease-default);
     pointer-events: none;
   }
   .tile.lit .tile-glow {
-    /* Le NIVEAU se lit aussi dans l'intensité (une lampe à 5 % doit être
-       faible, pas juste étroite). Sans musique --mvol vaut 0.5 → facteur 1 :
-       la lueur ne dépend du son que si la boucle rAF alimente la variable. */
-    opacity: calc((0.18 + var(--lvlf) * 0.5) * (0.55 + var(--mvol) * 0.9));
+    opacity: calc((0.3 + var(--lvlf) * 0.7) * (0.55 + var(--mvol) * 0.9));
   }
-
-  /* Peinture du ruban, ancrée à la tuile et révélée jusqu'au niveau. */
-  .tile-paint {
+  /* Le lavage : la couleur réelle de la lumière, franche au ras des rubans,
+     qui s'éteint en montant — le haut de la carte (le texte) reste sur le
+     verre, lisible dans les deux thèmes sans voile. */
+  .tile-wash {
     position: absolute;
     inset: 0;
+    background: linear-gradient(
+      to top,
+      rgb(var(--glow) / 0.42) 0%,
+      rgb(var(--glow) / 0.16) 45%,
+      transparent 80%
+    );
     opacity: 0;
-    /* La couleur tient FRANCHE sur l'essentiel de la zone allumée, puis se
-       dissout sur la fin : un rectangle net à la coupe se lirait « barre de
-       progression », mais une dissolution trop précoce délaverait justement
-       les teintes qu'on veut montrer. La lecture exacte du niveau, c'est le
-       ruban. */
-    -webkit-mask-image: linear-gradient(
-      90deg,
-      #000 0,
-      #000 calc(var(--lvl) * 0.72),
-      transparent var(--lvl)
-    );
-    mask-image: linear-gradient(
-      90deg,
-      #000 0,
-      #000 calc(var(--lvl) * 0.72),
-      transparent var(--lvl)
-    );
-    /* Le masque suit --lvl (transitionnée sur .tile) ; mask-image s'anime en
-       discret, le lister ici serait sans effet. */
     transition: opacity var(--duration-normal) var(--ease-default);
     pointer-events: none;
   }
-  .tile.lit .tile-paint {
-    /* PLEINE couleur : allumée, la tuile rend ce que le ruban éclaire — un
-       lavage translucide sur la carte délavait les teintes (un Ocean virait
-       au gris-bleu, un blanc 4000K au beige). La lisibilité du texte n'est
-       plus obtenue en affadissant la lumière mais par le voile local
-       (`.tile-scrim`), qui ne couvre que la colonne de texte. */
-    opacity: 1;
+  .tile.lit .tile-wash {
+    opacity: calc(0.25 + var(--lvlf) * 0.75);
   }
-  /* Couche qui porte les COULEURS et le MOUVEMENT. Séparée du cadre pour que
-     les animations d'opacité (pulsation, scintillement) se multiplient au
-     dosage ci-dessus au lieu de l'écraser — sinon un « Feu » à 100 % ferait
-     clignoter le fond jusque sous le texte. */
-  .tile-paint-leds {
+
+  /* ─── Les lignes de LED ──────────────────────────────────────────────── */
+  .tile-strips {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    pointer-events: none;
+  }
+  /* Éteinte, la ligne reste là : un trait sombre. */
+  .strip {
+    position: relative;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--color-muted);
+  }
+  /* Le halo de la ligne allumée — sur un calque à part : l'opacité suit le
+     niveau (une box-shadow ne se dose pas en calc). */
+  .strip::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow:
+      0 0 6px 1px rgb(var(--sglow) / 0.85),
+      0 0 18px 4px rgb(var(--sglow) / 0.45);
+    opacity: 0;
+    transition: opacity var(--duration-normal) var(--ease-default);
+  }
+  .strip.on::after {
+    opacity: calc(0.35 + var(--lvlf) * 0.65);
+  }
+  .strip-light {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    border-radius: inherit;
+    opacity: 0;
+    transition: opacity var(--duration-normal) var(--ease-default);
+  }
+  /* Thème clair : la ligne allumée dans un profilé sombre de 1 px, comme le
+     ruban dans son rail — sans lui, un blanc 4000K sur le verre clair
+     disparaissait (crème sur blanc). Le thème sombre n'en a pas besoin : la
+     nuit fait déjà le contraste, et le liseré y éteindrait le halo. */
+  :global(html:not([data-theme='dark'])) .strip.on {
+    background: oklch(0.3 0.03 262);
+  }
+  :global(html:not([data-theme='dark'])) .strip.on .strip-light {
+    inset: 1px;
+  }
+  .strip.on .strip-light {
+    opacity: 1;
+    /* Le niveau se lit à l'intensité. L'aperçu direct porte déjà la
+       luminosité du module : pas de double atténuation. */
+    filter: brightness(calc(0.5 + var(--lvlf) * 0.5));
+  }
+  .strip.on.live .strip-light {
+    filter: none;
+  }
+  /* Reflet de tube : la ligne se lit « LED allumée », pas « barre de couleur ». */
+  .strip.on .strip-light::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, oklch(1 0 0 / 0.45), transparent 70%);
+    pointer-events: none;
+  }
+  .strip-leds {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -661,41 +669,15 @@
     image-rendering: pixelated;
     image-rendering: crisp-edges;
   }
-  .tile-paint-fill {
+  .strip-fill {
     position: absolute;
     inset: 0;
     background: var(--paint);
     background-size: var(--paint-size, 100% 100%);
     background-repeat: repeat-x;
   }
-  /* Voile sous le texte. Indispensable dès lors que le fond rend la vraie
-     couleur : elle peut être très sombre (Ocean, Lava) comme très claire
-     (blanc 4000K, Pastel) — aucune couleur de texte ne tient sur les deux.
-     Bleu-nuit et non noir (charte), et dégressif vers la droite pour laisser
-     la lumière intacte là où rien n'est écrit. Le voile TIENT (≥ 0.5) jusqu'à
-     64 % : la colonne de texte va jusqu'à ~80 % de la tuile (légendes longues
-     « Musique · en attente de lecture ») — un fondu amorcé à 42 % laissait la
-     fin des légendes passer sous la barre de contraste sur peinture claire. */
-  .tile-scrim {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      90deg,
-      oklch(0.16 0.02 262 / 0.66) 0%,
-      oklch(0.16 0.02 262 / 0.5) 64%,
-      transparent 90%
-    );
-    opacity: 0;
-    transition: opacity var(--duration-normal) var(--ease-default);
-    pointer-events: none;
-  }
-  .tile.lit .tile-scrim {
-    opacity: 1;
-  }
-
-  /* Point lumineux des effets de balayage — clippé par la tuile, et révélé
-     jusqu'au niveau comme le reste (il hérite du masque du cadre). */
-  .tile-spot {
+  /* Point lumineux des effets de balayage, clippé par la ligne. */
+  .strip-spot {
     position: absolute;
     top: 0;
     bottom: 0;
@@ -706,70 +688,10 @@
     will-change: transform;
   }
 
-  /* ─── Le ruban ────────────────────────────────────────────────────────── */
-  .tile-bar {
-    position: absolute;
-    left: 14px;
-    right: 14px;
-    bottom: 12px;
-    height: 6px;
-    border-radius: 9999px;
-    background: var(--color-muted);
-    pointer-events: none;
-  }
-  .tile-bar-fill {
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: var(--paint);
-    /* Même peinture que le fond : le ruban défile donc avec lui, sinon les
-       deux raconteraient deux effets différents. */
-    background-size: var(--paint-size, 100% 100%);
-    background-repeat: repeat-x;
-    /* Révélé jusqu'au niveau (% = largeur du ruban), dégradé non comprimé. */
-    -webkit-mask-image: linear-gradient(
-      90deg,
-      #000 0,
-      #000 calc(var(--lvl) - 3px),
-      transparent var(--lvl)
-    );
-    mask-image: linear-gradient(90deg, #000 0, #000 calc(var(--lvl) - 3px), transparent var(--lvl));
-    opacity: 0;
-    /* Même logique que .tile-paint : c'est --lvl qui porte le glissement. */
-    transition: opacity var(--duration-normal) var(--ease-default);
-  }
-  .tile.lit .tile-bar-fill {
-    opacity: 1;
-  }
-  /* Tête du ruban : le bloom qui fait « lumière » et non « barre de progression ».
-     Séparée du fill parce qu'un masque rogne aussi les ombres portées. */
-  .tile-bar-tip {
-    position: absolute;
-    top: 50%;
-    left: var(--lvl);
-    width: 8px;
-    height: 8px;
-    margin: -4px 0 0 -6px;
-    border-radius: 50%;
-    background: rgb(var(--glow));
-    box-shadow:
-      0 0 10px 2px rgb(var(--glow) / 0.75),
-      0 0 26px 6px rgb(var(--glow) / 0.4);
-    opacity: 0;
-    /* PAS de transition sur `left` : left = var(--lvl), déjà lissée sur .tile
-       — une seconde interpolation par-dessus ferait traîner la tête derrière
-       le remplissage. */
-    transition: opacity var(--duration-normal) var(--ease-default);
-  }
-  .tile.lit .tile-bar-tip {
-    opacity: 1;
-  }
-
   /* ─── Mouvement des effets ───────────────────────────────────────────────
      Mêmes familles que la barre de la feuille : un dégradé qui défile, une
-     respiration, un scintillement, un point qui balaie. Les noms de classes
-     sont posés depuis le script (`anim`), la durée vient de la vitesse `sx`
-     du segment. */
+     respiration, un scintillement, un point qui balaie. Classes posées depuis
+     le script (`anim`), durée tirée de la vitesse `sx` de la ligne. */
   .anim-scroll {
     animation-name: tile-scroll;
     animation-timing-function: linear;
@@ -786,7 +708,7 @@
     animation-timing-function: steps(2, end);
     animation-iteration-count: infinite;
   }
-  .tile-spot {
+  .strip-spot {
     animation-name: tile-sweep;
     animation-timing-function: ease-in-out;
     animation-iteration-count: infinite;
@@ -832,18 +754,15 @@
 
   /* Onglet en arrière-plan : on ARRÊTE de peindre (règle Domo — rien ne tourne
      dans le vide, surtout sur batterie). */
-  .tile.paused .tile-paint-fill,
-  .tile.paused .tile-bar-fill,
-  .tile.paused .tile-spot {
+  .tile.paused .strip-fill,
+  .tile.paused .strip-spot {
     animation-play-state: paused;
   }
 
-  /* Pendant le glissé, tout suit le doigt SANS interpolation (sinon le niveau
-     traîne derrière le pouce). */
+  /* Pendant le glissé, la lumière suit le doigt SANS interpolation. */
   .tile.dragging .tile-glow,
-  .tile.dragging .tile-paint,
-  .tile.dragging .tile-bar-fill,
-  .tile.dragging .tile-bar-tip {
+  .tile.dragging .tile-wash,
+  .tile.dragging .strip::after {
     transition: none;
   }
 
@@ -874,29 +793,11 @@
     display: flex;
     align-items: flex-start;
     gap: 12px;
-    /* Bas dégagé pour le ruban (12 px + 6 px de haut + respiration). */
-    padding: 14px 14px 26px;
+    /* Bas dégagé pour les deux rubans (13 + 6 + 7 + 6 px) et leur halo. */
+    padding: 14px 14px 44px;
     /* Le contenu ne doit pas manger le geste : seules les vraies commandes
        (interrupteur, bouton Réglages) réarment les événements pointeur. */
     pointer-events: none;
-  }
-  .tile-icon {
-    display: flex;
-    height: 44px;
-    width: 44px;
-    flex-shrink: 0;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-lg);
-    background: var(--color-consumption-muted);
-    color: var(--color-consumption);
-    transition:
-      background-color var(--duration-normal) var(--ease-default),
-      color var(--duration-normal) var(--ease-default);
-  }
-  .tile.lit .tile-icon {
-    background: var(--color-primary);
-    color: var(--color-primary-fg);
   }
   .tile-text {
     display: flex;
@@ -905,19 +806,11 @@
     flex-direction: column;
     gap: 2px;
   }
-  /* Surtitre du lieu — signature Yeldra (uppercase, tracking discret). */
-  .tile-eyebrow {
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--color-muted-fg);
-    line-height: 1.2;
-  }
   .tile-title {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    gap: 2px 8px;
     font-size: 15px;
     font-weight: 600;
     color: var(--color-fg);
@@ -934,50 +827,25 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .tile-pct {
-    margin-top: 4px;
+  /* Le pourcentage du glissé, au-dessus des rubans, le temps du geste. */
+  .tile-drag {
+    position: absolute;
+    z-index: 2;
+    left: 14px;
+    bottom: 40px;
     font-size: 28px;
     font-weight: 700;
     line-height: 1;
     letter-spacing: -0.02em;
     color: var(--color-fg);
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-default);
+    pointer-events: none;
   }
-  .tile-pct.off {
-    opacity: 0.4;
+  .tile.dragging .tile-drag {
+    opacity: 1;
   }
-  /* Allumée, la tuile est une surface COLORÉE : le texte passe en clair sur le
-     voile, dans les deux thèmes — `--color-fg` suit le thème, pas la couleur
-     du ruban, et virerait à l'illisible sur un fond sombre en thème clair. */
-  .tile.lit .tile-title,
-  .tile.lit .tile-pct {
-    color: oklch(0.99 0.004 286);
-    text-shadow: 0 1px 3px oklch(0.15 0.02 262 / 0.45);
-  }
-  .tile.lit .tile-eyebrow,
-  .tile.lit .tile-state,
-  .tile.lit .tile-pct-unit {
-    color: oklch(0.94 0.008 262);
-    text-shadow: 0 1px 2px oklch(0.15 0.02 262 / 0.4);
-  }
-  /* Le bouton Réglages tombe, lui, dans la zone restée en couleur pure : sans
-     fond propre il se dissoudrait dedans. */
-  .tile.lit .tile-more {
-    border-color: oklch(1 0 0 / 0.4);
-    background: oklch(0.16 0.02 262 / 0.42);
-    color: oklch(0.98 0.004 286);
-  }
-  /* Le badge « Hors ligne »/« Démo » garde sa couleur SÉMANTIQUE (alerte /
-     mandarine) — il ne peut donc pas passer en clair comme le reste du texte.
-     Pastille à fond sombre local (même recette que .tile-more) : le seul
-     témoin de panne de la tuile doit rester lisible sur peinture claire —
-     c'est précisément allumée en ambre que la déconnexion se voit le moins. */
-  .tile.lit .tile-badge {
-    padding: 2px 7px;
-    border-radius: 9999px;
-    background: oklch(0.16 0.02 262 / 0.55);
-    text-shadow: none;
-  }
-  .tile-pct-unit {
+  .tile-drag-unit {
     font-size: 15px;
     font-weight: 600;
     color: var(--color-muted-fg);
@@ -1060,45 +928,38 @@
     outline-offset: 2px;
   }
 
-  /* ─── Tuile étroite (≈ 175 px : deux cartes de front sur iPhone) ─────────
-     Mesuré : icône 44 + écarts + actions 44 ne laissaient que 47 px au texte,
-     « 100 % » en fait 72. L'icône s'efface — l'ampoule répétait « Terrasse »
-     et l'interrupteur, et le ruban en bas dit déjà « lumière » — le texte
-     récupère 56 px. Au-delà de 240 px (iPad, bureau), rien ne change. */
+  /* ─── Tuile étroite (≈ 175 px : deux cartes de front sur iPhone) ───────── */
   @container (max-width: 239px) {
-    .tile-icon {
-      display: none;
-    }
     .tile-body {
       gap: 8px;
-      padding: 12px 12px 26px;
+      padding: 12px 12px 44px;
     }
-    .tile-title {
-      flex-wrap: wrap;
-      row-gap: 2px;
+    .tile-strips {
+      left: 12px;
+      right: 12px;
     }
-    .tile-pct {
-      font-size: 26px;
+    .tile-drag {
+      left: 12px;
+      font-size: 24px;
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .tile-glow,
-    .tile-paint,
-    .tile-bar-fill,
-    .tile-bar-tip,
-    .tile-icon,
+    .tile-wash,
+    .strip::after,
+    .strip-light,
+    .tile-drag,
     .toggle-pill-knob,
     .toggle-pill-knob::after {
       transition: none;
     }
     /* Les couleurs restent JUSTES, seul le mouvement disparaît. */
-    .tile-paint-fill,
-    .tile-bar-fill,
-    .tile-spot {
+    .strip-fill,
+    .strip-spot {
       animation: none !important;
     }
-    .tile-spot {
+    .strip-spot {
       display: none;
     }
   }
