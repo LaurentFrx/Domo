@@ -127,20 +127,16 @@
   .printer-tile:hover {
     border-color: var(--color-border-strong);
   }
-  /* ─── Glow néon quand l'imprimante est allumée (idem switches ON) ─── */
-  /* Utilise oklch(... / alpha) directement plutôt que color-mix() pour
-     compatibilité Safari iOS. */
+  /* ─── Allumée : la carte ENTIÈRE devient un bouton coloré en relief ───
+     Comme les interrupteurs (SwitchTile, à toutes les tailles) : fond de la
+     couleur de l'appareil + sheen haut-gauche, arêtes internes, halo porté ;
+     l'icône passe en pastille blanche translucide (demande de Laurent,
+     19/09/2026 : « doit réagir comme les autres interrupteurs »). `!important`
+     sur le fond : le verre INLINE (`background: var(--color-card)`) gagnerait.
+     oklch direct dans les ombres (jamais color-mix dans une box-shadow). */
   .printer-on {
     border-color: var(--color-consumption);
-    box-shadow:
-      0 0 14px oklch(0.546 0.215 262 / 0.5),
-      0 0 32px oklch(0.546 0.215 262 / 0.22);
-  }
-  /* Allumée, l'icône-interrupteur est un bouton coloré EN RELIEF — la recette
-     des interrupteurs (SwitchTile), pour que tous les boutons allumés se
-     ressemblent, sur PC comme sur iOS. `!important` sur le dégradé : le fond
-     INLINE (`background: …`) l'effacerait. */
-  .printer-on .printer-icon {
+    background-color: var(--color-consumption) !important;
     background-image: linear-gradient(
       135deg,
       oklch(1 0 0 / 0.32) 0%,
@@ -154,6 +150,13 @@
       inset -1px -2px 6px oklch(0.1 0.01 286 / 0.2),
       0 7px 18px -3px var(--color-consumption-glow),
       0 2px 6px var(--color-consumption-glow-mid);
+  }
+  .printer-on .printer-icon {
+    background: oklch(1 0 0 / 0.25) !important;
+    color: #fff !important;
+    box-shadow:
+      inset 0 1px 0 oklch(1 0 0 / 0.45),
+      0 2px 4px oklch(0.1 0.01 286 / 0.2);
   }
   /* L'icône EST le bouton on/off → curseur + retour tactile. */
   .printer-icon {

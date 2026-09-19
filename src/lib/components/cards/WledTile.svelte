@@ -3,8 +3,9 @@
    * Carte « Terrasse » — surface par défaut sur /pieces. Le ruban WLED : la
    * tuile montre les LIGNES DE LED elles-mêmes, une par ligne, dans la couleur
    * que la terrasse voit vraiment (teinte + blanc 4000K mélangés comme de la
-   * lumière, cf. `lightColor`), et la lueur qu'elles jettent sur la carte. Tout
-   * le réglage fin vit dans la feuille (WledSheet).
+   * lumière, cf. `lightColor`). Pas de halo sur la carte (retiré à la demande
+   * de Laurent, 19/09/2026) : la lumière, ce sont les rubans. Tout le réglage
+   * fin vit dans la feuille (WledSheet).
    *
    * Refonte du 19/09/2026 (Laurent : « trop d'infos inutiles, très moche
    * allumée, ne montre pas les lumières en service ni la température de
@@ -26,8 +27,8 @@
    * Le Pager, lui, ne navigue qu'à DEUX doigts — aucun conflit ; `data-swipe-ignore`
    * est la ceinture en plus des bretelles.
    *
-   * Lueur : quand le mode Musique joue, l'intensité de la lueur suit le niveau
-   * sonore serveur (var CSS `--mvol` en rAF, hors réactivité Svelte). Gated
+   * Musique : quand le mode joue, l'éclat des rubans suit le niveau sonore
+   * serveur (var CSS `--mvol` en rAF, hors réactivité Svelte). Gated
    * `animationsEnabled` + `prefers-reduced-motion`, en pause en arrière-plan.
    */
   import { wled, WHITE_4000K, type RGB } from '$stores/wled.svelte';
@@ -56,7 +57,7 @@
   // ─── Ligne « dominante » ───────────────────────────────────────────────
   // La plus longue effectivement allumée (à défaut, la plus longue tout
   // court). Chaque ligne est DESSINÉE à part plus bas ; celle-ci ne sert plus
-  // qu'à l'état musique (légende, lueur qui respire).
+  // qu'à l'état musique (légende, éclat qui respire).
   const dominant = $derived.by(() => {
     const segs = wled.segments;
     if (!segs.length) return null;
@@ -207,16 +208,6 @@
   // Ordre PHYSIQUE (ligne 1 en haut) : c'est l'ordre du ruban.
   const strips = $derived([...wled.segments].sort((a, b) => a.start - b.start).map(stripOf));
   const anyLit = $derived(strips.some((s) => s.lit));
-  /** Couleur de la lueur sur la carte : la moyenne des lignes allumées. */
-  const washRgb = $derived.by(() => {
-    const on = strips.filter((s) => s.lit);
-    if (!on.length) return '0 0 0';
-    const sum = on.reduce(
-      (a, s) => [a[0] + s.glow[0], a[1] + s.glow[1], a[2] + s.glow[2]],
-      [0, 0, 0]
-    );
-    return sum.map((c) => Math.round(c / on.length)).join(' ');
-  });
 
   // Légende : seulement ce que la lumière ne dit pas d'elle-même. Le nom de
   // l'effet (« Couleur fixe ») est parti — l'effet se VOIT sur les rubans ;
@@ -354,7 +345,7 @@
     send(next, true);
   }
 
-  // ─── Lueur qui respire avec la musique (--mvol, rAF) ───────────────────
+  // ─── Éclat qui respire avec la musique (--mvol, rAF) ───────────────────
   let hidden = $state(false);
   $effect(() => {
     if (typeof document === 'undefined') return;
@@ -364,7 +355,7 @@
     return () => document.removeEventListener('visibilitychange', onVis);
   });
 
-  // La lueur ne respire que si LA LIGNE PEINTE danse vraiment (et pas parce
+  // L'éclat ne respire que si LA LIGNE PEINTE danse vraiment (et pas parce
   // qu'un style global réactif traîne) — sinon l'écran et le ruban racontent
   // deux histoires différentes.
   const pulsing = $derived(
@@ -404,17 +395,11 @@
   class:lit={anyLit}
   class:dragging
   class:paused={hidden}
-  style="background: var(--color-card); border-color: var(--color-border); --lvlf: {level /
-    100}; --glow: {washRgb};"
+  style="background: var(--color-card); border-color: var(--color-border); --lvlf: {level / 100};"
 >
   <!-- Toutes les couches lumineuses et la surface de geste sont bornées à CE
        bloc (`inset: 0`). -->
   <div class="tile-light">
-    <!-- La lumière que les lignes jettent sur la carte : c'est elle qui dit
-         « allumé », depuis le bas où sont les rubans. -->
-    <div class="tile-glow" aria-hidden="true"></div>
-    <div class="tile-wash" aria-hidden="true"></div>
-
     <!-- Surface de geste : glissé = luminosité, tap = feuille. `data-no-haptic`
        car les retours sont déclenchés explicitement (accroche / tap). -->
     <div
@@ -547,7 +532,7 @@
     border-width: 1px;
     border-style: solid;
     border-radius: var(--radius-2xl);
-    /* Repos neutre quand la musique ne pilote pas la lueur. */
+    /* Repos neutre quand la musique ne pilote pas l'éclat des rubans. */
     --mvol: 0.5;
   }
   .tile-light {
@@ -555,41 +540,6 @@
     display: flex;
     flex: 1;
     flex-direction: column;
-  }
-
-  /* ─── La lumière sur la carte ────────────────────────────────────────── */
-  /* Lueur ambiante, depuis le bas où sont les rubans. Elle respire avec la
-     musique (--mvol) et suit le niveau (--lvlf) : une lampe à 5 % doit être
-     faible. Sans musique --mvol vaut 0.5 → facteur 1. */
-  .tile-glow {
-    position: absolute;
-    inset: -10% -10% -40%;
-    background: radial-gradient(70% 60% at 50% 100%, rgb(var(--glow) / 0.55), transparent 72%);
-    opacity: 0;
-    transition: opacity var(--duration-normal) var(--ease-default);
-    pointer-events: none;
-  }
-  .tile.lit .tile-glow {
-    opacity: calc((0.3 + var(--lvlf) * 0.7) * (0.55 + var(--mvol) * 0.9));
-  }
-  /* Le lavage : la couleur réelle de la lumière, franche au ras des rubans,
-     qui s'éteint en montant — le haut de la carte (le texte) reste sur le
-     verre, lisible dans les deux thèmes sans voile. */
-  .tile-wash {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      to top,
-      rgb(var(--glow) / 0.42) 0%,
-      rgb(var(--glow) / 0.16) 45%,
-      transparent 80%
-    );
-    opacity: 0;
-    transition: opacity var(--duration-normal) var(--ease-default);
-    pointer-events: none;
-  }
-  .tile.lit .tile-wash {
-    opacity: calc(0.25 + var(--lvlf) * 0.75);
   }
 
   /* ─── Les lignes de LED ──────────────────────────────────────────────── */
@@ -623,8 +573,10 @@
     opacity: 0;
     transition: opacity var(--duration-normal) var(--ease-default);
   }
+  /* Le halo suit le niveau (une ligne à 5 % doit être faible) et respire
+     avec la musique (--mvol ; sans musique il vaut 0.5 → facteur 1). */
   .strip.on::after {
-    opacity: calc(0.35 + var(--lvlf) * 0.65);
+    opacity: calc((0.35 + var(--lvlf) * 0.65) * (0.55 + var(--mvol) * 0.9));
   }
   .strip-light {
     position: absolute;
@@ -761,8 +713,6 @@
   }
 
   /* Pendant le glissé, la lumière suit le doigt SANS interpolation. */
-  .tile.dragging .tile-glow,
-  .tile.dragging .tile-wash,
   .tile.dragging .strip::after {
     transition: none;
   }
@@ -953,8 +903,6 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .tile-glow,
-    .tile-wash,
     .strip::after,
     .strip-light,
     .tile-drag,
