@@ -599,13 +599,14 @@
     align-self: center;
     display: flex;
     flex-direction: column;
-    gap: 7px;
+    /* 2 × 12 + 8 = 32 px : tient dans la hauteur du bouton Réglages (36). */
+    gap: 8px;
     pointer-events: none;
   }
   /* Éteinte, la ligne reste là : un trait sombre. */
   .strip {
     position: relative;
-    height: 6px;
+    height: 12px;
     border-radius: 9999px;
     background: var(--color-muted);
   }

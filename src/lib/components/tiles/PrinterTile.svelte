@@ -136,10 +136,24 @@
       0 0 14px oklch(0.546 0.215 262 / 0.5),
       0 0 32px oklch(0.546 0.215 262 / 0.22);
   }
+  /* Allumée, l'icône-interrupteur est un bouton coloré EN RELIEF — la recette
+     des interrupteurs (SwitchTile), pour que tous les boutons allumés se
+     ressemblent, sur PC comme sur iOS. `!important` sur le dégradé : le fond
+     INLINE (`background: …`) l'effacerait. */
   .printer-on .printer-icon {
+    background-image: linear-gradient(
+      135deg,
+      oklch(1 0 0 / 0.32) 0%,
+      oklch(1 0 0 / 0.08) 30%,
+      transparent 52%,
+      oklch(0.1 0.01 286 / 0.16) 100%
+    ) !important;
     box-shadow:
-      0 0 10px oklch(0.546 0.215 262 / 0.55),
-      0 0 20px oklch(0.546 0.215 262 / 0.3);
+      inset 0 1px 0.5px oklch(1 0 0 / 0.55),
+      inset 1.5px 1.5px 2px oklch(1 0 0 / 0.22),
+      inset -1px -2px 6px oklch(0.1 0.01 286 / 0.2),
+      0 7px 18px -3px var(--color-consumption-glow),
+      0 2px 6px var(--color-consumption-glow-mid);
   }
   /* L'icône EST le bouton on/off → curseur + retour tactile. */
   .printer-icon {

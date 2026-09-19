@@ -296,8 +296,8 @@
   /* ─── Membre de la carte « Interrupteurs » (prop `grouped`) ───
      Pas de verre dans le verre : la carte commune porte le relief, la puce n'a
      qu'un fond discret. Sur iPhone elle garde sa forme (icône sur le nom, en
-     ligne de quatre) et son relief coloré quand elle est allumée — la règle
-     iPhone plus bas passe après celle-ci, à spécificité égale. */
+     ligne de quatre) ; allumée, elle devient un bouton coloré en relief — la
+     règle « allumée » plus bas passe après celle-ci, à spécificité égale. */
   .switch-tile.grouped {
     gap: 4px;
     padding: 8px 4px 7px;
@@ -314,8 +314,7 @@
     width: 20px;
     height: 20px;
   }
-  /* Dès l'iPad : puce horizontale de 44 px (la cible tactile, rien de moins).
-     La lueur « allumé » est resserrée — à 32 px elle bavait sur les voisines. */
+  /* Dès l'iPad : puce horizontale de 44 px (la cible tactile, rien de moins). */
   @media (min-width: 768px) and (min-height: 600px) {
     .switch-tile.grouped {
       min-height: 44px;
@@ -329,8 +328,8 @@
     /* Le nom peut passer sur DEUX lignes (« Sèche- / serviette ») plutôt que
        d'être tronqué : c'est ce qui permet trois puces de front dans la colonne
        du bureau (mesuré : 95 px pour « Sèche-serviette » à 12 px, 74 de place
-       sur une ligne). La ligne On/Off cède sa place — l'état se lit à l'icône
-       pleine et au liseré lumineux, comme sur iPhone. */
+       sur une ligne). La ligne On/Off cède sa place — l'état se lit au bouton
+       coloré en relief, comme sur iPhone. */
     .switch-tile.grouped .switch-name {
       display: -webkit-box;
       -webkit-box-orient: vertical;
@@ -347,48 +346,38 @@
       width: 18px;
       height: 18px;
     }
-    /* Liseré néon : `!important` car le `border-color` INLINE (celui qui fait
-       le verre de la tuile entière) l'emporterait — le halo seul, resserré,
-       ne suffit plus à lire « allumé » sur une puce. */
-    .switch-tile.grouped[aria-checked='true'] {
-      border-color: var(--neon) !important;
-      box-shadow: 0 0 12px var(--neon-soft);
-    }
-    .switch-tile.grouped[aria-checked='true'] .switch-icon {
-      box-shadow: 0 0 8px var(--neon-soft);
-    }
   }
 
-  /* Vue iPhone : tuile ALLUMÉE = bouton coloré EN RELIEF (verre bombé, lumière haut-gauche).
+  /* Tuile ALLUMÉE = bouton coloré EN RELIEF (verre bombé, lumière haut-gauche) —
+     à TOUTES les tailles depuis le 19/09/2026 : c'était le rendu iPhone, le PC
+     n'avait qu'une icône pleine et un liseré (Laurent : « sur PC comme sur iOS »).
      Sheen diagonal (reflet haut-gauche → ombre bas-droite) + arêtes internes + halo coloré
      porté → effet bouton physique rétro-éclairé, jamais une couleur « plate ». */
-  @media (max-width: 639px) {
-    .switch-tile[aria-checked='true'] {
-      border-color: var(--neon);
-      background-color: var(--neon) !important;
-      background-image: linear-gradient(
-        135deg,
-        oklch(1 0 0 / 0.32) 0%,
-        oklch(1 0 0 / 0.08) 30%,
-        transparent 52%,
-        oklch(0.1 0.01 286 / 0.16) 100%
-      ) !important;
-      box-shadow:
-        inset 0 1px 0.5px oklch(1 0 0 / 0.55),
-        inset 1.5px 1.5px 2px oklch(1 0 0 / 0.22),
-        inset -1px -2px 6px oklch(0.1 0.01 286 / 0.2),
-        0 7px 18px -3px var(--neon-glow),
-        0 2px 6px var(--neon-mid);
-    }
-    .switch-tile[aria-checked='true'] .switch-icon {
-      background: oklch(1 0 0 / 0.25) !important;
-      color: #fff !important;
-      box-shadow:
-        inset 0 1px 0 oklch(1 0 0 / 0.45),
-        0 2px 4px oklch(0.1 0.01 286 / 0.2) !important;
-    }
-    .switch-tile[aria-checked='true'] .switch-name {
-      color: #fff !important;
-    }
+  .switch-tile[aria-checked='true'] {
+    border-color: var(--neon);
+    background-color: var(--neon) !important;
+    background-image: linear-gradient(
+      135deg,
+      oklch(1 0 0 / 0.32) 0%,
+      oklch(1 0 0 / 0.08) 30%,
+      transparent 52%,
+      oklch(0.1 0.01 286 / 0.16) 100%
+    ) !important;
+    box-shadow:
+      inset 0 1px 0.5px oklch(1 0 0 / 0.55),
+      inset 1.5px 1.5px 2px oklch(1 0 0 / 0.22),
+      inset -1px -2px 6px oklch(0.1 0.01 286 / 0.2),
+      0 7px 18px -3px var(--neon-glow),
+      0 2px 6px var(--neon-mid);
+  }
+  .switch-tile[aria-checked='true'] .switch-icon {
+    background: oklch(1 0 0 / 0.25) !important;
+    color: #fff !important;
+    box-shadow:
+      inset 0 1px 0 oklch(1 0 0 / 0.45),
+      0 2px 4px oklch(0.1 0.01 286 / 0.2) !important;
+  }
+  .switch-tile[aria-checked='true'] .switch-name {
+    color: #fff !important;
   }
 </style>
