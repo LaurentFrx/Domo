@@ -95,7 +95,7 @@
         </svg>
       </button>
       <span
-        class="text-center text-[11px] leading-tight font-semibold sm:text-[13px]"
+        class="printer-label text-center text-[11px] leading-tight font-semibold sm:text-[13px]"
         style="color: var(--color-fg);"
       >
         Imprimante
@@ -122,7 +122,7 @@
         <!-- Une fois un relevé réussi, les jauges restaient affichées pour toujours,
            y compris rechargées du cache de la semaine passée — alors que la dérive
            DHCP de cette imprimante est un incident récurrent. -->
-        <span class="text-[10px]" style="color: var(--color-muted-fg);">
+        <span class="printer-stale text-[10px]" style="color: var(--color-muted-fg);">
           Imprimante éteinte — niveaux relevés il y a {ageLabel(
             clock.now - printer.lastUpdate.getTime()
           )}
@@ -283,5 +283,23 @@
     padding: 0;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ─── Mise en page iPhone (hors `pad:`) : l'objet, sans texte (19/09/2026) ───
+     Ni le nom — l'icône le dit — ni les lignes d'état du bas (« jamais jointe /
+     Tap pour réessayer », « niveaux relevés il y a… ») : il reste l'icône-
+     interrupteur et, quand on les connaît, les jauges. Le relevé se relance
+     tout seul (toutes les 30 s en erreur, cf. store), le bouton n'y manque pas.
+     L'icône se centre : seule et calée à gauche, elle semblait orpheline. */
+  @media (max-width: 767px), (max-height: 599px) {
+    .printer-label,
+    .printer-stale,
+    .ink-error-btn {
+      display: none;
+    }
+    .printer-body,
+    .printer-head {
+      justify-content: center;
+    }
   }
 </style>
