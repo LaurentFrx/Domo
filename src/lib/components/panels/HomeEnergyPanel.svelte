@@ -304,15 +304,34 @@
     const maxAcCharge = Math.max(0, -ankerLocal.batteryPowerW);
     const maxAcDischarge = Math.max(0, ankerLocal.batteryPowerW);
     let sb3Charge = perPack.reduce((s, n) => s + Math.max(0, n), 0);
-    const discharge = perPack.reduce((s, n) => s + Math.max(0, -n), 0) + maxAcDischarge;
+    let discharge = perPack.reduce((s, n) => s + Math.max(0, -n), 0) + maxAcDischarge;
     // (c) contrainte 2 — fermeture : si la Maison déduite passe sous la veille, c'est
     // que la charge SB3 est surestimée (le pack sortait en AC) → on la réduit d'autant.
-    const home = pvSudW + pvOuestW + gridPowerW - (sb3Charge + maxAcCharge - discharge) - cumulusW;
+    let home = pvSudW + pvOuestW + gridPowerW - (sb3Charge + maxAcCharge - discharge) - cumulusW;
     if (home < HOUSE_FLOOR_W && sb3Charge > 0) {
       const cut = Math.min(sb3Charge, HOUSE_FLOOR_W - home);
       const k = (sb3Charge - cut) / sb3Charge;
       for (let i = 0; i < perPack.length; i++) if (perPack[i] > 0) perPack[i] *= k;
       sb3Charge -= cut;
+      home += cut;
+    }
+    // (d) même fermeture, côté DÉCHARGE : charge SB3 déjà nulle et Maison toujours
+    // sous la veille ⇒ les SB3 sortent plus que ce que le cloud en dit. C'est le cas
+    // à chaque appel de charge : mesuré le 19/09, cumulus allumé à 10:13:06 UTC
+    // (3 120 W, lu en local), sorties SB3 figées à 840 W côté cloud jusqu'à 10:17:39
+    // alors qu'elles débitaient déjà ~1 700 W. Pendant ces 4½ min, la Maison déduite
+    // valait −620 W : la carte gardait le cumulus caché dans une « Maison » de 2,4 kW.
+    // Réseau, APS, Max AC et cumulus sont tous lus en local (≤ 5 s) : l'écart ne
+    // peut venir que de la sortie SB3, seule grandeur venue du cloud. Il lui est
+    // rendu, ventilé comme la consigne (prorata PV, parts égales la nuit).
+    if (home < HOUSE_FLOOR_W && anker.connected && perPack.length > 0) {
+      const missing = HOUSE_FLOOR_W - home;
+      const pvTot = sb3PvInW.reduce((s, v) => s + v, 0);
+      for (let i = 0; i < perPack.length; i++) {
+        const share = pvTot > 1 ? (sb3PvInW[i] ?? 0) / pvTot : 1 / perPack.length;
+        perPack[i] -= missing * share;
+      }
+      discharge += missing;
     }
     return { charge: sb3Charge + maxAcCharge, discharge, perPack };
   });
