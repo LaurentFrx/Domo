@@ -10,13 +10,19 @@
  * Et re-poll si :
  *   - L'onglet redevient visible (visibilitychange)
  *   - Refresh manuel via printer.refresh()
+ *
+ * Niveaux affichés EN PERMANENCE (19/09/2026) : le dernier relevé vu, sans date.
+ * L'imprimante est le plus souvent hors tension, et l'encre ne bouge que quand
+ * elle imprime — le dernier relevé est donc le niveau courant. Deux mémoires :
+ * le cache du navigateur (affichage instantané, SANS expiration désormais) et
+ * celle du serveur (`?cached=1`, lue au montage) — la seule qui survive à un
+ * nouvel appareil ou à Safari qui purge une PWA restée une semaine fermée.
  */
 
 const SUCCESS_INTERVAL_MS = 5 * 60 * 1000;
 const ERROR_INTERVAL_MS = 30 * 1000;
 const INITIAL_DELAY_MS = 500;
 const CACHE_KEY = 'domo.printer.cache.v1';
-const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 jours — encre évolue lentement
 
 export type InkColor = 'BK' | 'C' | 'M' | 'Y';
 export interface InkTank {
@@ -25,35 +31,31 @@ export interface InkTank {
   percent: number;
 }
 
-function loadCachedInks(): { inks: InkTank[]; ts: number | null } {
-  if (typeof window === 'undefined') return { inks: [], ts: null };
+function loadCachedInks(): InkTank[] {
+  if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return { inks: [], ts: null };
-    const parsed = JSON.parse(raw) as { ts: number; inks: InkTank[] };
-    if (Date.now() - parsed.ts > CACHE_MAX_AGE_MS) return { inks: [], ts: null };
-    return { inks: parsed.inks ?? [], ts: parsed.ts };
+    if (!raw) return [];
+    return (JSON.parse(raw) as { inks?: InkTank[] }).inks ?? [];
   } catch {
-    return { inks: [], ts: null };
+    return [];
   }
 }
 
 function saveCachedInks(inks: InkTank[]): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), inks }));
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ inks }));
   } catch {
     // ignore
   }
 }
 
 class PrinterState {
-  private initial = loadCachedInks();
-  /** Niveaux d'encre — gardés MÊME quand l'imprimante est offline.
-   * Source : dernier scrape réussi, ou cache localStorage au mount. */
-  inks = $state<InkTank[]>(this.initial.inks);
-  /** Date du dernier scrape réussi (peut venir du cache). */
-  lastUpdate = $state<Date | null>(this.initial.ts ? new Date(this.initial.ts) : null);
+  /** Niveaux d'encre — le dernier relevé vu, gardé MÊME quand l'imprimante est
+   * hors tension. Source : relevé en direct, sinon mémoire serveur, sinon cache
+   * du navigateur (au montage). */
+  inks = $state<InkTank[]>(loadCachedInks());
   /** true si la dernière requête a réussi. Indépendant des niveaux d'encre :
    * on garde les valeurs cached même si online=false (imprimante éteinte). */
   online = $state(false);
@@ -64,10 +66,15 @@ class PrinterState {
 
   private timerId: ReturnType<typeof setTimeout> | null = null;
   private visibilityHandler: (() => void) | null = null;
+  /** Un relevé en direct est arrivé : la mémoire serveur ne doit plus l'écraser. */
+  private gotLive = false;
 
   connect() {
     if (typeof window === 'undefined') return;
     if (this.timerId !== null) return;
+    // Mémoire serveur d'abord : réponse immédiate, sans attendre l'échec réseau
+    // (~3-5 s) d'une imprimante hors tension.
+    void this.loadServerMemory();
     // 1er poll rapide
     this.timerId = setTimeout(() => this.pollAndSchedule(), INITIAL_DELAY_MS);
     // Re-poll quand l'onglet redevient actif
@@ -107,6 +114,20 @@ class PrinterState {
     this.timerId = setTimeout(() => this.pollAndSchedule(), delay);
   }
 
+  private async loadServerMemory() {
+    try {
+      const res = await fetch('/api/printer/status?cached=1', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = (await res.json()) as { inks?: InkTank[] };
+      if (!this.gotLive && data.inks && data.inks.length > 0) {
+        this.inks = data.inks;
+        saveCachedInks(data.inks);
+      }
+    } catch {
+      // Sans mémoire serveur, le cache du navigateur et le poll prennent le relais.
+    }
+  }
+
   private async poll() {
     this.status = 'polling';
     try {
@@ -129,7 +150,7 @@ class PrinterState {
       if (data.inks && data.inks.length > 0) {
         this.inks = data.inks;
         saveCachedInks(data.inks);
-        this.lastUpdate = new Date();
+        if (data.online) this.gotLive = true;
       }
       this.lastError = data.error ?? null;
       this.status = data.error || !data.online ? 'error' : 'connected';

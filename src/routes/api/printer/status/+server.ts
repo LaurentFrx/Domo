@@ -21,6 +21,12 @@
  * bascule automatiquement sur l'IP trouvée. Le bail DHCP peut donc bouger sans
  * que la carte ne tombe en panne (correctif racine, optionnel : réserver l'IP
  * de l'imprimante par sa MAC dans la Livebox).
+ *
+ * Mémoire (19/09/2026) : le dernier relevé complet est retenu côté serveur
+ * (`$lib/server/printer-inks`) et rendu quand l'imprimante ne répond pas — elle
+ * est le plus souvent hors tension. `?cached=1` le rend SANS interroger
+ * l'imprimante (réponse immédiate au montage de la carte, au lieu d'attendre
+ * les ~3-5 s de l'échec réseau).
  */
 
 import { error, json } from '@sveltejs/kit';
@@ -28,6 +34,7 @@ import { env } from '$env/dynamic/private';
 import https from 'node:https';
 import http from 'node:http';
 import net from 'node:net';
+import { readLastInks, saveLastInks } from '$lib/server/printer-inks';
 import type { RequestHandler } from './$types';
 
 const DEFAULT_TIMEOUT_MS = 5000;
@@ -53,6 +60,8 @@ export interface PrinterStatus {
   host?: string;
   /** true si l'imprimante a été retrouvée à une autre IP que celle configurée. */
   relocated?: boolean;
+  /** Réponse `?cached=1` : dernier relevé mémorisé, imprimante NON interrogée. */
+  cached?: boolean;
   error?: string;
 }
 
@@ -296,10 +305,18 @@ function maybeTriggerDiscovery(hint: string): void {
     });
 }
 
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async ({ url }) => {
   const configured = env.PRINTER_HOST;
   if (!configured) {
     throw error(503, "PRINTER_HOST non défini dans .env — l'endpoint reste désactivé.");
+  }
+  if (url.searchParams.has('cached')) {
+    return json({
+      fetchedAt: new Date().toISOString(),
+      online: false,
+      inks: await readLastInks(),
+      cached: true
+    } satisfies PrinterStatus);
   }
   const timeoutMs = Number(env.PRINTER_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
 
@@ -321,7 +338,8 @@ export const GET: RequestHandler = async () => {
       {
         fetchedAt,
         online: false,
-        inks: [],
+        // Injoignable (hors tension, le plus souvent) : le dernier relevé vu.
+        inks: await readLastInks(),
         host,
         relocated,
         error: attempt.error
@@ -345,5 +363,10 @@ export const GET: RequestHandler = async () => {
     );
   }
 
+  // Relevé complet : il devient la mémoire. Un échec d'écriture ne doit pas
+  // priver la carte du relevé frais qu'on tient.
+  await saveLastInks(inks).catch((e) =>
+    console.error('[printer] mémorisation des niveaux', (e as Error).message)
+  );
   return json({ fetchedAt, online: true, inks, host, relocated } satisfies PrinterStatus);
 };

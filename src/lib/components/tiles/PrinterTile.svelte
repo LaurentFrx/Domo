@@ -2,8 +2,6 @@
   import type { ZigbeeDevice } from '$stores/zigbee.svelte';
   import { zigbee } from '$stores/zigbee.svelte';
   import { printer, type InkColor } from '$stores/printer.svelte';
-  import { clock } from '$stores/clock.svelte';
-  import { ageLabel } from '$utils/freshness';
   import { haptic } from '$utils/haptic';
 
   interface Props {
@@ -104,7 +102,10 @@
 
     <!-- Niveaux d'encre CMYK : 4 jauges VERTICALES (remplies de bas en haut) + % dessous -->
     {#if printer.inks.length > 0}
-      <div class="ink-pills" class:opacity-60={!printer.online}>
+      <!-- Le dernier relevé VU, affiché tel quel — ni date ni grisé quand
+           l'imprimante est hors tension : l'encre ne bouge que quand elle
+           imprime, le dernier relevé EST le niveau courant (cf. store). -->
+      <div class="ink-pills">
         {#each printer.inks as ink (ink.color)}
           {@const c = INK[ink.color]}
           {@const pct = Math.max(0, Math.min(100, ink.percent))}
@@ -118,16 +119,6 @@
           </div>
         {/each}
       </div>
-      {#if !printer.online && printer.lastUpdate}
-        <!-- Une fois un relevé réussi, les jauges restaient affichées pour toujours,
-           y compris rechargées du cache de la semaine passée — alors que la dérive
-           DHCP de cette imprimante est un incident récurrent. -->
-        <span class="printer-stale text-[10px]" style="color: var(--color-muted-fg);">
-          Imprimante éteinte — niveaux relevés il y a {ageLabel(
-            clock.now - printer.lastUpdate.getTime()
-          )}
-        </span>
-      {/if}
     {:else}
       <button
         type="button"
@@ -287,13 +278,12 @@
 
   /* ─── Mise en page iPhone (hors `pad:`) : l'objet, sans texte (19/09/2026) ───
      Ni le nom — l'icône le dit — ni les lignes d'état du bas (« jamais jointe /
-     Tap pour réessayer », « niveaux relevés il y a… ») : il reste l'icône-
+     Tap pour réessayer ») : il reste l'icône-
      interrupteur et, quand on les connaît, les jauges. Le relevé se relance
      tout seul (toutes les 30 s en erreur, cf. store), le bouton n'y manque pas.
      L'icône se centre : seule et calée à gauche, elle semblait orpheline. */
   @media (max-width: 767px), (max-height: 599px) {
     .printer-label,
-    .printer-stale,
     .ink-error-btn {
       display: none;
     }
