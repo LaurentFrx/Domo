@@ -219,13 +219,29 @@
   }
 
   /* ─── Tuile étroite (≈ 175 px : à côté de la carte Terrasse sur iPhone) ───
-     Icône (40) + jauges (118) côte à côte demandent ~170 px de contenu : on
-     empile, l'icône au-dessus des jauges — 124 px de haut, la hauteur de la
-     carte voisine. */
+     L'icône reste sur la ligne des jauges (demande de Laurent, 19/09/2026) :
+     on resserre au lieu d'empiler. Mesuré : icône 40 + 12 + jauges 118 =
+     170 px, quand l'iPhone n'offre que 149 px de contenu et l'iPhone SE 140. */
   @container (max-width: 259px) {
     .printer-body {
-      flex-direction: column;
-      gap: 10px;
+      gap: 8px;
+    }
+    .ink-pills {
+      grid-template-columns: repeat(4, 20px);
+      gap: 6px;
+    }
+  }
+  @container (max-width: 145px) {
+    .printer-body {
+      gap: 6px;
+    }
+    .printer-icon {
+      width: 34px;
+      height: 34px;
+    }
+    .ink-pills {
+      grid-template-columns: repeat(4, 19px);
+      gap: 5px;
     }
   }
 </style>

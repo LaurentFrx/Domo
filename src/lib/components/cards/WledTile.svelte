@@ -415,38 +415,6 @@
     <div class="tile-glow" aria-hidden="true"></div>
     <div class="tile-wash" aria-hidden="true"></div>
 
-    <!-- LES LIGNES DE LED : un ruban par ligne, dans l'ordre physique. Éteinte,
-         une ligne reste un trait sombre — on voit ce qui est en service. -->
-    <div class="tile-strips" aria-hidden="true">
-      {#each strips as s (s.id)}
-        <div
-          class="strip"
-          class:on={s.lit}
-          class:live={s.live}
-          style="--sglow: {s.glow.join(' ')};"
-        >
-          <div class="strip-light">
-            {#if s.live}
-              <!-- Les VRAIES LED de la ligne, une par une (lignes sans blanc). -->
-              <canvas class="strip-leds" use:ledStrip={{ start: s.start, len: s.len }}></canvas>
-            {:else}
-              <div
-                class="strip-fill {s.anim}"
-                style="--paint: {s.paint}; --paint-size: {s.paintSize}; animation-duration: {s.animDur}s;"
-              ></div>
-            {/if}
-            {#if s.sweep}
-              <!-- Effets de balayage : le point qui traverse la ligne. -->
-              <div
-                class="strip-spot"
-                style="background: {s.spotPaint}; animation-duration: {s.spotDur}s;"
-              ></div>
-            {/if}
-          </div>
-        </div>
-      {/each}
-    </div>
-
     <!-- Surface de geste : glissé = luminosité, tap = feuille. `data-no-haptic`
        car les retours sont déclenchés explicitement (accroche / tap). -->
     <div
@@ -487,43 +455,75 @@
         {/if}
       </div>
 
-      <div class="tile-actions">
-        <label class="toggle-pill" aria-label="Allumer / éteindre l'éclairage terrasse">
-          <input
-            type="checkbox"
-            checked={wled.on}
-            onchange={(e) => {
-              haptic('light');
-              // L'interrupteur coupe la LUMIÈRE, pas le mode Musique : le serveur
-              // suspend le stream tant que le ruban est éteint.
-              wled.setOn((e.currentTarget as HTMLInputElement).checked);
-            }}
-          />
-          <span class="toggle-pill-knob"></span>
-        </label>
+      <label class="toggle-pill" aria-label="Allumer / éteindre l'éclairage terrasse">
+        <input
+          type="checkbox"
+          checked={wled.on}
+          onchange={(e) => {
+            haptic('light');
+            // L'interrupteur coupe la LUMIÈRE, pas le mode Musique : le serveur
+            // suspend le stream tant que le ruban est éteint.
+            wled.setOn((e.currentTarget as HTMLInputElement).checked);
+          }}
+        />
+        <span class="toggle-pill-knob"></span>
+      </label>
 
-        <button
-          type="button"
-          class="tile-more"
-          aria-label="Réglages de l'éclairage terrasse"
-          onclick={onopen}
-        >
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            aria-hidden="true"
+      <!-- LES LIGNES DE LED : un ruban par ligne, dans l'ordre physique. Éteinte,
+           une ligne reste un trait sombre — on voit ce qui est en service. -->
+      <div class="tile-strips" aria-hidden="true">
+        {#each strips as s (s.id)}
+          <div
+            class="strip"
+            class:on={s.lit}
+            class:live={s.live}
+            style="--sglow: {s.glow.join(' ')};"
           >
-            <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
-            <circle cx="16" cy="7" r="2" />
-            <circle cx="10" cy="17" r="2" />
-          </svg>
-        </button>
+            <div class="strip-light">
+              {#if s.live}
+                <!-- Les VRAIES LED de la ligne, une par une (lignes sans blanc). -->
+                <canvas class="strip-leds" use:ledStrip={{ start: s.start, len: s.len }}></canvas>
+              {:else}
+                <div
+                  class="strip-fill {s.anim}"
+                  style="--paint: {s.paint}; --paint-size: {s.paintSize}; animation-duration: {s.animDur}s;"
+                ></div>
+              {/if}
+              {#if s.sweep}
+                <!-- Effets de balayage : le point qui traverse la ligne. -->
+                <div
+                  class="strip-spot"
+                  style="background: {s.spotPaint}; animation-duration: {s.spotDur}s;"
+                ></div>
+              {/if}
+            </div>
+          </div>
+        {/each}
       </div>
+
+      <!-- Les rubans partagent la ligne du bouton Réglages : le bas de la
+           carte, c'est la lumière et son réglage. -->
+      <button
+        type="button"
+        class="tile-more"
+        aria-label="Réglages de l'éclairage terrasse"
+        onclick={onopen}
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+          <circle cx="16" cy="7" r="2" />
+          <circle cx="10" cy="17" r="2" />
+        </svg>
+      </button>
     </div>
 
     <!-- Le niveau ne s'écrit que pendant le glissé : au repos, il se lit à
@@ -552,7 +552,9 @@
   }
   .tile-light {
     position: relative;
+    display: flex;
     flex: 1;
+    flex-direction: column;
     min-height: 128px;
   }
 
@@ -592,11 +594,10 @@
   }
 
   /* ─── Les lignes de LED ──────────────────────────────────────────────── */
+  /* Sur la ligne du bouton Réglages, centrés sur lui (cf. .tile-body). */
   .tile-strips {
-    position: absolute;
-    left: 14px;
-    right: 14px;
-    bottom: 13px;
+    grid-area: 3 / 1;
+    align-self: center;
     display: flex;
     flex-direction: column;
     gap: 7px;
@@ -787,19 +788,31 @@
   }
 
   /* ─── Contenu ────────────────────────────────────────────────────────── */
+  /* Deux lignes : le lieu et l'interrupteur en haut ; les rubans et le
+     bouton Réglages en bas — la rangée du milieu prend la hauteur restante. */
   .tile-body {
     position: relative;
     z-index: 2;
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    /* Bas dégagé pour les deux rubans (13 + 6 + 7 + 6 px) et leur halo. */
-    padding: 14px 14px 44px;
+    display: grid;
+    flex: 1;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto 1fr auto;
+    column-gap: 12px;
+    padding: 14px;
     /* Le contenu ne doit pas manger le geste : seules les vraies commandes
        (interrupteur, bouton Réglages) réarment les événements pointeur. */
     pointer-events: none;
   }
+  .tile-body > .toggle-pill {
+    grid-area: 1 / 2;
+    pointer-events: auto;
+  }
+  .tile-body > .tile-more {
+    grid-area: 3 / 2;
+    pointer-events: auto;
+  }
   .tile-text {
+    grid-area: 1 / 1;
     display: flex;
     min-width: 0;
     flex: 1;
@@ -832,7 +845,8 @@
     position: absolute;
     z-index: 2;
     left: 14px;
-    bottom: 40px;
+    /* Au-dessus de la ligne des rubans (14 de marge + 36 de bouton + 6). */
+    bottom: 56px;
     font-size: 28px;
     font-weight: 700;
     line-height: 1;
@@ -851,16 +865,6 @@
     color: var(--color-muted-fg);
   }
 
-  .tile-actions {
-    display: flex;
-    flex-shrink: 0;
-    flex-direction: column;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 10px;
-    align-self: stretch;
-    pointer-events: auto;
-  }
   .tile-more {
     display: inline-flex;
     height: 36px;
@@ -931,15 +935,12 @@
   /* ─── Tuile étroite (≈ 175 px : deux cartes de front sur iPhone) ───────── */
   @container (max-width: 239px) {
     .tile-body {
-      gap: 8px;
-      padding: 12px 12px 44px;
-    }
-    .tile-strips {
-      left: 12px;
-      right: 12px;
+      column-gap: 10px;
+      padding: 12px;
     }
     .tile-drag {
       left: 12px;
+      bottom: 54px;
       font-size: 24px;
     }
   }
