@@ -458,12 +458,7 @@
            une ligne reste un trait sombre — on voit ce qui est en service. -->
       <div class="tile-strips" aria-hidden="true">
         {#each strips as s (s.id)}
-          <div
-            class="strip"
-            class:on={s.lit}
-            class:live={s.live}
-            style="--sglow: {s.glow.join(' ')};"
-          >
+          <div class="strip" class:on={s.lit} class:live={s.live}>
             <div class="strip-light">
               {#if s.live}
                 <!-- Les VRAIES LED de la ligne, une par une (lignes sans blanc). -->
@@ -560,24 +555,6 @@
     border-radius: 9999px;
     background: var(--color-muted);
   }
-  /* Le halo de la ligne allumée — sur un calque à part : l'opacité suit le
-     niveau (une box-shadow ne se dose pas en calc). */
-  .strip::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    box-shadow:
-      0 0 6px 1px rgb(var(--sglow) / 0.85),
-      0 0 18px 4px rgb(var(--sglow) / 0.45);
-    opacity: 0;
-    transition: opacity var(--duration-normal) var(--ease-default);
-  }
-  /* Le halo suit le niveau (une ligne à 5 % doit être faible) et respire
-     avec la musique (--mvol ; sans musique il vaut 0.5 → facteur 1). */
-  .strip.on::after {
-    opacity: calc((0.35 + var(--lvlf) * 0.65) * (0.55 + var(--mvol) * 0.9));
-  }
   .strip-light {
     position: absolute;
     inset: 0;
@@ -589,21 +566,24 @@
   /* Thème clair : la ligne allumée dans un profilé sombre de 1 px, comme le
      ruban dans son rail — sans lui, un blanc 4000K sur le verre clair
      disparaissait (crème sur blanc). Le thème sombre n'en a pas besoin : la
-     nuit fait déjà le contraste, et le liseré y éteindrait le halo. */
+     nuit fait déjà le contraste. */
   :global(html:not([data-theme='dark'])) .strip.on {
     background: oklch(0.3 0.03 262);
   }
   :global(html:not([data-theme='dark'])) .strip.on .strip-light {
     inset: 1px;
   }
+  /* Aucun halo autour des rubans (retiré à la demande de Laurent, 19/09/2026 :
+     il débordait sur la carte). Le niveau se lit à l'intensité, et la
+     musique (--mvol ; 0.5 au repos → facteur 1) module cette même intensité.
+     L'aperçu direct porte déjà la luminosité du module : pas de double
+     atténuation, seule la musique s'applique. */
   .strip.on .strip-light {
     opacity: 1;
-    /* Le niveau se lit à l'intensité. L'aperçu direct porte déjà la
-       luminosité du module : pas de double atténuation. */
-    filter: brightness(calc(0.5 + var(--lvlf) * 0.5));
+    filter: brightness(calc((0.5 + var(--lvlf) * 0.5) * (0.7 + var(--mvol) * 0.6)));
   }
   .strip.on.live .strip-light {
-    filter: none;
+    filter: brightness(calc(0.7 + var(--mvol) * 0.6));
   }
   /* Reflet de tube : la ligne se lit « LED allumée », pas « barre de couleur ». */
   .strip.on .strip-light::after {
@@ -713,7 +693,7 @@
   }
 
   /* Pendant le glissé, la lumière suit le doigt SANS interpolation. */
-  .tile.dragging .strip::after {
+  .tile.dragging .strip-light {
     transition: none;
   }
 
@@ -903,7 +883,6 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .strip::after,
     .strip-light,
     .tile-drag,
     .tile-text,
