@@ -1,5 +1,6 @@
 <script lang="ts">
   import { findmy, type FindMyDevice } from '$stores/findmy.svelte';
+  import { ageLabel } from '$lib/utils/freshness';
 
   // ─── Exclusion : ancien iPad de Laurent (position inconnue, batterie morte).
   // Filtre sur le topicId UNIQUEMENT — les deux iPad partagent le même `name`,
@@ -94,18 +95,42 @@
     if (d.battery == null || d.batteryStatus === 'Unknown') return null;
     return Math.round(d.battery);
   }
-  function batteryColor(d: FindMyDevice): string {
-    const p = batteryPct(d);
+  function levelColor(p: number | null, charging: boolean): string {
     if (p == null) return 'var(--color-muted-fg)';
-    if (d.charging) return 'var(--color-battery)';
+    if (charging) return 'var(--color-battery)';
     if (p > 50) return 'var(--color-battery)';
     if (p > 20) return 'var(--color-warning)';
     return 'var(--color-alert)';
   }
 
-  // Les AirPods (Accessory) ne remontent JAMAIS leur batterie au cloud Find My
-  // (seulement leur position) → on masque la ligne batterie pour eux (sinon un
-  // « — » permanent et inutile). Cf. limite Apple confirmée 2026-06-20.
+  // Les AirPods ne remontent JAMAIS leur batterie au cloud Localiser (0 % /
+  // Unknown, contenu brut relu le 19/09/2026 sur Pro 2 et Pro 3). Leur niveau
+  // vient du Bluetooth : le RPi4 écoute leurs annonces (airpods-ble). Le boîtier
+  // se remplit de SA charge — c'est la dernière valeur entendue, datée dans la
+  // bulle d'aide.
+  type Level = { pct: number | null; charging: boolean; tip: string };
+  function levelOf(d: FindMyDevice): Level {
+    if (!isAirpods(d)) {
+      const pct = batteryPct(d);
+      return { pct, charging: d.charging, tip: pct == null ? '' : ` — ${pct} %` };
+    }
+    const b = findmy.airpodsFor(d);
+    if (!b || b.case == null) return { pct: null, charging: false, tip: '' };
+    const buds = [
+      b.left != null ? `gauche ${b.left} %` : null,
+      b.right != null ? `droit ${b.right} %` : null
+    ].filter(Boolean);
+    const age = b.caseTs != null ? ageLabel(Date.now() - b.caseTs * 1000) : null;
+    return {
+      pct: b.case,
+      charging: b.caseCharging,
+      tip:
+        ` — boîtier ${b.case} %` +
+        (buds.length ? `, écouteurs ${buds.join(', ')}` : '') +
+        (age ? ` (il y a ${age})` : '')
+    };
+  }
+
   function isAirpods(d: FindMyDevice): boolean {
     const s = (d.deviceClass || '').toLowerCase();
     return (
@@ -120,7 +145,7 @@
   // ─── Visuel par type d'appareil : PNG « flat produit » (PommePlate, CC0,
   // static/devices/) + zone d'écran (%) où la couleur de batterie MONTE depuis
   // le bas — l'écran s'allume au niveau de la charge. AirPods : boîtier dessiné
-  // en SVG inline (même style), sans jauge (Find My ne donne pas leur batterie).
+  // en SVG inline (même style), rempli par la charge du boîtier (Bluetooth).
   type Art = {
     src: string | null;
     /** largeur affichée (px) pour 46 px de haut */
@@ -160,7 +185,13 @@
 <!-- Visuel d'appareil : PNG produit, écran rempli par la batterie depuis le bas
      (couleur selon le niveau) ; boîtier AirPods en SVG assorti ; grisé en attente
      de partage. -->
-{#snippet deviceArt(cls: string | null, pct: number | null, color: string, ph: boolean)}
+{#snippet deviceArt(
+  cls: string | null,
+  pct: number | null,
+  color: string,
+  ph: boolean,
+  uid: string
+)}
   {@const art = artFor(cls)}
   <span class="fm-art" class:fm-art-ph={ph} style="width: {art.w}px;">
     {#if art.src}
@@ -178,6 +209,20 @@
       <!-- Boîtier AirPods, flat produit (dessin maison, cf. static/devices/LICENSE.md) -->
       <svg viewBox="0 0 40 46" aria-hidden="true" style="width: 100%; height: auto;">
         <rect x="3" y="9" width="34" height="30" rx="9" fill="#b9babd" />
+        {#if pct != null}
+          <clipPath id="fm-case-{uid}">
+            <rect x="3" y="9" width="34" height="30" rx="9" />
+          </clipPath>
+          <rect
+            class="fm-case-fill"
+            x="3"
+            y={39 - (30 * pct) / 100}
+            width="34"
+            height={(30 * pct) / 100}
+            style="fill: {color};"
+            clip-path="url(#fm-case-{uid})"
+          />
+        {/if}
         <rect
           x="3"
           y="9"
@@ -200,14 +245,15 @@
 {#snippet deviceCell(item: RowItem, uid: string)}
   {#if item.placeholder}
     <div class="fm-cell fm-cell-ph" title="{item.name} — partage en attente">
-      {@render deviceArt(item.deviceClass, null, 'transparent', true)}
+      {@render deviceArt(item.deviceClass, null, 'transparent', true, uid)}
       <span class="fm-cell-name">{artFor(item.deviceClass).label}</span>
     </div>
   {:else}
     {@const d = item.device}
-    {@const pct = isAirpods(d) ? null : batteryPct(d)}
-    {@const color = batteryColor(d)}
-    {@const tip = `${shortName(d)}${pct == null ? '' : ` — ${pct} %`}${d.charging ? ' (en charge)' : ''}`}
+    {@const lv = levelOf(d)}
+    {@const pct = lv.pct}
+    {@const color = levelColor(pct, lv.charging)}
+    {@const tip = `${shortName(d)}${lv.tip}${lv.charging ? ' (en charge)' : ''}`}
     {#if d.lat != null && d.lon != null}
       <a
         class="fm-cell fm-cell-link"
@@ -217,14 +263,14 @@
         title={tip}
         aria-label="Voir {d.name} sur le plan — {tip}"
       >
-        {@render deviceArt(d.deviceClass, pct, color, false)}
-        {#if d.charging}<span class="fm-bolt" aria-hidden="true">⚡︎</span>{/if}
+        {@render deviceArt(d.deviceClass, pct, color, false, uid)}
+        {#if lv.charging}<span class="fm-bolt" aria-hidden="true">⚡︎</span>{/if}
         <span class="fm-cell-name">{artFor(d.deviceClass).label}</span>
       </a>
     {:else}
       <div class="fm-cell" title={tip} aria-label={tip}>
-        {@render deviceArt(d.deviceClass, pct, color, false)}
-        {#if d.charging}<span class="fm-bolt" aria-hidden="true">⚡︎</span>{/if}
+        {@render deviceArt(d.deviceClass, pct, color, false, uid)}
+        {#if lv.charging}<span class="fm-bolt" aria-hidden="true">⚡︎</span>{/if}
         <span class="fm-cell-name">{artFor(d.deviceClass).label}</span>
       </div>
     {/if}
@@ -376,6 +422,11 @@
     opacity: 0.82;
     box-shadow: inset 0 1.5px 0 oklch(1 0 0 / 0.4);
     transition: height var(--duration-slow, 300ms) var(--ease-default, ease);
+  }
+  /* Boîtier AirPods : même « liquide » translucide que les écrans (une var() ne
+     passe pas dans l'attribut SVG fill → couleur posée en style). */
+  .fm-case-fill {
+    opacity: 0.82;
   }
   .fm-cell-name {
     font-size: 9.5px;

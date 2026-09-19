@@ -22,7 +22,9 @@ function start() {
   client.on('message', (topic: string, buf: Buffer) => {
     if (!topic.startsWith('findmy/')) return;
     const payload = buf.toString();
-    cache.set(topic, payload);
+    // Payload vide = retained purgé par le bridge (appareil retiré de Localiser).
+    if (payload) cache.set(topic, payload);
+    else cache.delete(topic);
     for (const l of listeners) {
       try {
         l(topic, payload);

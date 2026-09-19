@@ -19,8 +19,12 @@ export const GET: RequestHandler = async ({ cookies }) => {
           /* flux fermé */
         }
       };
-      for (const e of findmySnapshot()) send(e.topic, e.payload); // snapshot = remplace le retained
-      unsub = findmySubscribe(send); // updates live
+      // Snapshot en UN événement : il fait foi côté client (un appareil purgé pendant
+      // une déconnexion disparaît aussi de son cache local), puis les updates live.
+      controller.enqueue(
+        enc.encode(`event: snapshot\ndata: ${JSON.stringify(findmySnapshot())}\n\n`)
+      );
+      unsub = findmySubscribe(send);
       ka = setInterval(() => {
         try {
           controller.enqueue(enc.encode(`: ka\n\n`));

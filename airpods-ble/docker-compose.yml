@@ -1,0 +1,15 @@
+services:
+  airpods-ble:
+    build: .
+    image: airpods-ble:latest
+    container_name: airpods-ble
+    restart: unless-stopped
+    # Mosquitto écoute sur la boucle locale du RPi4.
+    network_mode: host
+    # Le profil AppArmor docker-default interdit de parler à BlueZ sur le D-Bus système
+    # (« An AppArmor policy prevents this sender… », vécu le 19/09/2026).
+    security_opt:
+      - apparmor:unconfined
+    env_file: .env
+    volumes:
+      - /run/dbus:/run/dbus:ro
