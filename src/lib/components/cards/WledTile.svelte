@@ -555,7 +555,6 @@
     display: flex;
     flex: 1;
     flex-direction: column;
-    min-height: 128px;
   }
 
   /* ─── La lumière sur la carte ────────────────────────────────────────── */
@@ -596,7 +595,7 @@
   /* ─── Les lignes de LED ──────────────────────────────────────────────── */
   /* Sur la ligne du bouton Réglages, centrés sur lui (cf. .tile-body). */
   .tile-strips {
-    grid-area: 3 / 1;
+    grid-area: 2 / 1;
     align-self: center;
     display: flex;
     flex-direction: column;
@@ -788,16 +787,17 @@
   }
 
   /* ─── Contenu ────────────────────────────────────────────────────────── */
-  /* Deux lignes : le lieu et l'interrupteur en haut ; les rubans et le
-     bouton Réglages en bas — la rangée du milieu prend la hauteur restante. */
+  /* Deux lignes, rien entre elles : le lieu et l'interrupteur, puis les
+     rubans et le bouton Réglages. La hauteur est celle du contenu (~96 px) —
+     plus de minimum : les 128 px d'avant laissaient une rangée vide au milieu. */
   .tile-body {
     position: relative;
     z-index: 2;
     display: grid;
     flex: 1;
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: auto 1fr auto;
-    column-gap: 12px;
+    grid-template-rows: auto auto;
+    gap: 10px 12px;
     padding: 14px;
     /* Le contenu ne doit pas manger le geste : seules les vraies commandes
        (interrupteur, bouton Réglages) réarment les événements pointeur. */
@@ -808,11 +808,12 @@
     pointer-events: auto;
   }
   .tile-body > .tile-more {
-    grid-area: 3 / 2;
+    grid-area: 2 / 2;
     pointer-events: auto;
   }
   .tile-text {
     grid-area: 1 / 1;
+    align-self: center;
     display: flex;
     min-width: 0;
     flex: 1;
@@ -840,16 +841,16 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  /* Le pourcentage du glissé, au-dessus des rubans, le temps du geste. */
+  /* Le pourcentage du glissé prend la place du nom, le temps du geste : la
+     carte n'a plus de rangée libre pour lui. */
   .tile-drag {
     position: absolute;
     z-index: 2;
+    top: 14px;
     left: 14px;
-    /* Au-dessus de la ligne des rubans (14 de marge + 36 de bouton + 6). */
-    bottom: 56px;
-    font-size: 28px;
+    font-size: 20px;
     font-weight: 700;
-    line-height: 1;
+    line-height: 24px;
     letter-spacing: -0.02em;
     color: var(--color-fg);
     opacity: 0;
@@ -859,8 +860,14 @@
   .tile.dragging .tile-drag {
     opacity: 1;
   }
+  .tile-text {
+    transition: opacity var(--duration-fast) var(--ease-default);
+  }
+  .tile.dragging .tile-text {
+    opacity: 0;
+  }
   .tile-drag-unit {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--color-muted-fg);
   }
@@ -935,13 +942,12 @@
   /* ─── Tuile étroite (≈ 175 px : deux cartes de front sur iPhone) ───────── */
   @container (max-width: 239px) {
     .tile-body {
-      column-gap: 10px;
+      gap: 10px;
       padding: 12px;
     }
     .tile-drag {
+      top: 12px;
       left: 12px;
-      bottom: 54px;
-      font-size: 24px;
     }
   }
 
@@ -951,6 +957,7 @@
     .strip::after,
     .strip-light,
     .tile-drag,
+    .tile-text,
     .toggle-pill-knob,
     .toggle-pill-knob::after {
       transition: none;
