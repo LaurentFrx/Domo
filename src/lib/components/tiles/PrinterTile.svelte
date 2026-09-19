@@ -60,51 +60,44 @@
   class:printer-on={isOn}
   style="background: var(--color-card); border-color: var(--color-border);"
 >
-  <div class="printer-body flex items-center gap-3">
-    <!-- Icône-interrupteur (touch = on/off) + titre DESSOUS, comme les tuiles du dessus. -->
-    <div class="printer-head flex shrink-0 flex-col items-center gap-1">
-      <button
-        type="button"
-        class="printer-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-lg)]"
-        style="background: {isOn
-          ? 'var(--color-consumption)'
-          : 'var(--color-consumption-muted)'}; color: {isOn
-          ? 'white'
-          : 'var(--color-consumption)'};"
-        role="switch"
-        aria-checked={isOn}
-        aria-label="Allumer ou éteindre l'imprimante"
-        onclick={onTogglePlug}
-        disabled={!plug.available}
+  <!-- L'objet, sans texte (19/09/2026, toutes mises en page) : ni le nom — l'icône
+       le dit — ni ligne d'état. L'icône-interrupteur, et les jauges dès qu'un
+       relevé a été vu une fois (mémoire serveur, cf. store). Le relevé se
+       relance seul (30 s en erreur) : aucun bouton « réessayer » n'y manque. -->
+  <div class="printer-body flex items-center justify-center gap-3">
+    <button
+      type="button"
+      class="printer-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-lg)]"
+      style="background: {isOn
+        ? 'var(--color-consumption)'
+        : 'var(--color-consumption-muted)'}; color: {isOn ? 'white' : 'var(--color-consumption)'};"
+      role="switch"
+      aria-checked={isOn}
+      aria-label="Allumer ou éteindre l'imprimante"
+      title="Imprimante"
+      onclick={onTogglePlug}
+      disabled={!plug.available}
+    >
+      <svg
+        width="22"
+        height="22"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.75"
+        stroke-linecap="round"
+        stroke-linejoin="round"
       >
-        <svg
-          width="22"
-          height="22"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.75"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <polyline points="6 9 6 2 18 2 18 9" />
-          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-          <rect x="6" y="14" width="12" height="8" rx="0.5" />
-        </svg>
-      </button>
-      <span
-        class="printer-label text-center text-[11px] leading-tight font-semibold sm:text-[13px]"
-        style="color: var(--color-fg);"
-      >
-        Imprimante
-      </span>
-    </div>
+        <polyline points="6 9 6 2 18 2 18 9" />
+        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+        <rect x="6" y="14" width="12" height="8" rx="0.5" />
+      </svg>
+    </button>
 
-    <!-- Niveaux d'encre CMYK : 4 jauges VERTICALES (remplies de bas en haut) + % dessous -->
+    <!-- Niveaux d'encre CMYK : 4 jauges VERTICALES (remplies de bas en haut), le
+         dernier relevé VU affiché tel quel — ni date ni grisé quand l'imprimante
+         est hors tension : l'encre ne bouge que quand elle imprime. -->
     {#if printer.inks.length > 0}
-      <!-- Le dernier relevé VU, affiché tel quel — ni date ni grisé quand
-           l'imprimante est hors tension : l'encre ne bouge que quand elle
-           imprime, le dernier relevé EST le niveau courant (cf. store). -->
       <div class="ink-pills">
         {#each printer.inks as ink (ink.color)}
           {@const c = INK[ink.color]}
@@ -119,24 +112,6 @@
           </div>
         {/each}
       </div>
-    {:else}
-      <button
-        type="button"
-        class="ink-error-btn text-left text-[11px]"
-        style="color: var(--color-muted-fg);"
-        onclick={() => printer.refresh()}
-      >
-        {#if printer.status === 'unconfigured'}
-          Niveaux d'encre indisponibles — `PRINTER_HOST` non configuré.
-        {:else if printer.status === 'polling'}
-          Lecture des niveaux d'encre…
-        {:else}
-          Imprimante jamais jointe<span class="ink-error-detail"
-            >{` — ${printer.lastError ?? 'erreur réseau'}`}</span
-          >.
-          <span style="color: var(--color-primary);">Tap pour réessayer</span>
-        {/if}
-      </button>
     {/if}
   </div>
 </article>
@@ -185,7 +160,6 @@
   /* ─── 4 jauges d'encre CMYK VERTICALES (capsules remplies de bas en haut) ─── */
   .ink-pills {
     display: grid;
-    flex: 1;
     grid-template-columns: repeat(4, 22px);
     gap: 10px;
     justify-content: center;
@@ -245,51 +219,13 @@
   }
 
   /* ─── Tuile étroite (≈ 175 px : à côté de la carte Terrasse sur iPhone) ───
-     En ligne, icône + libellé (70) et les quatre jauges (118) demandaient
-     ~225 px. On empile : icône et libellé côte à côte en tête, jauges (ou
-     message) dessous — 124 px de haut, la hauteur de la carte voisine. */
+     Icône (40) + jauges (118) côte à côte demandent ~170 px de contenu : on
+     empile, l'icône au-dessus des jauges — 124 px de haut, la hauteur de la
+     carte voisine. */
   @container (max-width: 259px) {
     .printer-body {
       flex-direction: column;
-      align-items: stretch;
       gap: 10px;
-    }
-    .printer-head {
-      flex-direction: row;
-      gap: 8px;
-    }
-    .ink-pills {
-      flex: none;
-    }
-    /* Le détail technique (« connect EHOSTUNREACH 192.168.1.19:80 ») prenait
-       cinq lignes à cette largeur et étirait toute la rangée. L'iPad le garde. */
-    .ink-error-detail {
-      display: none;
-    }
-  }
-
-  .ink-error-btn {
-    background: none;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  /* ─── Mise en page iPhone (hors `pad:`) : l'objet, sans texte (19/09/2026) ───
-     Ni le nom — l'icône le dit — ni les lignes d'état du bas (« jamais jointe /
-     Tap pour réessayer ») : il reste l'icône-
-     interrupteur et, quand on les connaît, les jauges. Le relevé se relance
-     tout seul (toutes les 30 s en erreur, cf. store), le bouton n'y manque pas.
-     L'icône se centre : seule et calée à gauche, elle semblait orpheline. */
-  @media (max-width: 767px), (max-height: 599px) {
-    .printer-label,
-    .ink-error-btn {
-      display: none;
-    }
-    .printer-body,
-    .printer-head {
-      justify-content: center;
     }
   }
 </style>

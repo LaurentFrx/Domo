@@ -59,10 +59,7 @@ class PrinterState {
   /** true si la dernière requête a réussi. Indépendant des niveaux d'encre :
    * on garde les valeurs cached même si online=false (imprimante éteinte). */
   online = $state(false);
-  lastError = $state<string | null>(null);
   status = $state<'idle' | 'polling' | 'connected' | 'unconfigured' | 'error'>('idle');
-
-  empty = $derived(this.inks.length === 0);
 
   private timerId: ReturnType<typeof setTimeout> | null = null;
   private visibilityHandler: (() => void) | null = null;
@@ -135,7 +132,6 @@ class PrinterState {
       if (res.status === 503) {
         this.status = 'unconfigured';
         this.online = false;
-        this.lastError = 'PRINTER_HOST non défini côté serveur';
         return;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -152,12 +148,10 @@ class PrinterState {
         saveCachedInks(data.inks);
         if (data.online) this.gotLive = true;
       }
-      this.lastError = data.error ?? null;
       this.status = data.error || !data.online ? 'error' : 'connected';
     } catch (e) {
       this.online = false;
       this.status = 'error';
-      this.lastError = (e as Error).message;
       // Idem : on ne touche pas à `inks`, l'utilisateur garde la dernière vue.
     }
   }
