@@ -269,6 +269,8 @@
       import_hc_kwh: 0,
       import_hp_kwh: 0,
       import_split_source: null,
+      import_estimated: false,
+      has_daily: false,
       import_live_kwh: 0,
       savings_eur: 0,
       autoconso_estimated: false
@@ -325,7 +327,36 @@
     auto: viewBuckets.reduce((s, b) => s + (b.autoconso_kwh || 0), 0),
     imp: viewBuckets.reduce((s, b) => s + (b.import_kwh || 0), 0),
     eur: viewBuckets.reduce((s, b) => s + (b.savings_eur || 0), 0),
-    est: viewBuckets.some((b) => b.autoconso_estimated && (b.autoconso_kwh || 0) > 0)
+    est: viewBuckets.some((b) => b.autoconso_estimated && (b.autoconso_kwh || 0) > 0),
+    // Un seul mois au volume estimé par EDF suffit : le total est approché.
+    impEst: viewBuckets.some((b) => b.import_estimated && (b.import_kwh || 0) > 0)
+  });
+  // Année passée incomplète (2021 : l'historique EDF commence en novembre) : on le
+  // dit, sinon son total se lirait comme celui d'une année entière.
+  const MOIS_ABR = [
+    'janv.',
+    'févr.',
+    'mars',
+    'avr.',
+    'mai',
+    'juin',
+    'juil.',
+    'août',
+    'sept.',
+    'oct.',
+    'nov.',
+    'déc.'
+  ];
+  const partialYear = $derived.by(() => {
+    if (energyDrill.level !== 'year' || isCurrentYear) return null;
+    const idx = yearBuckets.flatMap((b, i) => (b.empty ? [] : [i]));
+    if (idx.length === 0) return null;
+    const first = idx[0];
+    const last = idx[idx.length - 1];
+    if (first === 0 && last === 11) return null;
+    return first === last
+      ? `${MOIS_ABR[first]} seulement`
+      : `${MOIS_ABR[first]}–${MOIS_ABR[last]} seulement`;
   });
   // Même bleu réseau que le graphe et que l'accueil : l'import garde UNE couleur
   // dans toute l'app.
@@ -436,7 +467,9 @@
         {/if}
         {#if viewTotals.imp >= 1}
           <span class="tot" style="color: {EDF_BLUE};">
-            {fmtTot(viewTotals.imp)}<span class="tot-u tot-u-kwh">kWh</span>
+            {viewTotals.impEst ? '≈' : ''}{fmtTot(viewTotals.imp)}<span class="tot-u tot-u-kwh"
+              >kWh</span
+            >
             <span class="tot-l">réseau</span>
           </span>
         {/if}
@@ -445,6 +478,9 @@
             {nfTot.format(viewTotals.eur)}<span class="tot-u">€</span>
             <span class="tot-l">économisés</span>
           </span>
+        {/if}
+        {#if partialYear}
+          <span class="tot-note">{partialYear}</span>
         {/if}
       </div>
 
@@ -514,7 +550,11 @@
           scaleMax={viewScale}
           onOpen={energyDrill.level === 'day' ? undefined : (k) => energyDrill.open(k)}
         />
-        {#if energyDrill.level === 'day' && !energyDrill.hasCurve}
+        {#if energyDrill.level === 'day' && !energyDrill.hasCurve && energyDrill.curveOutOfReach}
+          <p class="text-[11px]" style="color: var(--color-muted-fg);">
+            Courbe horaire hors d'atteinte : Enedis ne la conserve que 24 mois.
+          </p>
+        {:else if energyDrill.level === 'day' && !energyDrill.hasCurve}
           <p class="text-[11px]" style="color: var(--color-muted-fg);">
             Le détail heure par heure de cette journée n'a pas encore été récupéré chez Enedis — la
             reprise de l'historique remonte le temps peu à peu.
@@ -1030,6 +1070,14 @@
     margin-left: 3px;
     font-size: 10px;
     font-weight: 500;
+    color: var(--color-muted-fg);
+  }
+  /* « nov.–déc. seulement » : contrairement aux libellés, visible aussi sur
+     iPhone — sans lui, le total d'une année partielle se lit comme un an entier. */
+  .tot-note {
+    font-size: 10px;
+    font-weight: 500;
+    white-space: nowrap;
     color: var(--color-muted-fg);
   }
   .back-btn {

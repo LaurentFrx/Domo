@@ -10,10 +10,15 @@
  *    à la MINUTE (les bascules 00:06 / 08:06 tombent au milieu d'une heure) ;
  *  · production et autoconso = intégrale de `pv_samples`, donc seulement depuis
  *    juin 2026. Avant, la journée n'a que sa courbe d'import — dit tel quel.
+ *
+ * `curve_out_of_reach` : la journée n'a pas de courbe et n'en aura jamais —
+ * elle est plus vieille que les 24 mois qu'Enedis conserve. L'UI le dit au lieu
+ * de promettre une récupération qui n'arrivera pas.
  */
 import { json } from '@sveltejs/kit';
-import { isHC } from '$lib/server/tariffs';
+import { isHC, parisDate } from '$lib/server/tariffs';
 import {
+  CURVE_MAX_AGE_DAYS,
   emptyBucket,
   hasTable,
   integrateByEdges,
@@ -98,7 +103,14 @@ export const GET: RequestHandler = async ({ url }) => {
       }
     }
 
-    return json({ date, hours, has_curve: hasCurve, has_pv: hasPv });
+    const floor = parisDate(new Date(Date.now() - CURVE_MAX_AGE_DAYS * 86_400_000));
+    return json({
+      date,
+      hours,
+      has_curve: hasCurve,
+      has_pv: hasPv,
+      curve_out_of_reach: !hasCurve && date < floor
+    });
   } catch (e) {
     console.error('[energy/hourly] DB error:', e instanceof Error ? e.message : e);
     return json({ date, hours: [], error: 'database_unavailable' }, { status: 503 });

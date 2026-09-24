@@ -15,10 +15,19 @@ import { isHC, parisDate, regimeAt } from '$lib/server/tariffs';
 
 /** D'où vient la ventilation HC/HP d'une tranche, du plus fiable au moins
  * fiable — même vocabulaire à tous les niveaux (année, mois, jour) :
- * `curve` = courbe de charge ½h Enedis (la MESURE) ; `meter` = relevé compteur
- * saisi dans tariffs.json ; `enedis` = total Linky mais répartition estimée du
- * ratio EM-50 ; `local` = total ET répartition estimés. `null` = rien de connu. */
-export type SplitSource = 'curve' | 'meter' | 'local' | 'enedis' | null;
+ * `curve` = courbe de charge ½h Enedis (la MESURE) ; `index` = registres Linky
+ * HP/HC relevés chaque jour (ancien contrat EDF, 2024 : une mesure aussi) ;
+ * `meter` = relevé compteur saisi dans tariffs.json ; `index_est` = registres
+ * Linky relevés au mois, répartis au prorata des jours (estimé) ; `enedis` =
+ * total Linky mais répartition estimée ; `local` = total ET répartition
+ * estimés. `null` = rien de connu. */
+export type SplitSource = 'curve' | 'index' | 'meter' | 'index_est' | 'enedis' | 'local' | null;
+
+/** Miroir de ENEDIS_CURVE_MAX_AGE_DAYS (domo-recorder/record.py) : la limite
+ * de rétention de la courbe de charge côté Enedis, 24 mois glissants (au-delà,
+ * HTTP 500 — constaté le 27/08/2026, le backfill s'y arrête). Une journée plus
+ * ancienne sans courbe ne l'aura jamais. */
+export const CURVE_MAX_AGE_DAYS = 730;
 
 /** Une tranche de temps du bilan, quelle que soit sa durée. */
 export interface Bucket {
@@ -36,6 +45,9 @@ export interface Bucket {
   savings_eur: number;
   /** Provenance de la ventilation HC/HP (cf. SplitSource). */
   import_split_source: SplitSource;
+  /** Vrai quand le VOLUME d'import lui-même est une estimation (mois « Estimée »
+   * de l'ancien contrat EDF) : l'UI le préfixe de « ≈ ». */
+  import_estimated: boolean;
   /** Vrai quand aucune donnée n'existe pour cette tranche (≠ une vraie valeur
    * nulle) : l'UI montre une piste vide plutôt qu'un zéro trompeur. */
   empty: boolean;
@@ -53,6 +65,7 @@ export function emptyBucket(label: string, key: string | null = null): Bucket {
     import_hp_kwh: 0,
     savings_eur: 0,
     import_split_source: null,
+    import_estimated: false,
     empty: true
   };
 }

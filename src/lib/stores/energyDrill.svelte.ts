@@ -10,7 +10,7 @@
  * /api/energy/daily et /api/energy/hourly, et sont mis en CACHE : un mois passé
  * ne bouge plus, et l'aller-retour jour → mois → jour doit être instantané.
  */
-import type { MonthAgg } from './energyMonthly.svelte';
+import { normSplitSource, type MonthAgg, type SplitSource } from './energyMonthly.svelte';
 
 /** Une tranche de temps, quel que soit le niveau (mois, jour, heure). */
 export interface Bucket {
@@ -24,7 +24,9 @@ export interface Bucket {
   import_hc_kwh: number;
   import_hp_kwh: number;
   savings_eur: number;
-  import_split_source: 'curve' | 'meter' | 'local' | 'enedis' | null;
+  import_split_source: SplitSource;
+  /** Volume d'import estimé par EDF (ancien contrat) → « ≈ » côté UI. */
+  import_estimated: boolean;
   /** Aucune donnée pour cette tranche : piste vide, jamais un zéro trompeur. */
   empty: boolean;
   /** Autoconso reconstruite des € (pré-recorder) → tilde côté UI. */
@@ -39,10 +41,6 @@ function num(n: unknown): number {
   return typeof n === 'number' && Number.isFinite(n) ? Math.max(0, n) : 0;
 }
 
-function normSource(s: unknown): Bucket['import_split_source'] {
-  return s === 'curve' || s === 'meter' || s === 'local' || s === 'enedis' ? s : null;
-}
-
 /** Normalise un bucket venu du réseau (même exigence que le store mensuel). */
 function normBucket(b: Partial<Bucket> | undefined, fallbackLabel: string): Bucket {
   return {
@@ -55,13 +53,16 @@ function normBucket(b: Partial<Bucket> | undefined, fallbackLabel: string): Buck
     import_hc_kwh: num(b?.import_hc_kwh),
     import_hp_kwh: num(b?.import_hp_kwh),
     savings_eur: num(b?.savings_eur),
-    import_split_source: normSource(b?.import_split_source),
+    import_split_source: normSplitSource(b?.import_split_source),
+    import_estimated: b?.import_estimated === true,
     empty: b?.empty === true,
     autoconso_estimated: b?.autoconso_estimated === true
   };
 }
 
-/** Les 12 mois du store mensuel, vus comme des buckets navigables. */
+/** Les 12 mois du store mensuel, vus comme des buckets navigables — sauf ceux
+ * qui n'ont aucun jour à montrer (key null : le clic déplie leur détail au lieu
+ * de descendre dans trente zéros). */
 export function monthsToBuckets(
   months: MonthAgg[],
   labels: string[],
@@ -73,7 +74,7 @@ export function monthsToBuckets(
     const total = (m.autoconso_kwh || 0) + (m.import_kwh || 0);
     return {
       label: labels[i] ?? String(i + 1),
-      key: `${year}-${String(i + 1).padStart(2, '0')}`,
+      key: m.has_daily ? `${year}-${String(i + 1).padStart(2, '0')}` : null,
       production_kwh: m.production_kwh,
       autoconso_kwh: m.autoconso_kwh,
       surplus_kwh: m.surplus_kwh,
@@ -82,6 +83,7 @@ export function monthsToBuckets(
       import_hp_kwh: m.import_hp_kwh,
       savings_eur: m.savings_eur,
       import_split_source: m.import_split_source,
+      import_estimated: m.import_estimated,
       empty: (isCurrentYear && i > currentMonthIdx) || total < 0.5,
       autoconso_estimated: m.autoconso_estimated
     };
@@ -126,11 +128,20 @@ class EnergyDrillState {
   /** Niveau jour : la courbe ½h de ce jour a-t-elle déjà été récupérée ?
    * (le backfill remonte le temps sur plusieurs heures — avant son passage,
    * une journée ancienne est vide sans que rien ne soit cassé).
-   * Niveau mois : TOUS les jours à import ont-ils leur courbe ? Sinon les
-   * derniers sont ventilés par estimation (source 'enedis'/'local'). */
+   * Niveau mois : TOUS les jours à import ont-ils leur ventilation définitive
+   * (courbe, ou index EDF en 2024) ? Sinon les derniers sont ventilés par
+   * estimation (source 'enedis'/'local'). */
   hasCurve = $state(true);
+  /** Niveau jour : sans courbe, et plus vieux que les 24 mois qu'Enedis
+   * conserve — elle n'arrivera jamais. */
+  curveOutOfReach = $state(false);
 
-  #cache = new Map<string, Bucket[]>();
+  // Les drapeaux voyagent AVEC les tranches : un jour relu du cache doit dire
+  // la même chose que la première fois, pas hériter du jour vu juste avant.
+  #cache = new Map<
+    string,
+    { list: Bucket[]; hasPv: boolean; hasCurve: boolean; curveOutOfReach: boolean }
+  >();
   #seq = 0; // anti-course : seule la dernière demande peut écrire
 
   get level(): DrillLevel {
@@ -177,7 +188,10 @@ class EnergyDrillState {
   async #load(key: string, isDay: boolean): Promise<void> {
     const cached = this.#cache.get(key);
     if (cached) {
-      this.buckets = cached;
+      this.buckets = cached.list;
+      this.hasPv = cached.hasPv;
+      this.hasCurve = cached.hasCurve;
+      this.curveOutOfReach = cached.curveOutOfReach;
       this.error = null;
       this.loading = false;
       return;
@@ -196,6 +210,7 @@ class EnergyDrillState {
         hours?: Partial<Bucket>[];
         has_pv?: boolean;
         has_curve?: boolean;
+        curve_out_of_reach?: boolean;
       };
       if (seq !== this.#seq) return; // une demande plus récente a pris la main
       const raw = (isDay ? p.hours : p.days) ?? [];
@@ -206,10 +221,16 @@ class EnergyDrillState {
       // ventilation estimée doit céder la place à la mesure sans recharger.
       const today = new Date().toISOString().slice(0, 10);
       const complete = p.has_curve !== false;
-      if (complete && key < today.slice(0, key.length)) this.#cache.set(key, list);
+      const flags = {
+        hasPv: isDay ? p.has_pv !== false : true,
+        hasCurve: p.has_curve !== false,
+        curveOutOfReach: isDay && p.curve_out_of_reach === true
+      };
+      if (complete && key < today.slice(0, key.length)) this.#cache.set(key, { list, ...flags });
       this.buckets = list;
-      this.hasPv = isDay ? p.has_pv !== false : true;
-      this.hasCurve = p.has_curve !== false;
+      this.hasPv = flags.hasPv;
+      this.hasCurve = flags.hasCurve;
+      this.curveOutOfReach = flags.curveOutOfReach;
     } catch (e) {
       if (seq !== this.#seq) return;
       this.buckets = [];

@@ -6,22 +6,28 @@
  *    repli sur `savings_daily.import_wh` pour les jours qu'Enedis n'a pas encore
  *    publiés (J et J−1) ;
  *  · ventilation HC/HP = `enedis_daily.hc_kwh/hp_kwh` (courbe ½h ventilée à la
- *    minute par le recorder, source 'curve'). Pour les jours qui ne l'ont pas
- *    encore — J et J−1 (Enedis publie le lendemain), ou une panne de la
- *    passerelle — repli sur la FORME de la journée vue par l'EM-50 (ratio HC/HP
- *    appliqué au total du jour), marqué 'enedis' ou 'local' exactement comme la
- *    vue mensuelle : l'estimation s'affiche, annoncée comme telle, et la mesure
- *    la remplace dès qu'elle arrive. Avant l'EM-50 (juin 2026), rien à estimer ;
+ *    minute par le recorder, source 'curve'). Pour les jours de 2024 sans courbe
+ *    mais encadrés par deux relevés d'index Linky de l'ancien contrat EDF (celui
+ *    du jour et celui du lendemain), les registres HP/HC du compteur donnent la
+ *    répartition — une mesure, au kWh près (source 'index'). Pour les jours qui
+ *    n'ont ni l'une ni l'autre — J et J−1 (Enedis publie le lendemain), ou une
+ *    panne de la passerelle — repli sur la FORME de la journée vue par l'EM-50
+ *    (ratio HC/HP appliqué au total du jour), marqué 'enedis' ou 'local'
+ *    exactement comme la vue mensuelle : l'estimation s'affiche, annoncée comme
+ *    telle, et la mesure la remplace dès qu'elle arrive. Avant l'EM-50 (juin
+ *    2026), rien à estimer ;
  *  · autoconso et € = `savings_daily` (depuis juin 2026 seulement) ;
  *  · production et surplus = intégrale de `pv_samples` sur les bornes du jour.
  *
- * `has_curve` dit si TOUS les jours à import ont leur courbe : le client ne met
- * en cache qu'un mois complet (sinon l'estimation survivrait à la mesure).
+ * `has_curve` dit si TOUS les jours à import ont leur ventilation définitive
+ * (courbe, ou index EDF — ils ne changeront plus) : le client ne met en cache
+ * qu'un mois complet (sinon l'estimation survivrait à la mesure).
  *
  * Robustesse calquée sur /api/energy/monthly : readonly d'abord, gardes par
  * table, 503 + tableau vide plutôt qu'un crash, connexion toujours refermée.
  */
 import { json } from '@sveltejs/kit';
+import { edfHistory } from '$lib/server/edf-history';
 import {
   daysInMonth,
   emptyBucket,
@@ -82,6 +88,22 @@ export const GET: RequestHandler = async ({ url }) => {
           b.import_hp_kwh = Math.max(0, r.hp_kwh);
           b.import_split_source = 'curve'; // ventilée à la minute par le recorder
         }
+      }
+    }
+
+    // ── Registres Linky de l'ancien contrat EDF (09/03 → 09/10/2024) ──
+    // Un jour encadré par deux relevés (le sien et celui du lendemain) a sa
+    // répartition MESURÉE par le compteur : part HC des registres × total Enedis.
+    // Résolution : 1 kWh par registre — l'UI le dit dans l'infobulle.
+    const edf = edfHistory(db);
+    if (edf) {
+      for (const d of days) {
+        const s = edf.dayHcShare.get(d.key as string);
+        if (s === undefined || d.import_split_source !== null || !enedisDays.has(d.key as string))
+          continue;
+        d.import_hc_kwh = d.import_kwh * s;
+        d.import_hp_kwh = d.import_kwh * (1 - s);
+        d.import_split_source = 'index';
       }
     }
 
@@ -155,7 +177,10 @@ export const GET: RequestHandler = async ({ url }) => {
         d.import_split_source = enedisDays.has(d.key as string) ? 'enedis' : 'local';
       }
     }
-    const hasCurve = days.every((d) => d.import_kwh <= 0 || d.import_split_source === 'curve');
+    const hasCurve = days.every(
+      (d) =>
+        d.import_kwh <= 0 || d.import_split_source === 'curve' || d.import_split_source === 'index'
+    );
 
     return json({ month, days, has_curve: hasCurve });
   } catch (e) {

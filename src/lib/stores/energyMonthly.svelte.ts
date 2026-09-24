@@ -12,10 +12,29 @@
 const POLL_INTERVAL_MS = 5 * 60_000;
 const TIMEOUT_MS = 15_000;
 
-/** Provenance de la ventilation HC/HP d'un mois : `curve` = courbe ½h Enedis
- * (la mesure), `meter` = relevé compteur saisi, `enedis` = total Linky mais
- * répartition estimée, `local` = tout estimé, `null` = inconnue. */
-export type SplitSource = 'curve' | 'meter' | 'local' | 'enedis' | null;
+/** Provenance de la ventilation HC/HP d'un mois, de la plus fiable à la moins
+ * fiable : `curve` = courbe ½h Enedis (la mesure), `index` = registres Linky
+ * relevés chaque jour (ancien contrat EDF, mesure aussi), `meter` = relevé
+ * compteur saisi, `index_est` = registres relevés au mois, répartis au prorata
+ * (estimé), `enedis` = total Linky mais répartition estimée, `local` = tout
+ * estimé, `null` = inconnue. */
+export type SplitSource = 'curve' | 'index' | 'meter' | 'index_est' | 'enedis' | 'local' | null;
+
+const SPLIT_SOURCES: readonly SplitSource[] = [
+  'curve',
+  'index',
+  'meter',
+  'index_est',
+  'enedis',
+  'local'
+];
+
+/** LA liste blanche des provenances, partagée avec energyDrill : une valeur
+ * inconnue devient null — une source ajoutée côté serveur et oubliée ici
+ * perdrait donc sa ventilation sans bruit ; c'est le seul endroit à tenir. */
+export function normSplitSource(s: unknown): SplitSource {
+  return SPLIT_SOURCES.includes(s as SplitSource) ? (s as SplitSource) : null;
+}
 
 export interface MonthAgg {
   production_kwh: number;
@@ -28,6 +47,10 @@ export interface MonthAgg {
   import_hc_kwh: number;
   import_hp_kwh: number;
   import_split_source: SplitSource;
+  /** Volume d'import ESTIMÉ par EDF (ancien contrat, mois « Estimée ») — « ≈ » en UI. */
+  import_estimated: boolean;
+  /** Le mois a des jours à montrer : sinon la vue année n'y descend pas. */
+  has_daily: boolean;
   /** Import MESURÉ par le recorder ce mois (≠ relevé compteur) — base du KPI
    * d'autosuffisance, cohérent en période avec autoconso_kwh. */
   import_live_kwh: number;
@@ -53,6 +76,8 @@ function zeroMonth(): MonthAgg {
     import_hc_kwh: 0,
     import_hp_kwh: 0,
     import_split_source: null,
+    import_estimated: false,
+    has_daily: false,
     import_live_kwh: 0,
     savings_eur: 0,
     autoconso_estimated: false
@@ -76,13 +101,10 @@ function normMonth(m: Partial<MonthAgg> | undefined): MonthAgg {
     import_kwh: num(m?.import_kwh),
     import_hc_kwh: num(m?.import_hc_kwh),
     import_hp_kwh: num(m?.import_hp_kwh),
-    import_split_source:
-      m?.import_split_source === 'curve' ||
-      m?.import_split_source === 'meter' ||
-      m?.import_split_source === 'local' ||
-      m?.import_split_source === 'enedis'
-        ? m.import_split_source
-        : null,
+    import_split_source: normSplitSource(m?.import_split_source),
+    import_estimated: m?.import_estimated === true,
+    // Absent (serveur d'avant ce champ) → descente permise, comme avant.
+    has_daily: m?.has_daily !== false,
     import_live_kwh: num(m?.import_live_kwh),
     savings_eur: num(m?.savings_eur),
     autoconso_estimated: m?.autoconso_estimated === true

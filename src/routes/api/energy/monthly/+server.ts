@@ -19,6 +19,9 @@
  *    et surplus_kwh (∫ grid_export_w), intégrés à la volée (trapèze + plafond de
  *    gap 600 s, identique au recorder). Groupage par mois UTC (le serveur tourne
  *    en UTC ; l'écart de bord Paris < 2 h est négligeable sur un total mensuel).
+ *  · edf_* (exports de l'ancien contrat EDF, cf. $lib/server/edf-history) →
+ *    volume des mois où RIEN d'autre n'existe (2021-2023, souvent estimé par
+ *    EDF : `import_estimated`), et ventilation HC/HP tirée des registres Linky.
  *
  * Baseline (économies acquises AVANT le recorder, cf. tariffs.ts) : repliée dans
  * le mois courant tant qu'on est dans le mois d'ancrage — exactement comme la
@@ -40,16 +43,15 @@ import {
   parisDate,
   regimeAt
 } from '$lib/server/tariffs';
-import { bucketing, em50ImportByBucket } from '$lib/server/energy-buckets';
+import {
+  bucketing,
+  CURVE_MAX_AGE_DAYS,
+  em50ImportByBucket,
+  hasTable,
+  type SplitSource
+} from '$lib/server/energy-buckets';
+import { edfHistory } from '$lib/server/edf-history';
 import type { RequestHandler } from './$types';
-
-/** D'où vient la ventilation HC/HP d'un mois, du plus fiable au moins fiable :
- * `curve` = courbe de charge ½h Enedis (la MESURE, ventilée à la minute par le
- * recorder — canonique) ; `meter` = relevé compteur saisi à la main dans
- * tariffs.json ; `enedis` = total Linky mais répartition estimée du ratio
- * EM-50 ; `local` = total ET répartition estimés. `null` = rien de connu.
- * Exposé pour que la carte n'affiche pas une estimation comme une mesure. */
-type SplitSource = 'curve' | 'meter' | 'local' | 'enedis' | null;
 
 interface MonthAgg {
   production_kwh: number;
@@ -63,7 +65,15 @@ interface MonthAgg {
    * autoconso_kwh → base du KPI d'autosuffisance (≠ import_kwh, qui privilégie le
    * relevé facturé pour le tableau). */
   import_live_kwh: number;
+  /** Provenance de la ventilation HC/HP (cf. SplitSource) : exposée pour que la
+   * carte n'affiche jamais une estimation comme une mesure. */
   import_split_source: SplitSource;
+  /** Vrai quand le VOLUME d'import est une estimation d'EDF (ancien contrat,
+   * mois « Estimée ») : l'UI le préfixe de « ≈ » — jamais vendu comme mesuré. */
+  import_estimated: boolean;
+  /** Vrai quand le mois a des JOURS à montrer : sinon pas de descente depuis la
+   * vue année (un graphe de trente zéros ne raconte rien). */
+  has_daily: boolean;
   savings_eur: number;
   /** Vrai quand autoconso_kwh est RECONSTRUIT depuis les € importés de HA
    * (pré-recorder, juin 2025 → mai 2026) : kWh = € / tarif HP du régime —
@@ -86,12 +96,6 @@ interface MonthlyPayload {
   curve_pending: boolean;
 }
 
-/** Miroir de ENEDIS_CURVE_MAX_AGE_DAYS (domo-recorder/record.py) : la limite
- * de rétention de la courbe de charge côté Enedis, 24 mois glissants (au-delà,
- * HTTP 500 — constaté le 27/08/2026, le backfill s'y arrête). Ne sert qu'à ne
- * plus dire « en cours » d'une année que le backfill n'atteindra jamais. */
-const CURVE_MAX_AGE_DAYS = 730;
-
 function zeroMonth(): MonthAgg {
   return {
     production_kwh: 0,
@@ -102,6 +106,8 @@ function zeroMonth(): MonthAgg {
     import_hp_kwh: 0,
     import_live_kwh: 0,
     import_split_source: null,
+    import_estimated: false,
+    has_daily: false,
     savings_eur: 0,
     autoconso_estimated: false
   };
@@ -481,21 +487,67 @@ export const GET: RequestHandler = async ({ url }) => {
       /* table enedis_daily absente (base d'avant l'intégration) */
     }
 
-    // ── Ventilation HC/HP RÉELLE (courbe ½h Enedis, câblée le 25/08/2026) ──
-    // enedis_daily.hc_kwh/hp_kwh sont remplis par le recorder depuis la courbe de
-    // charge, découpée à la minute sur les fenêtres HC du régime (les bascules
-    // 00:06/08:06 ne tombent pas sur des bords de demi-heure — le recorder
-    // répartit au prorata). C'est LA mesure : elle prime sur tout, y compris sur
-    // les relevés saisis (qui couvrent des périodes de facturation, pas des mois
-    // civils — d'où l'écart de juin 2026 : 7,8 kWh saisis contre 26,6 mesurés).
-    // Couverture du mois par la courbe (le backfill remonte le temps peu à peu) :
+    // ── Volume des mois SANS aucune mesure : relevé saisi, puis ancien contrat EDF ──
+    // ⚠️ Un relevé saisi (tariffs.json) couvre une PÉRIODE DE FACTURATION, pas un
+    // mois civil : juillet 2025 portait 13,6 kWh quand le compteur en a compté
+    // 91,8 sur les 31 jours (bug visible en prod le 25/08/2026). Il ne fait donc
+    // le volume que si rien n'a été mesuré ce mois-là ; sinon il ne donne que sa
+    // répartition Creuses/Pleines (cf. plus bas). Les exports de l'ancien contrat
+    // EDF (edf-history.ts) passent APRÈS tout le reste : ils ne comblent que les
+    // mois d'avant l'historique Linky (2021 → août 2023), et la plupart sont des
+    // ESTIMATIONS d'EDF — marquées `import_estimated`, jamais vendues comme une
+    // mesure.
+    const importHc = monthlyImportHcHistory();
+    const importHp = monthlyImportHpHistory();
+    const monthKey = (i: number) => `${year}-${String(i + 1).padStart(2, '0')}`;
+    const releve = (i: number): { hc: number; hp: number } | null => {
+      const hc = importHc[monthKey(i)];
+      const hp = importHp[monthKey(i)];
+      const hasHc = typeof hc === 'number' && hc > 0;
+      const hasHp = typeof hp === 'number' && hp > 0;
+      return hasHc || hasHp ? { hc: hasHc ? hc : 0, hp: hasHp ? hp : 0 } : null;
+    };
+    const edf = edfHistory(db);
+    for (let i = 0; i < 12; i++) {
+      if (months[i].import_kwh > 0) continue;
+      const rel = releve(i);
+      if (rel) {
+        months[i].import_kwh = rel.hc + rel.hp;
+        continue;
+      }
+      const e = edf?.monthly.get(monthKey(i));
+      if (e && e.kwh > 0) {
+        months[i].import_kwh = e.kwh;
+        months[i].import_estimated = e.estimated;
+      }
+    }
+
+    // ── Ventilation HC/HP : la source la plus fiable qui sait trancher le mois ──
+    //   courbe ½h (≥ 95 %) > index quotidiens > relevé saisi > index au prorata
+    //   > courbe partielle (40-95 %) > forme EM-50.
+    // Chacune ne donne qu'un RATIO, appliqué au volume du mois : HC + HP ==
+    // import_kwh, toujours.
+    const decided = new Set<number>();
+    const applyShare = (i: number, share: number, source: SplitSource) => {
+      const tot = months[i].import_kwh;
+      months[i].import_hc_kwh = tot * share;
+      months[i].import_hp_kwh = tot * (1 - share);
+      months[i].import_split_source = source;
+      decided.add(i);
+    };
+
+    // 1. Courbe ½h Enedis (câblée le 25/08/2026). enedis_daily.hc_kwh/hp_kwh sont
+    // remplis par le recorder depuis la courbe de charge, découpée à la minute sur
+    // les fenêtres HC du régime (les bascules 00:06/08:06 ne tombent pas sur des
+    // bords de demi-heure — le recorder répartit au prorata). C'est LA mesure :
+    // elle prime sur tout, y compris sur les relevés saisis (d'où l'écart de juin
+    // 2026 : 7,8 kWh saisis contre 26,6 mesurés). Couverture du mois par la
+    // courbe (le backfill remonte le temps peu à peu) :
     //  · ≥ 95 % des kWh → 'curve', la ventilation est la MESURE ;
-    //  · 40 à 95 %      → on l'affiche quand même, en appliquant la répartition
-    //    des jours connus au total du mois, mais marquée 'enedis' — l'UI la met
-    //    alors en italique avec la mention « répartition estimée » ;
-    //  · < 40 %         → trop peu pour dire quoi que ce soit, on laisse la
-    //    chaîne d'estimation EM-50 ci-dessous faire son travail.
-    const curveMonths = new Set<number>();
+    //  · 40 à 95 %      → gardée pour l'étape 5 : la répartition des jours connus
+    //    appliquée au total du mois, marquée 'enedis' (« répartition estimée ») ;
+    //  · < 40 %         → trop peu pour dire quoi que ce soit.
+    const partialCurve = new Map<number, number>(); // mois → part HC des jours couverts
     try {
       const rows = db
         .prepare(
@@ -510,74 +562,70 @@ export const GET: RequestHandler = async ({ url }) => {
         const covered = (r.hc || 0) + (r.hp || 0);
         if (i < 0 || i > 11 || covered <= 0) continue;
         const part = covered / (covered + Math.max(0, r.missing || 0));
-        if (part < 0.4) continue;
-        // Normalise sur le total du mois (qui peut inclure des jours de repli
-        // mesure-maison, ou ceux que la courbe n'a pas encore couverts) pour que
-        // HC + HP == import_kwh, toujours.
-        const k = months[i].import_kwh > 0 ? months[i].import_kwh / covered : 1;
-        months[i].import_hc_kwh = r.hc * k;
-        months[i].import_hp_kwh = r.hp * k;
-        months[i].import_split_source = part >= 0.95 ? 'curve' : 'enedis';
-        curveMonths.add(i);
+        // Ratio des jours couverts appliqué au total du mois (qui peut inclure des
+        // jours de repli mesure-maison, ou ceux que la courbe n'a pas encore).
+        if (part >= 0.95) applyShare(i, (r.hc || 0) / covered, 'curve');
+        else if (part >= 0.4) partialCurve.set(i, (r.hc || 0) / covered);
       }
     } catch {
       /* colonnes hc_kwh/hp_kwh absentes (base d'avant la courbe ½h) */
     }
 
-    // ── Imports réseau relevés au compteur, ventilés HC / HP (pré-recorder) ──
-    // Relevés Linky/EDF (= facturés) → source de vérité. Quand un mois a un relevé,
-    // il PRIME sur le recorder (≠ logique des économies) : le recorder ne ventile
-    // pas l'import HP/HC, et ses chiffres du mois COURANT sont moins fiables (ex.
-    // juin 2026, données HA erronées). import_kwh = HC + HP. Les mois SANS relevé
-    // gardent le total recorder (sans ventilation → HC/HP restent à 0).
-    const importHc = monthlyImportHcHistory();
-    const importHp = monthlyImportHpHistory();
-    const noMeter: number[] = [];
+    // 2. Registres Linky relevés CHAQUE jour (ancien contrat EDF, mars → octobre
+    // 2024) : la répartition du mois est mesurée par le compteur lui-même.
     for (let i = 0; i < 12; i++) {
-      if (curveMonths.has(i)) continue; // la mesure ½h a déjà tranché
-      const key = `${year}-${String(i + 1).padStart(2, '0')}`;
-      const hc = importHc[key];
-      const hp = importHp[key];
-      const hasHc = typeof hc === 'number' && hc > 0;
-      const hasHp = typeof hp === 'number' && hp > 0;
-      if (hasHc || hasHp) {
-        // ⚠️ Un relevé saisi couvre une PÉRIODE DE FACTURATION, pas un mois
-        // civil : juillet 2025 portait 13,6 kWh quand le compteur en a compté
-        // 91,8 sur les 31 jours (bug visible en prod le 25/08/2026). Le relevé
-        // ne donne donc QUE la répartition Creuses/Pleines — un ratio, appliqué
-        // au total Enedis, qui reste seul maître du volume. Il ne fait le total
-        // que si Enedis n'a rien pour ce mois (avant l'historique Linky).
-        const relHc = hasHc ? hc : 0;
-        const relHp = hasHp ? hp : 0;
-        const relTot = relHc + relHp;
-        if (months[i].import_kwh > 0 && relTot > 0) {
-          const shareHc = relHc / relTot;
-          months[i].import_hc_kwh = months[i].import_kwh * shareHc;
-          months[i].import_hp_kwh = months[i].import_kwh * (1 - shareHc);
-        } else {
-          months[i].import_hc_kwh = relHc;
-          months[i].import_hp_kwh = relHp;
-          months[i].import_kwh = relTot;
-        }
-        months[i].import_split_source = 'meter';
-      } else if (months[i].import_kwh > 0) {
-        noMeter.push(i); // candidat à la ventilation dérivée (cf. ci-dessous)
-      }
+      const s = edf?.monthSplit.get(monthKey(i));
+      if (!decided.has(i) && s?.source === 'index' && months[i].import_kwh > 0)
+        applyShare(i, s.hcShare, 'index');
     }
 
-    // Ventilation de repli, dérivée de la mesure locale (cf. localHcShare) : elle
-    // couvre les mois SANS relevé — dont le mois en cours, qui restait vide sur la
-    // carte HC/HP jusqu'à la saisie du relevé, un mois plus tard. Ratio local
-    // appliqué au total mesuré : seul le ratio est fiable, pas ses kWh bruts.
+    // 3. Relevés compteur saisis (tariffs.json, = facturés) : leur répartition
+    // Creuses/Pleines, appliquée au volume du mois (cf. l'avertissement plus haut).
+    for (let i = 0; i < 12; i++) {
+      const rel = releve(i);
+      if (!decided.has(i) && rel && months[i].import_kwh > 0)
+        applyShare(i, rel.hc / (rel.hc + rel.hp), 'meter');
+    }
+
+    // 4. Registres relevés une fois par mois, répartis au prorata des jours : une
+    // estimation, annoncée comme telle.
+    for (let i = 0; i < 12; i++) {
+      const s = edf?.monthSplit.get(monthKey(i));
+      if (!decided.has(i) && s?.source === 'index_est' && months[i].import_kwh > 0)
+        applyShare(i, s.hcShare, 'index_est');
+    }
+
+    // 5. Courbe partielle (40 à 95 % des kWh du mois, cf. étape 1).
+    for (const [i, share] of partialCurve) if (!decided.has(i)) applyShare(i, share, 'enedis');
+
+    // 6. Ventilation de repli, dérivée de la mesure locale (cf. localHcShare) : elle
+    // couvre les mois que rien d'autre ne tranche — dont le mois en cours, qui
+    // restait vide sur la carte HC/HP jusqu'à la saisie du relevé, un mois plus
+    // tard. Ratio local appliqué au total mesuré : seul le ratio est fiable, pas
+    // ses kWh bruts.
+    const noMeter: number[] = [];
+    for (let i = 0; i < 12; i++) if (!decided.has(i) && months[i].import_kwh > 0) noMeter.push(i);
     const hcShare = localHcShare(db, year, noMeter);
     for (const i of noMeter) {
       const share = hcShare.get(i);
-      if (share === undefined) continue;
-      const tot = months[i].import_kwh;
-      months[i].import_hc_kwh = tot * share;
-      months[i].import_hp_kwh = tot * (1 - share);
-      months[i].import_split_source = enedisDominant.has(i) ? 'enedis' : 'local';
+      if (share !== undefined) applyShare(i, share, enedisDominant.has(i) ? 'enedis' : 'local');
     }
+
+    // ── Mois qui ont des JOURS à montrer — mêmes tables que /api/energy/daily.
+    // Sans eux, la vue année ne descend pas dans le mois : les mois connus par le
+    // seul total mensuel d'EDF (2021 → août 2023) donneraient trente zéros. ──
+    const dailyMonths = new Set<number>();
+    for (const t of ['enedis_daily', 'savings_daily', 'em50_daily']) {
+      if (!hasTable(db, t)) continue;
+      const rows = db
+        .prepare(
+          `SELECT DISTINCT CAST(substr(date,6,2) AS INTEGER) AS m FROM ${t} WHERE substr(date,1,4) = ?`
+        )
+        .all(String(year)) as { m: number }[];
+      for (const r of rows) dailyMonths.add(r.m - 1);
+    }
+    for (let i = 0; i < 12; i++)
+      months[i].has_daily = dailyMonths.has(i) || months[i].production_kwh > 0;
 
     // ── Borne basse du sélecteur d'année : première année avec des données ──
     // (économies importées OU lignes savings_daily). Repli : année courante.
@@ -603,13 +651,17 @@ export const GET: RequestHandler = async ({ url }) => {
     } catch {
       /* table enedis_daily absente */
     }
+    // Exports de l'ancien contrat EDF : le sélecteur remonte jusqu'à leur premier mois.
+    const edfYear = Number(edf?.firstMonth?.slice(0, 4));
+    if (Number.isFinite(edfYear) && edfYear >= 2000 && edfYear < minYear) minYear = edfYear;
 
     // ── Échelles FIXES toutes années confondues (demande Laurent 24/08) : le
     // graphe Saisons et la carte HC/HP gardent la même échelle d'une année à
     // l'autre — un mois d'hiver 2024 et un été 2026 se comparent d'un regard.
     // Conso du mois = import (max des sources par mois : Enedis, recorder,
-    // relevé saisi) + autoconso (mesurée ou reconstruite HA). Léger (agrégats
-    // sur ~1 100 lignes), pas de cache nécessaire. ──
+    // relevé saisi ; l'ancien contrat EDF là où rien d'autre n'existe) + autoconso
+    // (mesurée ou reconstruite HA). Léger (agrégats sur ~1 100 lignes), pas de
+    // cache nécessaire. ──
     let scaleMaxKwh = 0;
     {
       const importYm = new Map<string, number>();
@@ -642,6 +694,10 @@ export const GET: RequestHandler = async ({ url }) => {
         const hp = importHp[ym];
         bump(importYm, ym, (typeof hc === 'number' ? hc : 0) + (typeof hp === 'number' ? hp : 0));
       }
+      // Ancien contrat EDF : seulement là où aucune autre source n'a de volume —
+      // la même hiérarchie que la vue du mois (une estimation EDF ne double
+      // jamais un total Enedis).
+      for (const [ym, e] of edf?.monthly ?? []) if (!importYm.has(ym)) importYm.set(ym, e.kwh);
       for (const [ym, eur] of Object.entries(history)) {
         if ((autoYm.get(ym) ?? 0) >= 1 || typeof eur !== 'number' || eur <= 0) continue;
         const hp = regimeAt(new Date(`${ym}-15T12:00:00Z`)).hp_eur_kwh;

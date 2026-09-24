@@ -33,7 +33,8 @@
     "test:access": "node --experimental-strip-types --test scripts/access.test.ts",
     "test:demo": "node --experimental-strip-types --test scripts/demo.test.ts",
     "test:em50": "node --experimental-strip-types --import ./scripts/register-env.mjs --test scripts/em50-grid.test.ts",
-    "test:bilan": "node --experimental-strip-types --import ./scripts/register-env.mjs --test scripts/energy-daily.test.ts"
+    "test:bilan": "node --experimental-strip-types --import ./scripts/register-env.mjs --test scripts/energy-daily.test.ts",
+    "test:edf": "node --experimental-strip-types --import ./scripts/register-env.mjs --test scripts/edf-history.test.ts && python3 -B -m unittest ops/test_import_edf_history.py"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.0",

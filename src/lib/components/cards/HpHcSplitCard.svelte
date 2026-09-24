@@ -7,9 +7,9 @@
   // au-dessus (demande Laurent 24/08) : largeur constante, hauteur = volume
   // d'import du mois sur l'échelle FIXE commune — la barre d'un mois arrive à la
   // même hauteur que sa part bleue dans le graphe du dessus ; l'empilement
-  // cyan/corail dit la répartition. Provenances distinguées : relevé compteur
-  // facturé (tariffs.json) ou ventilation estimée — annoncée en clair. Les
-  // pistes sont TOUJOURS dessinées, toutes identiques, même sans la moindre
+  // cyan/corail dit la répartition. Provenances distinguées dans l'infobulle :
+  // courbe, index Linky, relevé saisi, ou ventilation estimée — annoncée en
+  // clair. Les pistes sont TOUJOURS dessinées, toutes identiques, même sans la moindre
   // ventilation : « Pas de relevé » s'écrit alors en grand au milieu des pistes
   // (arbitrages Laurent 04/09 : ni paragraphe d'explication, ni distinction
   // entre mois hors des 24 mois de courbe Enedis et mois sans courbe publiée).
@@ -71,11 +71,32 @@
   const H = 170;
   const segH = (v: number) => (maxMonth > 0 && v > 0 ? Math.max((H * v) / maxMonth, 2) : 0);
 
-  // Mois dont la VENTILATION est estimée : 'local' (total ET répartition mesure
-  // maison) ou 'enedis' (total = compteur Linky, répartition encore estimée).
-  const isEst = (m: Bucket) =>
-    (m.import_split_source === 'local' || m.import_split_source === 'enedis') && monthTotal(m) > 0;
-  const isEnedis = (m: Bucket) => m.import_split_source === 'enedis' && monthTotal(m) > 0;
+  // Provenance annoncée dans l'infobulle — une estimation ne passe jamais pour
+  // une mesure. Les registres Linky (`index`) sont des entiers : ±1 kWh par
+  // registre, soit ±100/total points sur la part creuses — ±20 points un jour à
+  // 5 kWh, négligeable sur un mois ; on le dit dès que ça pèse un point.
+  const provenance = (m: Bucket): string => {
+    const tot = monthTotal(m);
+    const parts: string[] = [];
+    if (m.import_estimated) parts.push('volume estimé par EDF');
+    if (m.import_split_source === 'index') {
+      const pts = Math.round(100 / tot);
+      parts.push(
+        pts >= 1
+          ? `relevés d'index Linky, au kWh près (part creuses à ±${pts} points)`
+          : "relevés d'index Linky"
+      );
+    } else if (m.import_split_source === 'index_est') {
+      parts.push("répartition estimée d'après les relevés EDF");
+    } else if (m.import_split_source === 'enedis') {
+      parts.push('total compteur EDF, répartition estimée');
+    } else if (m.import_split_source === 'local') {
+      parts.push('estimé (mesure maison)');
+    }
+    return parts.length > 0 ? ` · ${parts.join(', ')}` : '';
+  };
+  // Un volume estimé par EDF dans la période → « ≈ » devant les totaux en kWh.
+  const approxTotals = $derived(data.some((m) => m.import_estimated && monthTotal(m) > 0));
 </script>
 
 <!-- Pas d'enveloppe ici : les deux graphes du bilan partagent UNE carte, montée
@@ -99,7 +120,6 @@
       >
         {#each data as m, i (i)}
           {@const tot = monthTotal(m)}
-          {@const est = isEst(m)}
           {@const canOpen = tot > 0 && !!m.key && !!onOpen}
           <svelte:element
             this={canOpen ? 'button' : 'div'}
@@ -112,16 +132,17 @@
               ? `${m.label} — Creuses ${nf1.format(m.import_hc_kwh)} kWh (${pct(
                   m.import_hc_kwh,
                   tot
-                )} %) · Pleines ${nf1.format(m.import_hp_kwh)} kWh (${pct(m.import_hp_kwh, tot)} %)${
-                  isEnedis(m)
-                    ? ' · total compteur EDF, répartition estimée'
-                    : est
-                      ? ' · estimé (mesure maison)'
-                      : ''
-                }`
+                )} %) · Pleines ${nf1.format(m.import_hp_kwh)} kWh (${pct(
+                  m.import_hp_kwh,
+                  tot
+                )} %)${provenance(m)}`
               : `${m.label} — pas de relevé`}
           >
-            <span class="col-val">{tot >= (fine ? 0.05 : 0.5) ? fmtVal(tot) : ''}</span>
+            <span class="col-val"
+              >{tot >= (fine ? 0.05 : 0.5)
+                ? `${m.import_estimated ? '≈' : ''}${fmtVal(tot)}`
+                : ''}</span
+            >
             <div class="track" class:filled={tot > 0}>
               <div class="seg seg-hp" style="height: {segH(m.import_hp_kwh)}px;"></div>
               <div class="seg seg-hc" style="height: {segH(m.import_hc_kwh)}px;"></div>
@@ -152,8 +173,8 @@
           class="flex justify-between text-[10px] tabular-nums"
           style="color: var(--color-muted-fg);"
         >
-          <span>{nf1.format(totalHc)} kWh creuses</span>
-          <span>{nf1.format(totalHp)} kWh pleines</span>
+          <span>{approxTotals ? '≈' : ''}{nf1.format(totalHc)} kWh creuses</span>
+          <span>{approxTotals ? '≈' : ''}{nf1.format(totalHp)} kWh pleines</span>
         </div>
       </div>
     {/if}

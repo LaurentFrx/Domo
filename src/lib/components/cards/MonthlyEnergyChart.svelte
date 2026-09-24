@@ -57,6 +57,11 @@
   const fine = $derived(maxTotal > 0 && maxTotal < 10);
   const fmtVal = (v: number) => (fine ? nf1.format(v) : nf0.format(v));
 
+  // Chiffre approché : « ~ » pour l'autoconso reconstruite des € (pré-recorder),
+  // « ≈ » pour un volume d'import estimé par EDF (ancien contrat) — jamais
+  // présentés comme des mesures.
+  const approx = (m: Bucket) => (m.autoconso_estimated ? '~' : m.import_estimated ? '≈' : '');
+
   // Beaucoup de colonnes (les jours d'un mois, les 24 heures) : sur un écran
   // étroit les étiquettes se chevauchent et deviennent une bouillie. On ne garde
   // alors qu'un repère régulier — le CSS masque le reste sous 640 px seulement,
@@ -104,9 +109,9 @@
         aria-pressed={selected === i}
         aria-label={empty
           ? `${m.label} — pas de données`
-          : canOpen
-            ? `${m.label} : ${fmtKwh(monthTotal(m))} consommés — voir le détail`
-            : `${m.label} : ${fmtKwh(monthTotal(m))} consommés`}
+          : `${m.label} : ${m.import_estimated ? 'environ ' : ''}${fmtKwh(monthTotal(m))} consommés${
+              m.import_estimated ? ' (estimation EDF)' : ''
+            }${canOpen ? ' — voir le détail' : ''}`}
         onclick={() => {
           if (empty) return;
           // Un clic DESCEND d'un niveau tant qu'il en reste un ; au dernier
@@ -118,7 +123,7 @@
         <span class="col-val" class:cur
           >{empty || monthTotal(m) < (fine ? 0.05 : 0.5)
             ? ''
-            : `${m.autoconso_estimated ? '~' : ''}${fmtVal(monthTotal(m))}`}</span
+            : `${approx(m)}${fmtVal(monthTotal(m))}`}</span
         >
         <div class="track" class:empty class:sel={selected === i}>
           {#if !empty}
@@ -175,7 +180,11 @@
             : fmtKwh(sel.autoconso_kwh)}</strong
         ></span
       >
-      <span>Réseau <strong style="color: var(--color-fg);">{fmtKwh(sel.import_kwh)}</strong></span>
+      <span
+        >Réseau <strong style="color: var(--color-fg);"
+          >{sel.import_estimated ? `≈${fmtKwh(sel.import_kwh)}` : fmtKwh(sel.import_kwh)}</strong
+        >{sel.import_estimated ? ' (estimé par EDF)' : ''}</span
+      >
       <span>Surplus <strong style="color: var(--color-fg);">{fmtKwh(sel.surplus_kwh)}</strong></span
       >
       <span
