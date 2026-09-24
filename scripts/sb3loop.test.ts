@@ -11,6 +11,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  classifyWrite,
+  cloudFailed,
+  cloudRetryAt,
+  cloudRetryDelayMs,
   decide,
   feedforwardTarget,
   usableWh,
@@ -742,6 +746,89 @@ test('quota journalier : on cesse d’insister après 4 réarmements', () => {
       SB3_REARM
     ),
     false
+  );
+});
+
+// ─── Régression 24/09/2026 : panne du CLOUD comptée comme un refus ───────────
+// À 08:01 le cloud Anker a répondu « (10000) Failed to request. » à tous les
+// appels ; le pont a renvoyé 502. Compté comme un refus, ce 502 a coupé la
+// boucle en 25 s, grillé les 3 essais de restauration en 46 s, puis demandé une
+// correction « à la main » — pour une panne que seul le retour du cloud répare.
+
+const ecrit = (o: Partial<Parameters<typeof classifyWrite>[0]> = {}) => ({
+  ok: true,
+  confirmedW: 0,
+  reached: true,
+  cloudDown: false,
+  ...o
+});
+
+test('pont qui répond 502 = cloud en panne, PAS un refus de la consigne', () => {
+  const v = classifyWrite(ecrit({ ok: false, confirmedW: null, cloudDown: true }), 0, cfg);
+  assert.equal(v, 'cloud-down');
+});
+
+test('refus franc (200 ok:false) et faute de config (401/503) restent des échecs', () => {
+  assert.equal(classifyWrite(ecrit({ ok: false, confirmedW: null }), 0, cfg), 'failed');
+});
+
+test('pont muet, consigne prise, consigne bornée : classement inchangé', () => {
+  assert.equal(
+    classifyWrite(ecrit({ ok: false, confirmedW: null, reached: false }), 0, cfg),
+    'unreachable'
+  );
+  assert.equal(classifyWrite(ecrit({ confirmedW: 137 }), 137, cfg), 'confirmed');
+  assert.equal(classifyWrite(ecrit({ confirmedW: 1800 }), 2376, cfg), 'clamped');
+});
+
+test('essais espacés pendant une panne cloud : 30, 60, 120, 240 s puis plafond 300 s', () => {
+  const s = [1, 2, 3, 4, 5, 6, 12].map((n) => cloudRetryDelayMs(n, cfg) / 1000);
+  assert.deepEqual(s, [30, 60, 120, 240, 300, 300, 300]);
+  assert.equal(cloudRetryDelayMs(0, cfg), 30_000, 'compteur nul : délai de base');
+});
+
+test('panne continue : une seule alerte, après ~15-20 min, pas après 46 s', () => {
+  let streak = { cloudFailCount: 0, cloudDownSinceTs: null, cloudLastFailTs: null } as Parameters<
+    typeof cloudFailed
+  >[0];
+  let t = TR;
+  const alertes: number[] = [];
+  for (let i = 0; i < 12; i++) {
+    const r = cloudFailed(streak, cfg, t);
+    streak = r.streak;
+    if (r.alert) alertes.push(t - TR);
+    t = cloudRetryAt(streak, cfg) as number; // l'essai suivant part à l'échéance
+  }
+  assert.equal(alertes.length, 1, 'une alerte par panne');
+  assert.ok(
+    alertes[0] >= 15 * 60_000 && alertes[0] <= 20 * 60_000,
+    `alerte à ${alertes[0] / 60_000} min`
+  );
+  assert.equal(streak.cloudDownSinceTs, TR, 'la panne reste datée de son premier échec');
+});
+
+test('panne suivante après un long silence : série neuve, pas d’alerte héritée', () => {
+  // 6 échecs (sous le seuil d'alerte), puis la boucle n'écrit plus rien
+  // pendant 1 h (bande morte) ; une nouvelle panne ne doit pas alerter au 1er coup.
+  const vieille = {
+    cloudFailCount: cfg.cloudFailAlert - 1,
+    cloudDownSinceTs: TR,
+    cloudLastFailTs: TR + 750_000
+  };
+  const r = cloudFailed(vieille, cfg, TR + 750_000 + 3_600_000);
+  assert.equal(r.alert, false);
+  assert.equal(r.streak.cloudFailCount, 1);
+  assert.equal(r.streak.cloudDownSinceTs, TR + 750_000 + 3_600_000);
+});
+
+test('hors panne, rien n’est retenu ; en panne, l’essai suivant attend son délai', () => {
+  assert.equal(
+    cloudRetryAt({ cloudFailCount: 0, cloudDownSinceTs: null, cloudLastFailTs: null }, cfg),
+    null
+  );
+  assert.equal(
+    cloudRetryAt({ cloudFailCount: 3, cloudDownSinceTs: TR, cloudLastFailTs: TR + 90_000 }, cfg),
+    TR + 90_000 + 120_000
   );
 });
 

@@ -18,14 +18,22 @@ import { readJsonSafe, writeJsonAtomic, withFileLock } from '$lib/server/atomic-
 import { sendPush } from '$lib/server/monitor/push';
 import { parisDate } from '$lib/server/tariffs';
 import { collectSb3Inputs } from './inputs';
-import { decide, feedforwardTarget, shouldRearmSb3 } from './decide';
+import {
+  classifyWrite,
+  cloudFailed,
+  cloudRetryAt,
+  decide,
+  feedforwardTarget,
+  shouldRearmSb3
+} from './decide';
 import {
   defaultSb3LoopConfig,
   defaultSb3LoopState,
   type Sb3DecisionLogEntry,
   type Sb3LoopConfig,
   type Sb3LoopState,
-  type Sb3PlanSlot
+  type Sb3PlanSlot,
+  type Sb3WriteResult
 } from './types';
 
 import path from 'node:path';
@@ -68,14 +76,6 @@ export async function setSb3LoopEnabled(enabled: boolean): Promise<Sb3LoopState>
   });
 }
 
-interface WriteResult {
-  ok: boolean;
-  confirmedW: number | null;
-  /** Le PONT a-t-il répondu ? false = la requête n'est jamais arrivée (réseau,
-   *  timeout, token absent) — à distinguer d'un refus, cf. classifyWrite(). */
-  reached: boolean;
-}
-
 /**
  * Battement de cœur du BAIL de consigne — appel LOCAL au pont, AUCUN appel cloud.
  * En mode personnalisé, une écriture GRAVE la valeur dans le créneau du plan, et
@@ -112,9 +112,9 @@ async function writePreset(
   presetW: number,
   safePresetW: number | null,
   timeoutMs = 45_000
-): Promise<WriteResult> {
+): Promise<Sb3WriteResult> {
   const token = env.SB3_BRIDGE_WRITE_TOKEN;
-  if (!token) return { ok: false, confirmedW: null, reached: false };
+  if (!token) return { ok: false, confirmedW: null, reached: false, cloudDown: false };
   presetW = Math.round(Math.min(2400, Math.max(0, presetW)));
   try {
     const r = await fetch(`${bridgeUrl()}/api/sb3/output`, {
@@ -126,63 +126,60 @@ async function writePreset(
       body: JSON.stringify({ preset: presetW, safe_preset: safePresetW }),
       signal: AbortSignal.timeout(timeoutMs)
     });
-    // Le pont a RÉPONDU, même en erreur : un 502 signale que l'écriture cloud a
-    // échoué de son côté — c'est un refus, pas une requête perdue.
-    if (!r.ok) return { ok: false, confirmedW: null, reached: true };
+    // Le pont a RÉPONDU, même en erreur. Un 502, c'est son appel au CLOUD qui a
+    // levé une exception (Anker en panne, timeout) : la consigne n'a pas été
+    // jugée — cf. classifyWrite(). 400/401/503 sont des fautes de configuration.
+    if (!r.ok) return { ok: false, confirmedW: null, reached: true, cloudDown: r.status === 502 };
     const d = (await r.json()) as { ok?: boolean; confirmed_w?: number | null };
     return {
       ok: d.ok === true,
       confirmedW: typeof d.confirmed_w === 'number' ? d.confirmed_w : null,
-      reached: true
+      reached: true,
+      cloudDown: false
     };
   } catch {
     // Réseau coupé, tunnel Tailscale tombé, budget de 45 s dépassé : le pont
     // n'a rien vu passer. Rien n'a été écrit — rien n'est à réparer non plus.
-    return { ok: false, confirmedW: null, reached: false };
+    return { ok: false, confirmedW: null, reached: false, cloudDown: false };
   }
 }
 
-/**
- * Une consigne BORNÉE par le matériel n'est pas une consigne REFUSÉE.
- *
- * Le parc plafonne la sortie AC des SB3. Mesuré le 21/08/2026 dans le pont :
- * `sb3/output: preset=2376 → confirmé=1800.0 mode=3` — la commande est passée,
- * le matériel l'a saturée. La traiter comme un échec avait trois effets, tous
- * observés le même jour à 09:57 lors d'une chauffe forcée du cumulus :
- *   - `lastCmdW` restait sur la valeur d'AVANT (179 W) alors que le matériel
- *     était à 1800 W → le tick suivant repartait d'une base fausse et ÉCRASAIT
- *     la consigne en place (1800 → 386 W) 11 s avant l'échelon du ballon, donc
- *     1 275 W achetés à EDF et VETO au bout de 38 s de chauffe ;
- *   - `ffHoldUntilTs` n'était pas armé → la garde anti-baisse qui existe
- *     PRÉCISÉMENT pour protéger un pré-armement ne jouait pas ;
- *   - `confirmFailCount` montait → auto-désactivation de la boucle au 2ᵉ coup,
- *     alors que le cloud répondait et appliquait (épisode du 21/08).
- *
- * Même distinction, un cran plus bas : une requête QUI N'ARRIVE PAS n'est pas
- * une consigne refusée. Le 22/08 à 08:57, deux écritures de 2400 W ont expiré
- * sans que le pont en voie une seule (aucun `sb3/output` dans son journal, alors
- * qu'il en logge une toutes les 3 min avant et après) : la boucle s'est
- * auto-désactivée pour « consigne non prise 2× » et le parc est resté sans
- * pilotage 24 h, jusqu'à réactivation à la main. Or désactiver n'apporte RIEN
- * quand le pont est injoignable — la boucle ne peut de toute façon plus écrire,
- * et le bail rend le plan statique tout seul au bout de 900 s. Ce que ça coûte,
- * en revanche, c'est la reprise automatique quand le réseau revient.
- *
- * Critère tiré de la sémantique du pont (`server.py`, POST /api/sb3/output) :
- * `ok: false` n'arrive QUE sur refus franc du cloud (`set_sb2_home_load`
- * renvoie False) ; `ok: true` signifie POST accepté PUIS planning RELU, et
- * `confirmed_w` est alors la vérité du créneau courant. Une valeur relue qui
- * diffère de la cible n'est donc jamais une transmission perdue : c'est le parc
- * qui borne. Le compteur d'échecs — et l'auto-désactivation qu'il déclenche —
- * reste réservé au refus franc, la seule panne qu'il sait vraiment décrire.
- */
-type WriteVerdict = 'confirmed' | 'clamped' | 'failed' | 'unreachable';
+/** Panne cloud en cours et prochain essai pas encore dû : ne rien envoyer. */
+function cloudRetryPending(state: Sb3LoopState, cfg: Sb3LoopConfig, now: number): boolean {
+  const at = cloudRetryAt(state, cfg);
+  return at !== null && now < at;
+}
 
-function classifyWrite(w: WriteResult, targetW: number, cfg: Sb3LoopConfig): WriteVerdict {
-  if (!w.reached) return 'unreachable';
-  if (!w.ok || w.confirmedW === null) return 'failed';
-  if (Math.abs(w.confirmedW - targetW) <= cfg.confirmToleranceW) return 'confirmed';
-  return 'clamped';
+/** Le pont a répondu 502 : on espace l'essai suivant, et on prévient une seule
+ *  fois si la panne dure — sans jamais couper la boucle (rien à y gagner). */
+function noteCloudDown(state: Sb3LoopState, cfg: Sb3LoopConfig, now: number): void {
+  const { streak, alert } = cloudFailed(state, cfg, now);
+  Object.assign(state, streak);
+  if (alert) {
+    void sendPush({
+      title: '☁️ Cloud Anker en panne',
+      body: `Les consignes SB3 n'arrivent plus au cloud Anker depuis ${parisHm(streak.cloudDownSinceTs ?? now)} (erreur côté Anker). Rien à corriger à la main : Domo réessaie seul et reprend dès que le cloud répond ; d'ici là, la consigne en place ne bouge pas.`,
+      tag: 'sb3loop-cloud-down',
+      severity: 'warning',
+      url: '/energie'
+    });
+  }
+}
+
+/** Le cloud a répondu (consigne prise, bornée ou refusée) : fin de la panne.
+ *  Pas de notification de retour : elle partirait à la prochaine écriture, qui
+ *  peut attendre des heures dans la bande morte — un « revenu » daté de midi
+ *  pour une panne finie à 8 h induirait en erreur. */
+function noteCloudUp(state: Sb3LoopState): void {
+  state.cloudFailCount = 0;
+  state.cloudDownSinceTs = null;
+  state.cloudLastFailTs = null;
+}
+
+/** Suffixe de journal d'une écriture différée ou perdue pour panne cloud. */
+function cloudDownNote(state: Sb3LoopState, cfg: Sb3LoopConfig, what: string): string {
+  const at = cloudRetryAt(state, cfg);
+  return `cloud Anker en panne, ${what}${at !== null ? ` (nouvel essai vers ${parisHm(at)})` : ''}`;
 }
 
 /** Champs cloud dont dépend la boucle — le canary vérifie leur présence. */
@@ -271,6 +268,11 @@ export async function feedforwardCumulusStep(stepW: number): Promise<Feedforward
       return { wrote: false, targetW: null, note: 'boucle SB3 inactive — pas de feedforward' };
     }
     const now = Date.now();
+    // Panne cloud en cours : l'écriture échouerait, après avoir fait attendre
+    // la fermeture du relais du cumulus jusqu'à 15 s pour rien.
+    if (cloudRetryPending(state, cfg, now)) {
+      return { wrote: false, targetW: null, note: 'cloud Anker en panne — pas de feedforward' };
+    }
     const inputs = await collectSb3Inputs(cfg);
     const t = feedforwardTarget(inputs, cfg, state, stepW);
     if (!t.ok) return { wrote: false, targetW: null, note: t.reason };
@@ -287,6 +289,8 @@ export async function feedforwardCumulusStep(stepW: number): Promise<Feedforward
       FF_WRITE_TIMEOUT_MS
     );
     const verdict = classifyWrite(w, t.targetW, cfg);
+    if (verdict === 'cloud-down') noteCloudDown(state, cfg, now);
+    else if (verdict !== 'unreachable') noteCloudUp(state);
     const pris = verdict === 'confirmed' || verdict === 'clamped';
     if (pris) {
       // On enregistre ce que le matériel a RÉELLEMENT pris, pas ce qu'on visait :
@@ -313,7 +317,9 @@ export async function feedforwardCumulusStep(stepW: number): Promise<Feedforward
           ? ` (bornée à ${Math.round(w.confirmedW as number)} W par le parc)`
           : verdict === 'unreachable'
             ? ' (pont injoignable — rien écrit)'
-            : ' (NON confirmée)';
+            : verdict === 'cloud-down'
+              ? ` (${cloudDownNote(state, cfg, 'rien écrit')})`
+              : ' (NON confirmée)';
     const note =
       `${stepW > 0 ? 'PRÉ-ARMEMENT' : 'DÉSARMEMENT'} cumulus ${stepW > 0 ? '+' : '−'}` +
       `${Math.abs(Math.round(stepW))} W — part SB3 ${t.sharePct} % : consigne ` +
@@ -403,7 +409,15 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
       // Boucle à l'arrêt : tant qu'un créneau porte encore une consigne de la
       // boucle, on le rend au plan statique avant de sortir.
       const restore = await restoreStaticPlan(state, cfg, now);
-      if (restore) {
+      // Une note sans écriture (« en attente du créneau nuit », « différée ») se
+      // répète à chaque tick : ne journaliser que ses changements, sinon elle
+      // chasse du ring de 100 lignes tout ce qui précède en une demi-heure.
+      const nouvelle =
+        restore !== null &&
+        (restore.writtenW !== null ||
+          state.decisions[0]?.mode !== 'off' ||
+          state.decisions[0]?.reason !== restore.note);
+      if (restore && nouvelle) {
         pushLog(state, {
           ts: now,
           mode: 'off',
@@ -438,11 +452,35 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
 
     const inputs = await collectSb3Inputs(cfg);
     const d = decide(inputs, cfg, state);
-    state.enVol = d.enVol;
-    state.slow = d.slow;
+    // Panne cloud en cours, prochain essai pas encore dû : la décision est
+    // journalisée mais rien ne part. Ses effets de bord ne sont donc PAS
+    // appliqués — une correction « en vol » qui n'a jamais volé fausserait le
+    // prédicteur, et un biais lent déclaré corrigé ne le serait pas.
+    const differee = d.writeW !== null && cloudRetryPending(state, cfg, now);
+    if (!differee) {
+      state.enVol = d.enVol;
+      state.slow = d.slow;
+    }
 
     let writtenW: number | null = null;
     let confirmedW: number | null = null;
+    if (differee) {
+      const reason = `${d.reason} — ${cloudDownNote(state, cfg, 'écriture différée')}`;
+      if (state.decisions[0]?.mode !== d.mode || state.decisions[0]?.reason !== reason) {
+        pushLog(state, {
+          ts: now,
+          mode: d.mode,
+          reason,
+          houseLoadW: d.houseLoadW,
+          targetW: d.targetW,
+          beforeW: state.lastCmdW ?? inputs.cloud.sb3PresetW,
+          writtenW: null,
+          confirmedW: null
+        });
+      }
+      await writeJsonAtomic(STATE_FILE, state);
+      return result(state, d.mode, reason, d.houseLoadW, d.targetW, null, null);
+    }
     if (d.writeW !== null) {
       const beforeW = state.lastCmdW ?? inputs.cloud.sb3PresetW;
       // Créneau marqué AVANT l'écriture : même non confirmée, elle a pu être
@@ -469,8 +507,14 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
             url: '/energie'
           });
         }
+      } else if (verdict === 'cloud-down') {
+        // Le pont a parlé, le cloud non : ni consigne à enregistrer, ni refus à
+        // compter. La boucle reste active, l'essai suivant est espacé.
+        state.transportFailCount = 0;
+        noteCloudDown(state, cfg, now);
       } else if (verdict !== 'failed') {
         state.transportFailCount = 0;
+        noteCloudUp(state);
         // Bornée par le parc = commande PRISE : on garde la valeur en place comme
         // base, et on ne fait surtout pas monter le compteur d'échecs (il coupe
         // la boucle au 2ᵉ coup, cf. l'auto-désactivation du 21/08).
@@ -479,6 +523,7 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
         state.confirmFailCount = 0;
       } else {
         state.transportFailCount = 0;
+        noteCloudUp(state);
         state.confirmFailCount += 1;
         if (state.confirmFailCount >= cfg.confirmFailMax) {
           state.enabled = false;
@@ -501,7 +546,9 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
             ? `${d.reason} — bornée à ${Math.round(w.confirmedW as number)} W par le parc`
             : verdict === 'unreachable'
               ? `${d.reason} — pont injoignable, rien écrit`
-              : d.reason,
+              : verdict === 'cloud-down'
+                ? `${d.reason} — ${cloudDownNote(state, cfg, 'rien écrit')}`
+                : d.reason,
         houseLoadW: d.houseLoadW,
         targetW: d.targetW,
         beforeW,
@@ -569,6 +616,15 @@ const PARIS_HOUR_FMT = new Intl.DateTimeFormat('fr-FR', {
   hour: '2-digit',
   hourCycle: 'h23'
 });
+
+const PARIS_HM_FMT = new Intl.DateTimeFormat('fr-FR', {
+  timeZone: 'Europe/Paris',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23'
+});
+/** « 08:14 », heure de Paris — pour les messages et le journal. */
+const parisHm = (ts: number) => PARIS_HM_FMT.format(new Date(ts));
 
 /** Heure Paris (0-23), ou NaN si indéterminable.
  *  formatToParts et PAS format() : en locale fr, format() rend « 23 h » et le
@@ -638,11 +694,20 @@ async function restoreStaticPlan(
     };
   }
 
+  if (cloudRetryPending(state, cfg, now)) {
+    return {
+      note: `restauration ${slot} différée — ${cloudDownNote(state, cfg, 'essai espacé')}`,
+      writtenW: null,
+      confirmedW: null
+    };
+  }
+
   const target = staticPlanW(cfg, slot);
   // On écrit le plan statique ET on le déclare comme repli : le pont referme
   // alors le bail (plus rien à surveiller).
   const w = await writePreset(target, target);
-  if (!w.reached) {
+  const verdict = classifyWrite(w, target, cfg);
+  if (verdict === 'unreachable') {
     // Le pont n'a rien reçu : la tentative n'a pas eu lieu. La compter userait
     // les 3 essais sur une panne réseau et déclencherait l'alerte « plan non
     // restauré » alors que rien n'a été tenté.
@@ -652,10 +717,20 @@ async function restoreStaticPlan(
       confirmedW: null
     };
   }
-  const confirmed =
-    w.ok && w.confirmedW !== null && Math.abs(w.confirmedW - target) <= cfg.confirmToleranceW;
+  if (verdict === 'cloud-down') {
+    // Même chose un cran plus loin : le cloud n'a pas jugé la consigne. Le
+    // 24/09, ces 502 comptés comme des refus ont grillé les 3 essais en 46 s et
+    // demandé une correction à la main — que le retour du cloud rendait inutile.
+    noteCloudDown(state, cfg, now);
+    return {
+      note: `restauration ${slot} différée — ${cloudDownNote(state, cfg, 'essai espacé')}`,
+      writtenW: null,
+      confirmedW: null
+    };
+  }
+  noteCloudUp(state);
 
-  if (confirmed) {
+  if (verdict === 'confirmed') {
     state.pendingRestoreSlots = state.pendingRestoreSlots.filter((s) => s !== slot);
     state.restoreAttempts = 0;
     // Plus rien de gravé par la boucle : l'ancrage du slew redevient nul.

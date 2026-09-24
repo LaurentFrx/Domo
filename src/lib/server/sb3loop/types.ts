@@ -93,6 +93,19 @@ export interface Sb3LoopConfig {
    *  la boucle : elle ne peut de toute façon rien écrire, et elle doit repartir
    *  seule dès que le pont répond). */
   transportFailAlert: number;
+  /** Panne du CLOUD Anker (le pont répond 502 : son appel cloud a levé une
+   *  exception). Aucune écriture ne peut aboutir tant qu'elle dure : on espace
+   *  les essais — premier délai, puis doublement jusqu'au plafond — au lieu de
+   *  solliciter le cloud à chaque tick avec le compte propriétaire. */
+  cloudRetryBaseS: number;
+  cloudRetryMaxS: number;
+  /** Échecs cloud d'affilée au-delà desquels on prévient (≈ 17 min avec
+   *  l'espacement 30/60/120/240/300 s). Jamais de désactivation. */
+  cloudFailAlert: number;
+  /** Au-delà de cet écart entre deux échecs, la série est close : la boucle
+   *  n'a rien voulu écrire entre-temps, on ne sait rien du cloud — une panne
+   *  suivante repart de zéro au lieu d'hériter du compteur. */
+  cloudStreakGapS: number;
   /** Tentatives de restauration du plan statique avant abandon + notification.
    *  Réarmé chaque jour Paris : un échec nocturne ne doit pas condamner la
    *  restauration du lendemain. */
@@ -142,6 +155,20 @@ export interface Sb3LoopInputs {
 }
 
 export type Sb3LoopMode = 'off' | 'failsafe' | 'faillow' | 'allocate' | 'hold';
+
+/** Réponse du pont à une écriture de consigne (POST /api/sb3/output). */
+export interface Sb3WriteResult {
+  ok: boolean;
+  confirmedW: number | null;
+  /** Le PONT a-t-il répondu ? false = la requête n'est jamais arrivée (réseau,
+   *  timeout, token absent) — à distinguer d'un refus, cf. classifyWrite(). */
+  reached: boolean;
+  /** Le pont a répondu 502 : c'est son appel au CLOUD Anker qui a levé une
+   *  exception (erreur 10000, timeout…) — la consigne n'a pas été jugée. */
+  cloudDown: boolean;
+}
+
+export type Sb3WriteVerdict = 'confirmed' | 'clamped' | 'failed' | 'unreachable' | 'cloud-down';
 
 /** Créneau du plan statique posé dans l'app Anker. Une écriture cloud ne
  *  modifie QUE l'entrée couvrant l'heure locale courante : restaurer le créneau
@@ -229,6 +256,15 @@ export interface Sb3LoopState {
    *  `confirmFailCount`, qui ne compte que les refus du cloud : une requête qui
    *  n'arrive pas ne prouve rien sur le cloud et ne doit pas couper la boucle. */
   transportFailCount: number;
+  /** Écritures perdues d'affilée parce que le CLOUD Anker était en panne (pont
+   *  joint, réponse 502). Ni un refus ni un pont muet : la consigne n'a pas pu
+   *  être portée, rien ne prouve qu'elle serait refusée. Remis à zéro dès que le
+   *  cloud répond. */
+  cloudFailCount: number;
+  /** Début de la panne cloud en cours (1er échec de la série), null sinon. */
+  cloudDownSinceTs: number | null;
+  /** Dernier échec de la série : l'essai suivant attend `cloudRetryDelayMs`. */
+  cloudLastFailTs: number | null;
   /** Dernière consigne ÉCRITE par la boucle (ancrage du slew). */
   lastCmdW: number | null;
   lastWriteTs: number | null;
@@ -268,6 +304,9 @@ export function defaultSb3LoopState(): Sb3LoopState {
     },
     ffHoldUntilTs: null,
     transportFailCount: 0,
+    cloudFailCount: 0,
+    cloudDownSinceTs: null,
+    cloudLastFailTs: null,
     lastCmdW: null,
     lastWriteTs: null,
     confirmFailCount: 0,
@@ -311,6 +350,13 @@ export function defaultSb3LoopConfig(): Sb3LoopConfig {
     localMuteS: 120,
     confirmFailMax: 2,
     transportFailAlert: 20, // ~7 min de ticks : au-delà, la panne n'est plus un hoquet
+    // Un hoquet du cloud se résorbe souvent en secondes (24/09 : échec à 07:02:06,
+    // écriture confirmée à 07:02:39) : premier essai au tick d'après, puis on
+    // espace. Le plafond est celui du poll du pont (backoff 5 → 300 s).
+    cloudRetryBaseS: 30,
+    cloudRetryMaxS: 300,
+    cloudFailAlert: 7, // 0, 30, 90, 210, 450, 750, 1050 s : ~17 min de panne
+    cloudStreakGapS: 600, // 2× le plafond : une panne continue relance au plus toutes les 5 min
 
     restoreAttemptsMax: 3,
     confirmToleranceW: 25,

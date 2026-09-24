@@ -31,7 +31,15 @@
  * un délai non plus : elle remplace une lecture cloud périmée par la consigne
  * réellement écrite, ce qui rend l'estimation PLUS juste.
  */
-import type { Sb3Decision, Sb3LoopConfig, Sb3LoopInputs, Sb3LoopState, SlowBias } from './types';
+import type {
+  Sb3Decision,
+  Sb3LoopConfig,
+  Sb3LoopInputs,
+  Sb3LoopState,
+  Sb3WriteResult,
+  Sb3WriteVerdict,
+  SlowBias
+} from './types';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 
@@ -471,6 +479,116 @@ export function decide(
       slow
     };
   }
+}
+
+/**
+ * Une consigne BORNÉE par le matériel n'est pas une consigne REFUSÉE.
+ *
+ * Le parc plafonne la sortie AC des SB3. Mesuré le 21/08/2026 dans le pont :
+ * `sb3/output: preset=2376 → confirmé=1800.0 mode=3` — la commande est passée,
+ * le matériel l'a saturée. La traiter comme un échec avait trois effets, tous
+ * observés le même jour à 09:57 lors d'une chauffe forcée du cumulus :
+ *   - `lastCmdW` restait sur la valeur d'AVANT (179 W) alors que le matériel
+ *     était à 1800 W → le tick suivant repartait d'une base fausse et ÉCRASAIT
+ *     la consigne en place (1800 → 386 W) 11 s avant l'échelon du ballon, donc
+ *     1 275 W achetés à EDF et VETO au bout de 38 s de chauffe ;
+ *   - `ffHoldUntilTs` n'était pas armé → la garde anti-baisse qui existe
+ *     PRÉCISÉMENT pour protéger un pré-armement ne jouait pas ;
+ *   - `confirmFailCount` montait → auto-désactivation de la boucle au 2ᵉ coup,
+ *     alors que le cloud répondait et appliquait (épisode du 21/08).
+ *
+ * Même distinction, un cran plus bas : une requête QUI N'ARRIVE PAS n'est pas
+ * une consigne refusée. Le 22/08 à 08:57, deux écritures de 2400 W ont expiré
+ * sans que le pont en voie une seule (aucun `sb3/output` dans son journal, alors
+ * qu'il en logge une toutes les 3 min avant et après) : la boucle s'est
+ * auto-désactivée pour « consigne non prise 2× » et le parc est resté sans
+ * pilotage 24 h, jusqu'à réactivation à la main. Or désactiver n'apporte RIEN
+ * quand le pont est injoignable — la boucle ne peut de toute façon plus écrire,
+ * et le bail rend le plan statique tout seul au bout de 900 s. Ce que ça coûte,
+ * en revanche, c'est la reprise automatique quand le réseau revient.
+ *
+ * Et un cran plus loin : un pont qui RÉPOND 502 n'a pas vu la consigne refusée,
+ * il a vu le CLOUD tomber. `server.py` ne lève 502 que sur exception pendant
+ * `update_sites()` / `set_sb2_home_load()` ; le refus franc revient en 200
+ * `ok: false`. Le 24/09/2026 à 08:01, le cloud Anker a répondu « (10000) Failed
+ * to request. » à tous les appels des deux comptes, `get_site_list` compris —
+ * avant même le POST. Compté comme refus, ce 502 a coupé la boucle en 25 s,
+ * grillé les 3 essais de restauration en 46 s et envoyé « Plan SB3 non
+ * restauré — à corriger à la main », pour une panne qu'aucune main ne pouvait
+ * corriger. Même traitement que le pont muet : ni coupure ni essai consommé ;
+ * les tentatives sont seulement espacées (cf. `cloudRetryDelayMs`).
+ *
+ * Critère tiré de la sémantique du pont (`server.py`, POST /api/sb3/output) :
+ * `ok: false` n'arrive QUE sur refus franc du cloud (`set_sb2_home_load`
+ * renvoie False) ; `ok: true` signifie POST accepté PUIS planning RELU, et
+ * `confirmed_w` est alors la vérité du créneau courant. Une valeur relue qui
+ * diffère de la cible n'est donc jamais une transmission perdue : c'est le parc
+ * qui borne. Le compteur d'échecs — et l'auto-désactivation qu'il déclenche —
+ * reste réservé au refus franc, la seule panne qu'il sait vraiment décrire.
+ */
+export function classifyWrite(
+  w: Sb3WriteResult,
+  targetW: number,
+  cfg: Sb3LoopConfig
+): Sb3WriteVerdict {
+  if (!w.reached) return 'unreachable';
+  if (w.cloudDown) return 'cloud-down';
+  if (!w.ok || w.confirmedW === null) return 'failed';
+  if (Math.abs(w.confirmedW - targetW) <= cfg.confirmToleranceW) return 'confirmed';
+  return 'clamped';
+}
+
+/**
+ * Délai avant le prochain essai d'écriture après `failCount` pannes cloud
+ * d'affilée : `cloudRetryBaseS`, puis doublé à chaque échec, plafonné à
+ * `cloudRetryMaxS`. Chaque essai passe par le compte PROPRIÉTAIRE : réessayer
+ * à chaque tick pendant une panne, c'est 180 requêtes par heure vers un cloud
+ * qui ne répond pas — exactement ce qui fait bannir un compte.
+ */
+export function cloudRetryDelayMs(failCount: number, cfg: Sb3LoopConfig): number {
+  const n = Math.max(1, Math.floor(failCount));
+  return Math.min(cfg.cloudRetryMaxS, cfg.cloudRetryBaseS * 2 ** (n - 1)) * 1000;
+}
+
+/** Série de pannes cloud en cours (champs de `Sb3LoopState`). */
+export type CloudStreak = Pick<
+  Sb3LoopState,
+  'cloudFailCount' | 'cloudDownSinceTs' | 'cloudLastFailTs'
+>;
+
+/** Instant avant lequel aucune écriture cloud ne part, ou null hors panne. */
+export function cloudRetryAt(st: CloudStreak, cfg: Sb3LoopConfig): number | null {
+  if (st.cloudFailCount <= 0 || st.cloudLastFailTs === null) return null;
+  return st.cloudLastFailTs + cloudRetryDelayMs(st.cloudFailCount, cfg);
+}
+
+/**
+ * Série après un nouvel échec cloud, et faut-il prévenir ?
+ *
+ * Seule une écriture RÉUSSIE prouve le retour du cloud : le poll du pont passe
+ * par un autre compte, et le 24/09 il a échoué et réussi en alternance pendant
+ * que les écritures, elles, passaient ou non. Or une boucle au repos dans sa
+ * bande morte n'écrit rien pendant des heures. Sans limite d'âge, la panne
+ * suivante hériterait du compteur de la précédente et déclencherait l'alerte
+ * au bout de quelques secondes, datée du début de l'ancienne. Un écart de plus
+ * de `cloudStreakGapS` entre deux échecs clôt donc la série.
+ */
+export function cloudFailed(
+  st: CloudStreak,
+  cfg: Sb3LoopConfig,
+  now: number
+): { streak: CloudStreak; alert: boolean } {
+  const close =
+    st.cloudLastFailTs !== null && now - st.cloudLastFailTs > cfg.cloudStreakGapS * 1000;
+  const count = (close ? 0 : st.cloudFailCount) + 1;
+  return {
+    streak: {
+      cloudFailCount: count,
+      cloudDownSinceTs: close || st.cloudDownSinceTs === null ? now : st.cloudDownSinceTs,
+      cloudLastFailTs: now
+    },
+    alert: count === cfg.cloudFailAlert
+  };
 }
 
 /**
