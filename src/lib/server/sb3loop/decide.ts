@@ -617,3 +617,38 @@ export function shouldRearmSb3(
   if (now - st.autoDisabledTs < opts.delayMs) return false;
   return st.rearmCount < opts.maxPerDay;
 }
+
+/** « v3.8.2 » → [3, 8, 2] ; null si le tag n'a pas cette forme (pré-release…). */
+function versionParts(tag: string): number[] | null {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(tag.trim());
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+/** a est-elle plus récente que b ? Tags non numériques : simple différence. */
+function isNewer(a: string, b: string): boolean {
+  const pa = versionParts(a);
+  const pb = versionParts(b);
+  if (pa === null || pb === null) return a !== b;
+  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] > pb[i];
+  return false;
+}
+
+/**
+ * Release de anker-solix-api à signaler, ou null.
+ *
+ * La veille comparait la dernière release à une constante restée sur v3.6.3
+ * alors que le pont tournait en v3.8.1 depuis le 04/09, et notifiait CHAQUE
+ * JOUR tant qu'elles différaient — la même version, avec une version installée
+ * fausse. On ne signale donc qu'une release PLUS RÉCENTE que l'installée, une
+ * seule fois : ni une identique, ni une plus ancienne, ni une déjà annoncée.
+ */
+export function libUpdateToNotify(
+  latestTag: unknown,
+  installedTag: string,
+  notifiedTag: string | null
+): string | null {
+  if (typeof latestTag !== 'string' || latestTag.trim() === '') return null;
+  if (!isNewer(latestTag, installedTag)) return null;
+  if (notifiedTag !== null && !isNewer(latestTag, notifiedTag)) return null;
+  return latestTag;
+}

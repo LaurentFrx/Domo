@@ -10,8 +10,9 @@
  *  - canary de schéma (1er tick du jour Paris + démarrage) : champs attendus
  *    du payload cloud présents, sinon désactivation + notif ;
  *  - version de la lib : check quotidien de la release GitHub vs celle
- *    épinglée — NOTIFICATION SEULE, jamais de mise à jour automatique d'une
- *    dépendance qui pilote du matériel.
+ *    installée dans le pont — NOTIFICATION SEULE, une fois par nouvelle
+ *    version, jamais de mise à jour automatique d'une dépendance qui pilote du
+ *    matériel.
  */
 import { env } from '$env/dynamic/private';
 import { readJsonSafe, writeJsonAtomic, withFileLock } from '$lib/server/atomic-store';
@@ -24,6 +25,7 @@ import {
   cloudRetryAt,
   decide,
   feedforwardTarget,
+  libUpdateToNotify,
   shouldRearmSb3
 } from './decide';
 import {
@@ -40,8 +42,17 @@ import path from 'node:path';
 
 const STATE_FILE = path.join(path.resolve(process.cwd(), 'data'), 'sb3loop-state.json');
 const LOG_MAX = 100;
-/** Version de anker-solix-api épinglée dans le Dockerfile du bridge. */
-const EXPECTED_LIB_VERSION = 'v3.6.3';
+/**
+ * Version de anker-solix-api INSTALLÉE dans l'image du pont — tenue À LA MAIN.
+ * Le pont ne l'expose pas (`/api/health` ne donne que `library_available`, et
+ * `version` de FastAPI est celle du pont lui-même) : Domo ne peut pas la lire.
+ * Restée sur v3.6.3 alors que le pont passait en v3.8.1 le 04/09, elle faisait
+ * annoncer chaque jour une « version épinglée » fausse.
+ * À CHANGER DANS LE MÊME GESTE que le `@vX.Y.Z` de /home/laurent/anker-bridge/
+ * Dockerfile (RPi4) et la reconstruction de l'image ; contrôle :
+ * `docker exec anker-bridge pip show anker-solix-api`.
+ */
+const INSTALLED_LIB_VERSION = 'v3.8.1';
 
 const bridgeUrl = () => (env.ANKER_URL || 'http://127.0.0.1:8095').replace(/\/+$/, '');
 
@@ -207,7 +218,10 @@ async function runCanary(): Promise<string | null> {
   }
 }
 
-async function checkLibVersion(): Promise<void> {
+/** `dejaSignalee` : dernière release annoncée (état lu par le tick). Lancé
+ *  sans attendre, le check reprend le verrou pour la mémoriser : il passe
+ *  simplement après le tick en cours. */
+async function checkLibVersion(dejaSignalee: string | null): Promise<void> {
   try {
     const r = await fetch(
       'https://api.github.com/repos/thomluther/anker-solix-api/releases/latest',
@@ -217,16 +231,24 @@ async function checkLibVersion(): Promise<void> {
       }
     );
     if (!r.ok) return;
-    const d = (await r.json()) as { tag_name?: string };
-    if (d.tag_name && d.tag_name !== EXPECTED_LIB_VERSION) {
-      void sendPush({
-        title: '📦 anker-solix-api : nouvelle version',
-        body: `${d.tag_name} disponible (épinglée : ${EXPECTED_LIB_VERSION}). Aucune mise à jour automatique — à évaluer avant de toucher au bridge.`,
-        tag: 'sb3loop-lib-version',
-        severity: 'info',
-        url: '/energie'
-      });
-    }
+    const d = (await r.json()) as { tag_name?: unknown };
+    const tag = libUpdateToNotify(d.tag_name, INSTALLED_LIB_VERSION, dejaSignalee);
+    if (tag === null) return;
+    const recus = await sendPush({
+      title: '📦 anker-solix-api : nouvelle version',
+      body: `${tag} disponible (installée sur le pont : ${INSTALLED_LIB_VERSION}). Aucune mise à jour automatique — à évaluer avant de toucher au bridge.`,
+      tag: 'sb3loop-lib-version',
+      severity: 'info',
+      url: '/energie'
+    });
+    // Mémorisée seulement si elle est PARTIE : sans abonné joignable, on
+    // réessaie le lendemain plutôt que de la taire pour de bon.
+    if (recus === 0) return;
+    await withFileLock(STATE_FILE, async () => {
+      const s = await loadState();
+      s.libVersionNotified = tag;
+      await writeJsonAtomic(STATE_FILE, s);
+    });
   } catch {
     /* check best-effort — jamais bloquant */
   }
@@ -382,7 +404,7 @@ export async function sb3LoopTick(): Promise<Sb3TickResult> {
     }
     if (state.lastVersionCheckDayParis !== today) {
       state.lastVersionCheckDayParis = today;
-      void checkLibVersion();
+      void checkLibVersion(state.libVersionNotified);
     }
 
     if (!state.enabled) {

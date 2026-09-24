@@ -282,6 +282,10 @@ export interface Sb3LoopState {
   /** Canary schéma + check version lib : une fois par jour Paris. */
   lastCanaryDayParis: string | null;
   lastVersionCheckDayParis: string | null;
+  /** Dernière release de anker-solix-api déjà SIGNALÉE (tag GitHub) : une
+   *  notification par nouvelle version, pas une par jour tant qu'on ne met pas
+   *  le pont à jour. */
+  libVersionNotified: string | null;
   /** Journal des décisions (ring, plus récentes en tête). */
   decisions: Sb3DecisionLogEntry[];
 }
@@ -315,6 +319,7 @@ export function defaultSb3LoopState(): Sb3LoopState {
     pendingRestoreSlots: [],
     lastCanaryDayParis: null,
     lastVersionCheckDayParis: null,
+    libVersionNotified: null,
     decisions: []
   };
 }

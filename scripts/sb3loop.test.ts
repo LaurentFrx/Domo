@@ -17,6 +17,7 @@ import {
   cloudRetryDelayMs,
   decide,
   feedforwardTarget,
+  libUpdateToNotify,
   usableWh,
   shouldRearmSb3
 } from '../src/lib/server/sb3loop/decide.ts';
@@ -830,6 +831,42 @@ test('hors panne, rien n’est retenu ; en panne, l’essai suivant attend son d
     cloudRetryAt({ cloudFailCount: 3, cloudDownSinceTs: TR, cloudLastFailTs: TR + 90_000 }, cfg),
     TR + 90_000 + 120_000
   );
+});
+
+// ─── Veille de version anker-solix-api (24/09/2026) ───────────────────────────
+// La constante était restée sur v3.6.3 alors que le pont tourne en v3.8.1
+// depuis le 04/09 : Web Push quotidien « v3.8.2 disponible (épinglée : v3.6.3) »,
+// la même version chaque jour, avec une version installée fausse.
+
+test('une nouvelle release est signalée UNE fois, pas chaque jour', () => {
+  assert.equal(libUpdateToNotify('v3.8.2', 'v3.8.1', null), 'v3.8.2', 'jour 1 : signalée');
+  assert.equal(libUpdateToNotify('v3.8.2', 'v3.8.1', 'v3.8.2'), null, 'jour 2 : déjà signalée');
+});
+
+test('la release suivante est signalée à son tour', () => {
+  assert.equal(libUpdateToNotify('v3.8.3', 'v3.8.1', 'v3.8.2'), 'v3.8.3');
+  assert.equal(
+    libUpdateToNotify('v3.10.0', 'v3.8.1', 'v3.9.9'),
+    'v3.10.0',
+    'numérique, pas lexical'
+  );
+});
+
+test('rien à signaler : version installée, plus ancienne, ou retrait de release', () => {
+  assert.equal(libUpdateToNotify('v3.8.1', 'v3.8.1', null), null, 'déjà installée');
+  assert.equal(libUpdateToNotify('v3.7.0', 'v3.8.1', null), null, 'plus ancienne');
+  assert.equal(
+    libUpdateToNotify('v3.8.2', 'v3.8.1', 'v3.8.3'),
+    null,
+    'v3.8.3 retirée : pas de rechute'
+  );
+});
+
+test('tag absent ou atypique : jamais d’erreur, une seule annonce', () => {
+  assert.equal(libUpdateToNotify(undefined, 'v3.8.1', null), null);
+  assert.equal(libUpdateToNotify('', 'v3.8.1', null), null);
+  assert.equal(libUpdateToNotify('v3.9.0b1', 'v3.8.1', null), 'v3.9.0b1');
+  assert.equal(libUpdateToNotify('v3.9.0b1', 'v3.8.1', 'v3.9.0b1'), null);
 });
 
 // ─── VOIE LENTE — le biais que la bande morte laissait filer ─────────────────
