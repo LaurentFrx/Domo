@@ -184,13 +184,14 @@
 
 <!-- Visuel d'appareil : PNG produit, écran rempli par la batterie depuis le bas
      (couleur selon le niveau) ; boîtier AirPods en SVG assorti ; grisé en attente
-     de partage. -->
+     de partage ; en charge → petit éclair ROUGE superposé au centre du dessin. -->
 {#snippet deviceArt(
   cls: string | null,
   pct: number | null,
   color: string,
   ph: boolean,
-  uid: string
+  uid: string,
+  charging: boolean
 )}
   {@const art = artFor(cls)}
   <span class="fm-art" class:fm-art-ph={ph} style="width: {art.w}px;">
@@ -238,23 +239,21 @@
         <circle cx="20" cy="30" r="1.3" fill="#7c7d81" />
       </svg>
     {/if}
+    {#if charging}
+      <!-- SVG maison (cf. static/devices/LICENSE.md) — un glyphe ⚡ texte dépend
+           de la police et iOS peut le rendre en emoji jaune. -->
+      <svg class="fm-bolt" viewBox="0 0 8 12" aria-hidden="true">
+        <path d="M5 0 .6 6.8h2.9L2.6 12l4.8-6.9H4.5Z" fill="currentColor" />
+      </svg>
+    {/if}
   </span>
-{/snippet}
-
-<!-- Éclair de charge : petit éclair ROUGE posé au-dessus du dessin, centré sur
-     l'appareil (SVG maison, cf. static/devices/LICENSE.md — un glyphe ⚡ texte
-     dépend de la police et iOS peut le rendre en emoji jaune). -->
-{#snippet chargeBolt()}
-  <svg class="fm-bolt" viewBox="0 0 8 12" aria-hidden="true">
-    <path d="M5 0 .6 6.8h2.9L2.6 12l4.8-6.9H4.5Z" fill="currentColor" />
-  </svg>
 {/snippet}
 
 <!-- Cellule appareil : visuel (lien Plans si position connue) + nom court. -->
 {#snippet deviceCell(item: RowItem, uid: string)}
   {#if item.placeholder}
     <div class="fm-cell fm-cell-ph" title="{item.name} — partage en attente">
-      {@render deviceArt(item.deviceClass, null, 'transparent', true, uid)}
+      {@render deviceArt(item.deviceClass, null, 'transparent', true, uid, false)}
       <span class="fm-cell-name">{artFor(item.deviceClass).label}</span>
     </div>
   {:else}
@@ -272,14 +271,12 @@
         title={tip}
         aria-label="Voir {d.name} sur le plan — {tip}"
       >
-        {@render deviceArt(d.deviceClass, pct, color, false, uid)}
-        {#if lv.charging}{@render chargeBolt()}{/if}
+        {@render deviceArt(d.deviceClass, pct, color, false, uid, lv.charging)}
         <span class="fm-cell-name">{artFor(d.deviceClass).label}</span>
       </a>
     {:else}
       <div class="fm-cell" title={tip} aria-label={tip}>
-        {@render deviceArt(d.deviceClass, pct, color, false, uid)}
-        {#if lv.charging}{@render chargeBolt()}{/if}
+        {@render deviceArt(d.deviceClass, pct, color, false, uid, lv.charging)}
         <span class="fm-cell-name">{artFor(d.deviceClass).label}</span>
       </div>
     {/if}
@@ -349,8 +346,7 @@
     gap: 10px;
   }
   .fm-person + .fm-person {
-    /* 8 px (et non 6) : laisse passer l'éclair de charge sous le filet. */
-    padding-top: 8px;
+    padding-top: 6px;
     border-top: 1px solid color-mix(in oklch, var(--color-border) 55%, transparent);
   }
   .fm-avatar {
@@ -445,18 +441,18 @@
     color: var(--color-muted-fg);
     white-space: nowrap;
   }
-  /* Éclair de charge : au-dessus du dessin (top négatif = dans la marge de la
-     rangée, aucune hauteur ajoutée à la cellule), rouge « alerte » + léger halo
-     (oklch littéral : color-mix() via var() casse les ombres sur Chrome). */
+  /* Éclair de charge : superposé au centre du dessin, rouge « alerte », avec un
+     halo sombre pour se détacher du remplissage vert (oklch littéral :
+     color-mix() via var() casse les ombres sur Chrome). */
   .fm-bolt {
     position: absolute;
-    top: -8px;
+    top: 50%;
     left: 50%;
-    width: 7px;
-    height: 10px;
-    transform: translateX(-50%);
+    width: 8px;
+    height: 12px;
+    transform: translate(-50%, -50%);
     color: var(--color-alert);
-    filter: drop-shadow(0 0 1.5px oklch(0.65 0.22 25 / 0.55));
+    filter: drop-shadow(0 0 1.5px oklch(0.2 0.03 286 / 0.85));
     pointer-events: none;
   }
 </style>
