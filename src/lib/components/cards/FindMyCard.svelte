@@ -242,8 +242,8 @@
     {#if charging}
       <!-- SVG maison (cf. static/devices/LICENSE.md) — un glyphe ⚡ texte dépend
            de la police et iOS peut le rendre en emoji jaune. -->
-      <svg class="fm-bolt" viewBox="0 0 8 12" aria-hidden="true">
-        <path d="M5 0 .6 6.8h2.9L2.6 12l4.8-6.9H4.5Z" fill="currentColor" />
+      <svg class="fm-bolt" viewBox="-1 -1 10 14" aria-hidden="true">
+        <path d="M5 0 .6 6.8h2.9L2.6 12l4.8-6.9H4.5Z" />
       </svg>
     {/if}
   </span>
@@ -441,18 +441,24 @@
     color: var(--color-muted-fg);
     white-space: nowrap;
   }
-  /* Éclair de charge : superposé au centre du dessin, rouge « alerte », avec un
-     halo sombre pour se détacher du remplissage vert (oklch littéral :
-     color-mix() via var() casse les ombres sur Chrome). */
+  /* Éclair de charge : superposé au centre du dessin, ~la moitié de sa hauteur
+     (46 px) pour se voir d'un coup d'œil ; rouge « alerte » cerné d'un liseré
+     clair (le rouge seul se fond dans le remplissage vert) + ombre sombre pour
+     le décoller de l'écran (oklch littéral : color-mix() via var() casse les
+     ombres sur Chrome). */
   .fm-bolt {
     position: absolute;
     top: 50%;
     left: 50%;
-    width: 8px;
-    height: 12px;
+    width: 16px;
+    height: 22px;
     transform: translate(-50%, -50%);
-    color: var(--color-alert);
-    filter: drop-shadow(0 0 1.5px oklch(0.2 0.03 286 / 0.85));
+    fill: var(--color-alert);
+    stroke: var(--color-alert-fg);
+    stroke-width: 1.1;
+    stroke-linejoin: round;
+    paint-order: stroke fill;
+    filter: drop-shadow(0 1px 2px oklch(0.2 0.03 286 / 0.7));
     pointer-events: none;
   }
 </style>
